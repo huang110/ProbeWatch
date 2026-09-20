@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,6 +142,74 @@ type mediaLatestResponse struct {
 	Result     protocol.MediaResult `json:"result"`
 }
 
+func parseHistoryWindow(r *http.Request, now time.Time) (time.Time, time.Time, int, bool) {
+	q := r.URL.Query()
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		n, e := strconv.Atoi(v)
+		if e != nil || n < 1 || n > 1000 {
+			return time.Time{}, time.Time{}, 0, false
+		}
+		limit = n
+	}
+	from, to := now.Add(-24*time.Hour), now
+	var e error
+	if v := q.Get("from"); v != "" {
+		from, e = time.Parse(time.RFC3339, v)
+		if e != nil {
+			return time.Time{}, time.Time{}, 0, false
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		to, e = time.Parse(time.RFC3339, v)
+		if e != nil {
+			return time.Time{}, time.Time{}, 0, false
+		}
+	}
+	if from.After(to) {
+		return time.Time{}, time.Time{}, 0, false
+	}
+	return from.UTC(), to.UTC(), limit, true
+}
+
+func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, 405, "method not allowed")
+		return
+	}
+	now := time.Now().UTC()
+	from, to, _, ok := parseHistoryWindow(r, now)
+	if !ok {
+		writeJSONError(w, 400, "invalid query parameters")
+		return
+	}
+	nodes, err := s.service.Store().ListNodes(r.Context())
+	if err != nil {
+		writeJSONError(w, 503, "service unavailable")
+		return
+	}
+	nc := map[string]int{"total": len(nodes), "online": 0, "attention": 0, "offline": 0, "resource_reporting": 0}
+	for _, n := range nodes {
+		at, _, e := s.service.Store().GetResourceLatest(r.Context(), n.ID)
+		if e != nil {
+			nc["offline"]++
+			continue
+		}
+		age := now.Sub(at)
+		if age <= 2*time.Minute {
+			nc["online"]++
+		} else if age <= 10*time.Minute {
+			nc["attention"]++
+		} else {
+			nc["offline"]++
+		}
+		if !at.Before(from) && !at.After(to) {
+			nc["resource_reporting"]++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"nodes": nc, "checks": map[string]any{"total": 0, "success": 0, "failure": 0, "success_rate": nil, "avg_latency_ms": nil}, "window": map[string]time.Time{"from": from, "to": to}, "generated_at": now})
+}
+
 func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
 	if !security.IsRFC4122UUID(uuid) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
@@ -160,7 +229,7 @@ func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid st
 
 func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "nodes" || parts[2] == "" || (parts[3] != "mtr" && parts[3] != "media" && parts[3] != "resource" && parts[3] != "network") {
+	if (len(parts) != 4 && len(parts) != 5) || parts[0] != "api" || parts[1] != "nodes" || parts[2] == "" || (len(parts) == 4 && parts[3] != "mtr" && parts[3] != "media" && parts[3] != "resource" && parts[3] != "network") || (len(parts) == 5 && parts[4] != "history") {
 		writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -175,6 +244,10 @@ func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "node results unavailable")
+		return
+	}
+	if len(parts) == 5 {
+		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	if parts[3] == "mtr" {

@@ -52,3 +52,17 @@ def test_security_document_references_frontend_openresty_config():
     assert OPENRESTY_CONFIG.exists()
     assert "frontend/deploy/openresty-security.conf" in SECURITY_DOC
     assert "deploy/openresty-security.conf" not in SECURITY_DOC.replace("frontend/deploy/openresty-security.conf", "")
+
+
+def test_overview_uses_authenticated_api_and_history_without_browser_storage():
+    assert "fetch('/api/overview'" in SOURCE
+    assert '/resource/history' in SOURCE
+    assert 'localStorage' not in SOURCE
+    assert 'sessionStorage' not in SOURCE
+    assert 'token' not in SOURCE.lower()
+
+
+def test_overview_has_no_fake_sparkline_defaults_or_claims():
+    assert 'points = [28, 36, 31, 44, 39, 52, 47, 62]' not in SOURCE
+    assert '暂无历史数据' in SOURCE
+    assert '暂无 API 数据' in SOURCE

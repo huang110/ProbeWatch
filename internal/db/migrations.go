@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS resource_latest (
     payload BLOB NOT NULL,
     reported_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS resource_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    reported_at INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS resource_history_node_time_idx ON resource_history(node_id, reported_at, id);
 CREATE TABLE IF NOT EXISTS network_targets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -80,6 +88,15 @@ CREATE TABLE IF NOT EXISTS network_results_latest (
     checked_at INTEGER NOT NULL,
     PRIMARY KEY(node_id, target_id)
 );
+CREATE TABLE IF NOT EXISTS network_results_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES network_targets(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    checked_at INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS network_results_history_key_time_idx ON network_results_history(node_id, target_id, checked_at, id);
 CREATE TABLE IF NOT EXISTS mtr_targets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -96,6 +113,15 @@ CREATE TABLE IF NOT EXISTS mtr_results_latest (
     checked_at INTEGER NOT NULL,
     PRIMARY KEY(node_id, target_id)
 );
+CREATE TABLE IF NOT EXISTS mtr_results_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES mtr_targets(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    checked_at INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mtr_results_history_key_time_idx ON mtr_results_history(node_id, target_id, checked_at, id);
 CREATE TABLE IF NOT EXISTS media_detectors (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -112,6 +138,15 @@ CREATE TABLE IF NOT EXISTS media_results_latest (
     checked_at INTEGER NOT NULL,
     PRIMARY KEY(node_id, detector_id)
 );
+CREATE TABLE IF NOT EXISTS media_results_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    detector_id TEXT NOT NULL REFERENCES media_detectors(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    checked_at INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS media_results_history_key_time_idx ON media_results_history(node_id, detector_id, checked_at, id);
 CREATE TABLE IF NOT EXISTS request_replays (
     node_id TEXT NOT NULL,
     request_id TEXT NOT NULL,

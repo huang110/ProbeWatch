@@ -52,6 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/csrf", middleware.RequireAuth(http.HandlerFunc(s.service.CSRFHandler)))
 	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken))))
 	mux.Handle("/api/nodes", middleware.RequireAuth(http.HandlerFunc(s.listNodes)))
+	mux.Handle("/api/overview", middleware.RequireAuth(http.HandlerFunc(s.overview)))
 	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
 	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
@@ -100,7 +101,7 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		trimmed := strings.Trim(r.URL.Path, "/")
-		if strings.HasSuffix(trimmed, "/mtr") || strings.HasSuffix(trimmed, "/media") || strings.HasSuffix(trimmed, "/resource") || strings.HasSuffix(trimmed, "/network") {
+		if strings.HasSuffix(trimmed, "/mtr/history") || strings.HasSuffix(trimmed, "/media/history") || strings.HasSuffix(trimmed, "/resource/history") || strings.HasSuffix(trimmed, "/network/history") || strings.HasSuffix(trimmed, "/mtr") || strings.HasSuffix(trimmed, "/media") || strings.HasSuffix(trimmed, "/resource") || strings.HasSuffix(trimmed, "/network") {
 			s.nodeRead(w, r)
 			return
 		}

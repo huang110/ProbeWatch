@@ -78,6 +78,20 @@ type LatestResult struct {
 	Payload   []byte
 }
 
+type ResourceHistoryRecord struct {
+	NodeID     string
+	ReportedAt time.Time
+	RecordedAt time.Time
+	Payload    []byte
+}
+type ResultHistoryRecord struct {
+	NodeID     string
+	TargetID   string
+	CheckedAt  time.Time
+	RecordedAt time.Time
+	Payload    []byte
+}
+
 type RegisteredNode struct {
 	Node  Node
 	Token string
@@ -1072,6 +1086,77 @@ func (s *Store) GetResourceLatest(ctx context.Context, nodeID string) (time.Time
 		return time.Time{}, nil, err
 	}
 	return time.Unix(0, reportedAt).UTC(), payload, nil
+}
+
+func (s *Store) GetResourceHistory(ctx context.Context, nodeID string, from, to time.Time, limit int) ([]ResourceHistoryRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT reported_at, recorded_at, payload FROM resource_history WHERE node_id = ? AND reported_at >= ? AND reported_at <= ? ORDER BY reported_at DESC, id DESC LIMIT ?`, nodeID, unixNano(from), unixNano(to), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query resource history: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ResourceHistoryRecord, 0)
+	for rows.Next() {
+		var r ResourceHistoryRecord
+		var a, b int64
+		if err := rows.Scan(&a, &b, &r.Payload); err != nil {
+			return nil, fmt.Errorf("scan resource history: %w", err)
+		}
+		r.NodeID = nodeID
+		r.ReportedAt = time.Unix(0, a).UTC()
+		r.RecordedAt = time.Unix(0, b).UTC()
+		if !json.Valid(r.Payload) {
+			return nil, errors.New("invalid resource history payload")
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read resource history: %w", err)
+	}
+	return out, nil
+}
+func (s *Store) GetResultHistory(ctx context.Context, kind TargetKind, nodeID string, from, to time.Time, limit int) ([]ResultHistoryRecord, error) {
+	table, col, err := historyTable(kind)
+	if err != nil {
+		return nil, err
+	}
+	q := fmt.Sprintf(`SELECT %s, checked_at, recorded_at, payload FROM %s WHERE node_id = ? AND checked_at >= ? AND checked_at <= ? ORDER BY checked_at DESC, id DESC LIMIT ?`, col, table)
+	rows, err := s.db.QueryContext(ctx, q, nodeID, unixNano(from), unixNano(to), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query result history: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ResultHistoryRecord, 0)
+	for rows.Next() {
+		var r ResultHistoryRecord
+		var a, b int64
+		if err := rows.Scan(&r.TargetID, &a, &b, &r.Payload); err != nil {
+			return nil, fmt.Errorf("scan result history: %w", err)
+		}
+		r.NodeID = nodeID
+		r.CheckedAt = time.Unix(0, a).UTC()
+		r.RecordedAt = time.Unix(0, b).UTC()
+		if !json.Valid(r.Payload) {
+			return nil, errors.New("invalid result history payload")
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read result history: %w", err)
+	}
+	return out, nil
+}
+
+func historyTable(kind TargetKind) (string, string, error) {
+	switch kind {
+	case TargetKindTCP, TargetKindHTTP, TargetKindHTTPS, TargetKindDNS:
+		return "network_results_history", "target_id", nil
+	case TargetKindMTR:
+		return "mtr_results_history", "target_id", nil
+	case TargetKindMediaHTTP:
+		return "media_results_history", "detector_id", nil
+	default:
+		return "", "", errors.New("invalid history result kind")
+	}
 }
 
 func (s *Store) UpsertNetworkLatest(ctx context.Context, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
