@@ -22,13 +22,38 @@ type Runner struct {
 	client *http.Client
 	mu     sync.RWMutex
 	tasks  []protocol.CheckTask
+	next   map[string]time.Time
+	now    func() time.Time
+	probe  networkMonitor
+	media  mediaMonitor
+	mtr    mtrMonitor
+}
+
+type networkMonitor interface {
+	Run(context.Context, protocol.CheckTask) protocol.NetworkResult
+}
+
+type mediaMonitor interface {
+	Run(context.Context, protocol.CheckTask) protocol.MediaResult
+}
+
+type mtrMonitor interface {
+	Run(context.Context, protocol.CheckTask) protocol.MTRResult
 }
 
 func New(cfg config.Config) (*Runner, error) {
 	if strings.TrimSpace(cfg.AgentEndpoint) == "" || strings.TrimSpace(cfg.AgentNodeUUID) == "" || strings.TrimSpace(cfg.AgentNodeToken) == "" {
 		return nil, fmt.Errorf("agent endpoint, node UUID, and node token are required")
 	}
-	return &Runner{cfg: cfg, client: &http.Client{Timeout: 35 * time.Second}}, nil
+	return &Runner{
+		cfg:    cfg,
+		client: &http.Client{Timeout: 35 * time.Second},
+		next:   make(map[string]time.Time),
+		now:    time.Now,
+		probe:  &monitor.Probe{},
+		media:  &monitor.MediaDetector{},
+		mtr:    &monitor.MTRMonitor{},
+	}, nil
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -65,24 +90,55 @@ func (r *Runner) refresh(ctx context.Context) error {
 		return err
 	}
 	r.mu.Lock()
-	r.tasks = append([]protocol.CheckTask(nil), response.Tasks...)
+	updated := append([]protocol.CheckTask(nil), response.Tasks...)
+	valid := make(map[string]struct{}, len(updated))
+	for _, task := range updated {
+		valid[task.ID] = struct{}{}
+	}
+	for id := range r.next {
+		if _, ok := valid[id]; !ok {
+			delete(r.next, id)
+		}
+	}
+	r.tasks = updated
 	r.mu.Unlock()
 	return nil
 }
 
 func (r *Runner) report(ctx context.Context) error {
-	r.mu.RLock()
+	r.mu.Lock()
 	tasks := append([]protocol.CheckTask(nil), r.tasks...)
-	r.mu.RUnlock()
-	results := make([]protocol.CheckResult, 0, len(tasks))
+	now := r.now()
+	due := make([]protocol.CheckTask, 0, len(tasks))
 	for _, task := range tasks {
-		if !task.Enabled || task.Kind == "mtr" || task.Kind == "media_http" {
+		if !task.Enabled {
 			continue
 		}
-		result := (&monitor.Probe{}).Run(ctx, task)
-		results = append(results, protocol.CheckResult{ID: task.ID, Kind: task.Kind, Network: &result})
+		next, ok := r.next[task.ID]
+		if !ok || !now.Before(next) {
+			due = append(due, task)
+			r.next[task.ID] = now.Add(time.Duration(task.IntervalSeconds) * time.Second)
+		}
 	}
-	now := time.Now().UTC()
+	r.mu.Unlock()
+
+	results := make([]protocol.CheckResult, 0, len(due))
+	for _, task := range due {
+		var result protocol.CheckResult
+		switch task.Kind {
+		case "mtr":
+			value := r.mtr.Run(ctx, task)
+			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, MTR: &value}
+		case "media_http":
+			value := r.media.Run(ctx, task)
+			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Media: &value}
+		default:
+			value := r.probe.Run(ctx, task)
+			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Network: &value}
+		}
+		results = append(results, result)
+	}
+	now = r.now().UTC()
 	request := protocol.ReportRequest{NodeUUID: r.cfg.AgentNodeUUID, ReportedAt: now.Unix(), Resource: collectResource(), Results: results}
 	return r.doJSON(ctx, http.MethodPost, "/report", request, nil)
 }
