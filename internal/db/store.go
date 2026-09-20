@@ -1087,6 +1087,10 @@ func (s *Store) GetNetworkLatest(ctx context.Context, nodeID, targetID string) (
 	return time.Unix(0, checkedAt).UTC(), payload, nil
 }
 
+func (s *Store) ListNetworkLatest(ctx context.Context, nodeID string) ([]LatestResult, error) {
+	return s.listLatestResults(ctx, `SELECT target_id, checked_at, payload FROM network_results_latest WHERE node_id = ? ORDER BY target_id`, nodeID)
+}
+
 func (s *Store) UpsertMTRLatest(ctx context.Context, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
 	return s.upsertLatestResult(ctx, "mtr_results_latest", "target_id", nodeID, targetID, checkedAt, payload)
 }

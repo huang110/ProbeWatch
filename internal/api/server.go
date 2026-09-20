@@ -98,9 +98,16 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet && (strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/mtr") || strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/media")) {
-		s.nodeRead(w, r)
-		return
+	if r.Method == http.MethodGet {
+		trimmed := strings.Trim(r.URL.Path, "/")
+		if strings.HasSuffix(trimmed, "/mtr") || strings.HasSuffix(trimmed, "/media") || strings.HasSuffix(trimmed, "/resource") || strings.HasSuffix(trimmed, "/network") {
+			s.nodeRead(w, r)
+			return
+		}
+		if parts := strings.Split(trimmed, "/"); len(parts) == 3 && parts[0] == "api" && parts[1] == "nodes" {
+			s.nodeSummaryRead(w, r, parts[2])
+			return
+		}
 	}
 	NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.nodeAction)).ServeHTTP(w, r)
 }

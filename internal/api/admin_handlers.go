@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,9 +21,18 @@ type registrationTokenResponse struct {
 }
 
 type nodeResponse struct {
-	ID   string `json:"id"`
-	UUID string `json:"uuid"`
-	Name string `json:"name"`
+	ID             string          `json:"id"`
+	UUID           string          `json:"uuid"`
+	Name           string          `json:"name"`
+	Status         string          `json:"status"`
+	LastReportedAt *time.Time      `json:"last_reported_at,omitempty"`
+	Resource       json.RawMessage `json:"resource,omitempty"`
+}
+
+type networkLatestResponse struct {
+	TargetID  string                 `json:"target_id"`
+	CheckedAt time.Time              `json:"checked_at"`
+	Result    protocol.NetworkResult `json:"result"`
 }
 
 func (s *Server) createRegistrationToken(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +67,27 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	response := make([]nodeResponse, 0, len(nodes))
 	for _, node := range nodes {
-		response = append(response, nodeResponse{ID: node.ID, UUID: node.UUID, Name: node.Name})
+		response = append(response, s.nodeSummary(r.Context(), node))
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) nodeSummary(ctx context.Context, node db.Node) nodeResponse {
+	response := nodeResponse{ID: node.ID, UUID: node.UUID, Name: node.Name, Status: "offline"}
+	reportedAt, payload, err := s.service.Store().GetResourceLatest(ctx, node.ID)
+	if err != nil {
+		return response
+	}
+	response.LastReportedAt = &reportedAt
+	if time.Since(reportedAt) <= 2*time.Minute {
+		response.Status = "online"
+	} else if time.Since(reportedAt) <= 10*time.Minute {
+		response.Status = "attention"
+	}
+	if json.Valid(payload) {
+		response.Resource = json.RawMessage(payload)
+	}
+	return response
 }
 
 func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
@@ -114,9 +141,26 @@ type mediaLatestResponse struct {
 	Result     protocol.MediaResult `json:"result"`
 }
 
+func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
+	if !security.IsRFC4122UUID(uuid) {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.nodeSummary(r.Context(), node))
+}
+
 func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 || parts[0] != "api" || parts[1] != "nodes" || parts[2] == "" || (parts[3] != "mtr" && parts[3] != "media") {
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "nodes" || parts[2] == "" || (parts[3] != "mtr" && parts[3] != "media" && parts[3] != "resource" && parts[3] != "network") {
 		writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -137,7 +181,46 @@ func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 		s.writeMTRLatest(w, r, node.ID)
 		return
 	}
-	s.writeMediaLatest(w, r, node.ID)
+	if parts[3] == "media" {
+		s.writeMediaLatest(w, r, node.ID)
+		return
+	}
+	if parts[3] == "resource" {
+		s.writeResourceLatest(w, r, node.ID)
+		return
+	}
+	s.writeNetworkLatest(w, r, node.ID)
+}
+
+func (s *Server) writeResourceLatest(w http.ResponseWriter, r *http.Request, nodeID string) {
+	reportedAt, payload, err := s.service.Store().GetResourceLatest(r.Context(), nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusOK, map[string]any{"reported_at": nil, "resource": nil})
+		return
+	}
+	if err != nil || !json.Valid(payload) {
+		writeJSONError(w, http.StatusServiceUnavailable, "node resource unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reported_at": reportedAt, "resource": json.RawMessage(payload)})
+}
+
+func (s *Server) writeNetworkLatest(w http.ResponseWriter, r *http.Request, nodeID string) {
+	results, err := s.service.Store().ListNetworkLatest(r.Context(), nodeID)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node network unavailable")
+		return
+	}
+	response := make([]networkLatestResponse, 0, len(results))
+	for _, latest := range results {
+		var result protocol.NetworkResult
+		if err := json.Unmarshal(latest.Payload, &result); err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "node network unavailable")
+			return
+		}
+		response = append(response, networkLatestResponse{TargetID: latest.ID, CheckedAt: latest.CheckedAt, Result: result})
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) writeMTRLatest(w http.ResponseWriter, r *http.Request, nodeID string) {

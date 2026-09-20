@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -86,10 +85,6 @@ func (r *Runner) report(ctx context.Context) error {
 	now := time.Now().UTC()
 	request := protocol.ReportRequest{NodeUUID: r.cfg.AgentNodeUUID, ReportedAt: now.Unix(), Resource: collectResource(), Results: results}
 	return r.doJSON(ctx, http.MethodPost, "/report", request, nil)
-}
-
-func collectResource() protocol.ResourceSnapshot {
-	return protocol.ResourceSnapshot{OS: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: "0.1.0", StartedAt: time.Now().UTC().Unix()}
 }
 
 func (r *Runner) doJSON(ctx context.Context, method, path string, body any, destination any) error {
