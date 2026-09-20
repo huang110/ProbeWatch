@@ -1,0 +1,19 @@
+services:
+  probewatch:
+    # Host exposure stays on loopback. The process listens on all container
+    # interfaces so Docker's published port can reach it inside the container.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.local
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PROBEWATCH_ENV: development
+      PROBEWATCH_LISTEN: 0.0.0.0:8080
+      PROBEWATCH_ALLOW_NON_LOOPBACK_LISTEN: true
+      PROBEWATCH_DEPLOYMENT_MODE: container
+      PROBEWATCH_DATABASE: /app/data/probewatch.db
+      PROBEWATCH_PUBLIC_BASE_URL: http://127.0.0.1:8080
+    volumes:
+      # Compose resolves this from deploy/, so data lives at repository-root ./data.
+      - ../data:/app/data

@@ -1,0 +1,17 @@
+FROM golang:1.23-alpine AS build
+
+WORKDIR /src
+COPY go.mod ./
+COPY cmd ./cmd
+COPY internal ./internal
+RUN go build -o /out/probewatch ./cmd/probewatch
+
+FROM alpine:3.20
+
+RUN adduser -D -H -u 10001 probewatch \
+    && mkdir -p /app/data \
+    && chown probewatch:probewatch /app/data
+COPY --from=build /out/probewatch /probewatch
+USER probewatch
+EXPOSE 8080
+ENTRYPOINT ["/probewatch"]

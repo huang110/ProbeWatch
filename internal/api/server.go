@@ -1,0 +1,160 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/probewatch/probewatch/internal/auth"
+	"github.com/probewatch/probewatch/internal/config"
+	"github.com/probewatch/probewatch/internal/db"
+)
+
+type Server struct {
+	cfg          config.Config
+	service      *auth.Service
+	agentLimiter *rateLimiter
+}
+
+func NewServer(cfg config.Config, service *auth.Service) *Server {
+	return &Server{cfg: cfg, service: service, agentLimiter: newRateLimiter(120, time.Minute, 10000)}
+}
+
+func (s *Server) agentNodeTokenTTL() time.Duration {
+	if s.cfg.AgentNodeTokenTTL <= 0 {
+		return db.DefaultNodeTokenLifetime
+	}
+	return s.cfg.AgentNodeTokenTTL
+}
+
+func (s *Server) agentTokenTTL() time.Duration {
+	if s.cfg.AgentTokenTTL <= 0 {
+		return db.DefaultRegistrationTokenLifetime
+	}
+	return s.cfg.AgentTokenTTL
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.health)
+	mux.HandleFunc("/auth/github", s.githubStart)
+	mux.HandleFunc("/auth/github/callback", s.githubCallback)
+
+	middleware := NewMiddleware(s.service, s.cfg)
+	mux.Handle("/auth/logout", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.service.Logout(w, r)
+	}))))
+	mux.Handle("/api/csrf", middleware.RequireAuth(http.HandlerFunc(s.service.CSRFHandler)))
+	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken))))
+	mux.Handle("/api/nodes", middleware.RequireAuth(http.HandlerFunc(s.listNodes)))
+	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
+	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
+	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
+	mux.HandleFunc("/api/agent/v1/register", s.registerAgent)
+	mux.HandleFunc("/api/agent/v1/config", s.agentConfig)
+	mux.HandleFunc("/api/agent/v1/report", s.reportAgent)
+	mux.HandleFunc("/api/agent/v1/network-result", s.networkResultAgent)
+	mux.HandleFunc("/api/agent/v1/mtr-result", s.mtrResultAgent)
+	mux.HandleFunc("/api/agent/v1/media-result", s.mediaResultAgent)
+
+	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	protectedRoute := middleware.RequireAuth(middleware.RequireCSRF(protected))
+	if s.cfg.Environment == "development" {
+		mux.Handle("/api/test/protected", protectedRoute)
+		mux.Handle("/api/me/protected", protectedRoute)
+	}
+	mux.Handle("/api/me", middleware.RequireAuth(http.HandlerFunc(s.me)))
+	return securityHeaders(mux)
+}
+
+func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
+	if isWriteMethod(r.Method) {
+		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/targets" {
+				s.targetCollection(w, r)
+				return
+			}
+			s.targetAction(w, r)
+		})).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/targets" {
+		s.targetCollection(w, r)
+		return
+	}
+	s.targetAction(w, r)
+}
+
+func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && (strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/mtr") || strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/media")) {
+		s.nodeRead(w, r)
+		return
+	}
+	NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.nodeAction)).ServeHTTP(w, r)
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	user, err := s.service.CurrentUser(r, time.Now().UTC())
+	if err != nil {
+		writeAuthenticationError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"id":       user.ProviderUserID,
+		"provider": user.Provider,
+		"login":    user.Login,
+	})
+}
+
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+func (s *Server) githubStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	s.service.BeginOAuth(w, r)
+}
+
+func (s *Server) githubCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	s.service.Callback(w, r)
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
