@@ -1559,6 +1559,14 @@ func evaluateAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, e AlertEval
 		return errors.New("alert fields out of bounds")
 	}
 	fp := alertFingerprint(nodeID, e)
+	var lastSeen int64
+	err := tx.QueryRowContext(ctx, `SELECT last_seen_at FROM alert_events WHERE node_id=? AND fingerprint=?`, nodeID, fp).Scan(&lastSeen)
+	if err == nil && now.UnixNano() < lastSeen {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	if e.Failing {
 		return upsertAlertTx(ctx, tx, nodeID, fp, e, now)
 	}
@@ -1570,7 +1578,7 @@ func upsertAlertTx(ctx context.Context, tx *sql.Tx, nodeID, fingerprint string, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO alert_events (id,node_id,fingerprint,category,target_id,reason,severity,status,occurrence_count,first_seen_at,last_seen_at) VALUES (?,?,?,?,?,?,?,'open',1,?,?) ON CONFLICT(node_id,fingerprint) DO UPDATE SET severity=excluded.severity,status=CASE WHEN alert_events.status='acked' THEN 'acked' ELSE 'open' END,occurrence_count=alert_events.occurrence_count+1,last_seen_at=excluded.last_seen_at,resolved_at=NULL`, id, nodeID, fingerprint, e.Category, e.TargetID, e.Reason, e.Severity, unixNano(now), unixNano(now))
+	_, err = tx.ExecContext(ctx, `INSERT INTO alert_events (id,node_id,fingerprint,category,target_id,reason,severity,status,occurrence_count,first_seen_at,last_seen_at) VALUES (?,?,?,?,?,?,?,'open',1,?,?) ON CONFLICT(node_id,fingerprint) DO UPDATE SET severity=excluded.severity,status='open',occurrence_count=alert_events.occurrence_count+1,last_seen_at=excluded.last_seen_at,resolved_at=NULL`, id, nodeID, fingerprint, e.Category, e.TargetID, e.Reason, e.Severity, unixNano(now), unixNano(now))
 	return err
 }
 

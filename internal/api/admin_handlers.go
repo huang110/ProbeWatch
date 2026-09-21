@@ -287,9 +287,13 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	nc := map[string]int{"total": len(nodes), "online": 0, "attention": 0, "offline": 0, "resource_reporting": 0}
 	checksTotal, checksSuccess, latencyTotal, latencyCount := 0, 0, int64(0), 0
-	resources := map[string]any{"network_rx_bytes": uint64(0), "network_tx_bytes": uint64(0), "network_history": []any{}, "cpu_percent": nil, "memory_used_bytes": uint64(0), "memory_total_bytes": uint64(0), "filesystem_used_bytes": uint64(0), "filesystem_total_bytes": uint64(0)}
+	resources := map[string]any{"network_rx_bytes": uint64(0), "network_tx_bytes": uint64(0), "network_rx_bytes_delta": uint64(0), "network_tx_bytes_delta": uint64(0), "network_history": []any{}, "cpu_percent": nil, "memory_used_bytes": uint64(0), "memory_total_bytes": uint64(0), "filesystem_used_bytes": uint64(0), "filesystem_total_bytes": uint64(0)}
 	var cpuTotal float64
 	var resourceCount int
+	seenChecks := make(map[string]struct{})
+	var rxFirst, txFirst, rxLast, txLast uint64
+	var haveCounters bool
+
 	for _, n := range nodes {
 		at, _, e := s.service.Store().GetResourceLatest(r.Context(), n.ID)
 		if e != nil {
@@ -319,20 +323,28 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 					FilesystemTotal uint64  `json:"filesystem_total_bytes"`
 				}
 				if json.Unmarshal(record.Payload, &value) == nil {
+					if !haveCounters {
+						rxFirst, txFirst, haveCounters = value.Rx, value.Tx, true
+					}
+					rxLast, txLast = value.Rx, value.Tx
 					cpuTotal += value.CPU
 					resourceCount++
-					resources["network_rx_bytes"] = resources["network_rx_bytes"].(uint64) + value.Rx
-					resources["network_tx_bytes"] = resources["network_tx_bytes"].(uint64) + value.Tx
 					resources["memory_used_bytes"] = resources["memory_used_bytes"].(uint64) + value.MemoryUsed
 					resources["memory_total_bytes"] = resources["memory_total_bytes"].(uint64) + value.MemoryTotal
 					resources["filesystem_used_bytes"] = resources["filesystem_used_bytes"].(uint64) + value.FilesystemUsed
 					resources["filesystem_total_bytes"] = resources["filesystem_total_bytes"].(uint64) + value.FilesystemTotal
 				}
 			}
+
 		}
 		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
 			if records, e := s.service.Store().GetResultHistory(r.Context(), kind, n.ID, from, to, limit); e == nil {
 				for _, record := range records {
+					key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+					if _, exists := seenChecks[key]; exists {
+						continue
+					}
+					seenChecks[key] = struct{}{}
 					var result struct {
 						Status  string `json:"status"`
 						Reached bool   `json:"reached"`
@@ -364,6 +376,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	if resourceCount > 0 {
 		resources["cpu_percent"] = cpuTotal / float64(resourceCount)
 	}
+	if haveCounters {
+		resources["network_rx_bytes"] = rxLast
+		resources["network_tx_bytes"] = txLast
+		if rxLast >= rxFirst {
+			resources["network_rx_bytes_delta"] = rxLast - rxFirst
+		}
+		if txLast >= txFirst {
+			resources["network_tx_bytes_delta"] = txLast - txFirst
+		}
+	}
+
 	writeJSON(w, 200, map[string]any{"nodes": nc, "checks": checks, "resources": resources, "window": map[string]time.Time{"from": from, "to": to}, "generated_at": now})
 }
 
