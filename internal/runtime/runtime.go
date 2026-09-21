@@ -61,6 +61,7 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	defer cleanupCancel()
 	go runAuthCleanup(cleanupCtx, service)
 	go runLifecycleCleanup(cleanupCtx, store)
+	go runHistoryAggregation(cleanupCtx, store)
 	handler := api.NewServer(cfg, service).Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -126,6 +127,31 @@ func runLifecycleCleanup(ctx context.Context, store *db.Store) {
 			return
 		case <-ticker.C:
 			cleanup()
+		}
+	}
+}
+
+// runHistoryAggregation folds raw history older than the retention window into
+// the hourly and daily aggregate tables once per hour. A failed pass is logged
+// and retried on the next tick; it never stops the control plane.
+func runHistoryAggregation(ctx context.Context, store *db.Store) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	aggregate := func() {
+		aggregateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		boundary := time.Now().UTC().Add(-db.DefaultAggregateRetentionWindow)
+		if _, err := store.AggregateHistory(aggregateCtx, boundary); err != nil {
+			slog.Error("history aggregation failed", "error_class", fmt.Sprintf("%T", err))
+		}
+	}
+	aggregate()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			aggregate()
 		}
 	}
 }

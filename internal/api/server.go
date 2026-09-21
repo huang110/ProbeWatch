@@ -105,6 +105,17 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		trimmed := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(trimmed, "/")
+		if len(parts) >= 3 && parts[0] == "api" && parts[1] == "nodes" {
+			if len(parts) == 5 && parts[3] == "checks" && parts[4] == "summary" {
+				s.nodeChecksSummary(w, r, parts[2])
+				return
+			}
+			if len(parts) == 4 && parts[3] == "traffic" {
+				s.nodeTraffic(w, r, parts[2])
+				return
+			}
+		}
 		if strings.HasSuffix(trimmed, "/mtr/history") || strings.HasSuffix(trimmed, "/media/history") || strings.HasSuffix(trimmed, "/resource/history") || strings.HasSuffix(trimmed, "/network/history") || strings.HasSuffix(trimmed, "/mtr") || strings.HasSuffix(trimmed, "/media") || strings.HasSuffix(trimmed, "/resource") || strings.HasSuffix(trimmed, "/network") {
 			s.nodeRead(w, r)
 			return

@@ -189,6 +189,66 @@ CREATE TABLE IF NOT EXISTS alert_events (
 CREATE INDEX IF NOT EXISTS alert_events_node_status_idx ON alert_events(node_id, status, last_seen_at);
 CREATE INDEX IF NOT EXISTS alert_events_resolved_idx ON alert_events(status, resolved_at);
 CREATE INDEX IF NOT EXISTS alert_events_fingerprint_idx ON alert_events(fingerprint);
+CREATE TABLE IF NOT EXISTS resource_history_hourly (
+    window_start INTEGER NOT NULL,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    sample_count INTEGER NOT NULL,
+    cpu_avg REAL NOT NULL,
+    cpu_max REAL NOT NULL,
+    mem_used_ratio_avg REAL NOT NULL,
+    mem_used_ratio_max REAL NOT NULL,
+    disk_used_ratio_avg REAL NOT NULL,
+    disk_used_ratio_max REAL NOT NULL,
+    rx_min INTEGER NOT NULL,
+    rx_max INTEGER NOT NULL,
+    tx_min INTEGER NOT NULL,
+    tx_max INTEGER NOT NULL,
+    PRIMARY KEY(window_start, node_id)
+);
+CREATE INDEX IF NOT EXISTS resource_history_hourly_node_idx ON resource_history_hourly(node_id, window_start);
+CREATE TABLE IF NOT EXISTS resource_history_daily (
+    window_start INTEGER NOT NULL,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    sample_count INTEGER NOT NULL,
+    cpu_avg REAL NOT NULL,
+    cpu_max REAL NOT NULL,
+    mem_used_ratio_avg REAL NOT NULL,
+    mem_used_ratio_max REAL NOT NULL,
+    disk_used_ratio_avg REAL NOT NULL,
+    disk_used_ratio_max REAL NOT NULL,
+    rx_min INTEGER NOT NULL,
+    rx_max INTEGER NOT NULL,
+    tx_min INTEGER NOT NULL,
+    tx_max INTEGER NOT NULL,
+    PRIMARY KEY(window_start, node_id)
+);
+CREATE INDEX IF NOT EXISTS resource_history_daily_node_idx ON resource_history_daily(node_id, window_start);
+CREATE TABLE IF NOT EXISTS network_results_history_hourly (
+    window_start INTEGER NOT NULL,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES network_targets(id) ON DELETE CASCADE,
+    total INTEGER NOT NULL,
+    success INTEGER NOT NULL,
+    failure INTEGER NOT NULL,
+    latency_avg REAL NOT NULL,
+    latency_max INTEGER NOT NULL,
+    latency_count INTEGER NOT NULL,
+    PRIMARY KEY(window_start, node_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS network_results_history_hourly_node_idx ON network_results_history_hourly(node_id, window_start);
+CREATE TABLE IF NOT EXISTS network_results_history_daily (
+    window_start INTEGER NOT NULL,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES network_targets(id) ON DELETE CASCADE,
+    total INTEGER NOT NULL,
+    success INTEGER NOT NULL,
+    failure INTEGER NOT NULL,
+    latency_avg REAL NOT NULL,
+    latency_max INTEGER NOT NULL,
+    latency_count INTEGER NOT NULL,
+    PRIMARY KEY(window_start, node_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS network_results_history_daily_node_idx ON network_results_history_daily(node_id, window_start);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {

@@ -83,6 +83,11 @@ type AlertEvaluation struct {
 	Reason   string
 	Severity string
 	Failing  bool
+	// FingerprintDimension optionally namespaces the alert fingerprint so
+	// evaluations for the same node+category+target can coexist without
+	// resolving each other. Empty keeps the legacy fingerprint material
+	// unchanged.
+	FingerprintDimension string
 }
 
 type Store struct {
@@ -1385,6 +1390,9 @@ func (s *Store) PersistAgentReport(ctx context.Context, input AgentReportInput) 
 		return err
 	}
 	for _, result := range input.Results {
+		if err := evaluateMTRPathChangeAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
+			return err
+		}
 		if err := upsertAgentResultTx(ctx, tx, input.NodeID, result); err != nil {
 			return err
 		}
@@ -1415,6 +1423,9 @@ func (s *Store) PersistAgentResult(ctx context.Context, nodeID, requestID string
 		return fmt.Errorf("find agent result node: %w", err)
 	}
 	if err := insertRequestReplayTx(ctx, tx, nodeID, requestID, replayExpiresAt, now); err != nil {
+		return err
+	}
+	if err := evaluateMTRPathChangeAlertTx(ctx, tx, nodeID, result, now); err != nil {
 		return err
 	}
 	if err := upsertAgentResultTx(ctx, tx, nodeID, result); err != nil {
@@ -1529,6 +1540,94 @@ func evaluateResultAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, resul
 	return evaluateAlertTx(ctx, tx, nodeID, e, now)
 }
 
+const alertReasonPathChanged = "path_changed"
+
+// mtrPathHop mirrors the route fingerprint hop material: latency is
+// deliberately excluded so only topology changes alter the fingerprint.
+type mtrPathHop struct {
+	TTL      int    `json:"ttl"`
+	IP       string `json:"ip,omitempty"`
+	TimedOut bool   `json:"timed_out,omitempty"`
+}
+
+// mtrPathSample is the route fingerprint of one MTR result payload. The
+// fingerprint is empty when the payload carries no usable path data.
+type mtrPathSample struct {
+	fingerprint string
+	reached     bool
+}
+
+// mtrPathSampleFromPayload derives the route fingerprint from an MTR result
+// payload, mirroring the monitor-side fingerprint (destination, reached and
+// per-hop TTL/IP/timed-out). The client-supplied fingerprint field is ignored
+// so the comparison never mixes hash schemes.
+func mtrPathSampleFromPayload(payload []byte) mtrPathSample {
+	var parsed struct {
+		DestinationIP string       `json:"destination_ip"`
+		Hops          []mtrPathHop `json:"hops"`
+		Reached       bool         `json:"reached"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil || len(parsed.Hops) == 0 {
+		return mtrPathSample{}
+	}
+	encoded, err := json.Marshal(struct {
+		Destination string       `json:"destination"`
+		Reached     bool         `json:"reached"`
+		Hops        []mtrPathHop `json:"hops"`
+	}{parsed.DestinationIP, parsed.Reached, parsed.Hops})
+	if err != nil {
+		return mtrPathSample{}
+	}
+	sum := sha256.Sum256(encoded)
+	return mtrPathSample{fingerprint: hex.EncodeToString(sum[:]), reached: parsed.Reached}
+}
+
+// evaluateMTRPathChangeAlertTx raises a transient "path_changed" event alert
+// when an MTR result observes a different route than the stored latest for the
+// same node+target. It must run before upsertAgentResultTx so the stored latest
+// payload is still the previous observation. Both results must have reached the
+// destination so first reports and unreachable routes never raise the alert,
+// and results older than the stored latest are skipped because they would not
+// replace it. The alert lives on its own fingerprint dimension, so the
+// reachability evaluation never resolves it: a path change is an event, not a
+// persistent failure state.
+func evaluateMTRPathChangeAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, result AgentResultInput, now time.Time) error {
+	if result.Kind != TargetKindMTR {
+		return nil
+	}
+	var checkedAt int64
+	var previous []byte
+	err := tx.QueryRowContext(ctx, `SELECT checked_at, payload FROM mtr_results_latest WHERE node_id = ? AND target_id = ?`, nodeID, result.TargetID).Scan(&checkedAt, &previous)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("find previous mtr result: %w", err)
+	}
+	if unixNano(result.CheckedAt) < checkedAt {
+		return nil
+	}
+	previousPath := mtrPathSampleFromPayload(previous)
+	currentPath := mtrPathSampleFromPayload(result.Payload)
+	if previousPath.fingerprint == "" || currentPath.fingerprint == "" {
+		return nil
+	}
+	if !previousPath.reached || !currentPath.reached {
+		return nil
+	}
+	if previousPath.fingerprint == currentPath.fingerprint {
+		return nil
+	}
+	return evaluateAlertTx(ctx, tx, nodeID, AlertEvaluation{
+		Category:             "mtr",
+		TargetID:             result.TargetID,
+		Reason:               alertReasonPathChanged,
+		Severity:             AlertSeverityWarn,
+		Failing:              true,
+		FingerprintDimension: alertReasonPathChanged,
+	}, now)
+}
+
 func evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
 	var r struct {
 		CPUPercent           float64 `json:"cpu_percent"`
@@ -1550,7 +1649,11 @@ func evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, pay
 }
 
 func alertFingerprint(nodeID string, e AlertEvaluation) string {
-	h := sha256.Sum256([]byte(nodeID + "\x00" + e.Category + "\x00" + e.TargetID))
+	dimension := ""
+	if e.FingerprintDimension != "" {
+		dimension = "\x00" + e.FingerprintDimension
+	}
+	h := sha256.Sum256([]byte(nodeID + "\x00" + e.Category + "\x00" + e.TargetID + dimension))
 	return hex.EncodeToString(h[:])
 }
 
