@@ -704,7 +704,7 @@ func (s *Store) RegisterNodeWithTTL(ctx context.Context, registrationToken strin
 	if err != nil {
 		return RegisteredNode{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, nodeID, input.UUID, input.Name, unixNano(now), unixNano(now)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, nodeID, input.UUID, input.Name, "unknown", unixNano(now), unixNano(now)); err != nil {
 		return RegisteredNode{}, fmt.Errorf("insert node: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_tokens (id, node_id, token_digest, token_prefix, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`, nodeTokenID, nodeID, security.Digest(s.pepper, nodeToken), tokenPrefix(nodeToken), unixNano(now.Add(lifetime)), unixNano(now)); err != nil {
