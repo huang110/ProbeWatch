@@ -139,6 +139,28 @@ def test_public_status_sanitizes_node_names_before_publishing():
     assert "[已脱敏]" in handlers
 
 
+def test_frontend_never_injects_raw_html():
+    assert "dangerouslySetInnerHTML" not in SOURCE
+    assert "innerHTML" not in SOURCE
+    assert "insertAdjacentHTML" not in SOURCE
+    assert "document.write" not in SOURCE
+
+
+def test_node_detail_fetches_checks_summary_and_traffic_analytics():
+    assert "`/api/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary`" in SOURCE
+    assert "`/api/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`" in SOURCE
+    assert SOURCE.count("credentials: 'same-origin'") >= 3
+    assert "new AbortController" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_node_analytics_failures_render_inline_empty_state_without_popups():
+    assert "暂无数据" in SOURCE
+    assert "alert(" not in SOURCE
+    assert "window.alert" not in SOURCE
+
+
 def test_guest_view_uses_public_status_without_storage():
     assert "fetch('/api/public/status'" in SOURCE
     assert "GuestView" in SOURCE
@@ -150,7 +172,7 @@ def test_guest_view_uses_public_status_without_storage():
 
 def test_guest_view_does_not_call_management_apis():
     guest_section = SOURCE[SOURCE.index("function GuestView"):SOURCE.index("function App")]
-    for management_call in ("/api/nodes", "/api/alerts", "/api/overview", "/api/targets", "/api/csrf"):
+    for management_call in ("/api/nodes", "/api/alerts", "/api/overview", "/api/targets", "/api/csrf", "/checks/summary", "/traffic?period="):
         assert management_call not in guest_section, f"guest view must not call {management_call}"
 
 
