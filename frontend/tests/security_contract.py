@@ -54,6 +54,34 @@ def test_security_document_references_frontend_openresty_config():
     assert "deploy/openresty-security.conf" not in SECURITY_DOC.replace("frontend/deploy/openresty-security.conf", "")
 
 
+def test_https_homepage_security_headers_cover_browser_baseline():
+    required_headers = {
+        "Content-Security-Policy": "default-src 'self'",
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    }
+    config = OPENRESTY_CONFIG.read_text(encoding="utf-8")
+    assert 'add_header Content-Security-Policy "' in config
+    assert "default-src 'self'" in config
+    for header, value in {
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    }.items():
+        assert f"add_header {header} \"{value}\" always;" in config
+
+
+def test_openresty_security_snippet_keeps_api_proxy_guidance():
+    config = OPENRESTY_CONFIG.read_text(encoding="utf-8")
+    assert "API authorization" in config
+    assert "HTTPS server block" in config
+
+
 def test_overview_uses_authenticated_api_and_history_without_browser_storage():
     assert "fetch('/api/overview'" in SOURCE
     assert '/resource/history' in SOURCE

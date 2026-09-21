@@ -275,7 +275,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	from, to, _, ok := parseHistoryWindow(r, now)
+	from, to, limit, ok := parseHistoryWindow(r, now)
 	if !ok {
 		writeJSONError(w, 400, "invalid query parameters")
 		return
@@ -286,6 +286,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nc := map[string]int{"total": len(nodes), "online": 0, "attention": 0, "offline": 0, "resource_reporting": 0}
+	checksTotal, checksSuccess, latencyTotal, latencyCount := 0, 0, int64(0), 0
+	resources := map[string]any{"network_rx_bytes": uint64(0), "network_tx_bytes": uint64(0), "network_history": []any{}, "cpu_percent": nil, "memory_used_bytes": uint64(0), "memory_total_bytes": uint64(0), "filesystem_used_bytes": uint64(0), "filesystem_total_bytes": uint64(0)}
+	var cpuTotal float64
+	var resourceCount int
 	for _, n := range nodes {
 		at, _, e := s.service.Store().GetResourceLatest(r.Context(), n.ID)
 		if e != nil {
@@ -303,8 +307,64 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		if !at.Before(from) && !at.After(to) {
 			nc["resource_reporting"]++
 		}
+		if records, e := s.service.Store().GetResourceHistory(r.Context(), n.ID, from, to, limit); e == nil {
+			for _, record := range records {
+				var value struct {
+					CPU             float64 `json:"cpu_percent"`
+					Rx              uint64  `json:"network_rx_bytes"`
+					Tx              uint64  `json:"network_tx_bytes"`
+					MemoryUsed      uint64  `json:"memory_used_bytes"`
+					MemoryTotal     uint64  `json:"memory_total_bytes"`
+					FilesystemUsed  uint64  `json:"filesystem_used_bytes"`
+					FilesystemTotal uint64  `json:"filesystem_total_bytes"`
+				}
+				if json.Unmarshal(record.Payload, &value) == nil {
+					cpuTotal += value.CPU
+					resourceCount++
+					resources["network_rx_bytes"] = resources["network_rx_bytes"].(uint64) + value.Rx
+					resources["network_tx_bytes"] = resources["network_tx_bytes"].(uint64) + value.Tx
+					resources["memory_used_bytes"] = resources["memory_used_bytes"].(uint64) + value.MemoryUsed
+					resources["memory_total_bytes"] = resources["memory_total_bytes"].(uint64) + value.MemoryTotal
+					resources["filesystem_used_bytes"] = resources["filesystem_used_bytes"].(uint64) + value.FilesystemUsed
+					resources["filesystem_total_bytes"] = resources["filesystem_total_bytes"].(uint64) + value.FilesystemTotal
+				}
+			}
+		}
+		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
+			if records, e := s.service.Store().GetResultHistory(r.Context(), kind, n.ID, from, to, limit); e == nil {
+				for _, record := range records {
+					var result struct {
+						Status  string `json:"status"`
+						Reached bool   `json:"reached"`
+						Error   string `json:"error"`
+						Latency int64  `json:"latency_ms"`
+					}
+					if json.Unmarshal(record.Payload, &result) == nil {
+						checksTotal++
+						ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
+						if ok {
+							checksSuccess++
+						}
+						if result.Latency > 0 {
+							latencyTotal += result.Latency
+							latencyCount++
+						}
+					}
+				}
+			}
+		}
 	}
-	writeJSON(w, 200, map[string]any{"nodes": nc, "checks": map[string]any{"total": 0, "success": 0, "failure": 0, "success_rate": nil, "avg_latency_ms": nil}, "window": map[string]time.Time{"from": from, "to": to}, "generated_at": now})
+	checks := map[string]any{"total": checksTotal, "success": checksSuccess, "failure": checksTotal - checksSuccess, "success_rate": nil, "avg_latency_ms": nil}
+	if checksTotal > 0 {
+		checks["success_rate"] = float64(checksSuccess) * 100 / float64(checksTotal)
+		if latencyCount > 0 {
+			checks["avg_latency_ms"] = float64(latencyTotal) / float64(latencyCount)
+		}
+	}
+	if resourceCount > 0 {
+		resources["cpu_percent"] = cpuTotal / float64(resourceCount)
+	}
+	writeJSON(w, 200, map[string]any{"nodes": nc, "checks": checks, "resources": resources, "window": map[string]time.Time{"from": from, "to": to}, "generated_at": now})
 }
 
 func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
@@ -322,6 +382,56 @@ func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid st
 		return
 	}
 	writeJSON(w, http.StatusOK, s.nodeSummary(r.Context(), node))
+}
+
+type historyResourceResponse struct {
+	ReportedAt time.Time       `json:"reported_at"`
+	Resource   json.RawMessage `json:"resource"`
+}
+
+type historyResultResponse struct {
+	TargetID   string          `json:"target_id,omitempty"`
+	DetectorID string          `json:"detector_id,omitempty"`
+	CheckedAt  time.Time       `json:"checked_at"`
+	Result     json.RawMessage `json:"result"`
+}
+
+func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID, resource string) {
+	from, to, limit, ok := parseHistoryWindow(r, time.Now().UTC())
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	if resource == "resource" {
+		records, err := s.service.Store().GetResourceHistory(r.Context(), nodeID, from, to, limit)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "node resource history unavailable")
+			return
+		}
+		out := make([]historyResourceResponse, 0, len(records))
+		for _, record := range records {
+			out = append(out, historyResourceResponse{ReportedAt: record.ReportedAt, Resource: json.RawMessage(record.Payload)})
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	kind := map[string]db.TargetKind{"network": db.TargetKindTCP, "mtr": db.TargetKindMTR, "media": db.TargetKindMediaHTTP}[resource]
+	records, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
+		return
+	}
+	out := make([]historyResultResponse, 0, len(records))
+	for _, record := range records {
+		item := historyResultResponse{CheckedAt: record.CheckedAt, Result: json.RawMessage(record.Payload)}
+		if resource == "media" {
+			item.DetectorID = record.TargetID
+		} else {
+			item.TargetID = record.TargetID
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
@@ -344,9 +454,10 @@ func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 5 {
-		writeJSON(w, http.StatusOK, []any{})
+		s.writeNodeHistory(w, r, node.ID, parts[3])
 		return
 	}
+
 	if parts[3] == "mtr" {
 		s.writeMTRLatest(w, r, node.ID)
 		return

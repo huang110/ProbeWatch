@@ -1420,6 +1420,9 @@ func ensureNodeInTx(ctx context.Context, tx *sql.Tx, nodeID string) error {
 }
 
 func upsertResourceLatestTx(ctx context.Context, tx *sql.Tx, nodeID string, reportedAt time.Time, payload []byte) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO resource_history (node_id, payload, reported_at, recorded_at) VALUES (?, ?, ?, ?)`, nodeID, payload, unixNano(reportedAt), unixNano(time.Now().UTC())); err != nil {
+		return fmt.Errorf("insert resource history: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO resource_latest (node_id, payload, reported_at)
 		VALUES (?, ?, ?)
@@ -1661,6 +1664,20 @@ func latestResultQuery(kind TargetKind) (string, error) {
 }
 
 func upsertLatestResultTx(ctx context.Context, tx *sql.Tx, query, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
+	var historyTableName, historyColumn string
+	switch {
+	case strings.Contains(query, "network_results_latest"):
+		historyTableName, historyColumn = "network_results_history", "target_id"
+	case strings.Contains(query, "mtr_results_latest"):
+		historyTableName, historyColumn = "mtr_results_history", "target_id"
+	case strings.Contains(query, "media_results_latest"):
+		historyTableName, historyColumn = "media_results_history", "detector_id"
+	default:
+		return errors.New("invalid latest result history table")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+historyTableName+` (node_id, `+historyColumn+`, payload, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?)`, nodeID, targetID, payload, unixNano(checkedAt), unixNano(time.Now().UTC())); err != nil {
+		return fmt.Errorf("insert result history: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, query, nodeID, targetID, payload, unixNano(checkedAt)); err != nil {
 		return fmt.Errorf("upsert latest result: %w", err)
 	}
