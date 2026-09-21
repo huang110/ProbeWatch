@@ -60,6 +60,7 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	cleanupCtx, cleanupCancel := context.WithCancel(ctx)
 	defer cleanupCancel()
 	go runAuthCleanup(cleanupCtx, service)
+	go runLifecycleCleanup(cleanupCtx, store)
 	handler := api.NewServer(cfg, service).Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -108,7 +109,27 @@ func runAuthCleanup(ctx context.Context, service *auth.Service) {
 	}
 }
 
-// StartAgent starts the outbound-only monitoring agent.
+func runLifecycleCleanup(ctx context.Context, store *db.Store) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if _, err := store.CleanupLifecycle(cleanupCtx, time.Now().UTC()); err != nil {
+			slog.Error("lifecycle cleanup failed", "error_class", fmt.Sprintf("%T", err))
+		}
+	}
+	cleanup()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanup()
+		}
+	}
+}
+
 func StartAgent(cfg config.Config) error {
 	runner, err := agent.New(cfg)
 	if err != nil {

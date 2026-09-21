@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS registration_tokens (
     consumed_at INTEGER,
     created_at INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS registration_tokens_expiry_idx ON registration_tokens(expires_at);
 CREATE TABLE IF NOT EXISTS nodes (
     id TEXT PRIMARY KEY,
     uuid TEXT NOT NULL UNIQUE,
@@ -166,6 +167,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_events_node_idx ON audit_events(node_id, created_at);
+CREATE INDEX IF NOT EXISTS audit_events_created_idx ON audit_events(created_at);
 CREATE TABLE IF NOT EXISTS alert_events (
     id TEXT PRIMARY KEY,
     node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -182,6 +184,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
     UNIQUE(node_id, fingerprint)
 );
 CREATE INDEX IF NOT EXISTS alert_events_node_status_idx ON alert_events(node_id, status, last_seen_at);
+CREATE INDEX IF NOT EXISTS alert_events_resolved_idx ON alert_events(status, resolved_at);
 CREATE INDEX IF NOT EXISTS alert_events_fingerprint_idx ON alert_events(fingerprint);
 `
 

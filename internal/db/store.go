@@ -47,6 +47,7 @@ const DefaultNodeTokenLifetime = 365 * 24 * time.Hour
 
 const maxReplayCleanupRows = 1000
 const maxAuthCleanupRows = 1000
+const maxLifecycleCleanupRows = 500
 const maxResourcePayloadBytes = 64 * 1024
 const maxTargetIDLength = 128
 const maxTargetNameLength = 128
@@ -290,6 +291,67 @@ func (s *Store) ConsumeOAuthState(ctx context.Context, stateDigest []byte, now t
 	return nil
 }
 
+type LifecycleCleanupResult struct {
+	ResourceHistory       int64
+	NetworkResultsHistory int64
+	MTRResultsHistory     int64
+	MediaResultsHistory   int64
+	AuditEvents           int64
+	ResolvedAlertEvents   int64
+	RegistrationTokens    int64
+	NodeTokens            int64
+	RequestReplays        int64
+}
+
+func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleCleanupResult, error) {
+	var result LifecycleCleanupResult
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, fmt.Errorf("begin lifecycle cleanup: %w", err)
+	}
+	defer tx.Rollback()
+
+	deleteBatch := func(query, resource string, args ...any) (int64, error) {
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, fmt.Errorf("cleanup %s: %w", resource, err)
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("inspect cleanup %s: %w", resource, err)
+		}
+		return count, nil
+	}
+	cutoff30 := unixNano(now.Add(-30 * 24 * time.Hour))
+	cutoff90 := unixNano(now.Add(-90 * 24 * time.Hour))
+	history := []struct {
+		name  string
+		query string
+		args  []any
+		set   *int64
+	}{
+		{"resource history", `DELETE FROM resource_history WHERE rowid IN (SELECT rowid FROM resource_history WHERE reported_at < ? ORDER BY reported_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.ResourceHistory},
+		{"network results history", `DELETE FROM network_results_history WHERE rowid IN (SELECT rowid FROM network_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.NetworkResultsHistory},
+		{"mtr results history", `DELETE FROM mtr_results_history WHERE rowid IN (SELECT rowid FROM mtr_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.MTRResultsHistory},
+		{"media results history", `DELETE FROM media_results_history WHERE rowid IN (SELECT rowid FROM media_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.MediaResultsHistory},
+		{"audit events", `DELETE FROM audit_events WHERE rowid IN (SELECT rowid FROM audit_events WHERE created_at < ? ORDER BY created_at, rowid LIMIT ?)`, []any{cutoff90, maxLifecycleCleanupRows}, &result.AuditEvents},
+		{"resolved alert events", `DELETE FROM alert_events WHERE rowid IN (SELECT rowid FROM alert_events WHERE status = 'resolved' AND resolved_at IS NOT NULL AND resolved_at < ? ORDER BY resolved_at, rowid LIMIT ?)`, []any{cutoff90, maxLifecycleCleanupRows}, &result.ResolvedAlertEvents},
+		{"registration tokens", `DELETE FROM registration_tokens WHERE rowid IN (SELECT rowid FROM registration_tokens WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RegistrationTokens},
+		{"node tokens", `DELETE FROM node_tokens WHERE rowid IN (SELECT rowid FROM node_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL ORDER BY COALESCE(revoked_at, expires_at), rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.NodeTokens},
+		{"request replays", `DELETE FROM request_replays WHERE rowid IN (SELECT rowid FROM request_replays WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RequestReplays},
+	}
+	for _, item := range history {
+		count, err := deleteBatch(item.query, item.name, item.args...)
+		if err != nil {
+			return LifecycleCleanupResult{}, err
+		}
+		*item.set = count
+	}
+	if err := tx.Commit(); err != nil {
+		return LifecycleCleanupResult{}, fmt.Errorf("commit lifecycle cleanup: %w", err)
+	}
+	return result, nil
+}
 func (s *Store) CleanupExpiredOAuthStates(ctx context.Context, now time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

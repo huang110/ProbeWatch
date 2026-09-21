@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +136,96 @@ func TestReportHonorsIntervalsAndDisabledTasks(t *testing.T) {
 	}
 	if probe.calls != 2 {
 		t.Fatalf("calls after interval = %d", probe.calls)
+	}
+}
+
+func TestOutboxPersistsAndReplaysReport(t *testing.T) {
+	dir := t.TempDir()
+	available := false
+	var requestIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestIDs = append(requestIDs, r.Header.Get("X-Probe-Request-ID"))
+		if !available {
+			http.Error(w, "unavailable", http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	runner, err := New(config.Config{AgentEndpoint: server.URL, AgentNodeUUID: "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1", AgentNodeToken: "node-secret", AgentDataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.client.Timeout = time.Second
+	payload := []byte(`{"node_uuid":"6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1"}`)
+	if err := runner.enqueueReport(queuedReport{RequestID: "fixed-request", Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	outbox := filepath.Join(dir, "outbox")
+	entries, err := os.ReadDir(outbox)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("outbox entries = %d, err=%v", len(entries), err)
+	}
+	info, err := entries[0].Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("file mode = %v", info.Mode().Perm())
+	}
+	if err := runner.replayOutbox(context.Background()); err == nil && len(requestIDs) == 0 {
+		t.Fatal("replay did not attempt request")
+	}
+	available = true
+	if err := runner.replayOutbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := os.ReadDir(outbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("remaining outbox files = %d", len(remaining))
+	}
+	if len(requestIDs) < 2 || requestIDs[0] != requestIDs[1] {
+		t.Fatalf("request ids = %#v, want reuse", requestIDs)
+	}
+}
+
+func TestOutboxRejectsOversizeAndBadFiles(t *testing.T) {
+	dir := t.TempDir()
+	runner, err := New(config.Config{AgentEndpoint: "http://127.0.0.1:1", AgentNodeUUID: "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1", AgentNodeToken: "node-secret", AgentDataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.enqueueReport(queuedReport{RequestID: "too-large", Payload: make([]byte, maxOutboxFileSize+1)}); err == nil {
+		t.Fatal("oversize report accepted")
+	}
+	outbox, err := runner.outboxDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outbox, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outbox, "bad.json"), []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.replayOutbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "bad.json")); !os.IsNotExist(err) {
+		t.Fatalf("bad file still exists: %v", err)
+	}
+}
+
+func TestOutboxRejectsUnsafeDataDir(t *testing.T) {
+	runner, err := New(config.Config{AgentEndpoint: "http://127.0.0.1:1", AgentNodeUUID: "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1", AgentNodeToken: "node-secret", AgentDataDir: "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.enqueueReport(queuedReport{RequestID: "x", Payload: []byte("{}")}); err == nil {
+		t.Fatal("unsafe data dir accepted")
 	}
 }
 

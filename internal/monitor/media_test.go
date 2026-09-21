@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/netip"
@@ -15,9 +16,17 @@ func mediaTask() protocol.CheckTask {
 	return protocol.CheckTask{ID: "media-1", Kind: "media_http", Host: "media.example.com", Port: 443, Path: "/manifest", ExpectedStatus: 200, TimeoutMS: 1000, MaxHops: 1, IntervalSeconds: 10, Enabled: true}
 }
 
+type errorReader struct {
+	err error
+}
+
+func (r *errorReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
 func TestMediaDetectorUsesGETAndDefaultsDetector(t *testing.T) {
 	var got *http.Request
-	body := strings.Repeat("x", 100)
+	body := strings.Repeat("x", 8)
 	d := &MediaDetector{
 		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
 		MaxBodyBytes: 8,
@@ -35,6 +44,61 @@ func TestMediaDetectorUsesGETAndDefaultsDetector(t *testing.T) {
 	}
 }
 
+func TestMediaDetectorRejectsBodyOverLimitBeforeStatus(t *testing.T) {
+	d := &MediaDetector{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 9))), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), mediaTask())
+	if result.Status != "error" || result.Reason != "body exceeds limit" {
+		t.Fatalf("result = %#v, want fixed body limit error", result)
+	}
+}
+
+func TestMediaDetectorRejectsBodyOverLimitEvenOnErrorStatus(t *testing.T) {
+	d := &MediaDetector{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 9))), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), mediaTask())
+	if result.Status != "error" || result.Reason != "body exceeds limit" {
+		t.Fatalf("result = %#v, want fixed body limit error", result)
+	}
+}
+
+func TestMediaDetectorReturnsReadErrorWithoutStatus判定(t *testing.T) {
+	readErr := errors.New("read failed")
+	d := &MediaDetector{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(&errorReader{err: readErr}), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), mediaTask())
+	if result.Status != "error" || result.Reason != readErr.Error() {
+		t.Fatalf("result = %#v, want body read error", result)
+	}
+}
+
+func TestMediaDetectorAcceptsExactBodyLimit(t *testing.T) {
+	d := &MediaDetector{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 8))), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), mediaTask())
+	if result.Status != "available" || result.Reason != "" {
+		t.Fatalf("result = %#v, want available at exact limit", result)
+	}
+}
 func TestMediaDetectorMapsStatusMismatchToUnavailable(t *testing.T) {
 	d := &MediaDetector{
 		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},

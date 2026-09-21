@@ -18,6 +18,8 @@ import (
 
 const mediaMaxReasonBytes = 512
 
+var errMediaBodyExceedsLimit = errors.New("body exceeds limit")
+
 // MediaDetector performs a deliberately restricted HTTP availability check.
 // It accepts only the fields present in protocol.CheckTask; no caller-supplied
 // headers, cookies, credentials, or response content are ever persisted.
@@ -91,7 +93,11 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 		response, err = client.Do(request)
 		if err == nil {
 			defer response.Body.Close()
-			_, err = io.Copy(io.Discard, io.LimitReader(response.Body, d.maxBodyBytes()+1))
+			var n int64
+			n, err = io.Copy(io.Discard, io.LimitReader(response.Body, d.maxBodyBytes()+1))
+			if err == nil && n > d.maxBodyBytes() {
+				err = errMediaBodyExceedsLimit
+			}
 			if err == nil {
 				if response.StatusCode == task.ExpectedStatus || task.ExpectedStatus == 0 && response.StatusCode >= 200 && response.StatusCode < 300 {
 					result.Status = "available"
@@ -100,6 +106,7 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 				}
 			}
 		}
+
 	}
 	if err != nil {
 		result.Status = mediaStatusForError(ctx, err, "error")

@@ -51,9 +51,33 @@ func TestParseNetworkCounters(t *testing.T) {
 	}
 }
 
+func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
+	values := []cpuStats{{total: 100, idle: 40}, {total: 200, idle: 80}}
+	index := 0
+	tracker := &cpuTracker{read: func() (cpuStats, error) {
+		value := values[index]
+		index++
+		return value, nil
+	}}
+	if got, err := tracker.Sample(); err != nil || got != 0 {
+		t.Fatalf("first sample = %v, %v", got, err)
+	}
+	if got, err := tracker.Sample(); err != nil || math.Abs(got-60) > 1e-9 {
+		t.Fatalf("delta sample = %v, %v", got, err)
+	}
+}
+
+func TestCollectResourceKeepsStartedAt(t *testing.T) {
+	first := collectResourceWith(1234, nil)
+	second := collectResourceWith(1234, nil)
+	if first.StartedAt != 1234 || second.StartedAt != 1234 {
+		t.Fatalf("started_at = %d, %d", first.StartedAt, second.StartedAt)
+	}
+}
+
 func TestParseProcStat(t *testing.T) {
 	got, err := parseProcStat("cpu 10 20 30 40 5 0 0 0")
-	if err != nil || math.Abs(got.cpuPercent-57.142857142857146) > 1e-9 {
+	if err != nil || got != (cpuStats{total: 105, idle: 45}) {
 		t.Fatalf("got %#v, err %v", got, err)
 	}
 	for _, input := range []string{"", "cpu 1 2 3", "cpux 1 2 3 4", "cpu 1 nope 3 4", "cpu 0 0 0 0 0 0 0 0"} {

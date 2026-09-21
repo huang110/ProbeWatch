@@ -27,6 +27,7 @@ const (
 )
 
 var ErrMTRUnsupported = errors.New("mtr transport unsupported")
+var ErrMTRPermission = errors.New("mtr transport permission denied")
 
 // MTRTransport performs one bounded TTL probe. It must return only observed,
 // passive hop data; it must not perform route discovery through shell commands.
@@ -87,7 +88,7 @@ func (m *MTRMonitor) Run(parent context.Context, task protocol.CheckTask) protoc
 
 	transport := m.Transport
 	if transport == nil {
-		transport = UnsupportedMTRTransport{}
+		transport = defaultMTRTransport()
 	}
 	for ttl := 1; ttl <= task.MaxHops; ttl++ {
 		if err := ctx.Err(); err != nil {
@@ -172,6 +173,9 @@ func (m *MTRMonitor) maxResultBytes() int {
 }
 
 func (m *MTRMonitor) errorClass(ctx context.Context, err error) string {
+	if errors.Is(err, ErrMTRPermission) {
+		return "permission_denied"
+	}
 	if errors.Is(err, ErrMTRUnsupported) {
 		return "unsupported"
 	}

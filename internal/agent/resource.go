@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
@@ -15,11 +16,15 @@ import (
 const agentVersion = "0.2.0"
 
 func collectResource() protocol.ResourceSnapshot {
+	return collectResourceWith(processStartTime(), newCPUTracker())
+}
+
+func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
 		AgentVersion: agentVersion,
-		StartedAt:    processStartTime(),
+		StartedAt:    startedAt,
 	}
 	if hostname, err := os.Hostname(); err == nil {
 		resource.Hostname = boundedIdentity(hostname)
@@ -30,8 +35,10 @@ func collectResource() protocol.ResourceSnapshot {
 	if runtime.GOOS != "linux" {
 		return resource
 	}
-	if stat, err := readProcStat(); err == nil {
-		resource.CPUPercent = stat.cpuPercent
+	if cpu != nil {
+		if value, err := cpu.Sample(); err == nil {
+			resource.CPUPercent = value
+		}
 	}
 	if memory, err := readMemInfo(); err == nil {
 		resource.MemoryTotalBytes = memory.total
@@ -161,7 +168,43 @@ func parseNetworkCounters(data string) (networkStats, error) {
 	return result, nil
 }
 
-type cpuStats struct{ cpuPercent float64 }
+type cpuStats struct {
+	total uint64
+	idle  uint64
+}
+
+type cpuTracker struct {
+	mu          sync.Mutex
+	previous    cpuStats
+	hasPrevious bool
+	read        func() (cpuStats, error)
+}
+
+func newCPUTracker() cpuSampler { return &cpuTracker{read: readProcStat} }
+
+func (t *cpuTracker) Sample() (float64, error) {
+	current, err := t.read()
+	if err != nil {
+		return 0, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.hasPrevious {
+		t.previous, t.hasPrevious = current, true
+		return 0, nil
+	}
+	if current.total < t.previous.total || current.idle < t.previous.idle {
+		t.previous = current
+		return 0, fmt.Errorf("cpu counters moved backwards")
+	}
+	totalDelta := current.total - t.previous.total
+	idleDelta := current.idle - t.previous.idle
+	t.previous = current
+	if totalDelta == 0 || idleDelta > totalDelta {
+		return 0, fmt.Errorf("invalid cpu counter delta")
+	}
+	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), nil
+}
 
 func readProcStat() (cpuStats, error) {
 	line, err := readFirstLine("/proc/stat")
@@ -192,7 +235,7 @@ func parseProcStat(line string) (cpuStats, error) {
 	if total == 0 || total < idle {
 		return cpuStats{}, fmt.Errorf("invalid cpu totals")
 	}
-	return cpuStats{cpuPercent: float64(total-idle) * 100 / float64(total)}, nil
+	return cpuStats{total: total, idle: idle}, nil
 }
 
 func readLoadAvg() ([3]float64, error) {
@@ -219,4 +262,6 @@ func parseLoadAvg(line string) ([3]float64, error) {
 	return result, nil
 }
 
-func processStartTime() int64 { return time.Now().UTC().Unix() }
+var agentStartTime = time.Now().UTC().Unix()
+
+func processStartTime() int64 { return agentStartTime }

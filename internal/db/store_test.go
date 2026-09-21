@@ -835,6 +835,41 @@ func TestDeleteNodeAuditsAndPreventsAuthentication(t *testing.T) {
 	assertAuditAction(t, store, "delete", node.Node.ID)
 }
 
+func TestCleanupLifecycleRemovesOnlyEligibleRows(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	old30 := unixNano(now.Add(-31 * 24 * time.Hour))
+	old90 := unixNano(now.Add(-91 * 24 * time.Hour))
+	fresh := unixNano(now.Add(-time.Hour))
+	if _, err := store.db.Exec(`INSERT INTO nodes (id,uuid,name,created_at,updated_at) VALUES ('cleanup-node','550e8400-e29b-41d4-a716-446655440099','cleanup',?,?)`, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO resource_history (id,node_id,payload,reported_at,recorded_at) VALUES (1,'cleanup-node',X'01',?,?), (2,'cleanup-node',X'02',?,?)`, old30, old30, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO audit_events (id,action,created_at) VALUES ('old-audit','test',?), ('fresh-audit','test',?)`, old90, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO registration_tokens (id,token_digest,expires_at,created_at) VALUES ('expired-reg',X'11',?,?), ('valid-reg',X'12',?,?)`, old30, old30, now.Add(time.Hour).UnixNano(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO request_replays (node_id,request_id,expires_at,created_at) VALUES ('n','expired',?,?), ('n','valid',?,?)`, old30, old30, now.Add(time.Hour).UnixNano(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.CleanupLifecycle(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResourceHistory != 1 || result.AuditEvents != 1 || result.RegistrationTokens != 1 || result.RequestReplays != 1 {
+		t.Fatalf("cleanup result = %#v", result)
+	}
+	assertRowCount(t, store, `SELECT count(*) FROM resource_history`, 1)
+	assertRowCount(t, store, `SELECT count(*) FROM audit_events`, 1)
+	assertRowCount(t, store, `SELECT count(*) FROM registration_tokens`, 1)
+	assertRowCount(t, store, `SELECT count(*) FROM request_replays`, 1)
+}
+
 func TestRequestIDReplayIsRejectedAndExpiredIDsAreCleaned(t *testing.T) {
 	store := openTestStore(t)
 	defer store.Close()
