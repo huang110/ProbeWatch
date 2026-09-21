@@ -12,13 +12,14 @@ import (
 )
 
 type Server struct {
-	cfg          config.Config
-	service      *auth.Service
-	agentLimiter *rateLimiter
+	cfg           config.Config
+	service       *auth.Service
+	agentLimiter  *rateLimiter
+	publicLimiter *rateLimiter
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
-	return &Server{cfg: cfg, service: service, agentLimiter: newRateLimiter(120, time.Minute, 10000)}
+	return &Server{cfg: cfg, service: service, agentLimiter: newRateLimiter(120, time.Minute, 10000), publicLimiter: newRateLimiter(60, time.Minute, 10000)}
 }
 
 func (s *Server) agentNodeTokenTTL() time.Duration {
@@ -38,6 +39,7 @@ func (s *Server) agentTokenTTL() time.Duration {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
+	mux.HandleFunc("/api/public/status", s.publicStatus)
 	mux.HandleFunc("/auth/github", s.githubStart)
 	mux.HandleFunc("/auth/github/callback", s.githubCallback)
 

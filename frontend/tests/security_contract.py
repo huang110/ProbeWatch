@@ -10,6 +10,8 @@ VITE_CONFIG = (ROOT / "vite.config.js").read_text(encoding="utf-8")
 SECURITY_DOC = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
 OPENRESTY_CONFIG = ROOT / "deploy" / "openresty-security.conf"
 GITIGNORE = (ROOT.parent / ".gitignore").read_text(encoding="utf-8")
+API_DIR = ROOT.parent / "internal" / "api"
+PUBLIC_HANDLERS = API_DIR / "public_handlers.go"
 
 # IPv4 literals that are safe to appear in demo data: loopback, private,
 # link-local, multicast, and the RFC 5737 documentation ranges.
@@ -108,3 +110,51 @@ def test_alerts_handle_security_and_conflict_failures():
     for status in ('401', '403', '409'):
         assert status in SOURCE
     assert '确认告警失败' in SOURCE
+
+
+def test_public_status_endpoint_is_registered_without_authentication():
+    server = (API_DIR / "server.go").read_text(encoding="utf-8")
+    registrations = [line.strip() for line in server.splitlines() if "/api/public/status" in line]
+    assert registrations, "server.go must register /api/public/status"
+    assert all("RequireAuth" not in line for line in registrations), "public status must stay unauthenticated"
+
+
+def test_public_status_response_is_a_sanitized_allow_list():
+    handlers = PUBLIC_HANDLERS.read_text(encoding="utf-8")
+    assert "publicStatusResponse" in handlers
+    tags = set(re.findall(r'json:"([^"]+)"', handlers))
+    assert {"nodes", "online", "total", "names", "checks", "success_rate", "avg_latency_ms", "last_updated_at", "generated_at"} <= tags
+    forbidden = ("uuid", "node_id", "target_id", "detector_id", "token", "resource", "ip", "alert", "reason", "severity", "hostname")
+    for tag in tags:
+        for field in forbidden:
+            assert field not in tag, f"public status json tag {tag!r} leaks field {field!r}"
+    assert "ListAlerts" not in handlers
+    assert "NodeToken" not in handlers
+
+
+def test_public_status_sanitizes_node_names_before_publishing():
+    handlers = PUBLIC_HANDLERS.read_text(encoding="utf-8")
+    assert "sanitizeNodeName" in handlers
+    assert "ReplaceAllString" in handlers
+    assert "[已脱敏]" in handlers
+
+
+def test_guest_view_uses_public_status_without_storage():
+    assert "fetch('/api/public/status'" in SOURCE
+    assert "GuestView" in SOURCE
+    assert "服务状态" in SOURCE
+    assert "'/auth/github'" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_guest_view_does_not_call_management_apis():
+    guest_section = SOURCE[SOURCE.index("function GuestView"):SOURCE.index("function App")]
+    for management_call in ("/api/nodes", "/api/alerts", "/api/overview", "/api/targets", "/api/csrf"):
+        assert management_call not in guest_section, f"guest view must not call {management_call}"
+
+
+def test_security_document_describes_public_status_boundary():
+    assert "/api/public/status" in SECURITY_DOC
+    assert "脱敏" in SECURITY_DOC
+    assert "游客" in SECURITY_DOC

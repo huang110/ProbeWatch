@@ -121,6 +121,7 @@ The Dockerfile supplies the sole `/probewatch` `ENTRYPOINT`; Compose does not ov
 The control-plane binary now validates configuration, opens the SQLite store, and runs the HTTP server on `PROBEWATCH_LISTEN`. A local process exposes:
 
 - `GET /healthz`
+- `GET /api/public/status` (public, read-only, sanitized aggregates for the guest view)
 - `GET /auth/github`
 - `GET /auth/github/callback`
 - `POST /auth/logout`
