@@ -1,4 +1,4 @@
-:root { font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif; color: #e9eff0; background: #0a0e10; font-synthesis: none; text-rendering: optimizeLegibility; }
+.error-boundary { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 80% -20%, rgba(32, 77, 75, .25), transparent 36%), #0a0e10; }.error-boundary-card { width: min(440px, 100%); padding: 34px; border: 1px solid rgba(160,191,189,.12); border-radius: 13px; background: linear-gradient(140deg, rgba(255,255,255,.038), rgba(255,255,255,.016)); box-shadow: inset 0 1px rgba(255,255,255,.025); }.error-boundary-card h1 { margin: 12px 0 10px; font-size: 30px; }.error-boundary-card p { margin-bottom: 22px; color: #788587; font-size: 12px; line-height: 1.6; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: #0a0e10; }
 button, input { font: inherit; }
