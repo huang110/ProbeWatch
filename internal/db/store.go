@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -37,6 +38,8 @@ var (
 	ErrTargetNotFound                    = errors.New("target not found")
 	ErrTargetDisabled                    = errors.New("target is disabled")
 	ErrTargetKindMismatch                = errors.New("target kind mismatch")
+	ErrAlertNotFound                     = errors.New("alert not found")
+	ErrAlertResolved                     = errors.New("alert already resolved")
 )
 
 const DefaultRegistrationTokenLifetime = 15 * time.Minute
@@ -48,6 +51,38 @@ const maxResourcePayloadBytes = 64 * 1024
 const maxTargetIDLength = 128
 const maxTargetNameLength = 128
 const maxTargetHostLength = 253
+
+const (
+	AlertStatusOpen     = "open"
+	AlertStatusAcked    = "acked"
+	AlertStatusResolved = "resolved"
+	AlertSeverityInfo   = "info"
+	AlertSeverityWarn   = "warning"
+	AlertSeverityCrit   = "critical"
+)
+
+type AlertEvent struct {
+	ID              string
+	NodeID          string
+	Fingerprint     string
+	Category        string
+	TargetID        string
+	Reason          string
+	Severity        string
+	Status          string
+	OccurrenceCount int
+	FirstSeenAt     time.Time
+	LastSeenAt      time.Time
+	ResolvedAt      *time.Time
+}
+
+type AlertEvaluation struct {
+	Category string
+	TargetID string
+	Reason   string
+	Severity string
+	Failing  bool
+}
 
 type Store struct {
 	db     *sql.DB
@@ -1291,7 +1326,14 @@ func (s *Store) PersistAgentReport(ctx context.Context, input AgentReportInput) 
 		if err := upsertAgentResultTx(ctx, tx, input.NodeID, result); err != nil {
 			return err
 		}
+		if err := evaluateResultAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
+			return err
+		}
 	}
+	if err := evaluateResourceAlertTx(ctx, tx, input.NodeID, input.ResourcePayload, input.Now); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit agent report persistence: %w", err)
 	}
@@ -1316,6 +1358,10 @@ func (s *Store) PersistAgentResult(ctx context.Context, nodeID, requestID string
 	if err := upsertAgentResultTx(ctx, tx, nodeID, result); err != nil {
 		return err
 	}
+	if err := evaluateResultAlertTx(ctx, tx, nodeID, result, now); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit agent result persistence: %w", err)
 	}
@@ -1385,8 +1431,216 @@ func upsertResourceLatestTx(ctx context.Context, tx *sql.Tx, nodeID string, repo
 	return nil
 }
 
+func evaluateResultAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, result AgentResultInput, now time.Time) error {
+	var raw struct {
+		Status  string `json:"status"`
+		Reached bool   `json:"reached"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(result.Payload, &raw); err != nil {
+		return err
+	}
+	e := AlertEvaluation{TargetID: result.TargetID, Severity: AlertSeverityWarn}
+	switch result.Kind {
+	case TargetKindTCP, TargetKindHTTP, TargetKindHTTPS, TargetKindDNS:
+		e.Category = "network"
+		e.Failing = raw.Status == "timeout" || raw.Status == "blocked" || (raw.Status != "" && raw.Status != "success")
+		e.Reason = raw.Status
+	case TargetKindMediaHTTP:
+		e.Category = "media"
+		e.Failing = raw.Status != "available"
+		e.Reason = raw.Status
+	case TargetKindMTR:
+		e.Category = "mtr"
+		e.Failing = !raw.Reached || raw.Error == "unsupported" || raw.Error != ""
+		e.Reason = raw.Error
+		if e.Reason == "" && !raw.Reached {
+			e.Reason = "unreached"
+		}
+	}
+	if e.Reason == "" {
+		e.Reason = "failure"
+	}
+	return evaluateAlertTx(ctx, tx, nodeID, e, now)
+}
+
+func evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
+	var r struct {
+		CPUPercent           float64 `json:"cpu_percent"`
+		MemoryTotalBytes     uint64  `json:"memory_total_bytes"`
+		MemoryUsedBytes      uint64  `json:"memory_used_bytes"`
+		FilesystemTotalBytes uint64  `json:"filesystem_total_bytes"`
+		FilesystemUsedBytes  uint64  `json:"filesystem_used_bytes"`
+	}
+	if err := json.Unmarshal(payload, &r); err != nil {
+		return err
+	}
+	checks := []AlertEvaluation{{Category: "resource", TargetID: "cpu", Reason: "cpu_high", Severity: AlertSeverityCrit, Failing: r.CPUPercent > 90}, {Category: "resource", TargetID: "memory", Reason: "memory_high", Severity: AlertSeverityCrit, Failing: r.MemoryTotalBytes > 0 && float64(r.MemoryUsedBytes)/float64(r.MemoryTotalBytes)*100 > 90}, {Category: "resource", TargetID: "filesystem", Reason: "filesystem_high", Severity: AlertSeverityCrit, Failing: r.FilesystemTotalBytes > 0 && float64(r.FilesystemUsedBytes)/float64(r.FilesystemTotalBytes)*100 > 90}}
+	for _, e := range checks {
+		if err := evaluateAlertTx(ctx, tx, nodeID, e, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func alertFingerprint(nodeID string, e AlertEvaluation) string {
+	h := sha256.Sum256([]byte(nodeID + "\x00" + e.Category + "\x00" + e.TargetID))
+	return hex.EncodeToString(h[:])
+}
+
+func evaluateAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, e AlertEvaluation, now time.Time) error {
+	if strings.TrimSpace(e.Category) == "" || len(e.Category) > 64 || len(e.TargetID) > maxTargetIDLength || len(e.Reason) > 128 {
+		return errors.New("alert fields out of bounds")
+	}
+	fp := alertFingerprint(nodeID, e)
+	if e.Failing {
+		return upsertAlertTx(ctx, tx, nodeID, fp, e, now)
+	}
+	return resolveAlertTx(ctx, tx, nodeID, fp, now)
+}
+
+func upsertAlertTx(ctx context.Context, tx *sql.Tx, nodeID, fingerprint string, e AlertEvaluation, now time.Time) error {
+	id, err := randomID()
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO alert_events (id,node_id,fingerprint,category,target_id,reason,severity,status,occurrence_count,first_seen_at,last_seen_at) VALUES (?,?,?,?,?,?,?,'open',1,?,?) ON CONFLICT(node_id,fingerprint) DO UPDATE SET severity=excluded.severity,status=CASE WHEN alert_events.status='acked' THEN 'acked' ELSE 'open' END,occurrence_count=alert_events.occurrence_count+1,last_seen_at=excluded.last_seen_at,resolved_at=NULL`, id, nodeID, fingerprint, e.Category, e.TargetID, e.Reason, e.Severity, unixNano(now), unixNano(now))
+	return err
+}
+
+func resolveAlertTx(ctx context.Context, tx *sql.Tx, nodeID, fingerprint string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `UPDATE alert_events SET status='resolved', resolved_at=?, last_seen_at=? WHERE node_id=? AND fingerprint=? AND status <> 'resolved'`, unixNano(now), unixNano(now), nodeID, fingerprint)
+	return err
+}
+
+func (s *Store) EvaluateAlert(ctx context.Context, nodeID string, evaluation AlertEvaluation, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = ensureNodeInTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
+	if err = evaluateAlertTx(ctx, tx, nodeID, evaluation, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) UpsertAlert(ctx context.Context, nodeID string, evaluation AlertEvaluation, now time.Time) error {
+	evaluation.Failing = true
+	return s.EvaluateAlert(ctx, nodeID, evaluation, now)
+}
+func (s *Store) ResolveAlert(ctx context.Context, nodeID string, evaluation AlertEvaluation, now time.Time) error {
+	evaluation.Failing = false
+	return s.EvaluateAlert(ctx, nodeID, evaluation, now)
+}
+
+type AlertQuery struct {
+	Statuses []string
+	From     time.Time
+	To       time.Time
+	Limit    int
+}
+
+func (s *Store) ListAlerts(ctx context.Context, query AlertQuery) ([]AlertEvent, error) {
+	if query.Limit <= 0 || query.Limit > 1000 {
+		query.Limit = 100
+	}
+	args := make([]any, 0, len(query.Statuses)+3)
+	where := make([]string, 0, 3)
+	if len(query.Statuses) > 0 {
+		marks := make([]string, len(query.Statuses))
+		for i, status := range query.Statuses {
+			marks[i] = "?"
+			args = append(args, status)
+		}
+		where = append(where, "status IN ("+strings.Join(marks, ",")+")")
+	}
+	if !query.From.IsZero() {
+		where = append(where, "last_seen_at >= ?")
+		args = append(args, unixNano(query.From))
+	}
+	if !query.To.IsZero() {
+		where = append(where, "last_seen_at <= ?")
+		args = append(args, unixNano(query.To))
+	}
+	sqlQuery := `SELECT id,node_id,fingerprint,category,target_id,reason,severity,status,occurrence_count,first_seen_at,last_seen_at,resolved_at FROM alert_events`
+	if len(where) > 0 {
+		sqlQuery += " WHERE " + strings.Join(where, " AND ")
+	}
+	sqlQuery += " ORDER BY last_seen_at DESC, id DESC LIMIT ?"
+	args = append(args, query.Limit)
+	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	alerts := make([]AlertEvent, 0)
+	for rows.Next() {
+		var a AlertEvent
+		var first, last int64
+		var resolved sql.NullInt64
+		if err := rows.Scan(&a.ID, &a.NodeID, &a.Fingerprint, &a.Category, &a.TargetID, &a.Reason, &a.Severity, &a.Status, &a.OccurrenceCount, &first, &last, &resolved); err != nil {
+			return nil, err
+		}
+		a.FirstSeenAt = time.Unix(0, first).UTC()
+		a.LastSeenAt = time.Unix(0, last).UTC()
+		if resolved.Valid {
+			t := time.Unix(0, resolved.Int64).UTC()
+			a.ResolvedAt = &t
+		}
+		alerts = append(alerts, a)
+	}
+	return alerts, rows.Err()
+}
+
+func (s *Store) AckAlert(ctx context.Context, alertID, actorID string, now time.Time) (AlertEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AlertEvent{}, err
+	}
+	defer tx.Rollback()
+	var a AlertEvent
+	var first, last int64
+	var resolved sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT id,node_id,fingerprint,category,target_id,reason,severity,status,occurrence_count,first_seen_at,last_seen_at,resolved_at FROM alert_events WHERE id = ?`, alertID).Scan(&a.ID, &a.NodeID, &a.Fingerprint, &a.Category, &a.TargetID, &a.Reason, &a.Severity, &a.Status, &a.OccurrenceCount, &first, &last, &resolved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AlertEvent{}, ErrAlertNotFound
+	}
+	if err != nil {
+		return AlertEvent{}, err
+	}
+	if a.Status == AlertStatusResolved {
+		return AlertEvent{}, ErrAlertResolved
+	}
+	if a.Status == AlertStatusOpen {
+		if _, err = tx.ExecContext(ctx, `UPDATE alert_events SET status='acked' WHERE id=? AND status='open'`, alertID); err != nil {
+			return AlertEvent{}, err
+		}
+		if err = insertAudit(ctx, tx, "ack", a.NodeID, actorID, now); err != nil {
+			return AlertEvent{}, err
+		}
+		a.Status = AlertStatusAcked
+	}
+	a.FirstSeenAt = time.Unix(0, first).UTC()
+	a.LastSeenAt = time.Unix(0, last).UTC()
+	if resolved.Valid {
+		t := time.Unix(0, resolved.Int64).UTC()
+		a.ResolvedAt = &t
+	}
+	if err = tx.Commit(); err != nil {
+		return AlertEvent{}, err
+	}
+	return a, nil
+}
+
 func upsertAgentResultTx(ctx context.Context, tx *sql.Tx, nodeID string, result AgentResultInput) error {
 	query, err := latestResultQuery(result.Kind)
+
 	if err != nil {
 		return err
 	}

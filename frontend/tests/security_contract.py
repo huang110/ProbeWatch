@@ -59,10 +59,24 @@ def test_overview_uses_authenticated_api_and_history_without_browser_storage():
     assert '/resource/history' in SOURCE
     assert 'localStorage' not in SOURCE
     assert 'sessionStorage' not in SOURCE
-    assert 'token' not in SOURCE.lower()
 
 
 def test_overview_has_no_fake_sparkline_defaults_or_claims():
     assert 'points = [28, 36, 31, 44, 39, 52, 47, 62]' not in SOURCE
     assert '暂无历史数据' in SOURCE
     assert '暂无 API 数据' in SOURCE
+
+
+def test_alerts_use_authenticated_api_and_ephemeral_csrf_header():
+    assert "fetch('/api/alerts?status=open,acked'" in SOURCE
+    assert "fetch('/api/csrf'" in SOURCE
+    assert "credentials: 'same-origin'" in SOURCE
+    assert "X-CSRF-Token" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_alerts_handle_security_and_conflict_failures():
+    for status in ('401', '403', '409'):
+        assert status in SOURCE
+    assert '确认告警失败' in SOURCE

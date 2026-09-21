@@ -166,6 +166,23 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_events_node_idx ON audit_events(node_id, created_at);
+CREATE TABLE IF NOT EXISTS alert_events (
+    id TEXT PRIMARY KEY,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    category TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'acked', 'resolved')),
+    occurrence_count INTEGER NOT NULL DEFAULT 1 CHECK (occurrence_count > 0),
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    UNIQUE(node_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS alert_events_node_status_idx ON alert_events(node_id, status, last_seen_at);
+CREATE INDEX IF NOT EXISTS alert_events_fingerprint_idx ON alert_events(fingerprint);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {

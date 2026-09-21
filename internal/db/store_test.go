@@ -33,7 +33,7 @@ func TestOpenStoreCreatesSecureDatabaseAndMigratesAllTables(t *testing.T) {
 	for _, name := range []string{
 		"admin_users", "sessions", "oauth_states", "registration_tokens", "nodes", "node_tokens",
 		"resource_latest", "network_targets", "network_results_latest", "mtr_targets", "mtr_results_latest",
-		"media_detectors", "media_results_latest", "request_replays", "audit_events",
+		"media_detectors", "media_results_latest", "request_replays", "audit_events", "alert_events",
 	} {
 		var count int
 		if err := store.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&count); err != nil {

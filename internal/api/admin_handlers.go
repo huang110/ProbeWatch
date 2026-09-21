@@ -15,6 +15,103 @@ import (
 	"github.com/probewatch/probewatch/internal/security"
 )
 
+type alertResponse struct {
+	ID              string     `json:"id"`
+	NodeID          string     `json:"node_id"`
+	Category        string     `json:"category"`
+	TargetID        string     `json:"target_id"`
+	Reason          string     `json:"reason"`
+	Severity        string     `json:"severity"`
+	Status          string     `json:"status"`
+	OccurrenceCount int        `json:"occurrence_count"`
+	FirstSeenAt     time.Time  `json:"first_seen_at"`
+	LastSeenAt      time.Time  `json:"last_seen_at"`
+	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+}
+
+func alertResponseFrom(a db.AlertEvent) alertResponse {
+	return alertResponse{ID: a.ID, NodeID: a.NodeID, Category: a.Category, TargetID: a.TargetID, Reason: a.Reason, Severity: a.Severity, Status: a.Status, OccurrenceCount: a.OccurrenceCount, FirstSeenAt: a.FirstSeenAt, LastSeenAt: a.LastSeenAt, ResolvedAt: a.ResolvedAt}
+}
+
+func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/api/alerts" {
+		s.listAlerts(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/ack") {
+		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.ackAlert)).ServeHTTP(w, r)
+		return
+	}
+	writeJSONError(w, http.StatusNotFound, "not found")
+}
+
+func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	q := r.URL.Query()
+	statuses := q["status"]
+	if len(statuses) == 1 && strings.Contains(statuses[0], ",") {
+		statuses = strings.Split(statuses[0], ",")
+	}
+	if len(statuses) == 0 {
+		statuses = []string{db.AlertStatusOpen, db.AlertStatusAcked}
+	}
+	for _, status := range statuses {
+		if status != db.AlertStatusOpen && status != db.AlertStatusAcked && status != db.AlertStatusResolved {
+			writeJSONError(w, http.StatusBadRequest, "invalid status")
+			return
+		}
+	}
+	from, to, limit, ok := parseHistoryWindow(r, time.Now().UTC())
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	alerts, err := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{Statuses: statuses, From: from, To: to, Limit: limit})
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	out := make([]alertResponse, 0, len(alerts))
+	for _, a := range alerts {
+		out = append(out, alertResponseFrom(a))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) ackAlert(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != "alerts" || parts[3] != "ack" || parts[2] == "" {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	session, err := s.service.AuthenticateWithError(r, time.Now().UTC())
+	if err != nil {
+		writeAuthenticationError(w, err)
+		return
+	}
+	a, err := s.service.Store().AckAlert(r.Context(), parts[2], session.AdminUserID, time.Now().UTC())
+	if errors.Is(err, db.ErrAlertNotFound) {
+		writeJSONError(w, http.StatusNotFound, "alert not found")
+		return
+	}
+	if errors.Is(err, db.ErrAlertResolved) {
+		writeJSONError(w, http.StatusConflict, "alert already resolved")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, alertResponseFrom(a))
+}
+
 type registrationTokenResponse struct {
 	RegistrationToken string    `json:"registration_token"`
 	Endpoint          string    `json:"endpoint"`

@@ -4,9 +4,11 @@ from playwright.sync_api import sync_playwright
 BASE_URL = "http://127.0.0.1:4173/"
 
 
-def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None):
+def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200):
     page.route("**/api/me", lambda route: route.fulfill(status=me_status, content_type="application/json", body=("{}" if me is None else __import__("json").dumps(me))))
     page.route("**/api/nodes", lambda route: route.fulfill(status=nodes_status, content_type="application/json", body=__import__("json").dumps([] if nodes is None else nodes)))
+    page.route("**/api/alerts**", lambda route: route.fulfill(status=alerts_status, content_type="application/json", body=__import__("json").dumps([] if alerts is None else alerts)))
+    page.route("**/api/overview", lambda route: route.fulfill(status=200, content_type="application/json", body=__import__("json").dumps({})))
 
 
 def run_regressions():

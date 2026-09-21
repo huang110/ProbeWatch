@@ -53,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken))))
 	mux.Handle("/api/nodes", middleware.RequireAuth(http.HandlerFunc(s.listNodes)))
 	mux.Handle("/api/overview", middleware.RequireAuth(http.HandlerFunc(s.overview)))
+	mux.Handle("/api/alerts", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
+	mux.Handle("/api/alerts/", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
 	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
 	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
