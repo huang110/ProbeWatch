@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +47,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     id TEXT PRIMARY KEY,
     uuid TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT '',
     deleted_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -195,6 +198,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	if err := ensureNodesSchema(ctx, db); err != nil {
+		return err
+	}
 	if err := ensureNodeTokenPrefix(ctx, db); err != nil {
 		return err
 	}
@@ -217,6 +223,81 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	return nil
+}
+
+func ensureNodesSchema(ctx context.Context, db *sql.DB) error {
+	columns := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(nodes)`)
+	if err != nil {
+		return fmt.Errorf("inspect nodes schema: %w", err)
+	}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan nodes schema: %w", err)
+		}
+		columns[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read nodes schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close nodes schema: %w", err)
+	}
+
+	if !columns["uuid"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE nodes ADD COLUMN uuid TEXT`); err != nil {
+			return fmt.Errorf("add nodes uuid column: %w", err)
+		}
+	}
+	if !columns["deleted_at"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE nodes ADD COLUMN deleted_at INTEGER`); err != nil {
+			return fmt.Errorf("add nodes deleted_at column: %w", err)
+		}
+	}
+
+	rows, err = db.QueryContext(ctx, `SELECT id FROM nodes WHERE uuid IS NULL OR uuid = '' ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("find nodes missing uuid: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan node id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read nodes missing uuid: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close nodes missing uuid: %w", err)
+	}
+	for _, id := range ids {
+		uuid := stableNodeUUID(id)
+		if _, err := db.ExecContext(ctx, `UPDATE nodes SET uuid = ? WHERE id = ? AND (uuid IS NULL OR uuid = '')`, uuid, id); err != nil {
+			return fmt.Errorf("backfill node %q uuid: %w", id, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS nodes_uuid_idx ON nodes(uuid)`); err != nil {
+		return fmt.Errorf("create nodes uuid index: %w", err)
+	}
+	return nil
+}
+
+func stableNodeUUID(id string) string {
+	digest := sha256.Sum256([]byte("probewatch-node:" + id))
+	digest[6] = (digest[6] & 0x0f) | 0x50
+	digest[8] = (digest[8] & 0x3f) | 0x80
+	hexDigest := hex.EncodeToString(digest[:])
+	return hexDigest[0:8] + "-" + hexDigest[8:12] + "-" + hexDigest[12:16] + "-" + hexDigest[16:20] + "-" + hexDigest[20:32]
 }
 
 func ensureTargetEnabled(ctx context.Context, db *sql.DB) error {

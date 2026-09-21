@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 const testPepper = "test-only-server-pepper"
@@ -55,6 +57,69 @@ func TestOpenStoreCreatesSecureDatabaseAndMigratesAllTables(t *testing.T) {
 		assertFileMode(t, databasePath, 0600)
 	} else {
 		t.Log("Windows does not expose POSIX permission bits through os.FileMode; 0700/0600 cannot be asserted on this platform")
+	}
+}
+
+func TestOpenStoreMigratesLegacyNodesSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-nodes.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = legacy.Exec(`
+		CREATE TABLE nodes (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+		INSERT INTO nodes (id, name, status, created_at, updated_at)
+		VALUES ('legacy-node-1', 'legacy', 'online', 1700000000000000000, 1700000000000000000);
+		INSERT INTO nodes (id, name, status, created_at, updated_at)
+		VALUES ('legacy-node-2', 'legacy-2', 'offline', 1700000000000000001, 1700000000000000001);
+	`)
+	if err != nil {
+		legacy.Close()
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := OpenStore(path, []byte(testPepper))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	nodes, err := store.ListNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("ListNodes returned %d nodes, want 2", len(nodes))
+	}
+	if nodes[0].UUID == "" || nodes[1].UUID == "" || nodes[0].UUID == nodes[1].UUID {
+		t.Fatalf("migrated UUIDs = %#v, want distinct non-empty UUIDs", nodes)
+	}
+	for _, node := range nodes {
+		if !security.IsRFC4122UUID(node.UUID) {
+			t.Fatalf("migrated UUID %q is not RFC4122", node.UUID)
+		}
+	}
+	var status string
+	if err := store.db.QueryRow(`SELECT status FROM nodes WHERE id = 'legacy-node-1'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "online" {
+		t.Fatalf("legacy status = %q, want online", status)
+	}
+	if _, err := store.db.Exec(`INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES ('new-node', '550e8400-e29b-41d4-a716-446655440099', 'new', 'online', 1, 1)`); err != nil {
+		t.Fatalf("insert migrated node: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES ('duplicate-node', ?, 'duplicate', 'online', 1, 1)`, nodes[0].UUID); err == nil {
+		t.Fatal("duplicate UUID insert unexpectedly succeeded")
 	}
 }
 
