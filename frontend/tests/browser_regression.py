@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = __import__("os").environ.get("PROBEWATCH_BASE_URL", "http://127.0.0.1:4173/")
 
 
-def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200):
+def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200, media=None, media_status=200):
     json = __import__("json")
     empty_public_status = {"nodes": {"online": 0, "total": 0, "names": []}, "checks": {"success_rate": None, "avg_latency_ms": None}, "last_updated_at": None, "generated_at": "2026-09-22T00:00:00Z"}
     empty_traffic = {"period": "day", "window": {"from": "2026-09-21T00:00:00Z", "to": "2026-09-22T00:00:00Z"}, "rx_bytes": None, "tx_bytes": None, "rx_resets": 0, "tx_resets": 0, "interval_seconds": 3600, "series": []}
@@ -14,6 +14,22 @@ def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, a
     page.route("**/api/overview", lambda route: route.fulfill(status=overview_status, content_type="application/json", body=json.dumps({} if overview is None else overview)))
     page.route("**/api/public/status*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(empty_public_status if public_status is None else public_status)))
     page.route("**/api/nodes/*/checks/summary", lambda route: route.fulfill(status=checks_status, content_type="application/json", body=json.dumps([] if checks is None else checks)))
+
+    def media_route(route):
+        if media is None:
+            route.fulfill(status=media_status, content_type="application/json", body="[]")
+            return
+        if isinstance(media, dict):
+            uuid = route.request.url.rstrip("/").split("/")[-2]
+            payload = media.get(uuid)
+            if payload is None:
+                route.fulfill(status=500, content_type="application/json", body="{}")
+                return
+            route.fulfill(status=media_status, content_type="application/json", body=json.dumps(payload))
+            return
+        route.fulfill(status=media_status, content_type="application/json", body=json.dumps(media))
+
+    page.route("**/api/nodes/*/media", media_route)
 
     def traffic_route(route):
         url = route.request.url
@@ -198,6 +214,62 @@ def run_regressions():
         assert drawer.get_by_text("暂无数据", exact=True).count() >= 2
         assert page.locator(".api-state").count() == 0
         tests.append("node-analytics-failure")
+        page.close()
+
+        page = browser.new_page()
+        media_payload = [
+            {"detector_id": "det-1", "checked_at": "2026-09-21T12:00:00Z", "result": {"detector": "netflix", "status": "available", "region": "US", "latency_ms": 120, "reason": "region matched"}},
+            {"detector_id": "det-2", "checked_at": "2026-09-21T12:00:00Z", "result": {"detector": "disney", "status": "unavailable", "reason": "403 forbidden"}},
+            {"detector_id": "det-3", "checked_at": "2026-09-21T12:00:00Z", "result": {"detector": "youtube", "status": "timeout", "reason": "context deadline exceeded"}},
+        ]
+        install_api(
+            page,
+            nodes=[node, {"id": "node-2", "uuid": "uuid-2", "name": "备用节点", "status": "online", "resource": {}}],
+            alerts=[],
+            overview={"nodes": {"online": 2, "total": 2, "resource_reporting": 2}, "checks": {"success_rate": 100}, "resources": {}},
+            media={"uuid-1": media_payload},
+        )
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.locator(".nav-item").nth(4).click(force=True)
+        table = page.locator(".media-table")
+        table.wait_for()
+        header = table.locator("thead th")
+        assert header.count() == 5
+        assert header.nth(1).inner_text() == "netflix"
+        assert header.nth(3).inner_text() == "youtube"
+        rows = table.locator("tbody tr")
+        assert rows.count() == 2
+        first_row = rows.nth(0)
+        cells = first_row.locator("td")
+        assert cells.nth(0).inner_text() == "测试节点"
+        assert "media-cell-available" in (cells.nth(1).get_attribute("class") or "")
+        assert "US" in cells.nth(1).inner_text()
+        assert cells.nth(1).get_attribute("title") == "region matched"
+        assert "media-cell-unavailable" in (cells.nth(2).get_attribute("class") or "")
+        assert cells.nth(2).get_attribute("title") == "403 forbidden"
+        assert "media-cell-warning" in (cells.nth(3).get_attribute("class") or "")
+        assert cells.nth(3).get_attribute("title") == "context deadline exceeded"
+        assert cells.nth(4).inner_text() != "—"
+        second_row = rows.nth(1)
+        assert second_row.locator("td").nth(0).inner_text() == "备用节点"
+        assert second_row.get_by_text("暂无上报", exact=True).count() == 1
+        tests.append("media-matrix")
+        page.close()
+
+        page = browser.new_page()
+        install_api(
+            page,
+            nodes=[node],
+            alerts=[],
+            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {}},
+            media=[],
+        )
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.locator(".nav-item").nth(4).click(force=True)
+        media_empty = page.locator(".subpage .empty-state")
+        media_empty.get_by_text("暂无流媒体上报", exact=True).wait_for()
+        assert page.locator(".media-table").count() == 0
+        tests.append("media-empty")
         page.close()
         browser.close()
     print(f"{len(tests)} browser regression tests passed")

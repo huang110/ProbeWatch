@@ -161,6 +161,25 @@ def test_node_analytics_failures_render_inline_empty_state_without_popups():
     assert "window.alert" not in SOURCE
 
 
+def test_media_matrix_uses_authenticated_node_media_api():
+    assert "`/api/nodes/${encodeURIComponent(target.uuid)}/media`" in SOURCE
+    assert "credentials: 'same-origin'" in SOURCE
+    assert "new AbortController" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_media_matrix_renders_statuses_and_empty_states_defensively():
+    assert "暂无流媒体上报" in SOURCE
+    assert "暂无上报" in SOURCE
+    assert "mediaStatusTone" in SOURCE
+    for tone in ("available", "unavailable", "warning", "muted"):
+        assert f"media-cell-{tone}" in STYLES, f"styles.css must style media-cell-{tone}"
+    assert "dangerouslySetInnerHTML" not in SOURCE
+    assert "innerHTML" not in SOURCE
+    assert "alert(" not in SOURCE
+
+
 def test_guest_view_uses_public_status_without_storage():
     assert "fetch('/api/public/status'" in SOURCE
     assert "GuestView" in SOURCE
