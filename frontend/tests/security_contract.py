@@ -199,3 +199,30 @@ def test_security_document_describes_public_status_boundary():
     assert "/api/public/status" in SECURITY_DOC
     assert "脱敏" in SECURITY_DOC
     assert "游客" in SECURITY_DOC
+
+
+def test_settings_card_uses_authenticated_totp_apis_with_csrf():
+    assert "fetch('/api/totp/setup'" in SOURCE
+    assert "`/api/totp/${action}`" in SOURCE
+    assert "fetch('/api/csrf'" in SOURCE
+    assert "'X-CSRF-Token': csrfToken" in SOURCE
+    assert "one-time-code" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_totp_login_page_posts_pending_credential_to_verify():
+    assert "'/auth/totp/verify'" in SOURCE
+    assert "window.location.pathname === '/login/2fa'" in SOURCE
+    assert "TOTPVerifyPage" in SOURCE
+    # The verification POST must not carry any browser-stored token.
+    assert "method: 'POST'" in SOURCE
+    assert "credentials: 'same-origin'" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_totp_setup_secret_is_not_rendered_as_html_or_copied_to_clipboard():
+    assert "dangerouslySetInnerHTML" not in SOURCE
+    assert "clipboard" not in SOURCE.lower()
+    assert "totp-secret" in SOURCE

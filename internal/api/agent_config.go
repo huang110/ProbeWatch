@@ -3,10 +3,16 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
 )
+
+// agentConfigMaxAgeSeconds is the default freshness window served to agents.
+// An agent that cannot refresh its configuration within this window stops
+// probing (fail-closed) while continuing to report resources.
+const agentConfigMaxAgeSeconds = 1800
 
 type agentTargetPayload struct {
 	Host            string                `json:"host,omitempty"`
@@ -49,7 +55,11 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			tasks = append(tasks, task)
 		}
 	}
-	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{Tasks: tasks})
+	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{
+		Tasks:               tasks,
+		ConfigVersion:       time.Now().UTC().Unix(),
+		ConfigMaxAgeSeconds: agentConfigMaxAgeSeconds,
+	})
 }
 
 func targetToCheckTask(target db.TargetRecord) (protocol.CheckTask, error) {

@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/public/status", s.publicStatus)
 	mux.HandleFunc("/auth/github", s.githubStart)
 	mux.HandleFunc("/auth/github/callback", s.githubCallback)
+	mux.HandleFunc("/auth/totp/verify", s.totpVerifyLogin)
 
 	middleware := NewMiddleware(s.service, s.cfg)
 	mux.Handle("/auth/logout", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,9 @@ func (s *Server) Handler() http.Handler {
 		s.service.Logout(w, r)
 	}))))
 	mux.Handle("/api/csrf", middleware.RequireAuth(http.HandlerFunc(s.service.CSRFHandler)))
+	mux.Handle("/api/totp/setup", middleware.RequireAuth(http.HandlerFunc(s.totpSetup)))
+	mux.Handle("/api/totp/enable", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.totpEnable))))
+	mux.Handle("/api/totp/disable", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.totpDisable))))
 	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken))))
 	mux.Handle("/api/nodes", middleware.RequireAuth(http.HandlerFunc(s.listNodes)))
 	mux.Handle("/api/overview", middleware.RequireAuth(http.HandlerFunc(s.overview)))

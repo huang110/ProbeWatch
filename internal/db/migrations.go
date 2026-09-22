@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     expires_at INTEGER NOT NULL,
     consumed_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS totp_pending_states (
+    id TEXT PRIMARY KEY,
+    token_digest BLOB NOT NULL UNIQUE,
+    admin_user_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    consumed_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS registration_tokens (
     id TEXT PRIMARY KEY,
     token_digest BLOB NOT NULL UNIQUE,
@@ -160,6 +167,7 @@ CREATE TABLE IF NOT EXISTS request_replays (
 );
 CREATE INDEX IF NOT EXISTS request_replays_expiry_idx ON request_replays(expires_at);
 CREATE INDEX IF NOT EXISTS oauth_states_expiry_idx ON oauth_states(expires_at);
+CREATE INDEX IF NOT EXISTS totp_pending_states_expiry_idx ON totp_pending_states(expires_at);
 CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
@@ -279,8 +287,51 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureTargetEnabled(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureAdminTOTP(ctx, db); err != nil {
+		return err
+	}
 	if err := ensureMediaDetectorHost(ctx, db); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ensureAdminTOTP idempotently adds the TOTP columns to admin_users. The
+// pending-state table is covered by the CREATE TABLE IF NOT EXISTS statements
+// in the schema, which run on every migration pass.
+func ensureAdminTOTP(ctx context.Context, db *sql.DB) error {
+	columns := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(admin_users)`)
+	if err != nil {
+		return fmt.Errorf("inspect admin_users schema: %w", err)
+	}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan admin_users schema: %w", err)
+		}
+		columns[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read admin_users schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close admin_users schema: %w", err)
+	}
+
+	if !columns["totp_secret"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN totp_secret BLOB`); err != nil {
+			return fmt.Errorf("add admin_users totp_secret column: %w", err)
+		}
+	}
+	if !columns["totp_enabled"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add admin_users totp_enabled column: %w", err)
+		}
 	}
 	return nil
 }

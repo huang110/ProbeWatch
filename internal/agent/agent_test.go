@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,5 +248,245 @@ func TestRunStopsOnContextCancellation(t *testing.T) {
 	cancel()
 	if err := runner.Run(ctx); err != nil && err != context.Canceled {
 		t.Fatalf("Run cancellation error = %v", err)
+	}
+}
+
+// stubControlPlane serves a mutable agent configuration and captures reports,
+// standing in for the control plane in fail-closed scheduling tests.
+type stubControlPlane struct {
+	mu      sync.Mutex
+	config  protocol.AgentConfigResponse
+	reports []protocol.ReportRequest
+}
+
+func (s *stubControlPlane) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/config":
+			s.mu.Lock()
+			config := s.config
+			s.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(config)
+		case "/report":
+			body, err := io.ReadAll(io.LimitReader(r.Body, maxOutboxFileSize))
+			if err != nil {
+				http.Error(w, "unreadable report", http.StatusBadRequest)
+				return
+			}
+			var report protocol.ReportRequest
+			if err := json.Unmarshal(body, &report); err != nil {
+				http.Error(w, "malformed report", http.StatusBadRequest)
+				return
+			}
+			s.mu.Lock()
+			s.reports = append(s.reports, report)
+			s.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func (s *stubControlPlane) setConfig(config protocol.AgentConfigResponse) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config = config
+}
+
+func (s *stubControlPlane) receivedReports() []protocol.ReportRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]protocol.ReportRequest(nil), s.reports...)
+}
+
+func newStubRunner(t *testing.T, stub *stubControlPlane) *Runner {
+	t.Helper()
+	server := httptest.NewServer(stub.handler())
+	t.Cleanup(server.Close)
+	runner, err := New(config.Config{AgentEndpoint: server.URL, AgentNodeUUID: "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1", AgentNodeToken: "node-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner
+}
+
+func staleWindowTask() protocol.CheckTask {
+	return protocol.CheckTask{ID: "tcp-1", Kind: "tcp", Host: "example.com", Port: 443, TimeoutMS: 1000, MaxHops: 1, IntervalSeconds: 10, Enabled: true}
+}
+
+func TestReportStopsProbingAfterConfigMaxAgeAndRecoversAfterRefresh(t *testing.T) {
+	stub := &stubControlPlane{}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 100, ConfigMaxAgeSeconds: 30})
+	runner := newStubRunner(t, stub)
+	probe := &fakeNetworkMonitor{}
+	runner.probe = probe
+	now := time.Unix(10000, 0)
+	runner.now = func() time.Time { return now }
+
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runner.lastConfigVersion != 100 || runner.configMaxAgeSeconds != 30 {
+		t.Fatalf("after refresh version = %d, max age = %d, want 100/30", runner.lastConfigVersion, runner.configMaxAgeSeconds)
+	}
+	if !runner.lastRefreshSuccessAt.Equal(now) {
+		t.Fatalf("lastRefreshSuccessAt = %v, want %v", runner.lastRefreshSuccessAt, now)
+	}
+
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(30 * time.Second)
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 2 {
+		t.Fatalf("probe calls within the window = %d, want 2", probe.calls)
+	}
+
+	now = now.Add(time.Second)
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 2 {
+		t.Fatalf("probe calls after the window = %d, want 2 (fail-closed stops new probes)", probe.calls)
+	}
+	reports := stub.receivedReports()
+	if len(reports) != 3 {
+		t.Fatalf("reports received = %d, want 3 (resource reporting continues)", len(reports))
+	}
+	stale := reports[len(reports)-1]
+	if len(stale.Results) != 0 {
+		t.Fatalf("stale report results = %#v, want empty", stale.Results)
+	}
+	if stale.Resource.OS == "" || stale.Resource.AgentVersion == "" {
+		t.Fatalf("stale report resource = %#v, want populated identity", stale.Resource)
+	}
+
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 200, ConfigMaxAgeSeconds: 30})
+	now = now.Add(5 * time.Minute)
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runner.lastConfigVersion != 200 || !runner.lastRefreshSuccessAt.Equal(now) {
+		t.Fatalf("after recovery version = %d, lastRefreshSuccessAt = %v, want 200/%v", runner.lastConfigVersion, runner.lastRefreshSuccessAt, now)
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 3 {
+		t.Fatalf("probe calls after recovery = %d, want 3 (probing resumed)", probe.calls)
+	}
+	reports = stub.receivedReports()
+	resumed := reports[len(reports)-1]
+	if len(resumed.Results) != 1 || resumed.Results[0].ID != "tcp-1" {
+		t.Fatalf("recovered report results = %#v, want one tcp-1 result", resumed.Results)
+	}
+}
+
+func TestReportWithoutConfigMaxAgeKeepsProbing(t *testing.T) {
+	stub := &stubControlPlane{}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 7})
+	runner := newStubRunner(t, stub)
+	probe := &fakeNetworkMonitor{}
+	runner.probe = probe
+	now := time.Unix(10000, 0)
+	runner.now = func() time.Time { return now }
+
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runner.configMaxAgeSeconds != 0 {
+		t.Fatalf("configMaxAgeSeconds = %d, want 0 without a served max age", runner.configMaxAgeSeconds)
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(48 * time.Hour)
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 2 {
+		t.Fatalf("probe calls = %d, want 2 (legacy behavior without max age)", probe.calls)
+	}
+	reports := stub.receivedReports()
+	if len(reports) != 2 || len(reports[len(reports)-1].Results) != 1 {
+		t.Fatalf("reports without max age = %#v, want both carrying probe results", reports)
+	}
+}
+
+func TestRefreshWithNewConfigVersionKeepsRunningSchedule(t *testing.T) {
+	stub := &stubControlPlane{}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 1, ConfigMaxAgeSeconds: 3600})
+	runner := newStubRunner(t, stub)
+	probe := &fakeNetworkMonitor{}
+	runner.probe = probe
+	now := time.Unix(1000, 0)
+	runner.now = func() time.Time { return now }
+
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 1 {
+		t.Fatalf("probe calls = %d, want 1", probe.calls)
+	}
+
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 2, ConfigMaxAgeSeconds: 3600})
+	now = now.Add(5 * time.Second)
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runner.lastConfigVersion != 2 {
+		t.Fatalf("lastConfigVersion = %d, want 2", runner.lastConfigVersion)
+	}
+	if _, ok := runner.next["tcp-1"]; !ok {
+		t.Fatal("version change reset the schedule of a surviving task")
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 1 {
+		t.Fatalf("probe calls before the kept interval = %d, want 1", probe.calls)
+	}
+
+	now = now.Add(5 * time.Second)
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 2 {
+		t.Fatalf("probe calls after the interval = %d, want 2", probe.calls)
+	}
+
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{}, ConfigVersion: 3, ConfigMaxAgeSeconds: 3600})
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := runner.next["tcp-1"]; ok {
+		t.Fatal("removed task kept its schedule entry after refresh")
+	}
+}
+
+func TestRefreshFailureLeavesLastRefreshStateUntouched(t *testing.T) {
+	stub := &stubControlPlane{}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 100, ConfigMaxAgeSeconds: 30})
+	runner := newStubRunner(t, stub)
+	now := time.Unix(10000, 0)
+	runner.now = func() time.Time { return now }
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{staleWindowTask()}, ConfigVersion: 101, ConfigMaxAgeSeconds: -1})
+	now = now.Add(time.Minute)
+	if err := runner.refresh(context.Background()); err == nil {
+		t.Fatal("refresh accepted a config with an invalid max age")
+	}
+	if runner.lastConfigVersion != 100 || runner.configMaxAgeSeconds != 30 || !runner.lastRefreshSuccessAt.Equal(time.Unix(10000, 0)) {
+		t.Fatalf("failed refresh mutated state: version %d, max age %d, refreshed at %v", runner.lastConfigVersion, runner.configMaxAgeSeconds, runner.lastRefreshSuccessAt)
 	}
 }

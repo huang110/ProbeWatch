@@ -41,6 +41,17 @@ type Runner struct {
 	probe     networkMonitor
 	media     mediaMonitor
 	mtr       mtrMonitor
+
+	// configMaxAgeSeconds is the freshness window the control plane asked for
+	// (0 = no fail-closed enforcement, legacy behavior). lastRefreshSuccessAt
+	// is the time of the last successful config refresh. Once the configured
+	// window elapses without a successful refresh the runner stops executing
+	// probes (fail-closed) and keeps reporting resources only until a refresh
+	// succeeds again. lastConfigVersion records the version of the last
+	// accepted configuration. All three are guarded by mu.
+	configMaxAgeSeconds  int
+	lastRefreshSuccessAt time.Time
+	lastConfigVersion    int64
 }
 
 type networkMonitor interface {
@@ -114,7 +125,14 @@ func (r *Runner) refresh(ctx context.Context) error {
 			delete(r.next, id)
 		}
 	}
+	// A new config version replaces the task set without disturbing running
+	// schedules: surviving tasks keep their next-due entries, removed ones are
+	// pruned above. Version and freshness tracking only affect fail-closed
+	// staleness checks, never which tasks are currently scheduled.
 	r.tasks = updated
+	r.lastConfigVersion = response.ConfigVersion
+	r.configMaxAgeSeconds = response.ConfigMaxAgeSeconds
+	r.lastRefreshSuccessAt = r.now()
 	return nil
 }
 
@@ -122,15 +140,22 @@ func (r *Runner) report(ctx context.Context) error {
 	r.mu.Lock()
 	tasks := append([]protocol.CheckTask(nil), r.tasks...)
 	now := r.now()
+	// Fail-closed: when the control plane declared a config freshness window
+	// and it expired without a successful refresh, stop executing new probes
+	// with the stale configuration. Resource reporting continues with empty
+	// results; probing resumes automatically after a successful refresh.
+	stale := r.configMaxAgeSeconds > 0 && now.Sub(r.lastRefreshSuccessAt) > time.Duration(r.configMaxAgeSeconds)*time.Second
 	due := make([]protocol.CheckTask, 0, len(tasks))
-	for _, task := range tasks {
-		if !task.Enabled {
-			continue
-		}
-		next, ok := r.next[task.ID]
-		if !ok || !now.Before(next) {
-			due = append(due, task)
-			r.next[task.ID] = now.Add(time.Duration(task.IntervalSeconds) * time.Second)
+	if !stale {
+		for _, task := range tasks {
+			if !task.Enabled {
+				continue
+			}
+			next, ok := r.next[task.ID]
+			if !ok || !now.Before(next) {
+				due = append(due, task)
+				r.next[task.ID] = now.Add(time.Duration(task.IntervalSeconds) * time.Second)
+			}
 		}
 	}
 	r.mu.Unlock()

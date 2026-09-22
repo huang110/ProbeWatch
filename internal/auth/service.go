@@ -159,6 +159,19 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "authentication unavailable")
 		return
 	}
+	totpSecret, totpEnabled, err := s.store.GetAdminUserTOTP(r.Context(), admin.ID)
+	if err != nil {
+		logInternalError("read admin totp state", err)
+		writeError(w, http.StatusInternalServerError, "authentication unavailable")
+		return
+	}
+	if totpEnabled && len(totpSecret) > 0 {
+		// Two-factor administrators do not receive a session here. A
+		// short-lived pending credential is issued instead and consumed by
+		// POST /auth/totp/verify after the code check on /login/2fa.
+		s.startTOTPPendingLogin(w, r, admin.ID)
+		return
+	}
 	sessionValue, err := s.createSession(r.Context(), admin.ID, time.Now().UTC())
 	if err != nil {
 		logInternalError("create session", err)
@@ -373,6 +386,10 @@ func (s *Service) CleanupExpiredSessions(ctx context.Context, now time.Time) (in
 
 func (s *Service) CleanupExpiredOAuthStates(ctx context.Context, now time.Time) (int64, error) {
 	return s.store.CleanupExpiredOAuthStates(ctx, now)
+}
+
+func (s *Service) CleanupExpiredTOTPPendingStates(ctx context.Context, now time.Time) (int64, error) {
+	return s.store.CleanupExpiredTOTPPendingStates(ctx, now)
 }
 
 func (s *Service) CurrentUser(r *http.Request, now time.Time) (db.AdminUser, error) {

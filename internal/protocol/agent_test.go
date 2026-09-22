@@ -353,6 +353,79 @@ func TestCheckTaskWithoutRegionRulesStaysCompatible(t *testing.T) {
 	}
 }
 
+func TestAgentConfigValidateAcceptsOptionalVersionAndMaxAge(t *testing.T) {
+	legacy := AgentConfigResponse{}
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("legacy config without version fields rejected: %v", err)
+	}
+	current := AgentConfigResponse{ConfigVersion: 1700000000, ConfigMaxAgeSeconds: 1800}
+	if err := current.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	atLimit := AgentConfigResponse{ConfigVersion: 1, ConfigMaxAgeSeconds: maxConfigMaxAgeSeconds}
+	if err := atLimit.Validate(); err != nil {
+		t.Fatalf("Validate() rejected maximum max age: %v", err)
+	}
+	versionOnly := AgentConfigResponse{ConfigVersion: 1700000000}
+	if err := versionOnly.Validate(); err != nil {
+		t.Fatalf("Validate() rejected version without max age: %v", err)
+	}
+	maxAgeOnly := AgentConfigResponse{ConfigMaxAgeSeconds: 1}
+	if err := maxAgeOnly.Validate(); err != nil {
+		t.Fatalf("Validate() rejected minimum max age: %v", err)
+	}
+}
+
+func TestAgentConfigValidateRejectsInvalidVersionAndMaxAge(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*AgentConfigResponse)
+	}{
+		{name: "negative version", edit: func(response *AgentConfigResponse) { response.ConfigVersion = -1 }},
+		{name: "negative max age", edit: func(response *AgentConfigResponse) { response.ConfigMaxAgeSeconds = -1 }},
+		{name: "max age above limit", edit: func(response *AgentConfigResponse) { response.ConfigMaxAgeSeconds = maxConfigMaxAgeSeconds + 1 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := AgentConfigResponse{ConfigVersion: 1700000000, ConfigMaxAgeSeconds: 1800}
+			test.edit(&response)
+			if err := response.Validate(); err == nil {
+				t.Fatal("Validate() accepted invalid config version fields")
+			}
+		})
+	}
+}
+
+func TestAgentConfigDecodesVersionFieldsStrictly(t *testing.T) {
+	valid := []byte(`{"tasks":[],"config_version":1700000000,"config_max_age_seconds":1800}`)
+	var response AgentConfigResponse
+	if err := DecodeJSON(bytes.NewReader(valid), 1024, &response); err != nil {
+		t.Fatalf("DecodeJSON(valid) error = %v", err)
+	}
+	if response.ConfigVersion != 1700000000 || response.ConfigMaxAgeSeconds != 1800 {
+		t.Fatalf("decoded version fields = %d/%d", response.ConfigVersion, response.ConfigMaxAgeSeconds)
+	}
+	if err := response.Validate(); err != nil {
+		t.Fatalf("decoded config rejected: %v", err)
+	}
+
+	unknown := []byte(`{"tasks":[],"config_version":1700000000,"config_max_age_seconds":1800,"command":"rm"}`)
+	var rejected AgentConfigResponse
+	if err := DecodeJSON(bytes.NewReader(unknown), 1024, &rejected); err == nil {
+		t.Fatal("DecodeJSON accepted an unknown field next to the version fields")
+	}
+}
+
+func TestLegacyAgentConfigOmitsVersionFields(t *testing.T) {
+	encoded, err := json.Marshal(AgentConfigResponse{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "config_version") || strings.Contains(string(encoded), "config_max_age_seconds") {
+		t.Fatalf("legacy config marshaled version fields: %s", encoded)
+	}
+}
+
 func TestRegionRulesDecodeStrictly(t *testing.T) {
 	valid := []byte(`{"id":"media-1","kind":"media_http","host":"media.example.com","port":443,"path":"/manifest","timeout_ms":1000,"max_hops":20,"interval_seconds":10,"enabled":true,"region_rules":[{"region":"SG","contains":"geo-SG"}]}`)
 	var task CheckTask

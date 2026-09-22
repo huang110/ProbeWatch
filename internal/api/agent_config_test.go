@@ -100,6 +100,39 @@ func TestAgentConfigReturnsOnlyEnabledTargetsAsTasks(t *testing.T) {
 	}
 }
 
+func TestAgentConfigServesConfigVersionAndMaxAge(t *testing.T) {
+	handler, store, token, _ := newAgentConfigFixture(t)
+	now := time.Now().UTC()
+
+	payload, err := json.Marshal(agentTargetPayload{Port: 443, Path: "/", TimeoutMS: 2000, IntervalSeconds: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTarget(context.Background(), db.TargetDefinition{ID: "tcp-version-1", Name: "TCP versioned", Kind: db.TargetKindTCP, Host: "example.com", Enabled: true, Payload: payload}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Now().UTC().Add(-time.Second).Unix()
+	response := agentConfigGet(t, handler, token)
+	after := time.Now().UTC().Add(time.Second).Unix()
+	if response.Code != http.StatusOK {
+		t.Fatalf("agent config status = %d, body = %q", response.Code, response.Body.String())
+	}
+	var decoded protocol.AgentConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ConfigMaxAgeSeconds != 1800 {
+		t.Fatalf("config_max_age_seconds = %d, want default 1800", decoded.ConfigMaxAgeSeconds)
+	}
+	if decoded.ConfigVersion < before || decoded.ConfigVersion > after {
+		t.Fatalf("config_version = %d, want server unix seconds within [%d, %d]", decoded.ConfigVersion, before, after)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("served config must pass strict validation: %v", err)
+	}
+}
+
 func TestAgentConfigRejectsWrongMethodAndMissingAuth(t *testing.T) {
 	handler, _, token, _ := newAgentConfigFixture(t)
 

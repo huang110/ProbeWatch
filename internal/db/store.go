@@ -40,6 +40,9 @@ var (
 	ErrTargetKindMismatch                = errors.New("target kind mismatch")
 	ErrAlertNotFound                     = errors.New("alert not found")
 	ErrAlertResolved                     = errors.New("alert already resolved")
+	ErrTOTPPendingInvalid                = errors.New("invalid totp pending credential")
+	ErrTOTPPendingExpired                = errors.New("totp pending credential expired")
+	ErrTOTPPendingConsumed               = errors.New("totp pending credential already consumed")
 )
 
 const DefaultRegistrationTokenLifetime = 15 * time.Minute
@@ -432,6 +435,123 @@ func (s *Store) FindAllowedAdminUser(ctx context.Context, provider, providerUser
 		}
 	}
 	return false, nil
+}
+
+// GetAdminUserTOTP returns the stored Base32 TOTP secret and whether
+// two-factor authentication is enabled for the admin user.
+func (s *Store) GetAdminUserTOTP(ctx context.Context, adminUserID string) ([]byte, bool, error) {
+	var secret []byte
+	var enabled int64
+	err := s.db.QueryRowContext(ctx, `SELECT totp_secret, totp_enabled FROM admin_users WHERE id = ?`, adminUserID).Scan(&secret, &enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, sql.ErrNoRows
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get admin totp: %w", err)
+	}
+	return secret, enabled != 0, nil
+}
+
+// SetAdminUserTOTP persists the TOTP secret and enabled flag. A nil secret
+// clears the stored value; disabling must always clear the secret.
+func (s *Store) SetAdminUserTOTP(ctx context.Context, adminUserID string, secret []byte, enabled bool, now time.Time) error {
+	if secret == nil {
+		secret = []byte{}
+	}
+	enabledValue := 0
+	if enabled {
+		enabledValue = 1
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE admin_users SET totp_secret = ?, totp_enabled = ?, updated_at = ? WHERE id = ?`, secret, enabledValue, unixNano(now), adminUserID)
+	if err != nil {
+		return fmt.Errorf("set admin totp: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect admin totp update: %w", err)
+	}
+	if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// CreateTOTPPendingState issues a single-use, short-lived pending credential
+// for an administrator who authenticated via OAuth but still owes a TOTP code.
+// The plaintext is returned once; only its peppered digest is stored.
+func (s *Store) CreateTOTPPendingState(ctx context.Context, adminUserID string, now time.Time, lifetime time.Duration) (string, error) {
+	plaintext, err := security.GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	id, err := randomID()
+	if err != nil {
+		return "", err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO totp_pending_states (id, token_digest, admin_user_id, expires_at) VALUES (?, ?, ?, ?)`, id, security.Digest(s.pepper, plaintext), adminUserID, unixNano(now.Add(lifetime)))
+	if err != nil {
+		return "", fmt.Errorf("create totp pending state: %w", err)
+	}
+	return plaintext, nil
+}
+
+// GetTOTPPendingState resolves a pending credential to its admin user without
+// consuming it, so a mistyped code can be retried within the lifetime.
+func (s *Store) GetTOTPPendingState(ctx context.Context, plaintext string, now time.Time) (string, error) {
+	var adminUserID string
+	var expiresAt int64
+	var consumedAt sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT admin_user_id, expires_at, consumed_at FROM totp_pending_states WHERE token_digest = ?`, security.Digest(s.pepper, plaintext)).Scan(&adminUserID, &expiresAt, &consumedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrTOTPPendingInvalid
+	}
+	if err != nil {
+		return "", fmt.Errorf("find totp pending state: %w", err)
+	}
+	if consumedAt.Valid {
+		return "", ErrTOTPPendingConsumed
+	}
+	if now.UnixNano() >= expiresAt {
+		return "", ErrTOTPPendingExpired
+	}
+	return adminUserID, nil
+}
+
+// ConsumeTOTPPendingState atomically marks a pending credential used. The
+// conditional update ensures a credential can complete at most one login.
+func (s *Store) ConsumeTOTPPendingState(ctx context.Context, plaintext string, now time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE totp_pending_states SET consumed_at = ? WHERE token_digest = ? AND consumed_at IS NULL AND expires_at > ?`, unixNano(now), security.Digest(s.pepper, plaintext), unixNano(now))
+	if err != nil {
+		return fmt.Errorf("consume totp pending state: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect totp pending state consume: %w", err)
+	}
+	if affected != 1 {
+		return ErrTOTPPendingInvalid
+	}
+	return nil
+}
+
+func (s *Store) CleanupExpiredTOTPPendingStates(ctx context.Context, now time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin totp pending state cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM totp_pending_states WHERE rowid IN (SELECT rowid FROM totp_pending_states WHERE expires_at <= ? OR consumed_at IS NOT NULL ORDER BY expires_at, rowid LIMIT ?)`, unixNano(now), maxAuthCleanupRows)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup totp pending states: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("inspect totp pending state cleanup: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit totp pending state cleanup: %w", err)
+	}
+	return deleted, nil
 }
 
 func (s *Store) CreateSession(ctx context.Context, id string, sessionValue []byte, adminUserID string, expiresAt, createdAt time.Time) error {

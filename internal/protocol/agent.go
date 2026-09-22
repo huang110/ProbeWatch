@@ -28,6 +28,8 @@ const (
 	maxRegionLength         = 16
 	maxRegionContainsLength = 128
 	maxRegionRules          = 16
+
+	maxConfigMaxAgeSeconds = 86400
 )
 
 var allowedTaskKinds = map[string]struct{}{
@@ -199,12 +201,22 @@ type ErrorResponse struct {
 }
 
 // AgentConfigResponse is the strict wire shape for the agent's pulled check configuration.
+// ConfigVersion and ConfigMaxAgeSeconds are optional: a legacy control plane omits both,
+// and an agent then keeps its existing behavior without fail-closed staleness checks.
 type AgentConfigResponse struct {
-	Tasks []CheckTask `json:"tasks"`
+	Tasks               []CheckTask `json:"tasks"`
+	ConfigVersion       int64       `json:"config_version,omitempty"`
+	ConfigMaxAgeSeconds int         `json:"config_max_age_seconds,omitempty"`
 }
 
 // Validate checks the decoded configuration before an agent accepts any task.
 func (r AgentConfigResponse) Validate() error {
+	if r.ConfigVersion < 0 {
+		return errors.New("config_version must not be negative")
+	}
+	if r.ConfigMaxAgeSeconds < 0 || r.ConfigMaxAgeSeconds > maxConfigMaxAgeSeconds {
+		return fmt.Errorf("config_max_age_seconds must be between 1 and %d", maxConfigMaxAgeSeconds)
+	}
 	if len(r.Tasks) > 1000 {
 		return errors.New("tasks exceeds maximum length of 1000")
 	}

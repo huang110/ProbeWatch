@@ -95,6 +95,9 @@ func runAuthCleanup(ctx context.Context, service *auth.Service) {
 		if _, err := service.CleanupExpiredOAuthStates(cleanupCtx, time.Now().UTC()); err != nil {
 			slog.Error("auth cleanup failed", "resource", "oauth_states", "error_class", fmt.Sprintf("%T", err))
 		}
+		if _, err := service.CleanupExpiredTOTPPendingStates(cleanupCtx, time.Now().UTC()); err != nil {
+			slog.Error("auth cleanup failed", "resource", "totp_pending_states", "error_class", fmt.Sprintf("%T", err))
+		}
 		if _, err := service.CleanupExpiredSessions(cleanupCtx, time.Now().UTC()); err != nil {
 			slog.Error("auth cleanup failed", "resource", "sessions", "error_class", fmt.Sprintf("%T", err))
 		}
