@@ -257,3 +257,118 @@ func validCheckTask() CheckTask {
 		MaxHops: 10, IntervalSeconds: 60, Enabled: true,
 	}
 }
+
+func TestCheckTaskValidateAcceptsBoundedRegionRules(t *testing.T) {
+	task := validCheckTask()
+	task.Kind = "media_http"
+	task.Path = "/manifest"
+	task.RegionRules = []RegionRule{
+		{Region: "SG", Contains: "geo-SG"},
+		{Region: "US-West_2", Contains: "edge=us-west"},
+	}
+	if err := task.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	atLimit := validCheckTask()
+	atLimit.Kind = "media_http"
+	atLimit.Path = "/manifest"
+	for index := 0; index < maxRegionRules; index++ {
+		atLimit.RegionRules = append(atLimit.RegionRules, RegionRule{Region: "R" + strings.Repeat("x", 15), Contains: "marker"})
+	}
+	if len(atLimit.RegionRules) != maxRegionRules {
+		t.Fatalf("rule count = %d, want %d", len(atLimit.RegionRules), maxRegionRules)
+	}
+	if err := atLimit.Validate(); err != nil {
+		t.Fatalf("Validate() rejected %d rules: %v", maxRegionRules, err)
+	}
+
+	maxRegion := validCheckTask()
+	maxRegion.Kind = "media_http"
+	maxRegion.Path = "/manifest"
+	maxRegion.RegionRules = []RegionRule{{Region: strings.Repeat("a", maxRegionLength), Contains: strings.Repeat("b", maxRegionContainsLength)}}
+	if err := maxRegion.Validate(); err != nil {
+		t.Fatalf("Validate() rejected maximum-size rule: %v", err)
+	}
+}
+
+func TestCheckTaskValidateRejectsInvalidRegionRules(t *testing.T) {
+	base := func() CheckTask {
+		task := validCheckTask()
+		task.Kind = "media_http"
+		task.Path = "/manifest"
+		return task
+	}
+	for _, test := range []struct {
+		name  string
+		rules []RegionRule
+	}{
+		{name: "region too long", rules: []RegionRule{{Region: strings.Repeat("a", maxRegionLength+1), Contains: "geo"}}},
+		{name: "region empty", rules: []RegionRule{{Region: "", Contains: "geo"}}},
+		{name: "region blank", rules: []RegionRule{{Region: "   ", Contains: "geo"}}},
+		{name: "region illegal characters", rules: []RegionRule{{Region: "SG US", Contains: "geo"}}},
+		{name: "region punctuation", rules: []RegionRule{{Region: "SG!", Contains: "geo"}}},
+		{name: "contains too long", rules: []RegionRule{{Region: "SG", Contains: strings.Repeat("a", maxRegionContainsLength+1)}}},
+		{name: "contains empty", rules: []RegionRule{{Region: "SG", Contains: ""}}},
+		{name: "contains control character", rules: []RegionRule{{Region: "SG", Contains: "geo\n-SG"}}},
+		{name: "contains NUL", rules: []RegionRule{{Region: "SG", Contains: "geo\x00"}}},
+		{name: "too many rules", rules: func() []RegionRule {
+			rules := make([]RegionRule, maxRegionRules+1)
+			for index := range rules {
+				rules[index] = RegionRule{Region: "SG", Contains: "geo"}
+			}
+			return rules
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			task := base()
+			task.RegionRules = test.rules
+			if err := task.Validate(); err == nil {
+				t.Fatal("Validate() accepted invalid region rules")
+			}
+		})
+	}
+
+	nonMedia := validCheckTask()
+	nonMedia.Kind = "tcp"
+	nonMedia.RegionRules = []RegionRule{{Region: "SG", Contains: "geo"}}
+	if err := nonMedia.Validate(); err == nil {
+		t.Fatal("Validate() accepted region rules on a non-media task")
+	}
+}
+
+func TestCheckTaskWithoutRegionRulesStaysCompatible(t *testing.T) {
+	task := validCheckTask()
+	task.Kind = "media_http"
+	task.Path = "/manifest"
+	if err := task.Validate(); err != nil {
+		t.Fatalf("legacy task without rules rejected: %v", err)
+	}
+	encoded, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "region_rules") {
+		t.Fatalf("legacy task marshaled a region_rules field: %s", encoded)
+	}
+}
+
+func TestRegionRulesDecodeStrictly(t *testing.T) {
+	valid := []byte(`{"id":"media-1","kind":"media_http","host":"media.example.com","port":443,"path":"/manifest","timeout_ms":1000,"max_hops":20,"interval_seconds":10,"enabled":true,"region_rules":[{"region":"SG","contains":"geo-SG"}]}`)
+	var task CheckTask
+	if err := DecodeJSON(bytes.NewReader(valid), 1024, &task); err != nil {
+		t.Fatalf("DecodeJSON(valid) error = %v", err)
+	}
+	if err := task.Validate(); err != nil {
+		t.Fatalf("decoded task rejected: %v", err)
+	}
+	if len(task.RegionRules) != 1 || task.RegionRules[0].Region != "SG" || task.RegionRules[0].Contains != "geo-SG" {
+		t.Fatalf("decoded rules = %#v", task.RegionRules)
+	}
+
+	unknown := []byte(`{"id":"media-1","kind":"media_http","host":"media.example.com","port":443,"path":"/manifest","timeout_ms":1000,"max_hops":20,"interval_seconds":10,"enabled":true,"region_rules":[{"region":"SG","contains":"geo-SG","headers":{"X":"y"}}]}`)
+	var rejected CheckTask
+	if err := DecodeJSON(bytes.NewReader(unknown), 1024, &rejected); err == nil {
+		t.Fatal("DecodeJSON accepted an unknown field inside a region rule")
+	}
+}

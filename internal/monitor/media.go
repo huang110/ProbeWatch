@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -16,7 +17,12 @@ import (
 	"github.com/probewatch/probewatch/internal/security"
 )
 
-const mediaMaxReasonBytes = 512
+const (
+	mediaMaxReasonBytes = 512
+	// mediaRegionProbeBytes bounds how much of the response body may be held
+	// in memory for region matching. The prefix is never persisted.
+	mediaRegionProbeBytes = 64 * 1024
+)
 
 var errMediaBodyExceedsLimit = errors.New("body exceeds limit")
 
@@ -93,8 +99,9 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 		response, err = client.Do(request)
 		if err == nil {
 			defer response.Body.Close()
+			capture := &bodyPrefixCapture{}
 			var n int64
-			n, err = io.Copy(io.Discard, io.LimitReader(response.Body, d.maxBodyBytes()+1))
+			n, err = io.Copy(capture, io.LimitReader(response.Body, d.maxBodyBytes()+1))
 			if err == nil && n > d.maxBodyBytes() {
 				err = errMediaBodyExceedsLimit
 			}
@@ -104,6 +111,7 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 				} else {
 					result.Status = "unavailable"
 				}
+				result.Region = matchRegionRule(task.RegionRules, capture.prefix)
 			}
 		}
 
@@ -114,6 +122,39 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 	}
 	result.LatencyMS = time.Since(started).Milliseconds()
 	return result
+}
+
+// bodyPrefixCapture counts bytes streamed to the size limit while retaining a
+// bounded prefix of the response body for region matching. It never stores
+// more than mediaRegionProbeBytes and nothing it holds is persisted.
+type bodyPrefixCapture struct {
+	prefix []byte
+}
+
+func (w *bodyPrefixCapture) Write(p []byte) (int, error) {
+	if len(w.prefix) < mediaRegionProbeBytes {
+		remaining := mediaRegionProbeBytes - len(w.prefix)
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		w.prefix = append(w.prefix, p[:remaining]...)
+	}
+	return len(p), nil
+}
+
+// matchRegionRule returns the region of the first rule whose marker occurs in
+// the bounded body prefix, or "" when no rule matches. Rule order is the
+// caller's priority order.
+func matchRegionRule(rules []protocol.RegionRule, prefix []byte) string {
+	if len(rules) == 0 || len(prefix) == 0 {
+		return ""
+	}
+	for _, rule := range rules {
+		if rule.Contains != "" && bytes.Contains(prefix, []byte(rule.Contains)) {
+			return rule.Region
+		}
+	}
+	return ""
 }
 
 func (d *MediaDetector) httpTransport(probe *Probe) http.RoundTripper {

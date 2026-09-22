@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,5 +116,78 @@ func TestAgentConfigRejectsWrongMethodAndMissingAuth(t *testing.T) {
 	unauthenticated := agentConfigGet(t, handler, "not-a-real-token")
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated agent config status = %d, want 401", unauthenticated.Code)
+	}
+}
+
+func TestAgentConfigServesMediaRegionRulesAndValidates(t *testing.T) {
+	handler, store, token, _ := newAgentConfigFixture(t)
+	now := time.Now().UTC()
+
+	rules := []protocol.RegionRule{{Region: "SG", Contains: "geo-SG"}, {Region: "US", Contains: "edge=us-west"}}
+	mediaPayload, err := json.Marshal(agentTargetPayload{Port: 443, Path: "/manifest", TimeoutMS: 3000, IntervalSeconds: 60, RegionRules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTarget(context.Background(), db.TargetDefinition{ID: "media-region-1", Name: "Media SG", Kind: db.TargetKindMediaHTTP, Host: "media.example.com", Enabled: true, Payload: mediaPayload}, now); err != nil {
+		t.Fatal(err)
+	}
+	legacyPayload, err := json.Marshal(agentTargetPayload{Port: 443, Path: "/manifest", TimeoutMS: 3000, IntervalSeconds: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateTarget(context.Background(), db.TargetDefinition{ID: "media-legacy-1", Name: "Media legacy", Kind: db.TargetKindMediaHTTP, Host: "legacy.example.com", Enabled: true, Payload: legacyPayload}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	response := agentConfigGet(t, handler, token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("agent config status = %d, body = %q", response.Code, response.Body.String())
+	}
+	var payload protocol.AgentConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := payload.Validate(); err != nil {
+		t.Fatalf("agent config with region rules must pass strict validation: %v", err)
+	}
+	byID := make(map[string]protocol.CheckTask, len(payload.Tasks))
+	for _, task := range payload.Tasks {
+		byID[task.ID] = task
+	}
+	withRules, ok := byID["media-region-1"]
+	if !ok {
+		t.Fatal("media target with rules missing from agent config")
+	}
+	if len(withRules.RegionRules) != 2 || withRules.RegionRules[0].Region != "SG" || withRules.RegionRules[1].Contains != "edge=us-west" {
+		t.Fatalf("served region rules = %#v", withRules.RegionRules)
+	}
+	if withRules.Kind != "media_http" || withRules.Host != "media.example.com" || withRules.Path != "/manifest" {
+		t.Fatalf("media task mapping = %#v", withRules)
+	}
+
+	legacy, ok := byID["media-legacy-1"]
+	if !ok {
+		t.Fatal("legacy media target missing from agent config")
+	}
+	if legacy.RegionRules != nil {
+		t.Fatalf("legacy task rules = %#v, want none", legacy.RegionRules)
+	}
+	if strings.Contains(response.Body.String(), `"region_rules":[{"region":"US"`) && strings.Count(response.Body.String(), "region_rules") != 1 {
+		t.Fatalf("legacy task leaked region_rules: %s", response.Body.String())
+	}
+}
+
+func TestAgentConfigRejectsUnvalidatableMediaPayload(t *testing.T) {
+	handler, store, token, _ := newAgentConfigFixture(t)
+	now := time.Now().UTC()
+
+	payload := []byte(`{"port":443,"path":"/manifest","timeout_ms":3000,"interval_seconds":60,"region_rules":[{"region":"SG US","contains":"geo-SG"}]}`)
+	if _, err := store.CreateTarget(context.Background(), db.TargetDefinition{ID: "media-bad-1", Name: "Media bad", Kind: db.TargetKindMediaHTTP, Host: "media.example.com", Enabled: true, Payload: payload}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	response := agentConfigGet(t, handler, token)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("agent config status = %d %q, want 503 for unvalidatable payload", response.Code, response.Body.String())
 	}
 }

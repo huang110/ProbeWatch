@@ -24,6 +24,10 @@ const (
 	maxVersionLength     = 128
 	maxReasonLength      = 512
 	maxFingerprintLength = 512
+
+	maxRegionLength         = 16
+	maxRegionContainsLength = 128
+	maxRegionRules          = 16
 )
 
 var allowedTaskKinds = map[string]struct{}{
@@ -118,17 +122,75 @@ type ResourceSnapshot struct {
 
 // CheckTask is the only task shape an agent accepts from the control plane.
 type CheckTask struct {
-	ID              string `json:"id"`
-	Kind            string `json:"kind"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Path            string `json:"path,omitempty"`
-	ExpectedStatus  int    `json:"expected_status,omitempty"`
-	DNSType         string `json:"dns_type,omitempty"`
-	TimeoutMS       int    `json:"timeout_ms"`
-	MaxHops         int    `json:"max_hops,omitempty"`
-	IntervalSeconds int    `json:"interval_seconds"`
-	Enabled         bool   `json:"enabled"`
+	ID              string       `json:"id"`
+	Kind            string       `json:"kind"`
+	Host            string       `json:"host"`
+	Port            int          `json:"port"`
+	Path            string       `json:"path,omitempty"`
+	ExpectedStatus  int          `json:"expected_status,omitempty"`
+	DNSType         string       `json:"dns_type,omitempty"`
+	TimeoutMS       int          `json:"timeout_ms"`
+	MaxHops         int          `json:"max_hops,omitempty"`
+	IntervalSeconds int          `json:"interval_seconds"`
+	Enabled         bool         `json:"enabled"`
+	RegionRules     []RegionRule `json:"region_rules,omitempty"`
+}
+
+// RegionRule is one bounded body-marker rule for classifying the serving
+// region of a media_http endpoint. The agent matches Contains against a
+// bounded prefix of the response body it already read; nothing else about
+// the body is interpreted, stored, or reported.
+type RegionRule struct {
+	Region   string `json:"region"`
+	Contains string `json:"contains"`
+}
+
+// Validate enforces the strict bounds on one region rule: region is at most
+// 16 characters from a fixed allowlist, contains is 1..128 bytes with no
+// control characters.
+func (r RegionRule) Validate() error {
+	if err := validateString("region", r.Region, maxRegionLength, true); err != nil {
+		return err
+	}
+	for _, character := range r.Region {
+		switch {
+		case character >= 'a' && character <= 'z':
+		case character >= 'A' && character <= 'Z':
+		case character >= '0' && character <= '9':
+		case character == '-' || character == '_':
+		default:
+			return errors.New("region must contain only letters, digits, '-', and '_'")
+		}
+	}
+	if err := validateString("contains", r.Contains, maxRegionContainsLength, true); err != nil {
+		return err
+	}
+	for _, character := range r.Contains {
+		if character < 0x20 || character == 0x7f {
+			return errors.New("contains must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// ValidateRegionRules validates an optional rule list. Rules are only
+// meaningful for media_http tasks; any other kind carrying rules is rejected.
+func ValidateRegionRules(kind string, rules []RegionRule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	if kind != "media_http" {
+		return errors.New("region_rules are only allowed for media_http tasks")
+	}
+	if len(rules) > maxRegionRules {
+		return fmt.Errorf("region_rules exceeds maximum length of %d", maxRegionRules)
+	}
+	for index, rule := range rules {
+		if err := rule.Validate(); err != nil {
+			return fmt.Errorf("region_rules[%d]: %w", index, err)
+		}
+	}
+	return nil
 }
 
 // ErrorResponse is the stable JSON error envelope used by protocol endpoints.
@@ -358,7 +420,7 @@ func (t CheckTask) Validate() error {
 			return errors.New("path is required for HTTP tasks")
 		}
 	}
-	return nil
+	return ValidateRegionRules(t.Kind, t.RegionRules)
 }
 
 func (r CheckResult) Validate() error {

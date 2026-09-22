@@ -9,14 +9,15 @@ import (
 )
 
 type agentTargetPayload struct {
-	Host            string `json:"host,omitempty"`
-	Port            int    `json:"port,omitempty"`
-	Path            string `json:"path,omitempty"`
-	ExpectedStatus  int    `json:"expected_status,omitempty"`
-	DNSType         string `json:"dns_type,omitempty"`
-	TimeoutMS       int    `json:"timeout_ms,omitempty"`
-	MaxHops         int    `json:"max_hops,omitempty"`
-	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	Host            string                `json:"host,omitempty"`
+	Port            int                   `json:"port,omitempty"`
+	Path            string                `json:"path,omitempty"`
+	ExpectedStatus  int                   `json:"expected_status,omitempty"`
+	DNSType         string                `json:"dns_type,omitempty"`
+	TimeoutMS       int                   `json:"timeout_ms,omitempty"`
+	MaxHops         int                   `json:"max_hops,omitempty"`
+	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
+	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
 }
 
 // agentConfig serves the agent's read-only check configuration. It exposes only
@@ -72,6 +73,7 @@ func targetToCheckTask(target db.TargetRecord) (protocol.CheckTask, error) {
 		MaxHops:         config.MaxHops,
 		IntervalSeconds: config.IntervalSeconds,
 		Enabled:         target.Enabled,
+		RegionRules:     config.RegionRules,
 	}
 	if task.MaxHops == 0 {
 		task.MaxHops = 20

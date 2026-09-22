@@ -12,47 +12,51 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/protocol"
 )
 
 type targetRequest struct {
-	ID              *string `json:"id"`
-	Name            *string `json:"name"`
-	Kind            *string `json:"kind"`
-	Host            *string `json:"host"`
-	Port            *int    `json:"port"`
-	Path            *string `json:"path"`
-	ExpectedStatus  *int    `json:"expected_status"`
-	DNSType         *string `json:"dns_type"`
-	TimeoutMS       *int    `json:"timeout_ms"`
-	MaxHops         *int    `json:"max_hops"`
-	IntervalSeconds *int    `json:"interval_seconds"`
-	Enabled         *bool   `json:"enabled"`
+	ID              *string                `json:"id"`
+	Name            *string                `json:"name"`
+	Kind            *string                `json:"kind"`
+	Host            *string                `json:"host"`
+	Port            *int                   `json:"port"`
+	Path            *string                `json:"path"`
+	ExpectedStatus  *int                   `json:"expected_status"`
+	DNSType         *string                `json:"dns_type"`
+	TimeoutMS       *int                   `json:"timeout_ms"`
+	MaxHops         *int                   `json:"max_hops"`
+	IntervalSeconds *int                   `json:"interval_seconds"`
+	Enabled         *bool                  `json:"enabled"`
+	RegionRules     *[]protocol.RegionRule `json:"region_rules"`
 }
 
 type targetResponse struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Kind            string `json:"kind"`
-	Host            string `json:"host"`
-	Port            int    `json:"port,omitempty"`
-	Path            string `json:"path,omitempty"`
-	ExpectedStatus  int    `json:"expected_status,omitempty"`
-	DNSType         string `json:"dns_type,omitempty"`
-	TimeoutMS       int    `json:"timeout_ms,omitempty"`
-	MaxHops         int    `json:"max_hops,omitempty"`
-	IntervalSeconds int    `json:"interval_seconds,omitempty"`
-	Enabled         bool   `json:"enabled"`
+	ID              string                `json:"id"`
+	Name            string                `json:"name"`
+	Kind            string                `json:"kind"`
+	Host            string                `json:"host"`
+	Port            int                   `json:"port,omitempty"`
+	Path            string                `json:"path,omitempty"`
+	ExpectedStatus  int                   `json:"expected_status,omitempty"`
+	DNSType         string                `json:"dns_type,omitempty"`
+	TimeoutMS       int                   `json:"timeout_ms,omitempty"`
+	MaxHops         int                   `json:"max_hops,omitempty"`
+	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
+	Enabled         bool                  `json:"enabled"`
+	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
 }
 
 type targetPayload struct {
-	Host            string `json:"host,omitempty"`
-	Port            int    `json:"port,omitempty"`
-	Path            string `json:"path,omitempty"`
-	ExpectedStatus  int    `json:"expected_status,omitempty"`
-	DNSType         string `json:"dns_type,omitempty"`
-	TimeoutMS       int    `json:"timeout_ms,omitempty"`
-	MaxHops         int    `json:"max_hops,omitempty"`
-	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	Host            string                `json:"host,omitempty"`
+	Port            int                   `json:"port,omitempty"`
+	Path            string                `json:"path,omitempty"`
+	ExpectedStatus  int                   `json:"expected_status,omitempty"`
+	DNSType         string                `json:"dns_type,omitempty"`
+	TimeoutMS       int                   `json:"timeout_ms,omitempty"`
+	MaxHops         int                   `json:"max_hops,omitempty"`
+	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
+	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
 }
 
 func (s *Server) targetCollection(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +205,7 @@ func decodeTargetRequest(w http.ResponseWriter, r *http.Request, limit int64, de
 	allowed := map[string]struct{}{
 		"id": {}, "name": {}, "kind": {}, "host": {}, "port": {}, "path": {},
 		"expected_status": {}, "dns_type": {}, "timeout_ms": {}, "max_hops": {},
-		"interval_seconds": {}, "enabled": {},
+		"interval_seconds": {}, "enabled": {}, "region_rules": {},
 	}
 	for name, value := range fields {
 		if _, ok := allowed[name]; !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
@@ -265,6 +269,9 @@ func (r targetRequest) definition(existing *db.TargetRecord) (db.TargetDefinitio
 	}
 	if r.IntervalSeconds != nil {
 		config.IntervalSeconds = *r.IntervalSeconds
+	}
+	if r.RegionRules != nil {
+		config.RegionRules = *r.RegionRules
 	}
 	enabled := true
 	if existing != nil {
@@ -330,6 +337,9 @@ func validateTargetFields(id, name, kindValue, host string, config targetPayload
 	if (kindValue == "http" || kindValue == "https" || kindValue == "media_http") && config.Path == "" {
 		return errors.New("path is required")
 	}
+	if err := protocol.ValidateRegionRules(kindValue, config.RegionRules); err != nil {
+		return err
+	}
 	if kindValue == "dns" && config.DNSType == "" {
 		return errors.New("DNS type is required")
 	}
@@ -373,7 +383,7 @@ func targetToResponse(target db.TargetRecord) (targetResponse, error) {
 	if host == "" {
 		host = config.Host
 	}
-	return targetResponse{ID: target.ID, Name: target.Name, Kind: string(target.Kind), Host: host, Port: config.Port, Path: config.Path, ExpectedStatus: config.ExpectedStatus, DNSType: config.DNSType, TimeoutMS: config.TimeoutMS, MaxHops: config.MaxHops, IntervalSeconds: config.IntervalSeconds, Enabled: target.Enabled}, nil
+	return targetResponse{ID: target.ID, Name: target.Name, Kind: string(target.Kind), Host: host, Port: config.Port, Path: config.Path, ExpectedStatus: config.ExpectedStatus, DNSType: config.DNSType, TimeoutMS: config.TimeoutMS, MaxHops: config.MaxHops, IntervalSeconds: config.IntervalSeconds, Enabled: target.Enabled, RegionRules: config.RegionRules}, nil
 }
 
 func findTarget(ctx context.Context, store *db.Store, id string) (db.TargetRecord, error) {

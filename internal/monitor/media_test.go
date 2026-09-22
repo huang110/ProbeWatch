@@ -141,3 +141,145 @@ func TestMediaDetectorInvalidTaskDoesNotResolve(t *testing.T) {
 		t.Fatal("invalid task reached DNS")
 	}
 }
+
+func TestMediaDetectorMatchesRegionFromBodyPrefix(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{
+		{Region: "US", Contains: "geo-US"},
+		{Region: "SG", Contains: "geo-SG"},
+	}
+	d := &MediaDetector{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("xgeo-SGx")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), task)
+	if result.Status != "available" || result.Region != "SG" {
+		t.Fatalf("result = %#v, want available with region SG", result)
+	}
+}
+
+func TestMediaDetectorRegionFollowsRuleOrder(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{
+		{Region: "US", Contains: "geo-US"},
+		{Region: "SG", Contains: "geo-SG"},
+	}
+	d := &MediaDetector{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("geo-US and geo-SG")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), task)
+	if result.Region != "US" {
+		t.Fatalf("region = %q, want first matching rule US", result.Region)
+	}
+}
+
+func TestMediaDetectorLeavesRegionEmptyOnMiss(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{{Region: "SG", Contains: "geo-SG"}}
+	d := &MediaDetector{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("no marker here")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), task)
+	if result.Status != "available" || result.Region != "" {
+		t.Fatalf("result = %#v, want available with empty region", result)
+	}
+}
+
+func TestMediaDetectorWithoutRulesKeepsRegionEmpty(t *testing.T) {
+	d := &MediaDetector{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("geo-SG")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), mediaTask())
+	if result.Status != "available" || result.Region != "" {
+		t.Fatalf("result = %#v, want available with empty region when no rules configured", result)
+	}
+}
+
+func TestMediaDetectorRegionOnlyMatchesWithinBodyPrefix(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{{Region: "SG", Contains: "geo-SG"}}
+	marker := "geo-SG"
+	// Body whose marker starts exactly at the prefix boundary: only the first
+	// mediaRegionProbeBytes bytes may ever be inspected.
+	pastBody := strings.Repeat("x", mediaRegionProbeBytes) + marker
+	// Body whose marker ends exactly at the prefix boundary.
+	edgeBody := strings.Repeat("x", mediaRegionProbeBytes-len(marker)) + marker + strings.Repeat("y", 8)
+	for _, test := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "marker beyond prefix is ignored", body: pastBody, want: ""},
+		{name: "marker inside prefix matches", body: edgeBody, want: "SG"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d := &MediaDetector{
+				Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+				MaxBodyBytes: int64(len(test.body)),
+				roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header), Request: req}, nil
+				}),
+			}
+			result := d.Run(context.Background(), task)
+			if result.Status != "available" || result.Region != test.want {
+				t.Fatalf("result = %#v, want available with region %q", result, test.want)
+			}
+		})
+	}
+}
+
+func TestMediaDetectorRegionFillsOnUnavailableStatus(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{{Region: "SG", Contains: "geo-blocked"}}
+	d := &MediaDetector{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("geo-blocked")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), task)
+	if result.Status != "unavailable" || result.Region != "SG" {
+		t.Fatalf("result = %#v, want unavailable with region SG", result)
+	}
+}
+
+func TestMediaDetectorOverLimitBodyLeavesRegionEmpty(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{{Region: "SG", Contains: "geo-SG"}}
+	d := &MediaDetector{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("geo-SG-xx")), Header: make(http.Header), Request: req}, nil
+		}),
+	}
+	result := d.Run(context.Background(), task)
+	if result.Status != "error" || result.Region != "" {
+		t.Fatalf("result = %#v, want error with empty region for over-limit body", result)
+	}
+}
+
+func TestMediaDetectorInvalidRegionRulesAreRejectedAsInvalid(t *testing.T) {
+	task := mediaTask()
+	task.RegionRules = []protocol.RegionRule{{Region: "SG!", Contains: "geo-SG"}}
+	d := &MediaDetector{Resolver: &fakeResolver{}}
+	result := d.Run(context.Background(), task)
+	if result.Status != "invalid" {
+		t.Fatalf("status = %q, want invalid for malformed rules", result.Status)
+	}
+	if len(d.Resolver.(*fakeResolver).hosts) != 0 {
+		t.Fatal("invalid rules reached DNS")
+	}
+}

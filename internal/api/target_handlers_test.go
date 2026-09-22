@@ -263,3 +263,85 @@ func task4AdminWriteWithCSRF(t *testing.T, handler http.Handler, method, session
 	handler.ServeHTTP(response, request)
 	return response, response.Header().Get("X-CSRF-Token")
 }
+
+func TestMediaTargetRegionRulesRoundTripThroughCreateListAndPatch(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	handler := NewServer(task4Config(), service).Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	body := `{"id":"media-region","name":"Region detector","kind":"media_http","host":"media.example.com","path":"/manifest","timeout_ms":3000,"interval_seconds":60,"max_hops":20,"enabled":true,"region_rules":[{"region":"SG","contains":"geo-SG"},{"region":"US-West_2","contains":"edge=us-west"}]}`
+	created, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/targets", body)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"region_rules":[{"region":"SG","contains":"geo-SG"},{"region":"US-West_2","contains":"edge=us-west"}]`) {
+		t.Fatalf("media target create with rules = %d %q", created.Code, created.Body.String())
+	}
+
+	got, err := store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-region")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload agentTargetPayload
+	if err := json.Unmarshal(got.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.RegionRules) != 2 || payload.RegionRules[0].Region != "SG" || payload.RegionRules[1].Contains != "edge=us-west" {
+		t.Fatalf("stored payload rules = %#v", payload.RegionRules)
+	}
+
+	listed, _ := task4AdminWriteWithCSRF(t, handler, http.MethodGet, session, csrf, "/api/targets", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"region_rules"`) {
+		t.Fatalf("target list = %d %q, want region_rules echoed", listed.Code, listed.Body.String())
+	}
+
+	patched, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPatch, session, csrf, "/api/targets/media-region", `{"region_rules":[{"region":"JP","contains":"geo-JP"}]}`)
+	if patched.Code != http.StatusOK || !strings.Contains(patched.Body.String(), `"region":"JP"`) {
+		t.Fatalf("media target patch rules = %d %q", patched.Code, patched.Body.String())
+	}
+	got, err = store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-region")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got.Payload), `"region":"JP"`) || strings.Contains(string(got.Payload), `"region":"SG"`) {
+		t.Fatalf("patched payload = %s, want rules replaced", got.Payload)
+	}
+
+	cleared, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPatch, session, csrf, "/api/targets/media-region", `{"region_rules":[]}`)
+	if cleared.Code != http.StatusOK || strings.Contains(cleared.Body.String(), "region_rules") {
+		t.Fatalf("cleared rules response = %d %q, want empty rules omitted", cleared.Code, cleared.Body.String())
+	}
+}
+
+func TestMediaTargetRejectsInvalidRegionRules(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	handler := NewServer(task4Config(), service).Handler()
+	session, _ := task4AdminSession(t, service, store)
+
+	base := `"id":"media-bad-rules","name":"Bad rules","kind":"media_http","host":"media.example.com","path":"/manifest","timeout_ms":3000,"interval_seconds":60,"max_hops":20,"enabled":true`
+	for _, test := range []struct {
+		name  string
+		rules string
+	}{
+		{name: "region too long", rules: `[{"region":"aaaaaaaaaaaaaaaaX","contains":"geo"}]`},
+		{name: "region illegal characters", rules: `[{"region":"SG US","contains":"geo"}]`},
+		{name: "contains too long", rules: `[{"region":"SG","contains":"` + strings.Repeat("a", 129) + `"}]`},
+		{name: "contains control characters", rules: `[{"region":"SG","contains":"geo\nSG"}]`},
+		{name: "too many rules", rules: `[{"region":"SG","contains":"a"},{"region":"SG","contains":"b"},{"region":"SG","contains":"c"},{"region":"SG","contains":"d"},{"region":"SG","contains":"e"},{"region":"SG","contains":"f"},{"region":"SG","contains":"g"},{"region":"SG","contains":"h"},{"region":"SG","contains":"i"},{"region":"SG","contains":"j"},{"region":"SG","contains":"k"},{"region":"SG","contains":"l"},{"region":"SG","contains":"m"},{"region":"SG","contains":"n"},{"region":"SG","contains":"o"},{"region":"SG","contains":"p"},{"region":"SG","contains":"q"}]`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			csrf := task4CSRF(t, handler, session)
+			response, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/targets", `{"`+base+`","region_rules":`+test.rules+`}`)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("create with %s = %d %q, want 400", test.name, response.Code, response.Body.String())
+			}
+		})
+	}
+
+	rulesOnTCP, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, task4CSRF(t, handler, session), "/api/targets", `{"id":"tcp-bad-rules","name":"TCP rules","kind":"tcp","host":"example.com","port":443,"timeout_ms":3000,"max_hops":20,"interval_seconds":60,"enabled":true,"region_rules":[{"region":"SG","contains":"geo-SG"}]}`)
+	if rulesOnTCP.Code != http.StatusBadRequest {
+		t.Fatalf("tcp target with rules = %d %q, want 400", rulesOnTCP.Code, rulesOnTCP.Code)
+	}
+	if _, err := store.GetTarget(context.Background(), db.TargetKindTCP, "tcp-bad-rules"); err == nil {
+		t.Fatal("target with invalid rules was persisted")
+	}
+}
