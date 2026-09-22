@@ -3,8 +3,18 @@ import re
 
 
 ROOT = Path(__file__).parents[1]
-SOURCE = (ROOT / "src" / "main.jsx").read_text(encoding="utf-8")
-STYLES = (ROOT / "src" / "styles.css").read_text(encoding="utf-8")
+FRONTEND_SRC = ROOT / "src"
+# The console is split across src/main.jsx, src/App.jsx, src/components/ and
+# src/lib/; the security contract runs against every source file joined
+# together so the guarantees hold no matter how the UI is organised.
+SOURCE_FILES = sorted(
+    [path for path in FRONTEND_SRC.rglob("*.jsx") if path.is_file()]
+    + [path for path in FRONTEND_SRC.rglob("*.js") if path.is_file()]
+)
+assert SOURCE_FILES, "frontend src must contain jsx/js source files"
+SOURCE = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE_FILES)
+STYLES = (FRONTEND_SRC / "styles.css").read_text(encoding="utf-8")
+GUEST_VIEW = (FRONTEND_SRC / "components" / "GuestView.jsx").read_text(encoding="utf-8")
 INDEX = (ROOT / "index.html").read_text(encoding="utf-8")
 VITE_CONFIG = (ROOT / "vite.config.js").read_text(encoding="utf-8")
 SECURITY_DOC = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
@@ -190,9 +200,8 @@ def test_guest_view_uses_public_status_without_storage():
 
 
 def test_guest_view_does_not_call_management_apis():
-    guest_section = SOURCE[SOURCE.index("function GuestView"):SOURCE.index("function App")]
     for management_call in ("/api/nodes", "/api/alerts", "/api/overview", "/api/targets", "/api/csrf", "/checks/summary", "/traffic?period="):
-        assert management_call not in guest_section, f"guest view must not call {management_call}"
+        assert management_call not in GUEST_VIEW, f"guest view must not call {management_call}"
 
 
 def test_security_document_describes_public_status_boundary():
@@ -226,3 +235,96 @@ def test_totp_setup_secret_is_not_rendered_as_html_or_copied_to_clipboard():
     assert "dangerouslySetInnerHTML" not in SOURCE
     assert "clipboard" not in SOURCE.lower()
     assert "totp-secret" in SOURCE
+
+
+# ---- komari/Lite 风格重构（分栏面板）后的结构约束 ----
+
+
+def test_styles_define_design_tokens_and_reduced_motion():
+    assert ":root" in STYLES
+    for token in ("--bg-base", "--bg-panel", "--bg-raised", "--border", "--mint", "--amber", "--rose", "--text-1", "--text-2", "--text-3"):
+        assert token in STYLES, f"styles.css must define design token {token}"
+    assert "prefers-reduced-motion" in STYLES
+
+
+def test_topbar_has_clock_auto_refresh_interval_and_last_sync():
+    for marker in ("topbar-clock", "自动刷新", "refresh-interval", "最后同步", "REFRESH_OPTIONS = [10, 30, 60]"):
+        assert marker in SOURCE, f"topbar must expose {marker}"
+    assert "aria-pressed" in SOURCE
+    assert "localStorage" not in SOURCE
+    assert "sessionStorage" not in SOURCE
+
+
+def test_resource_and_history_polling_are_independent_and_pause_when_hidden():
+    assert "OVERVIEW_INTERVAL_MS = 300000" in SOURCE
+    assert "refreshInterval * 1000" in SOURCE
+    assert "visibilitychange" in SOURCE
+    assert "document.visibilityState" in SOURCE
+
+
+def test_overview_renders_six_stat_cards_with_sparklines():
+    assert "StatCard" in SOURCE
+    for label in ("节点在线", "平均延迟", "检测通过率", "今日流量", "CPU 平均", "内存平均"):
+        assert label in SOURCE, f"overview stat card {label} missing"
+    assert "stat-grid" in STYLES
+    assert "stat-card" in STYLES
+    assert "sparkline" in STYLES
+
+
+def test_overview_splits_node_table_and_side_rankings():
+    assert "overview-columns" in STYLES
+    assert "NodeTable" in SOURCE
+    assert "RankCard" in SOURCE
+    for rank in ("CPU 占用 Top5", "内存占用 Top5", "丢包 Top5", "最近告警"):
+        assert rank in SOURCE, f"side column ranking {rank} missing"
+
+
+def test_node_table_columns_cover_resources_network_loss_and_heartbeat():
+    for column in ("状态", "节点", "区域", "CPU", "内存", "磁盘", "网络 ↓/↑", "丢包率", "最后心跳"):
+        assert column in SOURCE, f"node table column {column} missing"
+    assert "node-table" in STYLES
+    assert "formatRate" in SOURCE
+
+
+def test_node_table_degrades_to_cards_on_mobile():
+    assert "node-card" in STYLES
+    assert "768px" in STYLES
+    assert ".node-table-wrap { display: none; }" in STYLES
+    assert ".node-card-list { display: none; }" in STYLES
+
+
+def test_sidebar_supports_collapse_and_mobile_drawer():
+    assert "sidebar-collapsed" in SOURCE
+    assert "sidebar-collapsed" in STYLES
+    assert "sidebar-open" in STYLES
+    assert "sidebar-backdrop" in STYLES
+    assert "折叠侧边栏" in SOURCE
+    assert "打开导航菜单" in SOURCE
+
+
+def test_guest_view_renders_public_big_screen_status():
+    assert "全部正常" in GUEST_VIEW
+    assert "部分异常" in GUEST_VIEW
+    assert "guest-stats-bar" in STYLES
+    assert "guest-node-grid" in STYLES
+    assert "guest-badge" in STYLES
+    # 公开页不展示单节点状态/在线时长等明细
+    assert "状态未公开" in GUEST_VIEW
+
+
+def test_node_detail_renders_gauges_history_chart_and_identity():
+    assert "RingGauge" in SOURCE
+    assert "DualLineChart" in SOURCE
+    assert "detail-identity" in STYLES
+    assert "ring-gauge" in STYLES
+    assert "dual-chart" in STYLES
+    for label in ("操作系统", "内核", "架构", "Agent 版本", "开始时间"):
+        assert label in SOURCE, f"node info row {label} missing"
+
+
+def test_drawer_stays_a_summary_dialog_without_full_analytics():
+    drawer = (FRONTEND_SRC / "components" / "NodeDrawer.jsx").read_text(encoding="utf-8")
+    assert 'role="dialog"' in drawer
+    assert "打开完整详情" in drawer
+    for management_call in ("/api/nodes", "/checks/summary", "/traffic?period=", "/resource/history"):
+        assert management_call not in drawer, f"summary drawer must not fetch {management_call}"

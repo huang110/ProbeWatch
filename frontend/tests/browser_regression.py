@@ -1,11 +1,14 @@
+import os
+import re
+
 from playwright.sync_api import sync_playwright
 
 
-BASE_URL = __import__("os").environ.get("PROBEWATCH_BASE_URL", "http://127.0.0.1:4173/")
+BASE_URL = os.environ.get("PROBEWATCH_BASE_URL", "http://127.0.0.1:4173/")
 
 
 def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200, media=None, media_status=200):
-    json = __import__("json")
+    import json
     empty_public_status = {"nodes": {"online": 0, "total": 0, "names": []}, "checks": {"success_rate": None, "avg_latency_ms": None}, "last_updated_at": None, "generated_at": "2026-09-22T00:00:00Z"}
     empty_traffic = {"period": "day", "window": {"from": "2026-09-21T00:00:00Z", "to": "2026-09-22T00:00:00Z"}, "rx_bytes": None, "tx_bytes": None, "rx_resets": 0, "tx_resets": 0, "interval_seconds": 3600, "series": []}
     page.route("**/api/me", lambda route: route.fulfill(status=me_status, content_type="application/json", body=("{}" if me is None else json.dumps(me))))
@@ -50,14 +53,11 @@ def run_regressions():
         browser = playwright.chromium.launch(headless=True)
         tests = []
         node = {"id": "node-1", "uuid": "uuid-1", "name": "测试节点", "status": "online", "last_reported_at": "2026-09-20T00:00:00Z", "resource": {"cpu_percent": 12.5, "memory_total_bytes": 100, "memory_used_bytes": 50}}
+        base_overview = {"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100, "avg_latency_ms": 42.7}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_rx_bytes_delta": 300, "network_tx_bytes_delta": 100, "network_history": [10, 20], "cpu_percent": 33.5, "memory_used_bytes": 4, "memory_total_bytes": 10}}
+        base_alerts = [{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}]
 
         page = browser.new_page()
-        install_api(
-            page,
-            nodes=[node],
-            alerts=[{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}],
-            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_history": [10, 20]}},
-        )
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
         page.goto(BASE_URL, wait_until="networkidle")
         page.locator(".nav-item").nth(3).click(force=True)
         page.locator(".subpage").wait_for()
@@ -67,18 +67,70 @@ def run_regressions():
         page.close()
 
         page = browser.new_page()
-        install_api(
-            page,
-            nodes=[node],
-            alerts=[{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}],
-            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_history": [10, 20]}},
-        )
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
+        page.goto(BASE_URL, wait_until="networkidle")
+        # 顶栏：当前时间、自动刷新开关、间隔选择、最后同步
+        clock_text = page.locator(".topbar-clock b").inner_text()
+        assert re.match(r"^\d{1,2}:\d{2}:\d{2}$", clock_text), f"unexpected clock text: {clock_text}"
+        toggle = page.locator(".refresh-toggle")
+        assert toggle.get_attribute("aria-pressed") == "true"
+        interval = page.locator(".refresh-interval")
+        assert interval.locator("option").count() == 3
+        assert [interval.locator("option").nth(i).get_attribute("value") for i in range(3)] == ["10", "30", "60"]
+        assert len(page.locator(".topbar .last-sync b").inner_text()) >= 1
+        toggle.click()
+        assert toggle.get_attribute("aria-pressed") == "false"
+        interval.select_option("10")
+        # 总览：6 个统计卡 + 右侧排行卡
+        assert page.locator(".stat-card").count() == 6
+        assert page.locator(".rank-card").count() == 3
+        assert page.locator(".recent-alerts-panel").count() == 1
+        headers = page.locator(".node-table thead th")
+        assert headers.count() == 10
+        assert headers.nth(6).inner_text() == "网络 ↓/↑"
+        assert headers.nth(7).inner_text() == "丢包率"
+        assert headers.nth(8).inner_text() == "最后心跳"
+        assert page.locator(".node-table tbody tr").count() == 1
+        tests.append("topbar-refresh-overview")
+        page.close()
+
+        page = browser.new_page()
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
         page.goto(BASE_URL, wait_until="networkidle")
         page.locator(".node-row").first.click()
         assert page.locator(".node-drawer").get_attribute("role") == "dialog"
         page.keyboard.press("Escape")
         assert page.locator(".node-drawer").count() == 0
         tests.append("dialog")
+        page.close()
+
+        page = browser.new_page()
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
+        page.goto(BASE_URL, wait_until="networkidle")
+        # 桌面端折叠成纯图标窄栏
+        assert "sidebar-collapsed" not in (page.locator(".sidebar").get_attribute("class") or "")
+        page.locator(".collapse-toggle").click()
+        assert "sidebar-collapsed" in (page.locator(".sidebar").get_attribute("class") or "")
+        page.locator(".collapse-toggle").click()
+        assert "sidebar-collapsed" not in (page.locator(".sidebar").get_attribute("class") or "")
+        tests.append("sidebar-collapse")
+        page.close()
+
+        page = browser.new_page()
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
+        page.goto(BASE_URL, wait_until="networkidle")
+        # 移动端（<768px）：表格隐藏，卡片展示且可打开抽屉
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert not page.locator(".node-table-wrap").is_visible()
+        card = page.locator(".node-card").first
+        card.wait_for()
+        assert card.is_visible()
+        assert "测试节点" in card.inner_text()
+        assert card.locator(".progress-track").count() == 3
+        card.click()
+        assert page.locator(".node-drawer").get_attribute("role") == "dialog"
+        page.keyboard.press("Escape")
+        tests.append("node-table-mobile-cards")
         page.close()
 
         page = browser.new_page()
@@ -94,12 +146,24 @@ def run_regressions():
         assert guest.get_by_text("42.7 ms", exact=True).count() == 1
         assert guest.get_by_text("98.5%", exact=True).count() == 1
         assert guest.get_by_text("edge-01", exact=True).count() == 1
+        assert guest.get_by_text("全部正常", exact=True).count() == 1
+        assert guest.locator(".guest-stats-bar").count() == 1
+        assert guest.locator(".guest-node-card").count() == 2
         assert page.locator(".side-nav").count() == 0
         assert page.locator(".node-row").count() == 0
         assert page.locator(".alert-item").count() == 0
         assert page.locator(".node-drawer").count() == 0
         assert guest.get_by_role("button", name="使用 GitHub 登录", exact=True).count() == 1
         tests.append("guest-view")
+        page.close()
+
+        page = browser.new_page()
+        install_api(page, me_status=401, public_status={"nodes": {"online": 1, "total": 2, "names": ["edge-01"]}, "checks": {"success_rate": None, "avg_latency_ms": None}, "last_updated_at": None, "generated_at": "2026-09-22T00:01:00Z"})
+        page.goto(BASE_URL, wait_until="networkidle")
+        guest = page.locator(".guest-shell")
+        guest.wait_for()
+        assert guest.get_by_text("部分异常", exact=True).count() == 1
+        tests.append("guest-view-degraded")
         page.close()
 
         page = browser.new_page()
@@ -121,16 +185,12 @@ def run_regressions():
         page.close()
 
         page = browser.new_page()
-        install_api(
-            page,
-            nodes=[node],
-            alerts=[{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}],
-            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_history": [10, 20]}},
-        )
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview)
         page.goto(BASE_URL, wait_until="networkidle")
         page.locator(".node-row").first.click()
         page.locator(".drawer-button").click()
         assert page.locator(".node-detail-page").count() == 1
+        assert page.locator(".ring-gauge").count() == 3
         assert page.get_by_text("12.5%").count() >= 1
         tests.append("node-detail")
         page.close()
@@ -147,18 +207,17 @@ def run_regressions():
             "week": {"period": "week", "window": {"from": "2026-09-15T00:00:00Z", "to": "2026-09-22T00:00:00Z"}, "rx_bytes": 3000000000, "tx_bytes": 500000000, "rx_resets": 2, "tx_resets": 0, "interval_seconds": 86400, "series": [{"time": f"2026-09-{15 + day_offset:02d}T00:00:00Z", "rx_bytes": 400000000 * (day_offset + 1), "tx_bytes": 70000000 * (day_offset + 1)} for day_offset in range(7)]},
             "month": {"period": "month", "window": {"from": "2026-08-23T00:00:00Z", "to": "2026-09-22T00:00:00Z"}, "rx_bytes": None, "tx_bytes": None, "rx_resets": 0, "tx_resets": 0, "interval_seconds": 86400, "series": []},
         }
-        install_api(
-            page,
-            nodes=[node],
-            alerts=[{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}],
-            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_history": [10, 20]}},
-            checks=checks,
-            traffic=traffic_by_period,
-        )
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview, checks=checks, traffic=traffic_by_period)
         page.goto(BASE_URL, wait_until="networkidle")
         page.locator(".node-row").first.click()
         drawer = page.locator(".node-drawer")
-        table = drawer.locator(".checks-table")
+        drawer.get_by_text("资源摘要", exact=True).wait_for()
+        assert drawer.get_by_text("打开完整详情", exact=True).count() == 1
+        assert drawer.locator(".checks-table").count() == 0
+        drawer.locator(".drawer-button").click()
+        detail = page.locator(".node-detail-page")
+        assert detail.count() == 1
+        table = detail.locator(".checks-table")
         table.wait_for()
         rows = table.locator("tbody tr")
         assert rows.count() == 3
@@ -181,20 +240,19 @@ def run_regressions():
         assert third_row.locator("td").nth(3).inner_text() == "—"
         assert third_row.locator("td").nth(5).inner_text() == "—"
         assert "checks-row-warning" not in (third_row.get_attribute("class") or "")
-        assert drawer.get_by_text("1.4 GB", exact=True).count() >= 1
-        assert drawer.get_by_text("238 MB", exact=True).count() >= 1
-        assert drawer.get_by_text("计数器重置 1 次", exact=True).count() == 1
-        assert drawer.locator(".traffic-bar-rx").count() >= 1
-        assert drawer.locator(".traffic-bar-tx").count() >= 1
-        week_button = drawer.get_by_role("button", name="周", exact=True)
+        assert detail.get_by_text("1.4 GB", exact=True).count() >= 1
+        assert detail.get_by_text("238 MB", exact=True).count() >= 1
+        assert detail.get_by_text("计数器重置 1 次", exact=True).count() == 1
+        assert detail.locator(".traffic-bar-rx").count() >= 1
+        assert detail.locator(".traffic-bar-tx").count() >= 1
+        week_button = detail.get_by_role("button", name="周", exact=True)
         week_button.click()
-        drawer.get_by_text("2.8 GB", exact=True).first.wait_for()
+        detail.get_by_text("2.8 GB", exact=True).first.wait_for()
         assert "filter-active" in (week_button.get_attribute("class") or "")
-        assert drawer.get_by_text("计数器重置 2 次", exact=True).count() == 1
-        drawer.locator(".drawer-button").click()
-        assert page.locator(".node-detail-page").count() == 1
-        assert page.locator(".node-detail-page .checks-table").count() == 1
-        assert page.get_by_text("2.8 GB", exact=True).count() >= 1
+        assert detail.get_by_text("计数器重置 2 次", exact=True).count() == 1
+        # 节点信息区（OS/内核/架构/Agent 版本/开始时间）
+        for label in ("操作系统", "内核", "架构", "Agent 版本", "开始时间"):
+            assert detail.get_by_text(label, exact=True).count() == 1
         tests.append("node-analytics")
         page.close()
 
@@ -202,16 +260,17 @@ def run_regressions():
         install_api(
             page,
             nodes=[node],
-            alerts=[{"id": "alert-1", "severity": "warning", "title": "测试告警", "message": "测试告警详情", "status": "open", "last_seen": "2026-09-20T00:00:00Z", "occurrence_count": 1}],
-            overview={"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_history": [10, 20]}},
+            alerts=base_alerts,
+            overview=base_overview,
             checks_status=503,
             traffic_status=503,
         )
         page.goto(BASE_URL, wait_until="networkidle")
         page.locator(".node-row").first.click()
-        drawer = page.locator(".node-drawer")
-        drawer.get_by_text("暂无数据", exact=True).first.wait_for()
-        assert drawer.get_by_text("暂无数据", exact=True).count() >= 2
+        page.locator(".drawer-button").click()
+        detail = page.locator(".node-detail-page")
+        detail.get_by_text("暂无数据", exact=True).first.wait_for()
+        assert detail.get_by_text("暂无数据", exact=True).count() >= 2
         assert page.locator(".api-state").count() == 0
         tests.append("node-analytics-failure")
         page.close()
