@@ -1,5 +1,5 @@
 import { ChartLineUp, CircleNotch, Pulse } from '@phosphor-icons/react'
-import { numeric, safeArray, safeObject, formatAlertTime, formatTimeOfDay } from '../lib/format.js'
+import { numeric, safeArray, safeObject, safeText, formatAlertTime, formatTimeOfDay } from '../lib/format.js'
 
 // 游客状态页：大屏风格，仅展示 /api/public/status 的脱敏聚合数据。
 // 公开 API 不含单节点状态或在线时长，节点卡片只展示脱敏名称与装饰色环。
