@@ -66,7 +66,8 @@ h1, h2, h3, p { margin-top: 0; }
 .api-state-auth .button { margin-left: auto; }
 
 /* ---------- 应用骨架 ---------- */
-.app-shell { min-height: 100dvh; display: flex; background: radial-gradient(circle at 82% -18%, rgba(90, 216, 174, .07), transparent 38%), var(--bg-base); }
+.app-shell { min-height: 100dvh; display: flex; background: radial-gradient(circle at 82% -18%, rgba(90, 216, 174, .08), transparent 40%), radial-gradient(circle at -10% 110%, rgba(108, 184, 232, .05), transparent 42%), var(--bg-base); }
+.content-wrap { position: relative; }
 .main-content { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .content-wrap { width: 100%; max-width: 1460px; margin: 0 auto; padding: 30px 34px 26px; }
 .content-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 24px; color: var(--text-3); font-size: 10px; }
@@ -152,6 +153,8 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
 .heading-actions { display: flex; align-items: center; gap: 18px; }
 
 /* ---------- 统计卡 ---------- */
+.stat-grid > article { transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease; }
+.stat-grid > article:hover { transform: translateY(-2px); border-color: rgba(90, 216, 174, .28); box-shadow: 0 14px 34px rgba(0, 0, 0, .32); }
 .stat-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
 .stat-card, .panel { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-bg); box-shadow: var(--shadow-card); }
 .stat-card { min-width: 0; min-height: 132px; padding: 15px 15px 12px; overflow: hidden; }
@@ -199,19 +202,19 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
 /* ---------- 节点表（桌面端） ---------- */
 .table-scroll { max-width: 100%; overflow-x: auto; }
 .node-table-wrap { margin-top: 4px; }
-.node-table { width: 100%; min-width: 860px; border-collapse: collapse; }
-.node-table th { padding: 9px 10px; border-bottom: 1px solid var(--border-strong); color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .1em; font-weight: 400; text-align: left; white-space: nowrap; }
-.node-table td { padding: 11px 10px; border-top: 1px solid var(--border); color: var(--text-2); font: 11px var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.node-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.node-table th { padding: 8px 8px; border-bottom: 1px solid var(--border-strong); color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .1em; font-weight: 400; text-align: left; white-space: nowrap; }
+.node-table td { padding: 9px 8px; border-top: 1px solid var(--border); color: var(--text-2); font: 11px var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .node-table tbody tr:first-child td { border-top: 0; }
-.node-row { cursor: pointer; transition: background 160ms ease; }
-.node-row:hover, .node-row:focus-visible { background: rgba(255, 255, 255, .035); }
+.node-row { cursor: pointer; box-shadow: inset 2px 0 transparent; transition: background 160ms ease, box-shadow 160ms ease; }
+.node-row:hover, .node-row:focus-visible { background: rgba(255, 255, 255, .04); box-shadow: inset 2px 0 rgba(90, 216, 174, .55); }
 .node-row-selected { background: rgba(90, 216, 174, .06); }
 .node-cell-status { width: 34px; }
 .node-cell-name { min-width: 170px; }
 .node-cell-name { display: flex; align-items: center; gap: 10px; }
 .node-cell-name .node-name-text { display: flex; flex-direction: column; min-width: 0; }
 .node-cell-name strong { overflow: hidden; color: var(--text-1); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.node-cell-name small { overflow: hidden; color: var(--text-3); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.node-cell-name small { max-width: 150px; overflow: hidden; color: var(--text-3); font: 9px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .node-avatar { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 9px; font-size: 11px; font-weight: 800; }
 .node-avatar-mint { color: #86e7c4; background: #14352e; }
 .node-avatar-blue { color: #93cdec; background: #16303e; }
@@ -220,7 +223,7 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
 .node-avatar-violet { color: #cfbcf2; background: #2b2542; }
 .node-avatar-gray { color: #9aa7a8; background: #232c30; }
 .node-avatar-lg { width: 46px; height: 46px; border-radius: 13px; font-size: 17px; }
-.node-cell-region { max-width: 160px; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.node-cell-region { max-width: 130px; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 .cell-meter { color: var(--text-2); }
 .cell-meter-hot { color: var(--amber); }
 .node-cell-network { display: flex; flex-direction: column; gap: 2px; }
@@ -432,7 +435,9 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
 @media (max-width: 1100px) {
   :root { --sidebar-width: 210px; }
   .topbar, .content-wrap { padding-left: 24px; padding-right: 24px; }
-  .stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat-grid > article { transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease; }
+.stat-grid > article:hover { transform: translateY(-2px); border-color: rgba(90, 216, 174, .28); box-shadow: 0 14px 34px rgba(0, 0, 0, .32); }
+.stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-columns { grid-template-columns: 1fr; }
   .sync-state { display: none; }
   .topbar-clock { display: none; }
@@ -451,7 +456,9 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
   .content-wrap { padding: 22px 16px 20px; }
   .page-heading, .subpage-heading { align-items: start; flex-direction: column; gap: 16px; }
   .heading-actions { width: 100%; justify-content: space-between; }
-  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-grid > article { transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease; }
+.stat-grid > article:hover { transform: translateY(-2px); border-color: rgba(90, 216, 174, .28); box-shadow: 0 14px 34px rgba(0, 0, 0, .32); }
+.stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .panel { padding: 15px; }
   .guest-shell { padding: 24px 16px 20px; }
   .guest-stats-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
