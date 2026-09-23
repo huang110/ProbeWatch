@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, CaretLineLeft, CaretLineRight, Clock, DotsThree, List, Pulse } from '@phosphor-icons/react'
+import { Bell, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay } from './lib/format.js'
-import { fetchCsrfToken, fetchGuestStatus } from './lib/api.js'
+import { fetchCsrfToken, fetchGuestStatus, performLogout } from './lib/api.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { NodeDetailPage } from './components/NodeDetailPage.jsx'
 import { OverviewPage } from './components/OverviewPage.jsx'
@@ -24,7 +24,7 @@ const REFRESH_OPTIONS = [10, 30, 60]
 const OVERVIEW_INTERVAL_MS = 300000
 const pageTitleFor = (page) => page === 'node-detail' ? '节点详情' : navItems.find((item) => item.id === page)?.label || ({ targets: '检测目标', settings: '系统设置' }[page] || '总览')
 
-function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav }) {
+function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout }) {
   return <header className="topbar">
     <div className="topbar-left">
       <button className="icon-button mobile-menu" aria-label="打开导航菜单" onClick={onOpenMobileNav}><List size={19} /></button>
@@ -32,6 +32,10 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
       <div className="breadcrumb"><span>监控</span><span className="breadcrumb-slash">/</span><strong>{pageTitleFor(activeNav)}</strong></div>
     </div>
     <div className="top-actions">
+      <button type="button" className="button button-quiet btn-sm top-guest-btn" onClick={onSwitchToGuest} title="切换至访客视角的只读监控大屏">
+        <Eye size={15} />
+        <span>游客模式</span>
+      </button>
       <div className="refresh-controls" role="group" aria-label="全局自动刷新">
         <button type="button" className={`refresh-toggle ${autoRefresh ? 'refresh-on' : ''}`} aria-pressed={autoRefresh} onClick={onToggleRefresh}><span className="refresh-toggle-dot" aria-hidden="true" />自动刷新</button>
         <select className="refresh-interval" value={refreshInterval} onChange={(event) => onIntervalChange(Number(event.target.value))} aria-label="自动刷新间隔">
@@ -41,12 +45,18 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
       <span className="last-sync">最后同步 <b>{lastSyncText}</b></span>
       <span className="sync-state"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? 'API 已连接' : 'API 状态未知'}</span>
       <button className="icon-button" aria-label="查看告警" onClick={() => onNavigate('alerts')}><Bell size={19} /></button>
-      <button className="profile-avatar profile-avatar-top" aria-label="当前用户">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</button>
+      <button type="button" className="button button-quiet btn-sm text-rose top-logout-btn" onClick={onLogout} title="退出当前管理员登录">
+        <SignOut size={15} />
+        <span>退出</span>
+      </button>
+      <div className="profile-avatar profile-avatar-top" title={`当前登录: ${me?.login || 'Admin'}`}>
+        {me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}
+      </div>
     </div>
   </header>
 }
 
-function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
+function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleCollapse, mobileOpen, onCloseMobile, onSwitchToGuest, onLogout }) {
   return <>
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''} ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="侧边栏">
       <div className="sidebar-head">
@@ -60,10 +70,27 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
         <span className="nav-section-label nav-section-spaced">配置</span>
         <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
         <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('settings')}><Database size={18} /><span>系统设置</span></button>
+        <span className="nav-section-label nav-section-spaced">模式切换</span>
+        <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
         <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.1.0</span></div>
-        <div className="profile-row"><div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div><div className="profile-text"><strong>{me?.login || me?.name || '未登录'}</strong><span>{me ? 'GitHub 会话' : '未认证'}</span></div><DotsThree size={20} className="muted" /></div>
+        <div className="profile-row">
+          <div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
+          <div className="profile-text">
+            <strong>{me?.login || me?.name || '未登录'}</strong>
+            <span>{me?.provider === 'local' ? '本地管理员' : me ? 'GitHub 会话' : '未认证'}</span>
+          </div>
+          <button
+            type="button"
+            className="icon-button btn-logout-sidebar text-rose"
+            onClick={onLogout}
+            title="退出登录"
+            aria-label="退出登录"
+          >
+            <SignOut size={17} />
+          </button>
+        </div>
       </div>
     </aside>
     {mobileOpen && <div className="sidebar-backdrop" onClick={onCloseMobile} aria-hidden="true" />}
@@ -96,6 +123,7 @@ export function App() {
   const [apiState, setApiState] = useState({ kind: 'loading', message: '正在加载 API 数据…' })
   const [me, setMe] = useState(null)
   const [publicStatus, setPublicStatus] = useState(null)
+  const [guestPreview, setGuestPreview] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshInterval, setRefreshInterval] = useState(30)
@@ -312,11 +340,48 @@ export function App() {
   const clockText = formatTimeOfDay(clock)
 
   if (window.location.pathname === '/login/2fa') return <TOTPVerifyPage />
-  if (apiState.kind === 'guest') return <GuestView status={publicStatus} isRefreshing={isRefreshing} onRefresh={refreshAll} onLoginSuccess={refreshAll} />
+  if (guestPreview || apiState.kind === 'guest') {
+    return (
+      <GuestView
+        status={publicStatus}
+        isRefreshing={isRefreshing}
+        onRefresh={refreshAll}
+        onLoginSuccess={() => { setGuestPreview(false); refreshAll() }}
+        isPreview={guestPreview}
+        onExitPreview={() => setGuestPreview(false)}
+        onLogout={performLogout}
+      />
+    )
+  }
   return <div className="app-shell">
-    <Sidebar activeNav={activeNav} onNavigate={navigate} me={me} apiState={apiState} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
+    <Sidebar
+      activeNav={activeNav}
+      onNavigate={navigate}
+      me={me}
+      apiState={apiState}
+      collapsed={sidebarCollapsed}
+      onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
+      mobileOpen={mobileNavOpen}
+      onCloseMobile={() => setMobileNavOpen(false)}
+      onSwitchToGuest={() => setGuestPreview(true)}
+      onLogout={performLogout}
+    />
     <main className="main-content">
-      <Topbar activeNav={activeNav} clockText={clockText} autoRefresh={autoRefresh} refreshInterval={refreshInterval} onToggleRefresh={() => setAutoRefresh((value) => !value)} onIntervalChange={setRefreshInterval} lastSyncText={lastSyncText} apiState={apiState} me={me} onNavigate={navigate} onOpenMobileNav={() => setMobileNavOpen(true)} />
+      <Topbar
+        activeNav={activeNav}
+        clockText={clockText}
+        autoRefresh={autoRefresh}
+        refreshInterval={refreshInterval}
+        onToggleRefresh={() => setAutoRefresh((value) => !value)}
+        onIntervalChange={setRefreshInterval}
+        lastSyncText={lastSyncText}
+        apiState={apiState}
+        me={me}
+        onNavigate={navigate}
+        onOpenMobileNav={() => setMobileNavOpen(true)}
+        onSwitchToGuest={() => setGuestPreview(true)}
+        onLogout={performLogout}
+      />
       <div className="content-wrap">
         {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
           : activeNav === 'node-detail' && detailNode ? <NodeDetailPage node={detailNode} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />

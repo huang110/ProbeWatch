@@ -2225,5 +2225,132 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
   .form-grid-mtr { grid-template-columns: 1fr; }
 }
 
+/* ============================================================
+   游客模式切换与退出登录增强样式
+   ============================================================ */
+
+/* 顶部游客预览浮条 */
+.guest-preview-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 24px;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(6, 78, 59, 0.4));
+  border-bottom: 1px solid rgba(52, 211, 153, 0.35);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  animation: slide-down 200ms ease;
+}
+
+@keyframes slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.preview-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #ecfdf5;
+}
+
+.preview-banner-left strong {
+  color: #34d399;
+}
+
+.preview-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 侧边栏退出按钮 */
+.btn-logout-sidebar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.btn-logout-sidebar:hover {
+  color: #f43f5e;
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+/* 顶栏快速切换与退出按钮 */
+.top-guest-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  transition: all 160ms ease;
+}
+
+.top-guest-btn:hover {
+  color: var(--mint);
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.top-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: #f43f5e !important;
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  background: rgba(244, 63, 94, 0.06);
+  transition: all 160ms ease;
+}
+
+.top-logout-btn:hover {
+  background: rgba(244, 63, 94, 0.16);
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.nav-item-guest-switch {
+  color: var(--text-2);
+}
+
+.nav-item-guest-switch:hover {
+  color: var(--mint);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+@media (max-width: 640px) {
+  .guest-preview-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+  .preview-banner-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 
 

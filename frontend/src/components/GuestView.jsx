@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowClockwise, CheckCircle, CircleNotch, Eye, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { StatusDot, UptimeBars } from './Common.jsx'
 
-export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
+export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
@@ -63,6 +63,26 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
 
   return (
     <main className="guest-shell guest-mjj-shell">
+      {/* 游客预览横幅（仅在管理员预览时呈现） */}
+      {isPreview && (
+        <div className="guest-preview-banner">
+          <div className="preview-banner-left">
+            <Eye size={17} weight="bold" className="text-mint" />
+            <span>您当前处于<strong>「游客大屏模式」</strong>（访客将直接看到此只读页面）</span>
+          </div>
+          <div className="preview-banner-right">
+            <button type="button" className="button button-primary btn-sm" onClick={onExitPreview} title="返回管理后台">
+              <SquaresFour size={15} weight="bold" />
+              <span>返回管理后台</span>
+            </button>
+            <button type="button" className="button button-quiet btn-sm text-rose" onClick={onLogout} title="退出当前登录">
+              <SignOut size={15} />
+              <span>退出登录</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 顶部导航 */}
       <header className="guest-header">
         <div className="brand-lockup">
@@ -80,10 +100,23 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
             {isRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
             {isRefreshing ? '正在同步…' : '刷新数据'}
           </button>
-          <button className="button button-primary" onClick={() => { setLoginError(''); setShowLogin(true) }}>
-            <SignIn size={16} weight="bold" />
-            <span>管理员登录</span>
-          </button>
+          {isPreview ? (
+            <>
+              <button className="button button-primary" onClick={onExitPreview} title="返回管理员控制台">
+                <SquaresFour size={16} weight="bold" />
+                <span>返回管理后台</span>
+              </button>
+              <button className="button button-quiet text-rose" onClick={onLogout} title="退出管理员登录">
+                <SignOut size={16} />
+                <span>退出登录</span>
+              </button>
+            </>
+          ) : (
+            <button className="button button-primary" onClick={() => { setLoginError(''); setShowLogin(true) }}>
+              <SignIn size={16} weight="bold" />
+              <span>管理员登录</span>
+            </button>
+          )}
         </div>
       </header>
 

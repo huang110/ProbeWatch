@@ -23,3 +23,21 @@ export async function fetchCsrfToken() {
   } catch {}
   throw new Error('csrf')
 }
+
+export async function performLogout() {
+  try {
+    const csrfToken = await fetchCsrfToken()
+    await fetch('/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      body: '{}',
+    })
+  } catch (error) {
+    console.error('Logout error:', error)
+  }
+  window.location.href = '/'
+}
