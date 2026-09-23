@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bell, CaretLineLeft, CaretLineRight, Clock, DotsThree, List, Pulse } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay } from './lib/format.js'
-import { fetchGuestStatus } from './lib/api.js'
+import { fetchCsrfToken, fetchGuestStatus } from './lib/api.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { NodeDetailPage } from './components/NodeDetailPage.jsx'
 import { OverviewPage } from './components/OverviewPage.jsx'
@@ -291,11 +291,7 @@ export function App() {
   const ackAlert = async (id) => {
     setAckingId(id)
     try {
-      const csrfResponse = await fetch('/api/csrf', { credentials: 'same-origin' })
-      if (csrfResponse.status === 401) throw new Error('auth')
-      if (!csrfResponse.ok) throw new Error('csrf')
-      const csrfToken = csrfResponse.headers.get('X-CSRF-Token')
-      if (!csrfToken) throw new Error('csrf')
+      const csrfToken = await fetchCsrfToken()
       const response = await fetch(`/api/alerts/${encodeURIComponent(id)}/ack`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: '{}' })
       if (response.status === 401) throw new Error('auth')
       if (response.status === 403) throw new Error('forbidden')

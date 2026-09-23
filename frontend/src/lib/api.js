@@ -16,6 +16,10 @@ export async function fetchCsrfToken() {
   if (response.status === 401) throw new Error('auth')
   if (!response.ok) throw new Error('csrf')
   const token = response.headers.get('X-CSRF-Token')
-  if (!token) throw new Error('csrf')
-  return token
+  if (token) return token
+  try {
+    const data = await response.json()
+    if (data?.token) return data.token
+  } catch {}
+  throw new Error('csrf')
 }

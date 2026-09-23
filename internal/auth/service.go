@@ -325,6 +325,7 @@ func (s *Service) CSRFHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-CSRF-Token", token)
 	_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
