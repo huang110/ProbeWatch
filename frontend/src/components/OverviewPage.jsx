@@ -57,7 +57,7 @@ export function OverviewPage({ data, overview, alerts, lossRates = {}, rates = {
     </section>
     <section className="overview-columns">
       <div className="panel panel-nodes">
-        <div className="panel-header"><div><h2>节点列表</h2><p>桌面端表格 · 移动端卡片 · 点击行打开摘要</p></div><button className="text-button" onClick={() => onNavigate('nodes')}>查看全部 <ArrowUpRight size={15} /></button></div>
+        <div className="panel-header"><div><h2>受控服务器节点</h2><p>哪吒风格卡片与紧凑表格双视图 · 点击查看小鸡体检详情</p></div><button className="text-button" onClick={() => onNavigate('nodes')}>查看全部 <ArrowUpRight size={15} /></button></div>
         <div className="node-toolbar">
           <label className="search-field"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索节点或 ID" aria-label="搜索节点" /></label>
           <div className="filter-group" role="group" aria-label="节点状态筛选">{['全部', '在线', '需关注', '离线'].map((item) => <button key={item} type="button" className={filter === item ? 'filter-active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div>

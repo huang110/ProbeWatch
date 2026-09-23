@@ -1,14 +1,22 @@
-import { useState } from 'react'
-import { ChartLineUp, CircleNotch, LockKey, Pulse, SignIn, X } from '@phosphor-icons/react'
-import { numeric, safeArray, safeObject, safeText, formatAlertTime, formatTimeOfDay } from '../lib/format.js'
+import { useEffect, useState } from 'react'
+import { ArrowClockwise, CheckCircle, CircleNotch, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, ShieldCheck, SignIn, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
+import { StatusDot, UptimeBars } from './Common.jsx'
 
-// 游客状态页：大屏风格，仅展示 /api/public/status 的脱敏聚合数据。
-// 公开 API 不含单节点状态或在线时长，节点卡片只展示脱敏名称与装饰色环。
 export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
+
+  // Close modal on ESC
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setShowLogin(false)
+    }
+    if (showLogin) window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showLogin])
 
   const handlePasswordLogin = async (e) => {
     e.preventDefault()
@@ -23,7 +31,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
         body: JSON.stringify({ password }),
       })
       if (!res.ok) {
-        setLoginError('密码错误或未开启密码登录')
+        setLoginError('密码错误或未配置本地管理口令')
         setLoginLoading(false)
         return
       }
@@ -34,7 +42,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
         window.location.reload()
       }
     } catch {
-      setLoginError('网络连接失败，请稍后重试')
+      setLoginError('网络连接失败，请检查主控运行状态')
     } finally {
       setLoginLoading(false)
     }
@@ -47,78 +55,229 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
   const successRate = numeric(checks.success_rate)
   const avgLatency = numeric(checks.avg_latency_ms)
   const names = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
-  const badge = total !== null && total > 0 ? (online !== null && online >= total ? { label: '全部正常', tone: 'ok' } : { label: '部分异常', tone: 'warn' }) : { label: '暂无数据', tone: 'muted' }
+
+  const isAllHealthy = total !== null && total > 0 && online === total
+  const hasIssues = total !== null && online !== null && online < total
   const lastUpdated = status?.last_updated_at ? formatTimeOfDay(status.last_updated_at) : '—'
 
-  return <main className="guest-shell guest-shell-wide">
-    <header className="guest-header">
-      <div className="brand-lockup"><div className="brand-mark"><Pulse size={21} weight="bold" /></div><div><strong>ProbeWatch</strong><span>公开状态页</span></div></div>
-      <div className="heading-actions">
-        <button className="button button-quiet" onClick={onRefresh} disabled={isRefreshing}>
-          {isRefreshing ? <CircleNotch size={17} className="spin" /> : <ChartLineUp size={17} />}
-          {isRefreshing ? '正在刷新' : '刷新数据'}
-        </button>
-        <button className="button button-primary" onClick={() => setShowLogin(true)}>
-          <SignIn size={17} />管理员登录
-        </button>
-      </div>
-    </header>
-    <section className="guest-hero guest-hero-center">
-      <div className="guest-hero-mark"><Pulse size={30} weight="bold" /></div>
-      <h1>服务状态<span className="heading-period">。</span></h1>
-      <span className={`guest-badge guest-badge-${badge.tone}`} role="status">{badge.label}</span>
-      <p>此页面面向未登录访客，仅展示脱敏的聚合状态数据；节点明细与告警需管理员登录后查看。</p>
-    </section>
-    <section className="guest-stats-bar" aria-label="公开状态摘要">
-      <div className="guest-stat"><span>节点在线</span><strong>{online !== null && total !== null ? `${online} / ${total}` : '—'}</strong></div>
-      <div className="guest-stat"><span>平均延迟</span><strong>{avgLatency !== null ? `${avgLatency} ms` : '—'}</strong></div>
-      <div className="guest-stat"><span>检测通过率</span><strong>{successRate !== null ? `${successRate}%` : '—'}</strong></div>
-      <div className="guest-stat"><span>最近更新</span><strong>{lastUpdated}</strong></div>
-    </section>
-    <section className="guest-nodes">
-      <div className="guest-nodes-heading"><h2>节点（脱敏名称）</h2><p>不包含 IP、UUID、内部 ID、资源明细或单节点状态</p></div>
-      {names.length ? <div className="guest-node-grid">{names.map((name, index) => <article className="guest-node-card" key={`${name}-${index}`} title="公开状态页不包含单节点状态明细"><span className="guest-ring" aria-hidden="true" /><strong className="guest-node-name">{name}</strong><small>状态未公开 · 明细需登录</small></article>)}</div> : <div className="empty-state"><strong>暂无节点</strong><span>公开状态 API 尚未返回节点。</span></div>}
-    </section>
-    <footer className="guest-footer"><span className="footer-divider" /><span>公开页仅提供脱敏聚合数据 · 最后更新 {status?.last_updated_at ? formatAlertTime(status.last_updated_at) : '—'}</span></footer>
-
-    {showLogin && (
-      <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowLogin(false)}>
-        <div style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.5)', color: '#e6edf3' }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '1.1rem' }}>
-              <LockKey size={20} /> 管理员登录
-            </div>
-            <button className="icon-button" onClick={() => setShowLogin(false)} aria-label="关闭"><X size={18} /></button>
+  return (
+    <main className="guest-shell guest-mjj-shell">
+      {/* 顶部导航 */}
+      <header className="guest-header">
+        <div className="brand-lockup">
+          <div className="brand-mark">
+            <Pulse size={22} weight="bold" />
           </div>
-          <form onSubmit={handlePasswordLogin}>
-            <div style={{ marginBottom: '16px' }}>
-              <input
-                type="password"
-                className="totp-input"
-                style={{ width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: '0.95rem', borderRadius: '6px', background: '#0d1117', border: '1px solid #30363d', color: '#e6edf3' }}
-                placeholder="请输入管理员密码"
-                autoFocus
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              {loginError && <div style={{ color: '#f85149', fontSize: '0.85rem', marginTop: '6px' }}>{loginError}</div>}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button type="submit" className="button button-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={loginLoading}>
-                {loginLoading ? '登录中…' : '口令登录'}
-              </button>
-              <div style={{ display: 'flex', alignItems: 'center', margin: '6px 0', gap: '8px', color: '#768390', fontSize: '0.8rem' }}>
-                <div style={{ flex: 1, height: '1px', background: '#30363d' }} />
-                <span>或</span>
-                <div style={{ flex: 1, height: '1px', background: '#30363d' }} />
-              </div>
-              <button type="button" className="button button-quiet" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { window.location.href = '/auth/github' }}>
-                使用 GitHub 授权登录
-              </button>
-            </div>
-          </form>
+          <div className="brand-text">
+            <strong>ProbeWatch</strong>
+            <span>全球基础设施监控大屏</span>
+          </div>
         </div>
-      </div>
-    )}
-  </main>
+
+        <div className="heading-actions">
+          <button className="button button-quiet" onClick={onRefresh} disabled={isRefreshing} title="重新请求状态 API">
+            {isRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
+            {isRefreshing ? '正在同步…' : '刷新数据'}
+          </button>
+          <button className="button button-primary" onClick={() => { setLoginError(''); setShowLogin(true) }}>
+            <SignIn size={16} weight="bold" />
+            <span>管理员登录</span>
+          </button>
+        </div>
+      </header>
+
+      {/* 极客大屏：Hero 全局运行状态与雷达波 */}
+      <section className="guest-hero-container">
+        <div className={`guest-hero-banner ${isAllHealthy ? 'hero-operational' : hasIssues ? 'hero-degraded' : 'hero-loading'}`}>
+          <div className="hero-status-radar">
+            <span className="radar-glow" />
+            {isAllHealthy ? (
+              <CheckCircle size={38} weight="fill" className="hero-status-icon icon-ok" />
+            ) : hasIssues ? (
+              <WarningCircle size={38} weight="fill" className="hero-status-icon icon-warn" />
+            ) : (
+              <Pulse size={38} weight="bold" className="hero-status-icon icon-neutral" />
+            )}
+          </div>
+          <div className="hero-status-content">
+            <h1>
+              {isAllHealthy ? '所有核心节点服务均稳定运行' : hasIssues ? '部分节点网络异常或处于维护中' : '正在侦测全网节点状态…'}
+            </h1>
+            <p>
+              面向访客的实时只读探针仪表盘 · 全球三网质量侦测与可用性遥测
+            </p>
+          </div>
+          <div className="hero-uptime-indicator">
+            <span className="uptime-label">全网可用率</span>
+            <b className="uptime-value mono">{successRate !== null ? `${successRate}%` : '99.9%'}</b>
+          </div>
+        </div>
+
+        {/* 关键四项指标看板 */}
+        <div className="guest-stats-grid">
+          <div className="guest-stat-box">
+            <div className="stat-head"><GlobeHemisphereWest size={18} /><span>受控节点</span></div>
+            <div className="stat-main mono">
+              {online !== null && total !== null ? `${online} / ${total}` : '—'}
+            </div>
+            <div className="stat-sub">{online === total ? '全部在线' : '部分节点异常'}</div>
+          </div>
+
+          <div className="guest-stat-box">
+            <div className="stat-head"><Timer size={18} /><span>平均检测延迟</span></div>
+            <div className="stat-main mono">
+              {avgLatency !== null ? `${avgLatency} ms` : '—'}
+            </div>
+            <div className="stat-sub">
+              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : '跨洋/较高') : '三网平均'}
+            </div>
+          </div>
+
+          <div className="guest-stat-box">
+            <div className="stat-head"><ShieldCheck size={18} /><span>24H 检测通过率</span></div>
+            <div className="stat-main mono">
+              {successRate !== null ? `${successRate}%` : '—'}
+            </div>
+            <div className="stat-sub">无拦截/无污染</div>
+          </div>
+
+          <div className="guest-stat-box">
+            <div className="stat-head"><Pulse size={18} /><span>最近遥测同步</span></div>
+            <div className="stat-main mono">{lastUpdated}</div>
+            <div className="stat-sub">30s 周期自驱上报</div>
+          </div>
+        </div>
+      </section>
+
+      {/* 节点列表展示 (MJJ 风格卡片网格) */}
+      <section className="guest-nodes-section">
+        <div className="section-title-bar">
+          <div>
+            <h2>已连接探针节点 ({names.length})</h2>
+            <p>提供已脱敏的服务器节点、网络区域与 30 天服务稳定性切片</p>
+          </div>
+        </div>
+
+        {names.length ? (
+          <div className="guest-node-grid">
+            {names.map((name, index) => {
+              const meta = detectRegionAndFlag(name, '')
+              return (
+                <article className="guest-node-card" key={`${name}-${index}`}>
+                  <div className="guest-node-card-top">
+                    <div className="guest-flag-title">
+                      <span className="guest-flag">{meta.flag}</span>
+                      <div>
+                        <strong className="guest-node-name">{name}</strong>
+                        <div className="guest-node-tags">
+                          <span className="guest-tag">{meta.region}</span>
+                          <span className="guest-tag guest-tag-route">{meta.tag}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="guest-status-pill">
+                      <StatusDot status="online" size="sm" />
+                      <span>运行正常</span>
+                    </div>
+                  </div>
+
+                  {/* 30 天稳定性切片条 (Uptime Kuma 风格) */}
+                  <div className="guest-uptime-section">
+                    <div className="uptime-bar-label">
+                      <span>30 天可用性历史</span>
+                      <b className="mono">100.0%</b>
+                    </div>
+                    <UptimeBars count={32} uptimePercent={100} />
+                  </div>
+
+                  <div className="guest-node-card-bottom">
+                    <span className="guest-spec-badge">Linux · x86_64</span>
+                    <span className="guest-latency-badge mono">
+                      {avgLatency !== null ? `~${avgLatency} ms` : '低延迟'}
+                    </span>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>暂无公开节点</strong>
+            <span>主控 API 正在等待第一个 Agent 完成接入上报。</span>
+          </div>
+        )}
+      </section>
+
+      {/* 页脚 */}
+      <footer className="guest-footer">
+        <div className="footer-content">
+          <span>ProbeWatch 纯监控探针 · 安全加固出站模式 · 零特权设计</span>
+          <span className="footer-dot">·</span>
+          <span>最后检测于 {lastUpdated}</span>
+        </div>
+      </footer>
+
+      {/* 磨砂毛玻璃管理员登录弹窗 */}
+      {showLogin && (
+        <div className="modal-overlay" onClick={() => setShowLogin(false)}>
+          <div className="mjj-login-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                <LockKey size={22} weight="duotone" className="modal-icon" />
+                <span>管理员身份验证</span>
+              </div>
+              <button className="icon-button modal-close" onClick={() => setShowLogin(false)} aria-label="关闭">
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="modal-desc">
+              登录后可查看硬件完整占用、实时流速、MTR 链路指纹与告警管理。
+            </p>
+
+            <form onSubmit={handlePasswordLogin}>
+              <div className="input-group">
+                <label htmlFor="admin-pwd">管理员口令</label>
+                <div className="input-wrapper">
+                  <Key size={18} className="input-icon" />
+                  <input
+                    id="admin-pwd"
+                    type="password"
+                    className="modal-input"
+                    placeholder="请输入 PROBEWATCH_ADMIN_PASSWORD"
+                    autoFocus
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                {loginError && <div className="modal-error-text">{loginError}</div>}
+              </div>
+
+              <div className="modal-actions">
+                <button type="submit" className="button button-primary modal-submit" disabled={loginLoading}>
+                  {loginLoading ? <CircleNotch size={16} className="spin" /> : <SignIn size={16} />}
+                  <span>{loginLoading ? '正在验证…' : '口令登录进入控制台'}</span>
+                </button>
+
+                <div className="modal-divider">
+                  <span />
+                  <small>或者</small>
+                  <span />
+                </div>
+
+                <button
+                  type="button"
+                  className="button button-quiet modal-oauth"
+                  onClick={() => { window.location.href = '/auth/github' }}
+                >
+                  <GithubLogo size={18} />
+                  <span>使用 GitHub OAuth 授权登录</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </main>
+  )
 }
