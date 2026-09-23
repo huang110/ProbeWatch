@@ -18,10 +18,19 @@ type Server struct {
 	service       *auth.Service
 	agentLimiter  *rateLimiter
 	publicLimiter *rateLimiter
+	loginLimiter  *rateLimiter
+	totpLimiter   *rateLimiter
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
-	return &Server{cfg: cfg, service: service, agentLimiter: newRateLimiter(120, time.Minute, 10000), publicLimiter: newRateLimiter(60, time.Minute, 10000)}
+	return &Server{
+		cfg:           cfg,
+		service:       service,
+		agentLimiter:  newRateLimiter(120, time.Minute, 10000),
+		publicLimiter: newRateLimiter(60, time.Minute, 10000),
+		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
+		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
+	}
 }
 
 func (s *Server) agentNodeTokenTTL() time.Duration {
@@ -224,6 +233,10 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.loginLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
+		return
+	}
 	var req localLoginRequest
 	if err := decodeJSONRequest(w, r, s.requestBodyLimit(), &req); err != nil {
 		writeRequestError(w, err)
@@ -242,4 +255,9 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 			"login":    "admin",
 		},
 	})
+}
+
+func writeRateLimitError(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	writeJSONError(w, http.StatusTooManyRequests, "too many attempts")
 }

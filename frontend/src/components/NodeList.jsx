@@ -1,9 +1,39 @@
-import { useEffect, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpRight, Coins, Cpu, HardDrive, HardDrives, Lightning, Memory, Pulse, Rows, Sparkle, SquaresFour, Tag, Timer } from '@phosphor-icons/react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, Coins, Cpu, HardDrive, HardDrives, Lightning, Memory, Pulse, Rows, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
 import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling } from '../lib/billing.js'
 import { ProgressBar, EmptyState, StatusDot } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
+
+export const getRegionalGroup = (node) => {
+  const region = (node.region || '').toLowerCase()
+  const name = (node.name || '').toLowerCase()
+  const tag = (node.tag || '').toLowerCase()
+  const flag = node.flag || ''
+
+  if (['🇨🇳', '🇭🇰', '🇲🇴', '🇹🇼', '🇯🇵', '🇰🇷', '🇸🇬'].includes(flag) ||
+      region.includes('中国') || region.includes('香港') || region.includes('台湾') || region.includes('日本') || region.includes('新加坡') || region.includes('韩国') || region.includes('亚太') ||
+      name.includes('香港') || name.includes('日本') || name.includes('新加坡') || name.includes('国内') || name.includes('上海') || name.includes('北京') || name.includes('广州') || name.includes('深圳')) {
+    if (tag.includes('bgp') || tag.includes('cn2') || tag.includes('9929') || tag.includes('4837') || tag.includes('cmin2') || tag.includes('直连') || name.includes('直连') || name.includes('bgp')) {
+      return 'direct' // 国内直连/精品
+    }
+    return 'asia' // 亚太地区
+  }
+
+  if (['🇺🇸', '🇨🇦', '🇧🇷'].includes(flag) || region.includes('美') || region.includes('加') || name.includes('美') || name.includes('西雅图') || name.includes('洛杉矶') || name.includes('圣何塞')) {
+    return 'america' // 美洲节点
+  }
+
+  if (['🇬🇧', '🇩🇪', '🇫🇷', '🇳🇱', '🇷🇺', '🇪🇺'].includes(flag) || region.includes('欧') || region.includes('英') || region.includes('德') || region.includes('法') || region.includes('俄') || name.includes('欧') || name.includes('伦敦') || name.includes('法兰克福')) {
+    return 'europe' // 欧洲节点
+  }
+
+  if (tag.includes('bgp') || tag.includes('cn2') || tag.includes('9929') || tag.includes('4837') || tag.includes('cmin2') || tag.includes('直连')) {
+    return 'direct'
+  }
+
+  return 'other'
+}
 
 const cellPercent = (value) => (
   <span className={value !== null && value >= 85 ? 'cell-meter cell-meter-hot' : 'cell-meter'}>
@@ -11,8 +41,21 @@ const cellPercent = (value) => (
   </span>
 )
 
-export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null, onSelect, defaultView = 'grid' }) {
-  const [viewMode, setViewMode] = useState(defaultView) // 'grid' | 'table'
+export function NodeTable({
+  nodes = [],
+  rates = {},
+  lossRates = {},
+  selectedId = null,
+  onSelect,
+  viewMode: controlledViewMode,
+  onToggleViewMode,
+  defaultView = 'grid',
+  hideViewToggle = false,
+}) {
+  const [internalViewMode, setInternalViewMode] = useState(defaultView)
+  const viewMode = controlledViewMode || internalViewMode
+  const setViewMode = onToggleViewMode || setInternalViewMode
+
   const [billingTargetNode, setBillingTargetNode] = useState(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
@@ -22,49 +65,62 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
     return () => window.removeEventListener('probewatch_billing_updated', handleUpdate)
   }, [])
 
-  const rows = nodes.map((node, index) => {
-    const key = safeText(node.uuid) || safeText(node.id) || `node-${index}`
-    const rate = rates[key] || null
-    const loss = lossRates[key] ?? null
-    const billing = getNodeBilling(key, node.name)
-    const calc = calculateRemainingValue(billing)
-    return { node, key, rate, loss, billing, calc }
-  })
+  const rows = useMemo(() => {
+    return nodes.map((node, index) => {
+      const key = safeText(node.uuid) || safeText(node.id) || `node-${index}`
+      const rate = rates[key] || null
+      const loss = lossRates[key] ?? null
+      const billing = getNodeBilling(key, node.name)
+      const calc = calculateRemainingValue(billing)
+      return { node, key, rate, loss, billing, calc }
+    })
+  }, [nodes, rates, lossRates, refreshTrigger])
 
   if (!rows.length) {
-    return <EmptyState title="暂无节点数据" detail="当前尚未发现已注册或上报的探针节点。" />
+    return <EmptyState title="暂无符合条件的服务器" detail="当前分组或搜索条件下未匹配到探针节点。" />
   }
 
   return (
     <div className="node-container">
-      {/* 视图切换按钮栏 */}
-      <div className="view-mode-bar">
-        <span className="node-count-badge">
-          共 <b>{rows.length}</b> 个计算节点
-        </span>
-        <div className="view-mode-toggles">
-          <button
-            type="button"
-            className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
-            onClick={() => setViewMode('grid')}
-            title="DStatus 宫格卡片视图"
-          >
-            <SquaresFour size={16} weight={viewMode === 'grid' ? 'bold' : 'regular'} />
-            <span>卡片</span>
-          </button>
-          <button
-            type="button"
-            className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
-            onClick={() => setViewMode('table')}
-            title="紧凑表格视图"
-          >
-            <Rows size={16} weight={viewMode === 'table' ? 'bold' : 'regular'} />
-            <span>表格</span>
-          </button>
+      {/* 视图切换按钮栏（当上层未隐藏时展示） */}
+      {!hideViewToggle && (
+        <div className="view-mode-bar">
+          <span className="node-count-badge">
+            展示 <b>{rows.length}</b> 台服务器节点
+          </span>
+          <div className="view-mode-toggles">
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
+              onClick={() => setViewMode('grid')}
+              title="哪吒/Komari 卡片视图"
+            >
+              <SquaresFour size={15} weight={viewMode === 'grid' ? 'bold' : 'regular'} />
+              <span>卡片</span>
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
+              onClick={() => setViewMode('table')}
+              title="紧凑运维表格视图"
+            >
+              <Rows size={15} weight={viewMode === 'table' ? 'bold' : 'regular'} />
+              <span>表格</span>
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}`}
+              onClick={() => setViewMode('compact')}
+              title="Komari 极简胶囊视图"
+            >
+              <Pulse size={15} weight={viewMode === 'compact' ? 'bold' : 'regular'} />
+              <span>极简</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* 1. DStatus (demo.vps.mom) + Lite 剩余价值风格独立服务器卡片 */}
+      {/* 1. 哪吒 / Komari 经典卡片视图 (Grid View) */}
       {viewMode === 'grid' && (
         <div className="mjj-card-grid">
           {rows.map(({ node, key, rate, loss, billing, calc }) => {
@@ -76,7 +132,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
               <article
                 key={key}
                 className={`mjj-card dstatus-card ${isSelected ? 'mjj-card-selected' : ''} ${!isOnline ? 'mjj-card-offline' : ''}`}
-                onClick={() => onSelect(node)}
+                onClick={() => onSelect && onSelect(node)}
               >
                 {/* 顶部：国旗、商家、节点名、线路与在线徽章 */}
                 <div className="mjj-card-header">
@@ -93,6 +149,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                       <div className="mjj-node-sub">
                         <span className="mjj-hostname">{node.hostname || node.id || '—'}</span>
                         <span className="mjj-arch-pill">{node.arch || 'amd64'}</span>
+                        {node.os && <span className="mjj-os-pill">{node.os.replace(/linux/i, '').trim()}</span>}
                       </div>
                     </div>
                   </div>
@@ -102,7 +159,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                   </div>
                 </div>
 
-                {/* 中部：四大硬件体质进度条 (CPU / 内存 / Swap / 硬盘) */}
+                {/* 核心指标：四大硬件体质进度条 (CPU / 内存 / Swap / 硬盘) */}
                 <div className="mjj-metrics-section">
                   {/* CPU */}
                   <div className="mjj-metric-row">
@@ -124,7 +181,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                     <ProgressBar value={node.memory} tone="dynamic" height={5} />
                   </div>
 
-                  {/* Swap (MJJ 特供) */}
+                  {/* Swap (MJJ 必备低配防爆) */}
                   <div className="mjj-metric-row">
                     <div className="mjj-metric-label">
                       <span className="mjj-metric-name"><Lightning size={13} /> Swap</span>
@@ -154,14 +211,14 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                       <span className="rate-icon"><ArrowDown size={14} weight="bold" /></span>
                       <div className="rate-info">
                         <small>实时下行</small>
-                        <b className="mono">{formatRate(rate?.down ?? null)}</b>
+                        <b className="mono text-mint">{formatRate(rate?.down ?? null)}</b>
                       </div>
                     </div>
                     <div className="mjj-rate-item rate-up">
                       <span className="rate-icon"><ArrowUp size={14} weight="bold" /></span>
                       <div className="rate-info">
                         <small>实时上行</small>
-                        <b className="mono">{formatRate(rate?.up ?? null)}</b>
+                        <b className="mono text-blue">{formatRate(rate?.up ?? null)}</b>
                       </div>
                     </div>
                   </div>
@@ -227,7 +284,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
         </div>
       )}
 
-      {/* 2. 紧凑专业表格模式 */}
+      {/* 2. 哪吒经典紧凑专业表格模式 (Table View) */}
       {viewMode === 'table' && (
         <div className="table-scroll node-table-wrap">
           <table className="node-table">
@@ -235,7 +292,8 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
               <tr>
                 <th>状态</th>
                 <th>节点 / 地区</th>
-                <th>商家</th>
+                <th>商家 / 线路</th>
+                <th>系统 / 架构</th>
                 <th>CPU</th>
                 <th>内存 (已用/总)</th>
                 <th>Swap</th>
@@ -245,8 +303,8 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                 <th>剩余价值</th>
                 <th>到期时间</th>
                 <th>连续在线</th>
-                <th>负载</th>
-                <th>管理</th>
+                <th>系统负载</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -255,8 +313,8 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                   key={key}
                   tabIndex={0}
                   className={`node-row node-row-${node.status} ${selectedId && selectedId === key ? 'node-row-selected' : ''}`}
-                  onClick={() => onSelect(node)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') onSelect(node) }}
+                  onClick={() => onSelect && onSelect(node)}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && onSelect) onSelect(node) }}
                 >
                   <td className="node-cell-status">
                     <StatusDot status={node.status} />
@@ -265,11 +323,19 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                     <span className="table-flag">{node.flag || '🌐'}</span>
                     <span className="node-name-text">
                       <strong>{node.name}</strong>
-                      <small>{node.tag || node.hostname || node.id}</small>
+                      <small>{node.hostname || node.id}</small>
                     </span>
                   </td>
                   <td>
-                    <span className="merchant-tag">{billing.merchant}</span>
+                    <div className="inline-flex items-center gap-1">
+                      {billing.merchant && <span className="merchant-tag">{billing.merchant}</span>}
+                      {node.tag && <span className="mjj-tag-route">{node.tag}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <span className="mono muted" style={{ fontSize: '11px' }}>
+                      {node.os ? node.os.replace(/linux/i, '').trim() : 'Linux'} ({node.arch || 'amd64'})
+                    </span>
                   </td>
                   <td>{cellPercent(node.cpu)}</td>
                   <td>
@@ -319,6 +385,54 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 3. Komari 极简微章视图 (Compact View) */}
+      {viewMode === 'compact' && (
+        <div className="komari-compact-grid">
+          {rows.map(({ node, key, rate, billing, calc }) => {
+            const isOnline = node.status === 'online'
+            return (
+              <div
+                key={key}
+                className={`komari-compact-card ${!isOnline ? 'offline' : ''}`}
+                onClick={() => onSelect && onSelect(node)}
+              >
+                <div className="compact-card-top">
+                  <div className="compact-title">
+                    <span className="compact-flag">{node.flag || '🌐'}</span>
+                    <strong>{node.name}</strong>
+                  </div>
+                  <StatusDot status={node.status} size="sm" />
+                </div>
+                <div className="compact-bars-row">
+                  <div className="compact-bar-item">
+                    <small>CPU</small>
+                    <ProgressBar value={node.cpu} height={4} />
+                    <span className="mono">{formatPercent(node.cpu)}</span>
+                  </div>
+                  <div className="compact-bar-item">
+                    <small>RAM</small>
+                    <ProgressBar value={node.memory} tone="blue" height={4} />
+                    <span className="mono">{formatPercent(node.memory)}</span>
+                  </div>
+                </div>
+                <div className="compact-card-bottom">
+                  <div className="compact-net mono">
+                    <span className="text-mint">↓ {formatRate(rate?.down ?? null)}</span>
+                    <span className="text-blue">↑ {formatRate(rate?.up ?? null)}</span>
+                  </div>
+                  <div className="inline-flex items-center gap-2">
+                    {billing.cycle !== 'free' && (
+                      <span className="compact-remaining mono">¥{calc.remainingValueCNY.toFixed(0)}</span>
+                    )}
+                    <span className="compact-uptime mono text-muted">{node.uptime || '—'}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

@@ -102,6 +102,26 @@ func TestLoadRejectsMissingProductionSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsWeakProductionAdminPassword(t *testing.T) {
+	for _, password := range []string{"short-pass", "1234567890123"} {
+		clearConfigEnvironment(t)
+		setValidProductionEnvironment(t)
+		t.Setenv("PROBEWATCH_ADMIN_PASSWORD", password)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PROBEWATCH_ADMIN_PASSWORD") {
+			t.Fatalf("Load error = %v, want a PROBEWATCH_ADMIN_PASSWORD strength error", err)
+		}
+	}
+}
+
+func TestLoadAcceptsProductionAdminPasswordAtMinimumLength(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionEnvironment(t)
+	t.Setenv("PROBEWATCH_ADMIN_PASSWORD", "12345678901234")
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load rejected a 14-character admin password: %v", err)
+	}
+}
+
 func TestLoadRejectsUnsafeCertificateBypassInProduction(t *testing.T) {
 	clearConfigEnvironment(t)
 	setValidProductionEnvironment(t)

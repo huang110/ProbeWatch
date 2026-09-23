@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Config contains all process configuration loaded at startup.
@@ -154,6 +155,9 @@ func Load() (Config, error) {
 		hasPassword := strings.TrimSpace(cfg.AdminPassword) != ""
 		if !hasGitHub && !hasPassword {
 			return Config{}, fmt.Errorf("either PROBEWATCH_ADMIN_PASSWORD or (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET) is required in production")
+		}
+		if hasPassword && utf8.RuneCountInString(cfg.AdminPassword) < 14 {
+			return Config{}, fmt.Errorf("PROBEWATCH_ADMIN_PASSWORD must be at least 14 characters in production")
 		}
 		if hasGitHub {
 			if strings.TrimSpace(cfg.GitHubRedirectURL) == "" {

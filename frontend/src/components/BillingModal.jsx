@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Clock, Coins, Copy, CurrencyCny, Info, Sparkle, Tag, X } from '@phosphor-icons/react'
+import { Check, Coins, Copy, Sparkle, Tag, X } from '@phosphor-icons/react'
 import { BILLING_CYCLES, COMMON_MERCHANTS, CURRENCY_RATES, calculateRemainingValue, generateForumSalesPost, getNodeBilling, saveNodeBillingData } from '../lib/billing.js'
 
 export function BillingModal({ node, onClose, onSaved }) {
@@ -11,6 +11,7 @@ export function BillingModal({ node, onClose, onSaved }) {
   const [dueDate, setDueDate] = useState(initial.dueDate)
   const [markup, setMarkup] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [activeTab, setActiveTab] = useState('config') // 'config' | 'calculator'
 
   const currentBilling = { merchant, price: Number(price) || 0, currency, cycle, dueDate }
@@ -19,16 +20,26 @@ export function BillingModal({ node, onClose, onSaved }) {
 
   const handleSave = (e) => {
     e.preventDefault()
-    saveNodeBillingData(node.uuid || node.id, { merchant, price: Number(price) || 0, currency, cycle, dueDate })
+    setSaveError('')
+    const ok = saveNodeBillingData(node.uuid || node.id, { merchant, price: Number(price) || 0, currency, cycle, dueDate })
+    if (ok === false) {
+      setSaveError('保存账单数据失败，本地存储可能已被禁用或已满。')
+      return
+    }
     if (onSaved) onSaved()
     onClose()
   }
 
   const handleCopyPost = () => {
     const text = generateForumSalesPost(node, currentBilling, calc, markup)
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }).catch(() => {
+        setCopied(false)
+      })
+    }
   }
 
   return (
@@ -144,6 +155,8 @@ export function BillingModal({ node, onClose, onSaved }) {
                 <b className="mono text-muted">¥{calc.annualCostCNY.toFixed(0)}/年</b>
               </div>
             </div>
+
+            {saveError && <div className="modal-error-text" style={{ marginBottom: 12 }}>{saveError}</div>}
 
             <div className="modal-actions-row">
               <button type="button" className="button button-quiet" onClick={onClose}>取消</button>

@@ -2352,5 +2352,1226 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
   }
 }
 
+/* ============================================================
+   Komari / Nezha 监控互交重构与满屏仪表盘样式
+   ============================================================ */
 
+/* 1. 顶栏标题增强 */
+.komari-page-heading {
+  margin-bottom: 18px;
+}
+
+.btn-add-server {
+  box-shadow: 0 4px 14px rgba(90, 216, 174, 0.25);
+  font-weight: 700;
+}
+
+/* 2. 全网实时总吞吐大看板 (Global Throughput Bar) */
+.global-throughput-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  background: linear-gradient(160deg, rgba(22, 30, 42, 0.8), rgba(12, 17, 24, 0.95));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+}
+
+.throughput-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 160ms ease;
+}
+
+.throughput-item:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.throughput-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.tone-mint {
+  color: var(--mint);
+  background: rgba(90, 216, 174, 0.12);
+  border: 1px solid rgba(90, 216, 174, 0.25);
+}
+
+.tone-blue {
+  color: var(--blue);
+  background: rgba(108, 184, 232, 0.12);
+  border: 1px solid rgba(108, 184, 232, 0.25);
+}
+
+.tone-violet {
+  color: var(--violet);
+  background: rgba(183, 157, 240, 0.12);
+  border: 1px solid rgba(183, 157, 240, 0.25);
+}
+
+.tone-amber {
+  color: var(--amber);
+  background: rgba(227, 181, 105, 0.12);
+  border: 1px solid rgba(227, 181, 105, 0.25);
+}
+
+.tone-amber-gold {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.12);
+}
+
+.status-dot-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 0 0 rgba(90, 216, 174, 0.7);
+  animation: dot-pulse 2s infinite;
+}
+
+@keyframes dot-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(90, 216, 174, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(90, 216, 174, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(90, 216, 174, 0);
+  }
+}
+
+.throughput-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.throughput-label {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.throughput-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.online-ratio-tag,
+.traffic-split-tag,
+.sla-tag,
+.billing-cny-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.online-ratio-tag {
+  color: var(--mint);
+  background: rgba(90, 216, 174, 0.14);
+}
+
+.traffic-split-tag {
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sla-tag {
+  color: var(--mint);
+  background: rgba(90, 216, 174, 0.12);
+}
+
+.billing-cny-badge {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
+}
+
+/* 3. Komari 智能工具栏 (Toolbar) 与 分组 Tab */
+.komari-toolbar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.komari-group-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.komari-group-tabs::-webkit-scrollbar {
+  height: 3px;
+}
+
+.komari-group-tabs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.komari-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 160ms ease;
+}
+
+.komari-tab-btn:hover {
+  color: var(--text-1);
+  border-color: rgba(90, 216, 174, 0.3);
+  background: rgba(90, 216, 174, 0.05);
+}
+
+.komari-tab-btn.active {
+  color: #06130e;
+  background: var(--mint);
+  border-color: var(--mint);
+  box-shadow: 0 4px 14px rgba(90, 216, 174, 0.25);
+  font-weight: 700;
+}
+
+.komari-tab-btn.active .tab-count {
+  color: #06130e;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.tab-count {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+}
+
+.komari-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.komari-search-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 240px;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+}
+
+.komari-search-wrapper .search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.komari-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(14, 20, 28, 0.85);
+  color: var(--text-1);
+  font-size: 12px;
+  transition: all 160ms ease;
+}
+
+.komari-search-input:focus {
+  border-color: var(--mint);
+  box-shadow: 0 0 0 1px var(--mint), 0 4px 16px rgba(90, 216, 174, 0.12);
+  outline: none;
+}
+
+.komari-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-2);
+  padding: 0;
+  cursor: pointer;
+}
+
+.search-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-1);
+}
+
+.komari-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.komari-status-filters {
+  display: inline-flex;
+  padding: 2px;
+  background: rgba(14, 20, 28, 0.7);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.komari-status-filters button {
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.komari-status-filters button:hover {
+  color: var(--text-1);
+}
+
+.komari-status-filters button.filter-active {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.komari-sort-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.komari-sort-wrapper .sort-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.komari-sort-select {
+  height: 36px;
+  padding: 0 12px 0 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(14, 20, 28, 0.85);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 160ms ease;
+}
+
+.komari-sort-select:hover {
+  color: var(--text-1);
+  border-color: rgba(90, 216, 174, 0.3);
+}
+
+.komari-sort-select:focus {
+  border-color: var(--mint);
+  color: var(--text-1);
+}
+
+/* 4. 100% 满屏服务器列表 (Full Width Nodes) */
+.full-width-nodes-section {
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+/* 5. 底部 4 列运维洞察与告警网格 (Panel Sub-Insights) */
+.panel-sub-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.panel-sub-insights .panel {
+  margin-bottom: 0;
+}
+
+/* 6. Komari 极简胶囊视图 (Compact View) */
+.komari-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.komari-compact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: linear-gradient(160deg, rgba(22, 30, 42, 0.75), rgba(12, 17, 24, 0.9));
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.komari-compact-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(90, 216, 174, 0.4);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.komari-compact-card.offline {
+  opacity: 0.65;
+}
+
+.compact-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.compact-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compact-flag {
+  font-size: 16px;
+}
+
+.compact-title strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-bars-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.compact-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.compact-bar-item small {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.compact-bar-item span {
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+.compact-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+}
+
+.compact-net {
+  display: flex;
+  gap: 8px;
+}
+
+.compact-net .rate-down {
+  color: var(--mint);
+}
+
+.compact-net .rate-up {
+  color: var(--blue);
+}
+
+.compact-remaining {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+/* 7. 现代化侧边滑动抽屉 (Modern Node Drawer) */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  z-index: 990;
+  animation: fadeIn 180ms ease-out;
+}
+
+.modern-node-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 480px;
+  max-width: 92vw;
+  background: #0b1118;
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  z-index: 999;
+  animation: slideInRight 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modern-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(14, 20, 28, 0.6);
+}
+
+.drawer-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.drawer-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.drawer-flag {
+  font-size: 20px;
+}
+
+.drawer-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.drawer-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.drawer-status-text.online {
+  color: var(--mint);
+  font-weight: 600;
+}
+
+.drawer-status-text.offline {
+  color: var(--rose);
+  font-weight: 600;
+}
+
+.drawer-scroll-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.drawer-rates-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.drawer-rate-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 30, 42, 0.6);
+  border: 1px solid var(--border);
+}
+
+.rate-icon-badge {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.drawer-rate-box.rate-down .rate-icon-badge {
+  color: var(--mint);
+  background: rgba(90, 216, 174, 0.12);
+}
+
+.drawer-rate-box.rate-up .rate-icon-badge {
+  color: var(--blue);
+  background: rgba(108, 184, 232, 0.12);
+}
+
+.rate-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.rate-label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.rate-val {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.drawer-section-card {
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 30, 42, 0.5);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.section-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.section-card-title.justify-between {
+  justify-content: space-between;
+}
+
+.drawer-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spec-label {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.spec-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.drawer-meter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.meter-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+}
+
+.meter-val {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.drawer-transfer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.transfer-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.transfer-label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.transfer-val {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.transfer-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+}
+
+.drawer-billing-card {
+  border-color: rgba(245, 158, 11, 0.25);
+  background: linear-gradient(160deg, rgba(245, 158, 11, 0.05), rgba(22, 30, 42, 0.6));
+}
+
+.drawer-billing-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.billing-meta-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.billing-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meta-label {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.meta-val {
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+.billing-calc-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.calc-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calc-label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.calc-amount {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.calc-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.modern-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: rgba(14, 20, 28, 0.8);
+}
+
+.modern-drawer-actions .drawer-button {
+  flex: 1;
+}
+
+/* 8. 哪吒风格添加服务器弹窗 (AddServerModal) */
+.add-server-modal {
+  width: 640px;
+  max-width: 95vw;
+}
+
+.security-assurance-banner {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(90, 216, 174, 0.08);
+  border: 1px solid rgba(90, 216, 174, 0.25);
+  margin-bottom: 16px;
+}
+
+.assurance-icon {
+  color: var(--mint);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.assurance-text strong {
+  display: block;
+  font-size: 12px;
+  color: #a7f3d0;
+  margin-bottom: 2px;
+}
+
+.assurance-text p {
+  font-size: 11px;
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.token-expiry-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 30, 42, 0.6);
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.countdown-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(90, 216, 174, 0.15);
+  color: var(--mint);
+}
+
+.countdown-badge.expired {
+  background: rgba(244, 63, 94, 0.15);
+  color: #f43f5e;
+}
+
+.script-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.script-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.script-tab-btn.active {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(90, 216, 174, 0.4);
+}
+
+.terminal-box {
+  border-radius: var(--radius-sm);
+  background: #05080c;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.t-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.t-red { background: #ff5f56; }
+.t-yellow { background: #ffbd2e; }
+.t-green { background: #27c93f; }
+
+.terminal-title {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.btn-copy-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.btn-copy-code:hover {
+  color: var(--text-1);
+  border-color: var(--mint);
+}
+
+.terminal-code {
+  padding: 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #38bdf8;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.post-install-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 30, 42, 0.4);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.post-install-guide code {
+  color: var(--mint);
+  background: rgba(90, 216, 174, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+/* 8.1 针对 AddServerModal.jsx 组件的精确样式 */
+.add-server-modal {
+  position: relative;
+  width: 640px;
+  max-width: 95vw;
+  background: #0d131a;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleIn 180ms ease-out;
+}
+
+@keyframes modalScaleIn {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.add-server-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(22, 30, 42, 0.4);
+}
+
+.title-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-icon-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(90, 216, 174, 0.12);
+  border: 1px solid rgba(90, 216, 174, 0.25);
+}
+
+.title-block h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.title-block p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.add-server-body {
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.install-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.install-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.install-tab:hover {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.install-tab.active {
+  color: #06130e;
+  background: var(--mint);
+  border-color: var(--mint);
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(90, 216, 174, 0.25);
+}
+
+.token-meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.token-meta-strip .meta-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.command-terminal-box {
+  border-radius: var(--radius-sm);
+  background: #04070a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.command-terminal-box .terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.command-terminal-box .terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.command-terminal-box .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.command-terminal-box .dot.red { background: #ff5f56; }
+.command-terminal-box .dot.yellow { background: #ffbd2e; }
+.command-terminal-box .dot.green { background: #27c93f; }
+
+.terminal-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.terminal-copy-btn:hover {
+  color: var(--text-1);
+  border-color: var(--mint);
+  background: rgba(90, 216, 174, 0.1);
+}
+
+.terminal-copy-btn.copied {
+  color: #06130e;
+  background: var(--mint);
+  border-color: var(--mint);
+}
+
+.command-terminal-box .terminal-code {
+  padding: 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #38bdf8;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.install-tips-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 30, 42, 0.4);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.install-tips-card .tip-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.install-tips-card .tip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--mint);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.modal-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--border);
+  background: rgba(14, 20, 28, 0.6);
+}
 

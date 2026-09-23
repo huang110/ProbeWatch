@@ -16,6 +16,45 @@ import (
 	"github.com/probewatch/probewatch/internal/db"
 )
 
+func TestAuthenticationEndpointsRateLimitAttempts(t *testing.T) {
+	provider := newServerFakeGitHub(t, "alice", nil)
+	defer provider.Close()
+	service, store := newServerAuth(t, provider, []string{"alice"}, "")
+	defer store.Close()
+	server := NewServer(config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", MaxRequestBody: 1024}, service)
+	server.loginLimiter = newRateLimiter(1, time.Minute, 32)
+	server.totpLimiter = newRateLimiter(1, time.Minute, 32)
+	handler := server.Handler()
+
+	loginRequest := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := loginRequest(); response.Code != http.StatusUnauthorized {
+		t.Fatalf("first login attempt status = %d, want 401", response.Code)
+	}
+	if response := loginRequest(); response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "60" {
+		t.Fatalf("second login attempt = %d, Retry-After %q, want 429 and 60", response.Code, response.Header().Get("Retry-After"))
+	}
+
+	totpRequest := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/auth/totp/verify", strings.NewReader(`{"code":"000000"}`))
+		request.Header.Set("Origin", "http://127.0.0.1:8080")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := totpRequest(); response.Code != http.StatusUnauthorized {
+		t.Fatalf("first TOTP attempt status = %d, want 401", response.Code)
+	}
+	if response := totpRequest(); response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "60" {
+		t.Fatalf("second TOTP attempt = %d, Retry-After %q, want 429 and 60", response.Code, response.Header().Get("Retry-After"))
+	}
+}
+
 func TestServerHandlerCoversHealthOAuthProtectedWriteAndLogout(t *testing.T) {
 	provider := newServerFakeGitHub(t, "alice", nil)
 	defer provider.Close()

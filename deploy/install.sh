@@ -18,6 +18,15 @@ ok()    { echo -e "${GREEN}[OK]${PLAIN} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${PLAIN} $*"; }
 error() { echo -e "${RED}[ERROR]${PLAIN} $*" >&2; }
 
+reject_control_chars() {
+    local name="$1"
+    local value="$2"
+    if [[ "$value" =~ [[:cntrl:]] ]]; then
+        error "$name 不能包含控制字符或换行"
+        exit 1
+    fi
+}
+
 if [[ $EUID -ne 0 ]]; then
     error "本脚本必须以 root 权限运行，请使用 sudo bash $0"
     exit 1
@@ -63,6 +72,21 @@ if [[ "$ROLE" == "agent" ]]; then
 
     if [[ -z "$ENDPOINT" || -z "$NODE_UUID" || -z "$NODE_TOKEN" ]]; then
         error "Endpoint、UUID、Token 为必填项，安装中止"
+        exit 1
+    fi
+    reject_control_chars "Endpoint" "$ENDPOINT"
+    reject_control_chars "节点 UUID" "$NODE_UUID"
+    reject_control_chars "节点 Token" "$NODE_TOKEN"
+    if [[ ! "$ENDPOINT" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$ ]]; then
+        error "Endpoint 必须是无查询参数的 HTTPS URL"
+        exit 1
+    fi
+    if [[ ! "$NODE_UUID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-8][0-9A-Fa-f]{3}-[89AaBb][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$ ]]; then
+        error "节点 UUID 格式无效"
+        exit 1
+    fi
+    if [[ ! "$NODE_TOKEN" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+        error "节点 Token 格式无效"
         exit 1
     fi
 

@@ -92,35 +92,35 @@ export const formatUptime = (startedAt) => {
 
 export const detectRegionAndFlag = (name = '', hostname = '') => {
   const text = `${name} ${hostname}`.toLowerCase()
-  if (/筋斗[雲云]|国内|广州|北京|上海|深圳|杭州|成都|南京|武汉|电信|联通|移动|cn|china/.test(text)) {
-    return { flag: '🇨🇳', region: '中国大陆', tag: '国内BGP' }
-  }
-  if (/香港|hk|hong kong/.test(text)) {
+  if (/香港|hong kong|\bhk\b/.test(text)) {
     return { flag: '🇭🇰', region: '中国香港', tag: '亚太优化' }
   }
-  if (/台湾|台北|tw|taiwan/.test(text)) {
+  if (/台湾|台北|\btw\b|taiwan/.test(text)) {
     return { flag: '🇹🇼', region: '中国台湾', tag: '亚太直连' }
   }
-  if (/日本|东京|大阪|jp|japan|tokyo|osaka/.test(text)) {
+  if (/日本|东京|大阪|\bjp\b|japan|tokyo|osaka/.test(text)) {
     return { flag: '🇯🇵', region: '日本', tag: '软银/IIJ' }
   }
-  if (/美国|美西|美东|圣何塞|洛杉矶|西雅图|达拉斯|纽约|us|usa|sjc|lax|sea/.test(text)) {
+  if (/美国|美西|美东|圣何塞|洛杉矶|西雅图|达拉斯|纽约|\bus\b|\busa\b|\bsjc\b|\blax\b|\bsea\b/.test(text)) {
     return { flag: '🇺🇸', region: '美国', tag: '9929/4837' }
   }
-  if (/新加坡|sg|singapore/.test(text)) {
+  if (/新加坡|\bsg\b|singapore/.test(text)) {
     return { flag: '🇸🇬', region: '新加坡', tag: '亚太直连' }
   }
-  if (/德国|法兰克福|de|germany|fra/.test(text)) {
+  if (/德国|法兰克福|\bde\b|germany|\bfra\b/.test(text)) {
     return { flag: '🇩🇪', region: '德国', tag: '欧洲BGP' }
   }
-  if (/英国|伦敦|uk|gb|london/.test(text)) {
+  if (/英国|伦敦|\buk\b|\bgb\b|london/.test(text)) {
     return { flag: '🇬🇧', region: '英国', tag: '欧洲BGP' }
   }
-  if (/韩国|首尔|kr|korea|seoul/.test(text)) {
+  if (/韩国|首尔|\bkr\b|korea|seoul/.test(text)) {
     return { flag: '🇰🇷', region: '韩国', tag: '亚太直连' }
   }
-  if (/俄罗斯|莫斯科|ru|russia|moscow/.test(text)) {
+  if (/俄罗斯|莫斯科|\bru\b|russia|moscow/.test(text)) {
     return { flag: '🇷🇺', region: '俄罗斯', tag: '欧亚伯利亚' }
+  }
+  if (/筋斗[雲云]|国内|中国|大陆|广州|北京|上海|深圳|杭州|成都|南京|武汉|电信|联通|移动|\bcn\b|china/.test(text)) {
+    return { flag: '🇨🇳', region: '中国大陆', tag: '国内BGP' }
   }
   return { flag: '🌐', region: '公网节点', tag: 'BGP网络' }
 }

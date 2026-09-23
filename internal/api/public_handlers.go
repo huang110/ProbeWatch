@@ -137,6 +137,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	if !lastUpdated.IsZero() {
 		response.LastUpdatedAt = &lastUpdated
 	}
+	response.GeneratedAt = now
 	sort.Strings(response.Nodes.Names)
 	writeJSON(w, http.StatusOK, response)
 }
