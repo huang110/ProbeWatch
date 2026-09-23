@@ -9,6 +9,7 @@ import { SubPage } from './components/SubPage.jsx'
 import { GuestView } from './components/GuestView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { BillingCenter } from './components/BillingCenter.jsx'
+import { ThemeToggle } from './components/ThemeToggle.jsx'
 import { GlobeHemisphereWest, WifiHigh, Broadcast, CloudArrowDown, SquaresFour, SlidersHorizontal, Database, Coins } from '@phosphor-icons/react'
 
 const navItems = [
@@ -24,7 +25,25 @@ const REFRESH_OPTIONS = [10, 30, 60]
 const OVERVIEW_INTERVAL_MS = 300000
 const pageTitleFor = (page) => page === 'node-detail' ? '节点详情' : navItems.find((item) => item.id === page)?.label || ({ targets: '检测目标', settings: '系统设置' }[page] || '总览')
 
-function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout }) {
+// 基于 document.cookie 保持纯状态流通与主题偏好
+function getSavedTheme() {
+  try {
+    const match = document.cookie.match(/(?:^|; )pb_theme=([^;]*)/)
+    if (match) {
+      const val = decodeURIComponent(match[1])
+      if (val === 'light' || val === 'dark' || val === 'system') return val
+    }
+  } catch {}
+  return 'system'
+}
+
+function saveTheme(val) {
+  try {
+    document.cookie = `pb_theme=${encodeURIComponent(val)}; path=/; max-age=31536000; SameSite=Lax`
+  } catch {}
+}
+
+function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
   return <header className="topbar">
     <div className="topbar-left">
       <button className="icon-button mobile-menu" aria-label="打开导航菜单" onClick={onOpenMobileNav}><List size={19} /></button>
@@ -32,6 +51,7 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
       <div className="breadcrumb"><span>监控</span><span className="breadcrumb-slash">/</span><strong>{pageTitleFor(activeNav)}</strong></div>
     </div>
     <div className="top-actions">
+      <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
       <button type="button" className="button button-quiet btn-sm top-guest-btn" onClick={onSwitchToGuest} title="切换至访客视角的只读监控大屏">
         <Eye size={15} />
         <span>游客模式</span>
@@ -74,7 +94,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
         <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.2.1</span></div>
+        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.2.2</span></div>
         <div className="profile-row">
           <div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
@@ -129,10 +149,38 @@ export function App() {
   const [refreshInterval, setRefreshInterval] = useState(30)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [theme, setTheme] = useState(getSavedTheme)
   const coreAbortRef = useRef(null)
   const coreRequestRef = useRef(0)
   const overviewAbortRef = useRef(null)
   const counterRef = useRef(new Map())
+
+  // 同步主题至 documentElement 属性与移动端 meta 状态栏
+  useEffect(() => {
+    saveTheme(theme)
+    const applyTheme = () => {
+      let resolved = theme
+      if (theme === 'system') {
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        resolved = prefersDark ? 'dark' : 'light'
+      }
+      document.documentElement.setAttribute('data-theme', resolved)
+      document.documentElement.setAttribute('data-theme-setting', theme)
+      const metaTheme = document.querySelector('meta[name="theme-color"]')
+      if (metaTheme) {
+        metaTheme.setAttribute('content', resolved === 'light' ? '#f6f7f9' : '#08090a')
+      }
+    }
+
+    applyTheme()
+
+    if (theme === 'system' && window.matchMedia) {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+      const handler = () => applyTheme()
+      mql.addEventListener('change', handler)
+      return () => mql.removeEventListener('change', handler)
+    }
+  }, [theme])
 
   const markSync = () => setLastSync(Date.now())
 
@@ -350,6 +398,8 @@ export function App() {
         isPreview={guestPreview}
         onExitPreview={() => setGuestPreview(false)}
         onLogout={performLogout}
+        theme={theme}
+        onThemeChange={setTheme}
       />
     )
   }
@@ -381,12 +431,14 @@ export function App() {
         onOpenMobileNav={() => setMobileNavOpen(true)}
         onSwitchToGuest={() => setGuestPreview(true)}
         onLogout={performLogout}
+        theme={theme}
+        onThemeChange={setTheme}
       />
       <div className="content-wrap">
         {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
           : activeNav === 'node-detail' && detailNode ? <NodeDetailPage node={detailNode} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
             : activeNav === 'billing' ? <BillingCenter nodes={data} />
-              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} refreshInterval={refreshInterval} onIntervalChange={setRefreshInterval} />}
+              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} refreshInterval={refreshInterval} onIntervalChange={setRefreshInterval} theme={theme} onThemeChange={setTheme} />}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>

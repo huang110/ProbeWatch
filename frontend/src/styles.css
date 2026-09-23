@@ -4577,6 +4577,7 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 }
 
 /* ---------- 3. 流量曲线与检测目标平滑时序线条增强 ---------- */
+/* ---------- 3. 哪吒探针 2.0 简约极细线条与主题切换系统 ---------- */
 .traffic-controls-right {
   display: flex;
   align-items: center;
@@ -4584,32 +4585,41 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   flex-wrap: wrap;
 }
 
-.traffic-chart-wrapper {
+/* 哪吒 2.0 风格卡片底座 */
+.nezha-traffic-wrap,
+.nezha-checks-wrap {
   position: relative;
-  background: rgba(10, 12, 14, 0.45);
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 12px 14px 10px;
-  margin-top: 10px;
+  padding: 10px 12px 8px;
+  margin-top: 8px;
+  box-shadow: var(--shadow-card);
 }
 
-.traffic-hover-banner {
-  min-height: 28px;
+/* 哪吒 2.0 简约清爽单行指示浮层 */
+.nezha-hover-banner {
+  min-height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
-  padding: 4px 12px;
+  margin-bottom: 6px;
+  padding: 3px 10px;
   border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
   font-size: 11px;
-  transition: all 0.18s ease;
+  transition: all 0.15s ease;
 }
 
-.traffic-hover-banner.active {
-  background: rgba(94, 106, 210, 0.08);
-  border-color: rgba(94, 106, 210, 0.25);
+.nezha-hover-banner.active {
+  background: var(--blue-dim);
+  border-color: var(--blue);
+}
+
+.nezha-arrow {
+  font-weight: 700;
+  margin-right: 2px;
 }
 
 .hover-badge-content {
@@ -4621,126 +4631,82 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 
 .hover-sep {
   color: var(--text-3);
-  opacity: 0.5;
+  opacity: 0.4;
+  font-size: 10px;
 }
 
 .hover-badge-hint {
   color: var(--text-3);
   font-size: 10px;
-  opacity: 0.7;
+  opacity: 0.75;
   letter-spacing: -0.01em;
 }
 
-.dot-mint {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-.dot-blue {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6366f1;
-  box-shadow: 0 0 6px rgba(99, 102, 241, 0.6);
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-.traffic-svg-canvas {
+/* 哪吒 2.0 极细线条与极简画布 */
+.nezha-svg-canvas {
   width: 100%;
-  height: 130px;
+  height: 120px;
   position: relative;
 }
 
-.traffic-spline-svg {
+.nezha-spline-svg {
   width: 100%;
   height: 100%;
   overflow: visible;
   display: block;
 }
 
-.traffic-grid-line {
-  stroke: rgba(255, 255, 255, 0.06);
-  stroke-dasharray: 2 3;
-  stroke-width: 0.7;
+.nezha-grid-line {
+  stroke: var(--border);
+  stroke-dasharray: 2 4;
+  stroke-width: 0.55;
   pointer-events: none;
 }
 
-.traffic-area-fill {
+.nezha-area-fill {
   pointer-events: none;
 }
 
-.traffic-line-stroke {
+.nezha-line-stroke {
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
-.traffic-crosshair {
-  stroke: rgba(255, 255, 255, 0.45);
+.nezha-axis-text {
+  font-size: 7px;
+  fill: var(--text-3);
+  font-family: var(--font-mono);
+  user-select: none;
+  opacity: 0.7;
+}
+
+.nezha-crosshair {
+  stroke: var(--text-2);
   stroke-dasharray: 2 2;
-  stroke-width: 0.8;
+  stroke-width: 0.6;
+  stroke-opacity: 0.45;
   pointer-events: none;
 }
 
-.traffic-interactive-group {
+.nezha-interactive-group {
   pointer-events: none;
 }
 
-.traffic-time-axis {
+.nezha-dot-rx,
+.nezha-dot-tx {
+  pointer-events: none;
+  transition: r 0.1s ease;
+}
+
+.nezha-time-axis {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--text-3);
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.06);
-}
-
-.checks-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
-.checks-chart-wrap {
-  position: relative;
-  background: rgba(10, 12, 14, 0.45);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px 10px;
-  margin-bottom: 12px;
-}
-
-.checks-svg-canvas {
-  width: 100%;
-  height: 110px;
-  position: relative;
-}
-
-.checks-line-svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.checks-time-axis {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  color: var(--text-3);
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px dashed var(--border);
 }
 
 .axis-target-name {
@@ -4754,4 +4720,198 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   color: var(--blue-bright);
   font-weight: 600;
 }
+
+/* ---------- 4. 主题切换器 (Theme Switcher) ---------- */
+.theme-switcher-compact {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 4px;
+  transition: all 120ms ease;
+  padding: 0;
+}
+
+.theme-btn:hover {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.theme-btn.active {
+  color: #fff;
+  background: var(--blue);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 系统设置页面大卡片式主题选择器 */
+.theme-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.theme-choice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-1);
+  text-align: left;
+  transition: all 140ms ease;
+  cursor: pointer;
+}
+
+.theme-choice-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-raised);
+}
+
+.theme-choice-card.selected {
+  border-color: var(--blue);
+  background: var(--blue-dim);
+  box-shadow: 0 0 0 1px var(--blue);
+}
+
+.theme-choice-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+.theme-choice-text strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.theme-choice-text span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+/* ---------- 5. 白天模式 / 浅色主题 (Light Mode / Day Theme) ---------- */
+[data-theme="light"] {
+  --bg-base: #f5f6f8;            /* 纯净清爽浅灰底色 */
+  --bg-panel: #ffffff;           /* 纯白单层卡片 */
+  --bg-raised: #f1f3f6;          /* 悬浮面板与输入表面 */
+  --bg-inset: #e8ecf1;           /* 内凹区域 */
+  --card-bg: #ffffff;
+  --border: rgba(0, 0, 0, 0.08); /* 极细清爽灰色微边框 */
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --mint: #10b981;               /* 清爽翠绿 */
+  --mint-strong: #059669;
+  --mint-dim: rgba(16, 185, 129, 0.12);
+  --blue: #4f46e5;               /* 科技蓝紫 */
+  --blue-bright: #4338ca;
+  --blue-dim: rgba(79, 70, 229, 0.1);
+  --amber: #d97706;              /* 暖琥珀色 */
+  --amber-dim: rgba(217, 119, 6, 0.12);
+  --rose: #e11d48;               /* 亮红报警 */
+  --rose-dim: rgba(225, 29, 72, 0.1);
+  --violet: #7c3aed;
+  --violet-dim: rgba(124, 58, 237, 0.1);
+  --text-1: #0f172a;             /* 纯黑灰高对比标题文本 */
+  --text-2: #475569;             /* 次级深灰正文 */
+  --text-3: #94a3b8;             /* 三级灰色注记 */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 16px 36px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--border);
+}
+
+[data-theme="light"] .topbar {
+  background: rgba(245, 246, 248, 0.88);
+  border-bottom-color: var(--border);
+}
+
+[data-theme="light"] .sidebar {
+  background: #ffffff;
+  border-right-color: var(--border);
+}
+
+[data-theme="light"] .app-shell {
+  background: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(79, 70, 229, 0.04), transparent), var(--bg-base);
+}
+
+[data-theme="light"] .theme-switcher-compact {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .theme-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .theme-choice-icon {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .node-drawer-panel {
+  background: #ffffff;
+  border-left-color: var(--border);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .node-drawer-panel .drawer-header {
+  background: #f8fafc;
+}
+
+[data-theme="light"] .modern-node-table th {
+  background: #f8fafc;
+  color: var(--text-2);
+}
+
+[data-theme="light"] .modern-node-table tr:hover td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .traffic-kpi-card,
+[data-theme="light"] .checks-kpi-card,
+[data-theme="light"] .spec-item,
+[data-theme="light"] .node-metric-card,
+[data-theme="light"] .guest-card {
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background: #ffffff;
+  color: var(--text-1);
+  border-color: var(--border);
+}
+
+[data-theme="light"] .linear-kbd {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-2);
+}
+
+[data-theme="light"] .nezha-hover-banner {
+  background: #f8fafc;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Clock, ShieldCheck } from '@phosphor-icons/react'
+import { Clock, Palette, ShieldCheck } from '@phosphor-icons/react'
 import { safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
+import { ThemeToggle } from './ThemeToggle.jsx'
 
 const totpSubmitCode = (value) => {
   const clean = safeText(value).replace(/[\s-]/g, '')
@@ -17,7 +18,7 @@ async function fetchTOTPCsrf() {
   return token
 }
 
-export function TOTPSettingsCard({ interval = 30, onIntervalChange }) {
+export function TOTPSettingsCard({ interval = 30, onIntervalChange, theme = 'system', onThemeChange }) {
   const [setup, setSetup] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [code, setCode] = useState('')
@@ -194,6 +195,22 @@ export function TOTPSettingsCard({ interval = 30, onIntervalChange }) {
               窗口流量曲线、探测目标时序、节点资源轮询与顶栏时钟同步
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* 界面外观与主题偏好设置 */}
+      <div className="panel" style={{ marginTop: '16px' }}>
+        <div className="panel-header">
+          <div>
+            <h2>界面外观与主题偏好设置</h2>
+            <p>自由切换白天浅色模式、夜间黑曜石深色模式，或自动跟随系统设置</p>
+          </div>
+          <span className="metric-icon metric-icon-violet">
+            <Palette size={17} weight="duotone" />
+          </span>
+        </div>
+        <div style={{ padding: '14px 16px' }}>
+          <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={false} />
         </div>
       </div>
     </>

@@ -9,7 +9,7 @@ import { MTRRouteView } from './MTRRouteView.jsx'
 import { NetworkMonitorView } from './NetworkMonitorView.jsx'
 import { Pulse } from '@phosphor-icons/react'
 
-export function SubPage({ page, data, alerts, onAck, ackingId, onBack, onSelectNode, rates = {}, lossRates = {}, refreshInterval = 30, onIntervalChange }) {
+export function SubPage({ page, data, alerts, onAck, ackingId, onBack, onSelectNode, rates = {}, lossRates = {}, refreshInterval = 30, onIntervalChange, theme = 'system', onThemeChange }) {
   const pages = {
     nodes: ['节点', '查看所有已注册节点和探针状态，支持自助接入新节点。'],
     billing: ['账单与价值', '全网 VPS 资产台账、续费周期提醒、剩余天数及二手出鸡指导价实时折算。'],
@@ -18,7 +18,7 @@ export function SubPage({ page, data, alerts, onAck, ackingId, onBack, onSelectN
     media: ['流媒体矩阵', '全球主流流媒体与 AI 服务（Netflix, YouTube, OpenAI 等）解锁能力矩阵。'],
     alerts: ['告警事件中心', '系统异常检测、阈值事件流与 Telegram / Webhook 告警分发管理。'],
     targets: ['检测目标', '管理全部检测目标：新建、启停或删除探测项。'],
-    settings: ['系统设置', '管理控制台安全选项与全局采样时序时间。'],
+    settings: ['系统设置', '管理控制台安全选项、外观主题与全局采样时序时间。'],
   }
   const [title, description] = pages[page] || pages.nodes
   return <section className="subpage">
@@ -33,7 +33,7 @@ export function SubPage({ page, data, alerts, onAck, ackingId, onBack, onSelectN
       : page === 'network' ? <NetworkMonitorView nodes={data} readOnly kinds={['tcp', 'http', 'https', 'dns']} />
       : page === 'mtr' ? <MTRRouteView nodes={data} readOnly kinds={['mtr']} />
       : page === 'targets' ? <TargetManage />
-      : page === 'settings' ? <TOTPSettingsCard interval={refreshInterval} onIntervalChange={onIntervalChange} />
+      : page === 'settings' ? <TOTPSettingsCard interval={refreshInterval} onIntervalChange={onIntervalChange} theme={theme} onThemeChange={onThemeChange} />
       : <div className="panel placeholder-panel"><div className="placeholder-icon"><Pulse size={22} /></div><h2>{title}数据面板</h2><p>暂无可由当前 API 支撑的数据。</p></div>}
   </section>
 }

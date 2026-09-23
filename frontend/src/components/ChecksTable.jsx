@@ -27,7 +27,7 @@ import { EmptyState } from './Common.jsx'
 /**
  * Catmull-Rom 转三次贝塞尔平滑曲线
  */
-function generateSmoothSpline(pts, bottomY = 90) {
+function generateNezhaSpline(pts, bottomY = 90) {
   if (!pts || !pts.length) return { line: '', area: '' }
   if (pts.length === 1) {
     const p = pts[0]
@@ -44,10 +44,10 @@ function generateSmoothSpline(pts, bottomY = 90) {
     const p2 = pts[i + 1]
     const p3 = pts[Math.min(i + 2, pts.length - 1)]
 
-    const cp1x = p1.x + (p2.x - p0.x) / 6
-    const cp1y = Math.max(6, Math.min(bottomY - 1, p1.y + (p2.y - p0.y) / 6))
-    const cp2x = p2.x - (p3.x - p1.x) / 6
-    const cp2y = Math.max(6, Math.min(bottomY - 1, p2.y - (p3.y - p1.y) / 6))
+    const cp1x = p1.x + (p2.x - p0.x) / 8
+    const cp1y = Math.max(6, Math.min(bottomY - 1, p1.y + (p2.y - p0.y) / 8))
+    const cp2x = p2.x - (p3.x - p1.x) / 8
+    const cp2y = Math.max(6, Math.min(bottomY - 1, p2.y - (p3.y - p1.y) / 8))
 
     line += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
   }
@@ -80,7 +80,7 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
     return { x, y, target: r }
   })
 
-  const spline = generateSmoothSpline(
+  const spline = generateNezhaSpline(
     latPoints.map((p) => ({ x: p.x, y: p.y })),
     baselineY
   )
@@ -88,85 +88,92 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
   const active = hoveredIdx !== null && latPoints[hoveredIdx] ? latPoints[hoveredIdx] : null
 
   return (
-    <div className="checks-chart-wrap" onMouseLeave={() => setHoveredIdx(null)}>
-      {/* 顶部悬浮动态卡片 */}
-      <div className={`traffic-hover-banner checks-hover-banner ${active ? 'active' : ''}`}>
+    <div className="checks-chart-wrap nezha-checks-wrap" onMouseLeave={() => setHoveredIdx(null)}>
+      {/* 哪吒 2.0 简约单行悬浮指示 */}
+      <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
         {active ? (
           <div className="hover-badge-content">
             <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.target.name}</span>
-            <span className="hover-sep">·</span>
+            <span className="hover-sep">│</span>
             <span className="hover-stat text-mint mono">
               协议: <b>{active.target.kind}</b>
             </span>
-            <span className="hover-sep">·</span>
+            <span className="hover-sep">│</span>
             <span className="hover-stat text-blue mono">
-              平均延迟: <b>{active.target.latency !== null ? `${formatNumber(active.target.latency)} ms` : '—'}</b>
+              延迟: <b>{active.target.latency !== null ? `${formatNumber(active.target.latency)} ms` : '—'}</b>
             </span>
-            <span className="hover-sep">·</span>
+            <span className="hover-sep">│</span>
             <span className="hover-stat text-1 mono">
-              丢包率: <b>{active.target.lossRate !== null ? formatLossPercent(active.target.lossRate) : '0%'}</b>
+              丢包: <b>{active.target.lossRate !== null ? formatLossPercent(active.target.lossRate) : '0%'}</b>
             </span>
             {active.target.jitter !== null && (
               <>
-                <span className="hover-sep">·</span>
+                <span className="hover-sep">│</span>
                 <span className="hover-stat text-amber mono">
                   抖动: <b>{formatNumber(active.target.jitter)} ms</b>
                 </span>
               </>
             )}
-            <span className="hover-sep">·</span>
+            <span className="hover-sep">│</span>
             <span className="hover-stat muted mono">
               基准 {samplingSec}s
             </span>
           </div>
         ) : (
           <div className="hover-badge-hint mono">
-            <span>移动鼠标至探测目标平滑曲线节点，查看瞬时时延、丢包率与链路质量</span>
+            <span>哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标时延与丢包</span>
           </div>
         )}
       </div>
 
-      <div className="checks-svg-canvas">
+      <div className="checks-svg-canvas nezha-svg-canvas">
         <svg
-          className="checks-line-svg"
+          className="checks-line-svg nezha-spline-svg"
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
           role="img"
-          aria-label="探测目标质量与平滑延迟走势曲线"
+          aria-label="探测目标质量细线条走势图"
         >
           <defs>
-            <linearGradient id="checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
-              <stop offset="70%" stopColor="#6366f1" stopOpacity="0.05" />
+            <linearGradient id="nezha-checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.08" />
               <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
             </linearGradient>
-            <filter id="checks-glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodColor="#6366f1" floodOpacity="0.4" />
-            </filter>
           </defs>
 
-          {/* 参考水平基准线 */}
-          <line className="traffic-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
-          <line className="traffic-grid-line" x1="0" y1="53" x2="100" y2="53" />
-          <line className="traffic-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
+          {/* 参考水平极细虚线 */}
+          <line className="nezha-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
+          <line className="nezha-grid-line" x1="0" y1="53" x2="100" y2="53" />
+          <line className="nezha-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
 
-          {/* 渐变面积 */}
+          {/* 渐变微透明面积 */}
           {validLatencies.length > 0 && (
-            <path className="checks-area-fill" d={spline.area} fill="url(#checks-lat-grad)" />
+            <path className="nezha-area-fill" d={spline.area} fill="url(#nezha-checks-lat-grad)" />
           )}
 
-          {/* 延迟曲线 */}
+          {/* 哪吒 2.0 极细延迟线条 (0.95px) */}
           {validLatencies.length > 0 && (
             <path
-              className="checks-stroke-line"
+              className="nezha-line-stroke nezha-line-tx"
               d={spline.line}
               fill="none"
               stroke="#6366f1"
-              strokeWidth="1.9"
+              strokeWidth="0.95"
               strokeLinecap="round"
               strokeLinejoin="round"
-              style={{ filter: 'url(#checks-glow)' }}
             />
+          )}
+
+          {/* Y 轴刻度标注 */}
+          {maxLat > 0 && (
+            <g className="nezha-axis-scale-group" aria-hidden="true">
+              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                {Math.round(maxLat)} ms
+              </text>
+              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                0 ms
+              </text>
+            </g>
           )}
 
           {/* 交互交叉线与发光点 */}
@@ -174,40 +181,29 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
             const isHovered = hoveredIdx === index
             const hasLoss = p.target.lossRate !== null && p.target.lossRate > 0
             const dotTone = hasLoss
-              ? 'var(--rose)'
+              ? '#f43f5e'
               : p.target.latency !== null && p.target.latency < 50
-              ? 'var(--mint)'
-              : 'var(--blue)'
+              ? '#10b981'
+              : '#6366f1'
 
             return (
               <g key={`check-pt-${index}`}>
                 {isHovered && (
-                  <>
-                    <line
-                      className="traffic-crosshair"
-                      x1={p.x}
-                      y1={topY - 4}
-                      x2={p.x}
-                      y2={baselineY + 2}
-                      stroke="rgba(255, 255, 255, 0.4)"
-                      strokeDasharray="2 2"
-                      strokeWidth="0.8"
-                    />
-                    <circle
-                      cx={p.x}
-                      cy={p.y}
-                      r="4.8"
-                      fill={hasLoss ? 'rgba(244, 63, 94, 0.35)' : 'rgba(99, 102, 241, 0.35)'}
-                    />
-                  </>
+                  <line
+                    className="nezha-crosshair"
+                    x1={p.x}
+                    y1={topY - 3}
+                    x2={p.x}
+                    y2={baselineY}
+                  />
                 )}
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={isHovered ? 3.2 : 2}
+                  r={isHovered ? 2.4 : 1.6}
                   fill={dotTone}
-                  stroke="#fff"
-                  strokeWidth={isHovered ? '1' : '0.6'}
+                  stroke="#ffffff"
+                  strokeWidth="0.75"
                 />
                 {/* 鼠标灵敏捕捉区 */}
                 <rect
@@ -227,7 +223,7 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
       </div>
 
       {/* X 轴目标名称指示 */}
-      <div className="checks-time-axis mono">
+      <div className="checks-time-axis nezha-time-axis mono">
         {targets.map((t, idx) => (
           <span
             key={`x-${idx}`}

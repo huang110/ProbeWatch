@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { ArrowClockwise, CheckCircle, CircleNotch, Eye, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { StatusDot, UptimeBars } from './Common.jsx'
+import { ThemeToggle } from './ThemeToggle.jsx'
 
-export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout }) {
+export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
@@ -96,6 +97,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         </div>
 
         <div className="heading-actions">
+          <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
           <button className="button button-quiet" onClick={onRefresh} disabled={isRefreshing} title="重新请求状态 API">
             {isRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
             {isRefreshing ? '正在同步…' : '刷新数据'}
