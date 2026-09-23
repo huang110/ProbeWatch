@@ -4,6 +4,23 @@
 
 ---
 
+## [v0.2.3] - 2026-09-24
+
+### 🌐 主题全局化与延迟探针极细线条重构 (Theme Globalization & Latency Hairline Spline)
+- **主题系统全域深度穿透 (Universal Theme Globalization)**：
+  - **加载零闪烁**：模块启动首行即刻注入 `data-theme` 属性，彻底根除 React 挂载过程中的深浅色闪烁。
+  - **总览卡片深度调优**：修复 `.mjj-card:hover` 原先暗黑底色问题，浅色模式下硬件体质条 (`.mjj-metrics-section`)、小鸡账单横条 (`.mjj-billing-strip`)、分类 Tab 等全面调优为纯净高对比白昼形态。
+  - **游客大屏 (`GuestView`) 全面适配**：纯白天画布、清爽卡片、高对比度字体与透明微边框，日间强光下通透细腻。
+  - **弹窗与抽屉系统全覆盖**：登录弹窗 (`.mjj-login-modal`)、两步验证 (`TOTPVerifyPage`)、添加服务器 (`.add-server-modal`)、账单管理 (`.billing-modal`) 与侧边抽屉 (`.modern-node-drawer`) 100% 适配浅色模式。
+  - **所有二级子页面适配**：网络检测、MTR 路由、流媒体检测、告警中心与账单中心全量无缝自适应深浅色。
+- **延迟探针全景升级为哪吒 2.0 极细线条 (Latency Probe Hairline)**：
+  - **网络检测主控 (`NetworkMonitorView`)**：全新增设 **哪吒 2.0 实时延迟探针流线 (`NetworkLatencyLines`)**，0.95px 超细流线、薄纱透明度、Y 轴水位刻度水印标注与紧凑单行交互指示栏。
+  - **MTR 骨干路由追踪 (`MTRRouteView`)**：彻底移出粗重色块条，升级为 **逐跳时延极细阶梯流线**；并在顶部增设 **全路由逐跳延迟跃迁走势图 (`MTRHopLatencyLine`)**。
+  - **侧边抽屉三网检测 (`NodeDrawer`)**：在「三网质量与延迟检测」卡片内嵌 **微型三网延迟流线 (`DrawerChecksLatencyLine`)**。
+- **严格遵循安全与契约测试**：100% 零客户端明文存储泄露（基于 `document.cookie` 持久化）。
+
+---
+
 ## [v0.2.2] - 2026-09-24
 
 ### 🎨 哪吒探针 2.0 极细线条与多主题系统支持 (Nezha Hairline & Day/Night/System Themes)

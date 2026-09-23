@@ -2,6 +2,22 @@ import { Component, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.jsx'
 import './styles.css'
+// 优先在模块加载阶段初始化主题，彻底杜绝白屏/黑屏闪烁
+try {
+  const match = document.cookie.match(/(?:^|; )pb_theme=([^;]*)/)
+  const saved = match ? decodeURIComponent(match[1]) : 'system'
+  let resolved = saved
+  if (saved === 'system') {
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    resolved = prefersDark ? 'dark' : 'light'
+  }
+  document.documentElement.setAttribute('data-theme', resolved)
+  document.documentElement.setAttribute('data-theme-setting', saved)
+  const metaTheme = document.querySelector('meta[name="theme-color"]')
+  if (metaTheme) {
+    metaTheme.setAttribute('content', resolved === 'light' ? '#f5f6f8' : '#08090a')
+  }
+} catch {}
 
 class ErrorBoundary extends Component {
   state = { failed: false, category: '渲染异常' }

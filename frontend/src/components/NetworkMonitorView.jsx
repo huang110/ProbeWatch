@@ -11,6 +11,224 @@ const PRESET_NETWORK_TARGETS = [
   { id: 'tcp-cf', name: 'Anycast DNS (TCP:443)', kind: 'tcp', host: '198.51.100.1', port: 443 },
 ]
 
+/**
+ * Catmull-Rom 转三次贝塞尔平滑曲线 (哪吒探针 2.0 极细线条专用)
+ */
+function generateNezhaSpline(pts, bottomY = 90) {
+  if (!pts || !pts.length) return { line: '', area: '' }
+  if (pts.length === 1) {
+    const p = pts[0]
+    return {
+      line: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)}`,
+      area: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} L ${p.x.toFixed(2)} ${bottomY} Z`,
+    }
+  }
+
+  let line = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(i - 1, 0)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(i + 2, pts.length - 1)]
+
+    const cp1x = p1.x + (p2.x - p0.x) / 8
+    const cp1y = Math.max(6, Math.min(bottomY - 1, p1.y + (p2.y - p0.y) / 8))
+    const cp2x = p2.x - (p3.x - p1.x) / 8
+    const cp2y = Math.max(6, Math.min(bottomY - 1, p2.y - (p3.y - p1.y) / 8))
+
+    line += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+
+  const firstX = pts[0].x.toFixed(2)
+  const lastX = pts[pts.length - 1].x.toFixed(2)
+  const area = `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`
+  return { line, area }
+}
+
+export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(), selectedNodeName = '' }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null)
+  if (!targets.length) return null
+
+  const items = targets.map((t) => {
+    const report = resultsByTargetId.get(t.id)
+    const res = report?.result || {}
+    const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
+    const lat = numeric(res.latency_ms)
+    return {
+      target: t,
+      report,
+      latency: lat,
+      isOk,
+      statusCode: res.status_code,
+      error: res.error,
+    }
+  })
+
+  const validLatencies = items.map((i) => i.latency).filter((l) => l !== null && l >= 0)
+  const maxLat = Math.max(...validLatencies, 20)
+  const headroomLat = maxLat * 1.15
+  const baselineY = 90
+  const topY = 16
+  const plotHeight = baselineY - topY
+  const count = items.length
+  const slot = 100 / Math.max(count, 1)
+
+  const pts = items.map((it, i) => {
+    const x = i * slot + slot / 2
+    const lat = it.latency !== null && it.latency >= 0 ? it.latency : 0
+    const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
+    return { x, y, item: it }
+  })
+
+  const spline = generateNezhaSpline(
+    pts.map((p) => ({ x: p.x, y: p.y })),
+    baselineY
+  )
+
+  const active = hoveredIdx !== null && pts[hoveredIdx] ? pts[hoveredIdx] : null
+
+  return (
+    <div className="network-latency-wrap nezha-traffic-wrap" onMouseLeave={() => setHoveredIdx(null)}>
+      {/* 哪吒 2.0 简约单行悬浮指示栏 */}
+      <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
+        {active ? (
+          <div className="hover-badge-content">
+            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.item.target.name}</span>
+            <span className="hover-sep">│</span>
+            <span className="hover-stat text-mint mono">
+              协议: <b>{active.item.target.kind.toUpperCase()}</b>
+            </span>
+            <span className="hover-sep">│</span>
+            <span className="hover-stat text-blue mono">
+              延迟: <b>{active.item.latency !== null ? `${active.item.latency} ms` : '—'}</b>
+            </span>
+            <span className="hover-sep">│</span>
+            <span className={`hover-stat mono ${active.item.isOk ? 'text-mint' : 'text-rose'}`}>
+              状态: <b>{active.item.isOk ? '连通正常' : active.item.error || '连接超时'}</b>
+            </span>
+            {selectedNodeName && (
+              <>
+                <span className="hover-sep">│</span>
+                <span className="hover-stat muted mono">源: {selectedNodeName}</span>
+              </>
+            )}
+            <span className="hover-sep">│</span>
+            <span className="hover-stat muted mono">基准 30s</span>
+          </div>
+        ) : (
+          <div className="hover-badge-hint mono">
+            <span>哪吒 2.0 网络延迟探针流线 · 鼠标滑过节点查看实时连通性与时延</span>
+          </div>
+        )}
+      </div>
+
+      <div className="checks-svg-canvas nezha-svg-canvas" style={{ height: '90px' }}>
+        <svg
+          className="checks-line-svg nezha-spline-svg"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="实时网络延迟细线条走势图"
+        >
+          <defs>
+            <linearGradient id="nezha-net-lat-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.09" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* 参考水平极细虚线 */}
+          <line className="nezha-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
+          <line className="nezha-grid-line" x1="0" y1="53" x2="100" y2="53" />
+          <line className="nezha-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
+
+          {/* 渐变微透明面积 */}
+          {validLatencies.length > 0 && (
+            <path className="nezha-area-fill" d={spline.area} fill="url(#nezha-net-lat-grad)" />
+          )}
+
+          {/* 哪吒 2.0 极细延迟线条 (0.95px) */}
+          {validLatencies.length > 0 && (
+            <path
+              className="nezha-line-stroke"
+              d={spline.line}
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="0.95"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {/* Y 轴刻度标注 */}
+          {maxLat > 0 && (
+            <g className="nezha-axis-scale-group" aria-hidden="true">
+              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                {Math.round(maxLat)} ms
+              </text>
+              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                0 ms
+              </text>
+            </g>
+          )}
+
+          {/* 交互交叉线与发光点 */}
+          {pts.map((p, index) => {
+            const isHovered = hoveredIdx === index
+            const isOk = p.item.isOk
+            const dotTone = !isOk ? '#f43f5e' : p.item.latency !== null && p.item.latency < 50 ? '#10b981' : '#6366f1'
+
+            return (
+              <g key={`net-pt-${index}`}>
+                {isHovered && (
+                  <line
+                    className="nezha-crosshair"
+                    x1={p.x}
+                    y1={topY - 3}
+                    x2={p.x}
+                    y2={baselineY}
+                  />
+                )}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={isHovered ? 2.4 : 1.6}
+                  fill={dotTone}
+                  stroke="#ffffff"
+                  strokeWidth="0.75"
+                />
+                <rect
+                  x={index * slot}
+                  y="0"
+                  width={slot}
+                  height="100"
+                  fill="transparent"
+                  style={{ cursor: 'crosshair' }}
+                  onMouseEnter={() => setHoveredIdx(index)}
+                  onMouseMove={() => setHoveredIdx(index)}
+                />
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+
+      {/* X 轴目标名称指示 */}
+      <div className="checks-time-axis nezha-time-axis mono">
+        {items.map((it, idx) => (
+          <span
+            key={`x-net-${idx}`}
+            className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
+            style={{ width: `${slot}%`, textAlign: 'center' }}
+          >
+            {it.target.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function NetworkMonitorView({ nodes = [] }) {
   const [selectedNodeUuid, setSelectedNodeUuid] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
   const [results, setResults] = useState([])
@@ -164,6 +382,7 @@ export function NetworkMonitorView({ nodes = [] }) {
   const successCount = results.filter((r) => r?.result?.status === 'success' || (r?.result?.status_code && r.result.status_code < 400)).length
   const totalReports = results.length
   const passRate = totalReports > 0 ? Math.round((successCount / totalReports) * 100) : 100
+  const selectedNode = nodes.find((n) => (n.uuid || n.id) === selectedNodeUuid) || nodes[0]
 
   return (
     <div className="network-module-view">
@@ -330,6 +549,13 @@ export function NetworkMonitorView({ nodes = [] }) {
           </form>
         )}
       </div>
+
+      {/* 实时网络延迟探针细流线走势图 (哪吒 2.0 风格) */}
+      <NetworkLatencyLines
+        targets={filteredTargets}
+        resultsByTargetId={resultsByTargetId}
+        selectedNodeName={selectedNode?.name}
+      />
 
       {/* 网络检测目标列表 */}
       <div className="panel network-table-panel">

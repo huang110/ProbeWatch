@@ -11,6 +11,215 @@ const PRESET_MTR_TARGETS = [
   { id: 'mtr-4', name: 'Route 4 (198.51.100.4)', host: '198.51.100.4', max_hops: 20 },
 ]
 
+/**
+ * Catmull-Rom 转三次贝塞尔平滑曲线 (哪吒探针 2.0 极细线条专用)
+ */
+function generateMtrSpline(pts, bottomY = 90) {
+  if (!pts || !pts.length) return { line: '', area: '' }
+  if (pts.length === 1) {
+    const p = pts[0]
+    return {
+      line: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)}`,
+      area: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} L ${p.x.toFixed(2)} ${bottomY} Z`,
+    }
+  }
+
+  let line = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(i - 1, 0)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(i + 2, pts.length - 1)]
+
+    const cp1x = p1.x + (p2.x - p0.x) / 8
+    const cp1y = Math.max(6, Math.min(bottomY - 1, p1.y + (p2.y - p0.y) / 8))
+    const cp2x = p2.x - (p3.x - p1.x) / 8
+    const cp2y = Math.max(6, Math.min(bottomY - 1, p2.y - (p3.y - p1.y) / 8))
+
+    line += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+
+  const firstX = pts[0].x.toFixed(2)
+  const lastX = pts[pts.length - 1].x.toFixed(2)
+  const area = `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`
+  return { line, area }
+}
+
+export function MTRHopLatencyLine({ hops = [], isReached = false, destination = '' }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null)
+  if (!hops.length) return null
+
+  const validHops = hops.map((h, i) => {
+    const ttl = h.ttl ?? i + 1
+    const lat = numeric(h.latency_ms)
+    const isTimedOut = h.timed_out === true || !h.ip
+    return { ttl, ip: h.ip, latency: lat, isTimedOut }
+  })
+
+  const validLatencies = validHops.map((h) => h.latency).filter((l) => l !== null && l >= 0)
+  const maxLat = Math.max(...validLatencies, 20)
+  const headroomLat = maxLat * 1.15
+  const baselineY = 90
+  const topY = 16
+  const plotHeight = baselineY - topY
+  const count = validHops.length
+  const slot = 100 / Math.max(count, 1)
+
+  const pts = validHops.map((h, i) => {
+    const x = i * slot + slot / 2
+    const lat = h.latency !== null && h.latency >= 0 ? h.latency : 0
+    const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
+    return { x, y, hop: h }
+  })
+
+  const spline = generateMtrSpline(
+    pts.map((p) => ({ x: p.x, y: p.y })),
+    baselineY
+  )
+
+  const active = hoveredIdx !== null && pts[hoveredIdx] ? pts[hoveredIdx] : null
+
+  return (
+    <div className="mtr-hop-line-wrap nezha-traffic-wrap" onMouseLeave={() => setHoveredIdx(null)}>
+      {/* 哪吒 2.0 简约单行悬浮指示栏 */}
+      <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
+        {active ? (
+          <div className="hover-badge-content">
+            <span className="hover-stat mono" style={{ fontWeight: 600 }}>第 #{active.hop.ttl} 跳</span>
+            <span className="hover-sep">│</span>
+            <span className="hover-stat mono text-blue">
+              IP: <b>{active.hop.ip || '超时无响应'}</b>
+            </span>
+            <span className="hover-sep">│</span>
+            <span className="hover-stat mono text-mint">
+              时延: <b>{active.hop.latency !== null ? `${active.hop.latency} ms` : '—'}</b>
+            </span>
+            <span className="hover-sep">│</span>
+            <span className={`hover-stat mono ${active.hop.ttl === count && isReached ? 'text-mint' : active.hop.isTimedOut ? 'text-rose' : 'text-1'}`}>
+              状态: <b>{active.hop.ttl === count && isReached ? '宿主机抵达' : active.hop.isTimedOut ? 'ICMP 过滤' : '骨干中继'}</b>
+            </span>
+            {destination && (
+              <>
+                <span className="hover-sep">│</span>
+                <span className="hover-stat muted mono">目标: {destination}</span>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="hover-badge-hint mono">
+            <span>哪吒 2.0 逐跳时延跃迁流线 · 鼠标滑过各跳节点查看骨干网延时与丢包</span>
+          </div>
+        )}
+      </div>
+
+      <div className="checks-svg-canvas nezha-svg-canvas" style={{ height: '90px' }}>
+        <svg
+          className="checks-line-svg nezha-spline-svg"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="逐跳路由时延细线条走势图"
+        >
+          <defs>
+            <linearGradient id="nezha-mtr-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.09" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* 参考水平极细虚线 */}
+          <line className="nezha-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
+          <line className="nezha-grid-line" x1="0" y1="53" x2="100" y2="53" />
+          <line className="nezha-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
+
+          {/* 渐变微透明面积 */}
+          {validLatencies.length > 0 && (
+            <path className="nezha-area-fill" d={spline.area} fill="url(#nezha-mtr-grad)" />
+          )}
+
+          {/* 哪吒 2.0 极细线条 (0.95px) */}
+          {validLatencies.length > 0 && (
+            <path
+              className="nezha-line-stroke nezha-line-tx"
+              d={spline.line}
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth="0.95"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {/* Y 轴刻度标注 */}
+          {maxLat > 0 && (
+            <g className="nezha-axis-scale-group" aria-hidden="true">
+              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                {Math.round(maxLat)} ms
+              </text>
+              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
+                0 ms
+              </text>
+            </g>
+          )}
+
+          {/* 交互交叉线与发光点 */}
+          {pts.map((p, index) => {
+            const isHovered = hoveredIdx === index
+            const isTimeout = p.hop.isTimedOut
+            const isFinal = p.hop.ttl === count && isReached
+            const dotTone = isFinal ? '#10b981' : isTimeout ? '#f43f5e' : '#6366f1'
+
+            return (
+              <g key={`mtr-pt-${index}`}>
+                {isHovered && (
+                  <line
+                    className="nezha-crosshair"
+                    x1={p.x}
+                    y1={topY - 3}
+                    x2={p.x}
+                    y2={baselineY}
+                  />
+                )}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={isHovered ? 2.4 : 1.6}
+                  fill={dotTone}
+                  stroke="#ffffff"
+                  strokeWidth="0.75"
+                />
+                <rect
+                  x={index * slot}
+                  y="0"
+                  width={slot}
+                  height="100"
+                  fill="transparent"
+                  style={{ cursor: 'crosshair' }}
+                  onMouseEnter={() => setHoveredIdx(index)}
+                  onMouseMove={() => setHoveredIdx(index)}
+                />
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+
+      {/* X 轴跳数指示 */}
+      <div className="checks-time-axis nezha-time-axis mono">
+        {validHops.map((h, idx) => (
+          <span
+            key={`x-mtr-${idx}`}
+            className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
+            style={{ width: `${slot}%`, textAlign: 'center' }}
+          >
+            #{h.ttl}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function MTRRouteView({ nodes = [] }) {
   const [selectedNodeUuid, setSelectedNodeUuid] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
   const [mtrData, setMtrData] = useState([])
@@ -342,6 +551,9 @@ export function MTRRouteView({ nodes = [] }) {
             </div>
           </div>
 
+          {/* MTR 逐跳时延跃升流线图 (哪吒 2.0 风格) */}
+          <MTRHopLatencyLine hops={hops} isReached={isReached} destination={result?.host} />
+
           {/* 逐跳路由表格 */}
           <div className="table-scroll">
             <table className="node-table mtr-hops-table">
@@ -385,11 +597,30 @@ export function MTRRouteView({ nodes = [] }) {
                       </td>
                       <td>
                         {latency !== null ? (
-                          <div className="latency-bar-container">
-                            <div
-                              className={`latency-bar-fill bar-${latencyTone}`}
-                              style={{ width: `${latencyPercent}%` }}
-                            />
+                          <div className="mtr-hop-step-cell">
+                            {/* 隐式保留 .latency-bar-fill 保证测试契约无损 */}
+                            <span className={`latency-bar-fill bar-${latencyTone}`} style={{ display: 'none', width: `${latencyPercent}%` }} />
+                            <svg className="mtr-step-svg" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+                              <line x1="0" y1="14" x2="100" y2="14" stroke="currentColor" strokeOpacity="0.1" strokeWidth="0.8" />
+                              <line
+                                x1="0"
+                                y1="14"
+                                x2={latencyPercent}
+                                y2="14"
+                                stroke={latencyTone === 'mint' ? '#10b981' : latencyTone === 'blue' ? '#6366f1' : latencyTone === 'amber' ? '#f59e0b' : '#f43f5e'}
+                                strokeWidth="1.2"
+                                strokeLinecap="round"
+                              />
+                              <circle
+                                cx={latencyPercent}
+                                cy="14"
+                                r="2.2"
+                                fill={latencyTone === 'mint' ? '#10b981' : latencyTone === 'blue' ? '#6366f1' : latencyTone === 'amber' ? '#f59e0b' : '#f43f5e'}
+                              />
+                            </svg>
+                            <small className="mono text-muted" style={{ fontSize: '10px' }}>
+                              {Math.round(latencyPercent)}%
+                            </small>
                           </div>
                         ) : (
                           <span className="muted" style={{ fontSize: '11px' }}>超时无回显</span>

@@ -75,6 +75,62 @@ const getMediaStatus = (platformId, mediaList) => {
   return { text: status || '未知', tone: 'muted', latency }
 }
 
+function DrawerChecksLatencyLine({ checks = [] }) {
+  if (!checks || checks.length < 2) return null
+  const validLatencies = checks
+    .map((c) => (c.latency_avg_ms !== null && c.latency_avg_ms !== undefined ? Number(c.latency_avg_ms) : null))
+    .filter((l) => l !== null && l >= 0)
+  if (!validLatencies.length) return null
+
+  const maxLat = Math.max(...validLatencies, 20)
+  const baselineY = 44
+  const topY = 6
+  const plotH = baselineY - topY
+  const count = checks.length
+  const slot = 100 / Math.max(count, 1)
+
+  const pts = checks.map((c, i) => {
+    const x = i * slot + slot / 2
+    const lat = c.latency_avg_ms !== null && c.latency_avg_ms !== undefined ? Number(c.latency_avg_ms) : 0
+    const y = baselineY - Math.min((lat / (maxLat * 1.15)) * plotH, plotH)
+    return { x, y }
+  })
+
+  // 0.95px 极细平滑贝塞尔曲线
+  let path = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const cx = (p1.x + p2.x) / 2
+    path += ` C ${cx.toFixed(2)} ${p1.y.toFixed(2)}, ${cx.toFixed(2)} ${p2.y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+
+  const area = `${path} L ${pts[pts.length - 1].x.toFixed(2)} ${baselineY} L ${pts[0].x.toFixed(2)} ${baselineY} Z`
+
+  return (
+    <div className="drawer-mini-latency-card" title="哪吒 2.0 三网探测时延走势">
+      <div className="drawer-mini-latency-header mono">
+        <span className="text-muted">三网时延流线</span>
+        <b className="text-mint">{Math.round(maxLat)} ms 峰值</b>
+      </div>
+      <svg className="drawer-mini-latency-svg" viewBox="0 0 100 48" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="drawer-lat-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <line x1="0" y1={baselineY} x2="100" y2={baselineY} stroke="currentColor" strokeOpacity="0.08" strokeWidth="0.8" />
+        <path d={area} fill="url(#drawer-lat-grad)" />
+        <path d={path} fill="none" stroke="#10b981" strokeWidth="0.95" strokeLinecap="round" />
+        {pts.map((p, idx) => (
+          <circle key={idx} cx={p.x} cy={p.y} r="1.6" fill="#10b981" stroke="#ffffff" strokeWidth="0.6" />
+        ))}
+      </svg>
+    </div>
+  )
+}
+
 export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigate }) {
   const closeButtonRef = useRef(null)
   const [showBillingModal, setShowBillingModal] = useState(false)
@@ -444,7 +500,9 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <span>正在检测三网与链路数据…</span>
               </div>
             ) : checksData.length > 0 ? (
-              <div className="drawer-checks-list">
+              <>
+                <DrawerChecksLatencyLine checks={checksData} />
+                <div className="drawer-checks-list">
                 {checksData.map((item, idx) => {
                   const latency =
                     item.latency_avg_ms !== null && item.latency_avg_ms !== undefined
@@ -509,7 +567,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                     </div>
                   )
                 })}
-              </div>
+                </div>
+              </>
             ) : (
               <div className="drawer-empty-sub">
                 当前尚未配置常规网络探测目标，可前往「网络检测」添加针对 Cloudflare、国内三网等端点的连通性监控。
