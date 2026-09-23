@@ -311,7 +311,7 @@ export function App() {
   const clockText = formatTimeOfDay(clock)
 
   if (window.location.pathname === '/login/2fa') return <TOTPVerifyPage />
-  if (apiState.kind === 'guest') return <GuestView status={publicStatus} isRefreshing={isRefreshing} onRefresh={refreshAll} />
+  if (apiState.kind === 'guest') return <GuestView status={publicStatus} isRefreshing={isRefreshing} onRefresh={refreshAll} onLoginSuccess={refreshAll} />
   return <div className="app-shell">
     <Sidebar activeNav={activeNav} onNavigate={navigate} me={me} apiState={apiState} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
     <main className="main-content">

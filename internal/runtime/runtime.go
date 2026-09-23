@@ -18,6 +18,7 @@ import (
 	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/notify"
 )
 
 // ErrControlPlaneNotConfigured marks the future API/store runtime boundary.
@@ -62,6 +63,8 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	go runAuthCleanup(cleanupCtx, service)
 	go runLifecycleCleanup(cleanupCtx, store)
 	go runHistoryAggregation(cleanupCtx, store)
+	notifier := notify.NewNotifier(cfg)
+	go notify.RunAlertDispatcher(cleanupCtx, store, notifier)
 	handler := api.NewServer(cfg, service).Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {

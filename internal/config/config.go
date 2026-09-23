@@ -36,6 +36,10 @@ type Config struct {
 	AgentRegistrationToken string
 	AgentName              string
 	AgentDataDir           string
+	AdminPassword          string
+	TelegramBotToken       string
+	TelegramChatID         string
+	WebhookURL             string
 }
 
 const DefaultDevelopmentTokenPepper = "development-only-probewatch-token-pepper"
@@ -77,6 +81,10 @@ func Load() (Config, error) {
 		AgentRegistrationToken: value(lookup, "PROBEWATCH_AGENT_REGISTRATION_TOKEN"),
 		AgentName:              valueOrDefault(lookup, "PROBEWATCH_AGENT_NAME", "ProbeWatch Agent"),
 		AgentDataDir:           valueOrDefault(lookup, "PROBEWATCH_AGENT_DATA", "./data/agent"),
+		AdminPassword:          value(lookup, "PROBEWATCH_ADMIN_PASSWORD"),
+		TelegramBotToken:       value(lookup, "PROBEWATCH_TELEGRAM_BOT_TOKEN"),
+		TelegramChatID:         value(lookup, "PROBEWATCH_TELEGRAM_CHAT_ID"),
+		WebhookURL:             value(lookup, "PROBEWATCH_WEBHOOK_URL"),
 	}
 
 	var err error
@@ -142,21 +150,25 @@ func Load() (Config, error) {
 		if err != nil {
 			return Config{}, err
 		}
-		if strings.TrimSpace(cfg.GitHubClientID) == "" {
-			return Config{}, fmt.Errorf("GITHUB_CLIENT_ID is required in production")
+		hasGitHub := strings.TrimSpace(cfg.GitHubClientID) != "" && strings.TrimSpace(cfg.GitHubClientSecret) != ""
+		hasPassword := strings.TrimSpace(cfg.AdminPassword) != ""
+		if !hasGitHub && !hasPassword {
+			return Config{}, fmt.Errorf("either PROBEWATCH_ADMIN_PASSWORD or (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET) is required in production")
 		}
-		if strings.TrimSpace(cfg.GitHubClientSecret) == "" {
-			return Config{}, fmt.Errorf("GITHUB_CLIENT_SECRET is required in production")
-		}
-		if strings.TrimSpace(cfg.GitHubRedirectURL) == "" {
-			return Config{}, fmt.Errorf("GITHUB_REDIRECT_URL is required in production")
-		}
-		redirectURL, err := validateProductionHTTPSURL("GITHUB_REDIRECT_URL", cfg.GitHubRedirectURL)
-		if err != nil {
-			return Config{}, err
-		}
-		if urlOrigin(publicURL) != urlOrigin(redirectURL) {
-			return Config{}, fmt.Errorf("GITHUB_REDIRECT_URL origin must match PROBEWATCH_PUBLIC_BASE_URL origin")
+		if hasGitHub {
+			if strings.TrimSpace(cfg.GitHubRedirectURL) == "" {
+				return Config{}, fmt.Errorf("GITHUB_REDIRECT_URL is required in production when using GitHub OAuth")
+			}
+			redirectURL, err := validateProductionHTTPSURL("GITHUB_REDIRECT_URL", cfg.GitHubRedirectURL)
+			if err != nil {
+				return Config{}, err
+			}
+			if urlOrigin(publicURL) != urlOrigin(redirectURL) {
+				return Config{}, fmt.Errorf("GITHUB_REDIRECT_URL origin must match PROBEWATCH_PUBLIC_BASE_URL origin")
+			}
+			if len(cfg.GitHubAllowedUsers) == 0 && strings.TrimSpace(cfg.GitHubAllowedOrg) == "" {
+				return Config{}, fmt.Errorf("GITHUB_ALLOWED_USERS or GITHUB_ALLOWED_ORG is required in production when using GitHub OAuth")
+			}
 		}
 		if len([]byte(cfg.SessionSecret)) < 32 {
 			return Config{}, fmt.Errorf("SESSION_SECRET must be at least 32 bytes in production")
@@ -166,9 +178,6 @@ func Load() (Config, error) {
 		}
 		if cfg.AgentIgnoreUnsafeCert {
 			return Config{}, fmt.Errorf("AGENT_IGNORE_UNSAFE_CERT must be false in production")
-		}
-		if len(cfg.GitHubAllowedUsers) == 0 && strings.TrimSpace(cfg.GitHubAllowedOrg) == "" {
-			return Config{}, fmt.Errorf("GITHUB_ALLOWED_USERS or GITHUB_ALLOWED_ORG is required in production")
 		}
 	}
 

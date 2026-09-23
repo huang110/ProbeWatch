@@ -481,9 +481,49 @@ h1 { margin: 10px 0 8px; color: var(--text-1); font-size: clamp(26px, 2.6vw, 36p
   .search-field { width: 100%; }
   .filter-group { justify-content: space-between; }
   .filter-group button { flex: 1; }
+  .target-form-grid { grid-template-columns: 1fr; }
   .guest-stats-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .footer-divider { display: none; }
 }
+
+/* ---------- 检测目标管理 ---------- */
+.target-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.target-table { width: 100%; min-width: 760px; margin-top: 6px; border-collapse: collapse; }
+.target-table th { padding: 8px; border-bottom: 1px solid var(--border-strong); color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .1em; font-weight: 400; text-align: left; white-space: nowrap; }
+.target-table td { padding: 10px 8px; border-top: 1px solid var(--border); color: var(--text-2); font: 11px var(--font-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.target-table tbody tr:first-child td { border-top: 0; }
+.target-table td:first-child { color: var(--text-1); font-weight: 700; }
+.target-kind { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-2); background: rgba(255, 255, 255, .03); font: 600 10px var(--font-mono); }
+.target-state { display: inline-flex; align-items: center; gap: 7px; }
+.target-toggle { display: inline-flex; align-items: center; padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-3); background: transparent; font: 700 10px var(--font-mono); transition: border-color 160ms ease, color 160ms ease; }
+.target-toggle:hover { color: var(--text-1); border-color: rgba(90, 216, 174, .35); }
+.target-toggle-on { color: #d9f9ec; border-color: rgba(90, 216, 174, .4); background: var(--mint-dim); }
+.target-toggle:disabled { cursor: wait; opacity: .7; }
+.target-delete { color: var(--rose); }
+.target-delete:hover { color: #f2b3ba; }
+.target-delete:disabled { cursor: wait; opacity: .7; }
+.target-form-panel { margin-top: var(--gap); }
+.target-form { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
+.target-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field-label { color: var(--text-3); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.field-input, .field-select, .field-textarea { width: 100%; box-sizing: border-box; height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text-1); background: var(--bg-inset); font: 500 12px var(--font-mono); outline: 0; transition: border-color 160ms ease; }
+.field-input:focus, .field-select:focus, .field-textarea:focus { border-color: rgba(90, 216, 174, .45); }
+.field-textarea { height: auto; min-height: 84px; padding: 8px 10px; line-height: 1.6; resize: vertical; }
+.field-hint { color: var(--text-3); font-size: 10px; line-height: 1.6; }
+.field-wide { grid-column: 1 / -1; }
+.target-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+/* ---------- 节点接入 ---------- */
+.enroll-hint { margin: 14px 0 0; color: var(--text-3); font-size: 10px; line-height: 1.7; }
+.enroll-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.enroll-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; color: var(--text-2); font-size: 11px; }
+.enroll-meta b { color: var(--text-1); font-weight: 600; }
+.enroll-countdown { padding: 3px 10px; border: 1px solid rgba(227, 181, 105, .4); border-radius: 999px; color: var(--amber); background: var(--amber-dim); font: 700 10px var(--font-mono); }
+.enroll-countdown-expired { color: var(--rose); border-color: rgba(224, 127, 136, .4); background: var(--rose-dim); }
+.enroll-script { margin: 14px 0 0; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-inset); color: #c9f4e4; font: 12px/1.7 var(--font-mono); white-space: pre; overflow-x: auto; }
+.enroll-copy-failed { color: var(--rose); font-size: 10px; }
+.enroll-warning { margin: 14px 0 0; color: var(--text-3); font-size: 10px; line-height: 1.7; }
 
 /* ---------- 动效偏好 ---------- */
 @media (prefers-reduced-motion: reduce) {

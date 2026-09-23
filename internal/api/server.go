@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
+	"github.com/probewatch/probewatch/frontend"
 	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
@@ -42,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/public/status", s.publicStatus)
 	mux.HandleFunc("/auth/github", s.githubStart)
 	mux.HandleFunc("/auth/github/callback", s.githubCallback)
+	mux.HandleFunc("/auth/login", s.localLogin)
 	mux.HandleFunc("/auth/totp/verify", s.totpVerifyLogin)
 
 	middleware := NewMiddleware(s.service, s.cfg)
@@ -85,6 +88,32 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/api/me/protected", protectedRoute)
 	}
 	mux.Handle("/api/me", middleware.RequireAuth(http.HandlerFunc(s.me)))
+
+	distFS, err := frontend.DistFS()
+	if err == nil {
+		fileServer := http.FileServer(http.FS(distFS))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") || r.URL.Path == "/healthz" {
+				http.NotFound(w, r)
+				return
+			}
+			cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+			if cleanPath == "" || cleanPath == "." {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			f, err := distFS.Open(cleanPath)
+			if err == nil {
+				_ = f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for client-side routing
+			r.URL.Path = "/"
+			fileServer.ServeHTTP(w, r)
+		})
+	}
+
 	return securityHeaders(mux)
 }
 
@@ -183,5 +212,34 @@ func securityHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+type localLoginRequest struct {
+	Password string `json:"password"`
+}
+
+func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req localLoginRequest
+	if err := decodeJSONRequest(w, r, s.requestBodyLimit(), &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	if err := s.service.AuthenticateLocalPassword(w, r, req.Password); err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"user": map[string]string{
+			"id":       "admin",
+			"provider": "local",
+			"login":    "admin",
+		},
 	})
 }

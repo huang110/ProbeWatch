@@ -9,3 +9,13 @@ export async function fetchGuestStatus(signal) {
     return null
   }
 }
+
+// 管理页写操作（POST/PATCH/DELETE）先取一次性 CSRF Token，与 ackAlert / TOTP 同一模式。
+export async function fetchCsrfToken() {
+  const response = await fetch('/api/csrf', { credentials: 'same-origin' })
+  if (response.status === 401) throw new Error('auth')
+  if (!response.ok) throw new Error('csrf')
+  const token = response.headers.get('X-CSRF-Token')
+  if (!token) throw new Error('csrf')
+  return token
+}

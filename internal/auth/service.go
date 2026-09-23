@@ -251,6 +251,46 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+func (s *Service) AuthenticateLocalPassword(w http.ResponseWriter, r *http.Request, password string) error {
+	trimmedAdminPassword := strings.TrimSpace(s.cfg.AdminPassword)
+	if trimmedAdminPassword == "" {
+		return errors.New("local password login is not configured")
+	}
+	if subtle.ConstantTimeCompare([]byte(password), []byte(trimmedAdminPassword)) != 1 {
+		return errors.New("invalid credentials")
+	}
+	admin, err := s.store.UpsertAdminUser(r.Context(), "local", "admin", "admin", time.Now().UTC())
+	if err != nil {
+		logInternalError("upsert local admin user", err)
+		return err
+	}
+	totpSecret, totpEnabled, err := s.store.GetAdminUserTOTP(r.Context(), admin.ID)
+	if err != nil {
+		logInternalError("read admin totp state", err)
+		return err
+	}
+	if totpEnabled && len(totpSecret) > 0 {
+		s.startTOTPPendingLogin(w, r, admin.ID)
+		return nil
+	}
+	sessionValue, err := s.createSession(r.Context(), admin.ID, time.Now().UTC())
+	if err != nil {
+		logInternalError("create session", err)
+		return err
+	}
+	setCookie(w, s.cfg, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionValue,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Environment != "development",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionLifetime / time.Second),
+		Expires:  time.Now().UTC().Add(sessionLifetime),
+	})
+	return nil
+}
+
 func (s *Service) CSRFHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

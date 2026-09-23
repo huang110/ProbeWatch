@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from playwright.sync_api import sync_playwright
 
@@ -7,7 +8,7 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("PROBEWATCH_BASE_URL", "http://127.0.0.1:4173/")
 
 
-def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200, media=None, media_status=200):
+def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200, media=None, media_status=200, targets=None, targets_status=200, registration=None, csrf_token="contract-csrf-token"):
     import json
     empty_public_status = {"nodes": {"online": 0, "total": 0, "names": []}, "checks": {"success_rate": None, "avg_latency_ms": None}, "last_updated_at": None, "generated_at": "2026-09-22T00:00:00Z"}
     empty_traffic = {"period": "day", "window": {"from": "2026-09-21T00:00:00Z", "to": "2026-09-22T00:00:00Z"}, "rx_bytes": None, "tx_bytes": None, "rx_resets": 0, "tx_resets": 0, "interval_seconds": 3600, "series": []}
@@ -46,6 +47,62 @@ def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, a
         route.fulfill(status=traffic_status, content_type="application/json", body=json.dumps(payload))
 
     page.route("**/api/nodes/*/traffic*", traffic_route)
+
+    # 深拷贝：PATCH 场景会原地改写 enabled，不能影响其他 page 的基线数据
+    targets_store = json.loads(json.dumps(targets)) if targets is not None else []
+
+    def csrf_route(route):
+        route.fulfill(status=200, content_type="application/json", headers={"X-CSRF-Token": csrf_token}, body="{}")
+
+    def targets_collection_route(route):
+        request = route.request
+        if request.method == "GET":
+            if targets_status != 200:
+                route.fulfill(status=targets_status, content_type="application/json", body='{"error": "targets unavailable"}')
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(list(targets_store)))
+            return
+        if request.method == "POST":
+            body = json.loads(request.post_data or "{}")
+            for item in targets_store:
+                if item.get("id") == body.get("id"):
+                    route.fulfill(status=409, content_type="application/json", body=json.dumps({"error": "target already exists"}))
+                    return
+            created = dict(body)
+            created.setdefault("enabled", True)
+            targets_store.append(created)
+            route.fulfill(status=201, content_type="application/json", body=json.dumps(created))
+            return
+        route.fulfill(status=405, content_type="application/json", body=json.dumps({"error": "method not allowed"}))
+
+    def targets_item_route(route):
+        request = route.request
+        target_id = request.url.rstrip("/").split("/")[-1]
+        if request.method == "PATCH":
+            body = json.loads(request.post_data or "{}")
+            for item in targets_store:
+                if item.get("id") == target_id:
+                    item["enabled"] = bool(body.get("enabled", not item.get("enabled", True)))
+                    route.fulfill(status=200, content_type="application/json", body=json.dumps(item))
+                    return
+            route.fulfill(status=404, content_type="application/json", body=json.dumps({"error": "target not found"}))
+            return
+        if request.method == "DELETE":
+            targets_store[:] = [item for item in targets_store if item.get("id") != target_id]
+            route.fulfill(status=204, body="")
+            return
+        route.fulfill(status=405, content_type="application/json", body=json.dumps({"error": "method not allowed"}))
+
+    def registration_route(route):
+        if registration is None:
+            route.fulfill(status=404, content_type="application/json", body=json.dumps({"error": "not found"}))
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(registration))
+
+    page.route("**/api/csrf", csrf_route)
+    page.route("**/api/targets/*", targets_item_route)
+    page.route("**/api/targets", targets_collection_route)
+    page.route("**/api/registration-tokens", registration_route)
 
 
 def run_regressions():
@@ -329,6 +386,126 @@ def run_regressions():
         media_empty.get_by_text("暂无流媒体上报", exact=True).wait_for()
         assert page.locator(".media-table").count() == 0
         tests.append("media-empty")
+        page.close()
+
+        base_targets = [
+            {"id": "tcp-edge-01", "name": "边缘 TCP", "kind": "tcp", "host": "192.0.2.10", "port": 80, "interval_seconds": 60, "timeout_ms": 3000, "enabled": True},
+            {"id": "http-edge-01", "name": "边缘 HTTP", "kind": "http", "host": "192.0.2.11", "port": 80, "path": "/health", "interval_seconds": 30, "timeout_ms": 3000, "enabled": False},
+            {"id": "mtr-edge-01", "name": "边缘 MTR", "kind": "mtr", "host": "192.0.2.12", "port": 80, "max_hops": 20, "interval_seconds": 300, "timeout_ms": 3000, "enabled": True},
+        ]
+
+        # 检测目标管理：列表 / 筛选 / 创建（成功 + 服务端 409 文案）/ 启停 / 删除
+        page = browser.new_page()
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview, targets=base_targets)
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.locator(".nav-item", has_text="检测目标").click(force=True)
+        table = page.locator(".target-table")
+        table.wait_for()
+        headers = table.locator("thead th")
+        assert headers.count() == 9
+        assert [headers.nth(i).inner_text() for i in range(8)] == ["ID", "名称", "类型", "主机", "端口", "路径", "间隔", "启用"]
+        rows = table.locator("tbody tr")
+        assert rows.count() == 3
+        first_row = rows.nth(0)
+        assert first_row.locator("td").nth(0).inner_text() == "tcp-edge-01"
+        assert first_row.locator("td").nth(2).inner_text() == "TCP"
+        assert first_row.locator("td").nth(4).inner_text() == "80"
+        assert first_row.locator("td").nth(5).inner_text() == "—"
+        assert first_row.locator("td").nth(6).inner_text() == "60s"
+        assert first_row.locator(".target-toggle").inner_text() == "已启用"
+        # 按类型筛选
+        page.get_by_role("button", name="HTTP", exact=True).click()
+        assert table.locator("tbody tr").count() == 1
+        assert table.locator("tbody tr").nth(0).locator("td").nth(0).inner_text() == "http-edge-01"
+        page.get_by_role("button", name="全部", exact=True).click()
+        assert table.locator("tbody tr").count() == 3
+        # 创建目标（http 类型，路径必填字段出现）
+        page.get_by_role("button", name="新建目标", exact=True).click()
+        form = page.locator(".target-form-panel")
+        form.wait_for()
+        page.locator(".target-form-grid select").first.select_option("http")
+        page.get_by_placeholder("例如：上海 HTTP 探测").fill("新建 HTTP")
+        page.get_by_placeholder("例如：http-sh-01").fill("http-new-01")
+        page.get_by_placeholder("域名或 IP，不含协议").fill("192.0.2.30")
+        page.get_by_placeholder("/health").fill("/status")
+        page.get_by_role("button", name="创建目标", exact=True).click()
+        page.locator(".api-state", has_text="已创建").wait_for()
+        assert table.locator("tbody tr").count() == 4
+        # 重复 ID → 服务端 error 文案原样展示
+        page.locator(".target-form-grid select").first.select_option("http")
+        page.get_by_placeholder("例如：上海 HTTP 探测").fill("重复目标")
+        page.get_by_placeholder("例如：http-sh-01").fill("http-new-01")
+        page.get_by_placeholder("域名或 IP，不含协议").fill("192.0.2.30")
+        page.get_by_placeholder("/health").fill("/status")
+        page.get_by_role("button", name="创建目标", exact=True).click()
+        form_error = page.locator(".target-form-panel .api-state-error")
+        form_error.wait_for()
+        assert "target already exists" in form_error.inner_text()
+        # 启停切换（PATCH enabled）
+        rows.nth(0).locator(".target-toggle").click()
+        rows.nth(0).locator(".target-toggle").get_by_text("已停用", exact=True).wait_for()
+        # 删除目标
+        target_row = table.locator("tbody tr", has_text="http-new-01")
+        target_row.locator(".target-delete").click()
+        page.locator(".api-state", has_text="已删除").wait_for()
+        assert table.locator("tbody tr").count() == 3
+        tests.append("targets-manage")
+        page.close()
+
+        # network / mtr 只读表格视图（复用 TargetTable，按 kind 过滤，无操作按钮）
+        page = browser.new_page()
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview, targets=base_targets)
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.locator(".nav-item").nth(2).click(force=True)
+        readonly_table = page.locator(".target-table")
+        readonly_table.wait_for()
+        assert readonly_table.locator("thead th").count() == 8
+        readonly_rows = readonly_table.locator("tbody tr")
+        assert readonly_rows.count() == 2
+        assert readonly_rows.nth(0).locator("td").nth(0).inner_text() == "tcp-edge-01"
+        assert readonly_rows.nth(1).locator("td").nth(5).inner_text() == "/health"
+        assert readonly_rows.nth(0).get_by_text("已启用", exact=True).count() == 1
+        assert page.locator(".target-delete").count() == 0
+        assert page.locator(".target-toggle").count() == 0
+        page.locator(".nav-item").nth(3).click(force=True)
+        page.get_by_text("MTR 路由目标", exact=True).wait_for()
+        mtr_rows = page.locator(".target-table tbody tr")
+        assert mtr_rows.count() == 1
+        assert mtr_rows.nth(0).locator("td").nth(0).inner_text() == "mtr-edge-01"
+        assert mtr_rows.nth(0).locator("td").nth(2).inner_text() == "MTR"
+        tests.append("targets-readonly")
+        page.close()
+
+        # 节点自助接入：生成注册命令、倒计时、复制反馈
+        registration = {
+            "registration_token": "reg-token-123",
+            "endpoint": "https://probewatch.example.com/api/agent/v1",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=900)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        page = browser.new_page()
+        page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=BASE_URL.rstrip("/"))
+        install_api(page, nodes=[node], alerts=base_alerts, overview=base_overview, registration=registration)
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.locator(".nav-item").nth(1).click(force=True)
+        enroll_panel = page.locator(".enroll-panel")
+        assert enroll_panel.get_by_text("15 分钟", exact=False).count() == 1
+        page.get_by_role("button", name="生成接入命令", exact=True).click()
+        enroll_script = page.locator(".enroll-script")
+        enroll_script.wait_for()
+        script_text = enroll_script.inner_text()
+        assert 'export PROBEWATCH_AGENT_ENDPOINT="https://probewatch.example.com/api/agent/v1"' in script_text
+        assert 'export PROBEWATCH_AGENT_REGISTRATION_TOKEN="reg-token-123"' in script_text
+        assert "PROBEWATCH_AGENT_NODE_UUID=" in script_text
+        assert re.search(r'PROBEWATCH_AGENT_NODE_UUID="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"', script_text)
+        assert "./probewatch-agent" in script_text
+        assert re.match(r"剩余 \d{2}:\d{2}", page.locator(".enroll-countdown").inner_text())
+        warning = page.locator(".enroll-warning").inner_text()
+        assert "15 分钟" in warning and "仅可注册一个节点" in warning
+        page.get_by_role("button", name="复制安装命令", exact=True).click()
+        page.get_by_role("button", name="已复制", exact=True).wait_for()
+        clipboard_text = page.evaluate("() => navigator.clipboard.readText()")
+        assert 'export PROBEWATCH_AGENT_REGISTRATION_TOKEN="reg-token-123"' in clipboard_text
+        tests.append("node-enroll")
         page.close()
         browser.close()
     print(f"{len(tests)} browser regression tests passed")

@@ -233,8 +233,76 @@ def test_totp_login_page_posts_pending_credential_to_verify():
 
 def test_totp_setup_secret_is_not_rendered_as_html_or_copied_to_clipboard():
     assert "dangerouslySetInnerHTML" not in SOURCE
-    assert "clipboard" not in SOURCE.lower()
+    # clipboard 仅允许出现在节点接入面板（NodeEnroll）的复制按钮里；
+    # TOTP 密钥仍禁止任何复制通道。
+    totp_source = (FRONTEND_SRC / "components" / "TOTPSettingsCard.jsx").read_text(encoding="utf-8")
+    assert "clipboard" not in totp_source.lower()
     assert "totp-secret" in SOURCE
+
+
+# ---- 检测目标管理（TargetManage）----
+
+
+def test_target_manage_uses_authenticated_targets_api_with_csrf():
+    target_manage = (FRONTEND_SRC / "components" / "TargetManage.jsx").read_text(encoding="utf-8")
+    assert "fetch('/api/targets'" in target_manage
+    assert "`/api/targets/${encodeURIComponent(target.id)}`" in target_manage
+    assert "method: 'PATCH'" in target_manage
+    assert "method: 'DELETE'" in target_manage
+    assert "fetchCsrfToken" in target_manage
+    assert "'X-CSRF-Token': csrfToken" in target_manage
+    assert "credentials: 'same-origin'" in target_manage
+    assert "localStorage" not in target_manage
+    assert "sessionStorage" not in target_manage
+    assert "dangerouslySetInnerHTML" not in target_manage
+
+
+def test_target_manage_supports_all_kinds_and_server_error_text():
+    target_manage = (FRONTEND_SRC / "components" / "TargetManage.jsx").read_text(encoding="utf-8")
+    for kind in ("tcp", "http", "https", "dns", "mtr", "media_http"):
+        assert kind in target_manage, f"target form must support kind {kind}"
+    assert "dns_type" in target_manage
+    assert "region_rules" in target_manage
+    assert "JSON.parse" in target_manage
+    assert "max_hops" in target_manage
+    assert "expected_status" in target_manage
+    # 服务端 {"error": ...} 文案需原样展示
+    assert ".error" in target_manage
+
+
+def test_target_table_is_reused_as_readonly_view_for_network_and_mtr():
+    subpage = (FRONTEND_SRC / "components" / "SubPage.jsx").read_text(encoding="utf-8")
+    assert "TargetManage" in subpage
+    assert "readOnly" in subpage
+    for kind in ("'tcp'", "'http'", "'https'", "'dns'", "'mtr'"):
+        assert kind in subpage, f"network/mtr readonly filter must include {kind}"
+    assert "NodeEnroll" in subpage
+
+
+# ---- 节点自主接入（NodeEnroll）----
+
+
+def test_node_enroll_uses_registration_token_api_and_clipboard_without_storage():
+    node_enroll = (FRONTEND_SRC / "components" / "NodeEnroll.jsx").read_text(encoding="utf-8")
+    assert "fetch('/api/registration-tokens'" in node_enroll
+    assert "method: 'POST'" in node_enroll
+    assert "fetchCsrfToken" in node_enroll
+    assert "'X-CSRF-Token': csrfToken" in node_enroll
+    assert "credentials: 'same-origin'" in node_enroll
+    assert "registration_token" in node_enroll
+    assert "expires_at" in node_enroll
+    assert "crypto.randomUUID" in node_enroll
+    assert "navigator.clipboard.writeText" in node_enroll
+    assert "已复制" in node_enroll
+    assert "PROBEWATCH_AGENT_REGISTRATION_TOKEN" in node_enroll
+    assert "PROBEWATCH_AGENT_NODE_UUID" in node_enroll
+    assert "PROBEWATCH_AGENT_ENDPOINT" in node_enroll
+    assert "15 分钟" in node_enroll
+    assert "仅可注册一个节点" in node_enroll
+    assert "localStorage" not in node_enroll
+    assert "sessionStorage" not in node_enroll
+    assert "dangerouslySetInnerHTML" not in node_enroll
+    assert "innerHTML" not in node_enroll
 
 
 # ---- komari/Lite 风格重构（分栏面板）后的结构约束 ----
