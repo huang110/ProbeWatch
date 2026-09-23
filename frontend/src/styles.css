@@ -4575,3 +4575,88 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* ---------- 3. 流量曲线与检测目标时序线条增强 ---------- */
+.traffic-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.traffic-mode-toggles {
+  margin-bottom: 0;
+}
+
+.traffic-line-stroke {
+  filter: drop-shadow(0 2px 8px rgba(94, 106, 210, 0.25));
+}
+
+.traffic-line-rx {
+  filter: drop-shadow(0 2px 8px rgba(48, 164, 108, 0.25));
+}
+
+.traffic-dot-rx,
+.traffic-dot-tx {
+  transition: r 0.15s ease, filter 0.15s ease;
+}
+
+.traffic-dot-rx.active {
+  filter: drop-shadow(0 0 6px rgba(48, 164, 108, 0.8));
+}
+
+.traffic-dot-tx.active {
+  filter: drop-shadow(0 0 6px rgba(94, 106, 210, 0.8));
+}
+
+.checks-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.checks-chart-wrap {
+  position: relative;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 14px 10px;
+  margin-bottom: 12px;
+}
+
+.checks-svg-canvas {
+  width: 100%;
+  height: 110px;
+  position: relative;
+}
+
+.checks-line-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.checks-time-axis {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(148, 178, 190, 0.08);
+}
+
+.axis-target-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.axis-target-name.axis-active {
+  color: var(--blue-bright);
+  font-weight: 600;
+}

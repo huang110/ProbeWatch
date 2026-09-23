@@ -386,7 +386,7 @@ export function App() {
         {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
           : activeNav === 'node-detail' && detailNode ? <NodeDetailPage node={detailNode} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
             : activeNav === 'billing' ? <BillingCenter nodes={data} />
-              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} />}
+              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} refreshInterval={refreshInterval} onIntervalChange={setRefreshInterval} />}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>

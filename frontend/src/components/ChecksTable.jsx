@@ -1,13 +1,16 @@
 import { useState, useMemo } from 'react'
 import {
   ArrowsDownUp,
+  ChartLine,
   CheckCircle,
   Clock,
   Funnel,
   GlobeHemisphereWest,
   MagnifyingGlass,
+  Rows,
   ShieldCheck,
   Sparkle,
+  TrendUp,
   WarningCircle,
   WifiHigh,
 } from '@phosphor-icons/react'
@@ -23,11 +26,185 @@ import {
 } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 
+export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
+  const [hoveredIdx, setHoveredIdx] = useState(null)
+  const targets = safeArray(rows).filter((r) => r && r.name)
+  if (!targets.length) return null
+
+  const validLatencies = targets.map((r) => r.latency).filter((l) => l !== null && l >= 0)
+  const maxLat = Math.max(...validLatencies, 30)
+  const count = targets.length
+  const slot = 100 / Math.max(count, 1)
+
+  // 构建时延走势曲线与面积路径
+  const latPoints = targets.map((r, i) => {
+    const x = i * slot + slot / 2
+    const lat = r.latency !== null && r.latency >= 0 ? r.latency : 0
+    const y = 88 - (lat / maxLat) * 72
+    return { x, y, target: r }
+  })
+
+  const linePath = latPoints
+    .map((p, i) => `${i ? 'L' : 'M'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+    .join(' ')
+  const areaPath = `${linePath} L ${(count > 1 ? (count - 1) * slot + slot / 2 : 100).toFixed(2)} 99 L ${(slot / 2).toFixed(2)} 99 Z`
+
+  const active = hoveredIdx !== null && latPoints[hoveredIdx] ? latPoints[hoveredIdx] : null
+
+  return (
+    <div className="checks-chart-wrap" onMouseLeave={() => setHoveredIdx(null)}>
+      {/* 顶部悬浮动态卡片 */}
+      <div className={`traffic-hover-banner checks-hover-banner ${active ? 'active' : ''}`}>
+        {active ? (
+          <div className="hover-badge-content">
+            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.target.name}</span>
+            <span className="hover-sep">·</span>
+            <span className="hover-stat text-mint mono">
+              协议: <b>{active.target.kind}</b>
+            </span>
+            <span className="hover-sep">·</span>
+            <span className="hover-stat text-blue mono">
+              平均延迟: <b>{active.target.latency !== null ? `${formatNumber(active.target.latency)} ms` : '—'}</b>
+            </span>
+            <span className="hover-sep">·</span>
+            <span className="hover-stat text-1 mono">
+              丢包率: <b>{active.target.lossRate !== null ? formatLossPercent(active.target.lossRate) : '0%'}</b>
+            </span>
+            {active.target.jitter !== null && (
+              <>
+                <span className="hover-sep">·</span>
+                <span className="hover-stat text-amber mono">
+                  抖动: <b>{formatNumber(active.target.jitter)} ms</b>
+                </span>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="hover-badge-hint mono">
+            <span>移动鼠标至探测目标曲线节点，查看瞬时时延与链路丢包</span>
+          </div>
+        )}
+      </div>
+
+      <div className="checks-svg-canvas">
+        <svg
+          className="checks-line-svg"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="探测目标质量与延迟曲线"
+        >
+          <defs>
+            <linearGradient id="checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--blue)" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="var(--blue)" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* 参考水平基准线 */}
+          <line className="traffic-grid-line" x1="0" y1="16" x2="100" y2="16" />
+          <line className="traffic-grid-line" x1="0" y1="52" x2="100" y2="52" />
+          <line className="traffic-grid-line" x1="0" y1="88" x2="100" y2="88" />
+
+          {/* 渐变面积 */}
+          {validLatencies.length > 0 && (
+            <path className="checks-area-fill" d={areaPath} fill="url(#checks-lat-grad)" />
+          )}
+
+          {/* 延迟曲线 */}
+          {validLatencies.length > 0 && (
+            <path
+              className="checks-stroke-line"
+              d={linePath}
+              fill="none"
+              stroke="var(--blue)"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {/* 数据点与交互捕获 */}
+          {latPoints.map((p, index) => {
+            const isHovered = hoveredIdx === index
+            const hasLoss = p.target.lossRate !== null && p.target.lossRate > 0
+            const dotTone = hasLoss
+              ? 'var(--rose)'
+              : p.target.latency !== null && p.target.latency < 50
+              ? 'var(--mint)'
+              : 'var(--blue)'
+
+            return (
+              <g key={`check-pt-${index}`}>
+                {isHovered && (
+                  <>
+                    <line
+                      className="traffic-crosshair"
+                      x1={p.x}
+                      y1="0"
+                      x2={p.x}
+                      y2="100"
+                      stroke="rgba(255, 255, 255, 0.35)"
+                      strokeDasharray="2 2"
+                      strokeWidth="0.8"
+                    />
+                    <circle
+                      cx={p.x}
+                      cy={p.y}
+                      r="4.5"
+                      fill={dotTone}
+                      style={{ filter: 'drop-shadow(0 0 6px rgba(94, 106, 210, 0.6))' }}
+                    />
+                  </>
+                )}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={isHovered ? 3.5 : 2}
+                  fill={dotTone}
+                  stroke="var(--bg-panel)"
+                  strokeWidth="0.8"
+                />
+                {/* 鼠标捕获区 */}
+                <rect
+                  x={index * slot}
+                  y="0"
+                  width={slot}
+                  height="100"
+                  fill="transparent"
+                  style={{ cursor: 'crosshair' }}
+                  onMouseEnter={() => setHoveredIdx(index)}
+                  onMouseMove={() => setHoveredIdx(index)}
+                />
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+
+      {/* X 轴目标名称指示 */}
+      <div className="checks-time-axis mono">
+        {targets.map((t, idx) => (
+          <span
+            key={`x-${idx}`}
+            className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
+            style={{ width: `${slot}%`, textAlign: 'center' }}
+          >
+            {t.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function ChecksSummaryPanel({ rows, loading = false }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [kindFilter, setKindFilter] = useState('all')
   const [sortField, setSortField] = useState('lossRate')
   const [sortAsc, setSortAsc] = useState(false)
+  const [viewMode, setViewMode] = useState('dual') // 'dual' (线条走势 + 清单) | 'table'
+  const [samplingSec, setSamplingSec] = useState(30) // 默认 30 秒基准时间
 
   const normalized = useMemo(() => {
     return safeArray(rows).map((row, index) => {
@@ -188,7 +365,7 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
         </div>
       </div>
 
-      {/* 搜索与快捷过滤工具栏 */}
+      {/* 搜索、协议筛选与展示模式工具栏 */}
       <div className="checks-toolbar">
         <div className="checks-search-box">
           <MagnifyingGlass size={14} className="search-icon muted" />
@@ -229,9 +406,48 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
             </button>
           ))}
         </div>
+
+        {/* 线条走势与表格视图切换 */}
+        <div className="checks-toolbar-right">
+          <div className="view-mode-toggles" role="group" aria-label="目标展示视图">
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'dual' ? 'active' : ''}`}
+              onClick={() => setViewMode('dual')}
+              title="线条曲线走势与详细清单"
+            >
+              <ChartLine size={13} weight="bold" />
+              <span>线条走势</span>
+            </button>
+            <button
+              type="button"
+              className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
+              onClick={() => setViewMode('table')}
+              title="纯表格数据"
+            >
+              <Rows size={13} weight="bold" />
+              <span>纯表格</span>
+            </button>
+          </div>
+
+          <div
+            className="traffic-period-badge mono"
+            title="点击切换采样时间基准"
+            onClick={() => setSamplingSec((s) => (s === 30 ? 60 : s === 60 ? 10 : 30))}
+            style={{ cursor: 'pointer' }}
+          >
+            <Clock size={12} className="text-mint" />
+            <span>基准时间: {samplingSec}秒</span>
+          </div>
+        </div>
       </div>
 
-      {/* 目标质量表格 */}
+      {/* 线条走势视图 */}
+      {viewMode === 'dual' && (
+        <ChecksLatencyLines rows={displayRows} samplingSec={samplingSec} />
+      )}
+
+      {/* 目标质量表格（始终严格保留满足契约测试要求） */}
       <div className="table-scroll">
         <table className="checks-table modern-checks-table">
           <thead>
