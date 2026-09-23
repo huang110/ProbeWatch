@@ -278,7 +278,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
               <div className="spec-item">
                 <span className="spec-label">探针版本</span>
                 <div className="spec-value mono text-mint">
-                  {node.agentVersion || node.version || 'ProbeWatch Agent v0.2.0'}
+                  {node.agentVersion || node.version || 'ProbeWatch Agent v0.2.1'}
                 </div>
               </div>
             </div>
