@@ -4,6 +4,23 @@
 
 ---
 
+## [v0.2.4] - 2026-09-24
+
+### 🔄 全面修复页面刷新回退首页问题 (SPA Route Persistence & Hash Navigation)
+- **全站 URL Hash 路由持久化 (Hash-Based SPA Routing)**：
+  - 引入 URL Hash 路由规范（`#/nodes`, `#/billing`, `#/network`, `#/mtr`, `#/media`, `#/alerts`, `#/targets`, `#/settings`），页面按 F5 刷新时保持当前视图，绝不再跳回首页总览。
+  - 支持浏览器前进/后退（`hashchange` 监听），平滑响应历史记录切换。
+  - 双重保障降级机制：优先读取 `window.location.hash`，缺省时自动降级读取 `pb_nav` Cookie 状态恢复上次访问位置。
+- **节点详情页深度持久化恢复 (`#/node-detail?uuid=...`)**：
+  - 节点详情 URL 携带探针 UUID 参数（如 `#/node-detail?uuid=xyz`）。
+  - 刷新页面时即刻呈现「正在同步节点清单与详情…」优雅过渡状态，后台节点数据及历史 CPU/内存、三网检测、时序流量并行秒级恢复。
+- **无感抽屉联动跳转与细节补全**：
+  - 侧边抽屉 `NodeDrawer` 完整打通网络检测、MTR 路由及流媒体矩阵的快速直达跳转。
+  - 打开节点详情时同步推入对应带有探针 UUID 的路由历史。
+- **严格遵守安全契约**：严格恪守 `security_contract.py`，保持零客户端明文存储泄露（不使用 localStorage / sessionStorage）。
+
+---
+
 ## [v0.2.3] - 2026-09-24
 
 ### 🌐 主题全局化与延迟探针极细线条重构 (Theme Globalization & Latency Hairline Spline)

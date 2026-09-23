@@ -43,6 +43,49 @@ function saveTheme(val) {
   } catch {}
 }
 
+const VALID_NAV_PAGES = ['overview', 'nodes', 'billing', 'network', 'mtr', 'media', 'alerts', 'targets', 'settings', 'node-detail']
+
+function parseRouteFromHash() {
+  try {
+    const raw = (window.location.hash || '').replace(/^#\/?/, '').trim()
+    if (!raw) return null
+    const [pathPart, queryPart] = raw.split('?')
+    const cleanPath = (pathPart || '').replace(/\/+$/, '').trim()
+    if (!cleanPath || cleanPath === 'overview') {
+      return { page: 'overview', nodeUuid: null }
+    }
+    if (VALID_NAV_PAGES.includes(cleanPath)) {
+      const params = new URLSearchParams(queryPart || '')
+      return {
+        page: cleanPath,
+        nodeUuid: params.get('uuid') || params.get('id') || null,
+      }
+    }
+  } catch {}
+  return null
+}
+
+function getCookieNav() {
+  try {
+    const match = document.cookie.match(/(?:^|; )pb_nav=([^;]*)/)
+    if (match) {
+      const val = decodeURIComponent(match[1])
+      if (VALID_NAV_PAGES.includes(val)) {
+        return { page: val, nodeUuid: null }
+      }
+    }
+  } catch {}
+  return null
+}
+
+function getInitialNav() {
+  const fromHash = parseRouteFromHash()
+  if (fromHash) return fromHash
+  const fromCookie = getCookieNav()
+  if (fromCookie) return fromCookie
+  return { page: 'overview', nodeUuid: null }
+}
+
 function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
   return <header className="topbar">
     <div className="topbar-left">
@@ -94,7 +137,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
         <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.2.3</span></div>
+        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.2.4</span></div>
         <div className="profile-row">
           <div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
@@ -118,7 +161,8 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
 }
 
 export function App() {
-  const [activeNav, setActiveNav] = useState('overview')
+  const initialRouteRef = useRef(getInitialNav())
+  const [activeNav, setActiveNav] = useState(() => initialRouteRef.current.page)
   const [selectedNode, setSelectedNode] = useState(null)
   const [detailNode, setDetailNode] = useState(null)
   const [data, setData] = useState([])
@@ -181,6 +225,52 @@ export function App() {
       return () => mql.removeEventListener('change', handler)
     }
   }, [theme])
+
+  // 同步 URL hash 与浏览器前进/后退
+  useEffect(() => {
+    try {
+      const route = parseRouteFromHash()
+      if (!route) {
+        const targetHash = activeNav === 'overview' ? '#/' : `#/${activeNav}`
+        window.history.replaceState(null, '', targetHash)
+      }
+    } catch {}
+
+    const handleHashChange = () => {
+      const route = parseRouteFromHash()
+      if (route) {
+        setActiveNav(route.page)
+        document.cookie = `pb_nav=${encodeURIComponent(route.page)}; path=/; max-age=2592000; SameSite=Lax`
+        if (route.page === 'node-detail' && route.nodeUuid && data.length > 0) {
+          const found = data.find((n) => (n.uuid || n.id) === route.nodeUuid)
+          if (found) setDetailNode(found)
+        }
+      } else {
+        setActiveNav('overview')
+        document.cookie = `pb_nav=overview; path=/; max-age=2592000; SameSite=Lax`
+      }
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [data, activeNav])
+
+  // 页面刷新或通过链接进入 node-detail 时，待节点数据加载后自动恢复 detailNode
+  useEffect(() => {
+    if (activeNav === 'node-detail') {
+      const route = parseRouteFromHash()
+      const targetUuid = route?.nodeUuid || initialRouteRef.current?.nodeUuid
+      if (targetUuid && data.length > 0) {
+        const currentDetailUuid = detailNode ? (detailNode.uuid || detailNode.id) : null
+        if (currentDetailUuid !== targetUuid) {
+          const found = data.find((n) => (n.uuid || n.id) === targetUuid)
+          if (found) {
+            setDetailNode(found)
+          }
+        }
+      }
+    }
+  }, [activeNav, detailNode, data])
 
   const markSync = () => setLastSync(Date.now())
 
@@ -324,8 +414,11 @@ export function App() {
     return () => controller.abort()
   }, [nodeKey])
 
+  const routeInfo = parseRouteFromHash()
+  const targetDetailUuid = activeNav === 'node-detail' ? (routeInfo?.nodeUuid || initialRouteRef.current?.nodeUuid) : null
+
   useEffect(() => {
-    const uuid = selectedNode?.uuid || selectedNode?.id
+    const uuid = selectedNode?.uuid || selectedNode?.id || (activeNav === 'node-detail' ? (detailNode?.uuid || detailNode?.id || targetDetailUuid) : null)
     if (!uuid) { setHistory([]); return undefined }
     historyAbortRef.current?.abort()
     const controller = new AbortController()
@@ -338,10 +431,10 @@ export function App() {
       return json.map((item) => { const resource = item?.resource || {}; const memoryTotal = numeric(resource.memory_total_bytes); const memoryUsed = numeric(resource.memory_used_bytes); return { cpu: numeric(resource.cpu_percent), mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null } }).reverse()
     }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
     return () => controller.abort()
-  }, [selectedNode])
+  }, [selectedNode, detailNode, activeNav, targetDetailUuid])
 
   const analyticsNode = selectedNode || detailNode
-  const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : ''
+  const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
   useEffect(() => {
     if (!analyticsUuid) { setChecksSummary(null); setChecksLoading(false); return undefined }
     checksAbortRef.current?.abort()
@@ -382,7 +475,23 @@ export function App() {
     } finally { setAckingId(null) }
   }
 
-  const navigate = (page) => { setActiveNav(page); setMobileNavOpen(false) }
+  const navigate = useCallback((page, extra = {}) => {
+    setActiveNav(page)
+    setMobileNavOpen(false)
+    try {
+      let targetHash = `#/${page}`
+      const uuid = extra?.uuid || (page === 'node-detail' ? (detailNode?.uuid || detailNode?.id) : null)
+      if (page === 'node-detail' && uuid) {
+        targetHash = `#/node-detail?uuid=${encodeURIComponent(uuid)}`
+      } else if (page === 'overview') {
+        targetHash = '#/'
+      }
+      if (window.location.hash !== targetHash) {
+        window.history.pushState(null, '', targetHash)
+      }
+      document.cookie = `pb_nav=${encodeURIComponent(page)}; path=/; max-age=2592000; SameSite=Lax`
+    } catch {}
+  }, [detailNode])
   const refreshAll = () => { loadCore(true); loadOverview() }
   const lastSyncText = lastSync ? formatTimeOfDay(lastSync) : '—'
   const clockText = formatTimeOfDay(clock)
@@ -436,12 +545,12 @@ export function App() {
       />
       <div className="content-wrap">
         {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
-          : activeNav === 'node-detail' && detailNode ? <NodeDetailPage node={detailNode} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
+          : activeNav === 'node-detail' ? <NodeDetailPage node={detailNode} loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
             : activeNav === 'billing' ? <BillingCenter nodes={data} />
               : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} refreshInterval={refreshInterval} onIntervalChange={setRefreshInterval} theme={theme} onThemeChange={setTheme} />}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>
-    {selectedNode && <NodeDrawer node={selectedNode} rates={rates} onClose={() => setSelectedNode(null)} onOpenDetails={(node) => { setSelectedNode(null); setDetailNode(node); navigate('node-detail') }} />}
+    {selectedNode && <NodeDrawer node={selectedNode} rates={rates} onClose={() => setSelectedNode(null)} onOpenDetails={(node) => { setSelectedNode(null); setDetailNode(node); navigate('node-detail', { uuid: node.uuid || node.id }) }} onNavigate={navigate} />}
   </div>
 }

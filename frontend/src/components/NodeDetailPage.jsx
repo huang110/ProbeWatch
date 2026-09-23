@@ -6,6 +6,7 @@ import { TrafficPanel } from './Traffic.jsx'
 
 export function NodeDetailPage({
   node,
+  loading = false,
   history = [],
   historyLoading = false,
   checksSummary = null,
@@ -21,7 +22,9 @@ export function NodeDetailPage({
     return (
       <section className="subpage node-detail-page">
         <div className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <p style={{ color: 'var(--text-3)', marginBottom: '16px' }}>未找到指定节点的信息或该节点已被移除。</p>
+          <p style={{ color: 'var(--text-3)', marginBottom: '16px' }}>
+            {loading ? '正在同步节点清单与详情…' : '未找到指定节点的信息或该节点已被移除。'}
+          </p>
           <button type="button" className="button button-primary" onClick={onBack}>
             <ArrowLeft size={15} /> 返回节点列表
           </button>
