@@ -188,7 +188,7 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 		scanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		alerts, err := store.AlertEvents(scanCtx, db.AlertQuery{
+		alerts, err := store.ListAlerts(scanCtx, db.AlertQuery{
 			Statuses: []string{"open"},
 			Limit:    100,
 		})
@@ -198,7 +198,7 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 		}
 
 		for _, alert := range alerts {
-			node, err := store.GetNode(scanCtx, alert.NodeID)
+			node, err := store.GetNodeByUUID(scanCtx, alert.NodeID)
 			if err != nil {
 				node = db.Node{ID: alert.NodeID, Name: alert.NodeID}
 			}
