@@ -19,7 +19,7 @@ export function EmptyState({ title = '暂无数据', detail = '当前没有可�
   )
 }
 
-export function ProgressBar({ value, tone = 'dynamic', height = 6 }) {
+export function ProgressBar({ value, tone = 'dynamic', height = 4 }) {
   const num = numeric(value) ?? 0
   const clamped = Math.max(0, Math.min(100, num))
   

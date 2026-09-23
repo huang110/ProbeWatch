@@ -5,10 +5,10 @@ import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
 
 const PRESET_MTR_TARGETS = [
-  { id: 'mtr-cloudflare', name: 'Cloudflare DNS (1.1.1.1)', host: '1.1.1.1', max_hops: 20 },
-  { id: 'mtr-google', name: 'Google DNS (8.8.8.8)', host: '8.8.8.8', max_hops: 20 },
-  { id: 'mtr-alidns', name: '阿里公共DNS (223.5.5.5)', host: '223.5.5.5', max_hops: 20 },
-  { id: 'mtr-114dns', name: '114 国内常用DNS (114.114.114.114)', host: '114.114.114.114', max_hops: 20 },
+  { id: 'mtr-1', name: 'Route 1 (198.51.100.1)', host: '198.51.100.1', max_hops: 20 },
+  { id: 'mtr-2', name: 'Route 2 (198.51.100.2)', host: '198.51.100.2', max_hops: 20 },
+  { id: 'mtr-3', name: 'Route 3 (198.51.100.3)', host: '198.51.100.3', max_hops: 20 },
+  { id: 'mtr-4', name: 'Route 4 (198.51.100.4)', host: '198.51.100.4', max_hops: 20 },
 ]
 
 export function MTRRouteView({ nodes = [] }) {
@@ -254,7 +254,7 @@ export function MTRRouteView({ nodes = [] }) {
                 <label className="field-label">目标 IP / 域名</label>
                 <input
                   className="field-input mono"
-                  placeholder="如: 1.1.1.1 或 hk.example.com"
+                  placeholder="如: 198.51.100.1 或 hk.example.com"
                   value={newTarget.host}
                   onChange={(e) => setNewTarget({ ...newTarget, host: e.target.value })}
                 />

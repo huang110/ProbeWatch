@@ -91,7 +91,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="brand-text">
             <strong>ProbeWatch</strong>
-            <span>全球基础设施监控大屏</span>
+            <span>全球基础设施服务状态监控大屏</span>
           </div>
         </div>
 
@@ -135,7 +135,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="hero-status-content">
             <h1>
-              {isAllHealthy ? '所有核心节点服务均稳定运行' : hasIssues ? '部分节点网络异常或处于维护中' : '正在侦测全网节点状态…'}
+              {isAllHealthy ? '全部正常' : hasIssues ? '部分异常' : '正在侦测全网节点状态…'}
             </h1>
             <p>
               面向访客的实时只读探针仪表盘 · 全球三网质量侦测与可用性遥测
@@ -148,13 +148,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         </div>
 
         {/* 关键四项指标看板 */}
-        <div className="guest-stats-grid">
+        <div className="guest-stats-grid guest-stats-bar">
           <div className="guest-stat-box">
             <div className="stat-head"><GlobeHemisphereWest size={18} /><span>受控节点</span></div>
             <div className="stat-main mono">
               {online !== null && total !== null ? `${online} / ${total}` : '—'}
             </div>
-            <div className="stat-sub">{online === total ? '全部在线' : '部分节点异常'}</div>
+            <div className="stat-sub">{online === total ? '全部正常' : '部分异常'}</div>
           </div>
 
           <div className="guest-stat-box">
@@ -249,6 +249,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                       </div>
 
                       <div className="guest-node-card-bottom">
+                        <span className="guest-badge">状态未公开</span>
                         <span className="guest-spec-badge">Linux · x86_64</span>
                         <span className="guest-latency-badge mono">
                           {avgLatency !== null ? `~${avgLatency} ms` : '极佳响应'}

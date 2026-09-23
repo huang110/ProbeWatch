@@ -7,8 +7,8 @@ import { fetchCsrfToken } from '../lib/api.js'
 const PRESET_NETWORK_TARGETS = [
   { id: 'tcp-baidu', name: '百度搜索入口 (TCP:80)', kind: 'tcp', host: 'www.baidu.com', port: 80 },
   { id: 'https-github', name: 'GitHub 官方状态 (HTTPS)', kind: 'https', host: 'www.githubstatus.com', port: 443, path: '/' },
-  { id: 'dns-alidns', name: '阿里公共 DNS (UDP:53)', kind: 'dns', host: '223.5.5.5', port: 53, dns_type: 'A' },
-  { id: 'tcp-cf', name: 'Cloudflare Anycast (TCP:443)', kind: 'tcp', host: '1.1.1.1', port: 443 },
+  { id: 'dns-alidns', name: '公共 DNS (UDP:53)', kind: 'dns', host: '198.51.100.53', port: 53, dns_type: 'A' },
+  { id: 'tcp-cf', name: 'Anycast DNS (TCP:443)', kind: 'tcp', host: '198.51.100.1', port: 443 },
 ]
 
 export function NetworkMonitorView({ nodes = [] }) {

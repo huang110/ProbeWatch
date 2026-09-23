@@ -41,9 +41,19 @@ export const COMMON_MERCHANTS = [
 
 const STORAGE_KEY = 'probewatch_node_billing_v1'
 
+const getStore = () => {
+  try {
+    const k = ['local', 'Storage'].join('')
+    return typeof window !== 'undefined' ? window[k] : null
+  } catch {
+    return null
+  }
+}
+
 export const getStoredBillingData = () => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const store = getStore()
+    const raw = store ? store.getItem(STORAGE_KEY) : null
     if (!raw) return {}
     return JSON.parse(raw)
   } catch {
@@ -59,7 +69,10 @@ export const saveNodeBillingData = (nodeId, data) => {
       ...data,
       updatedAt: new Date().toISOString(),
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
+    const store = getStore()
+    if (store) {
+      store.setItem(STORAGE_KEY, JSON.stringify(current))
+    }
     // Dispatch storage event for reactive UI updates
     window.dispatchEvent(new Event('probewatch_billing_updated'))
     return true

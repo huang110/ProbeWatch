@@ -291,18 +291,19 @@ export function NodeTable({
             <thead>
               <tr>
                 <th>状态</th>
-                <th>节点 / 地区</th>
+                <th>节点 / 区域</th>
                 <th>商家 / 线路</th>
                 <th>系统 / 架构</th>
                 <th>CPU</th>
-                <th>内存 (已用/总)</th>
+                <th>内存</th>
                 <th>Swap</th>
-                <th>硬盘</th>
-                <th>实时网络 (↓ / ↑)</th>
+                <th>磁盘</th>
+                <th>网络 ↓/↑</th>
                 <th>累计总流量</th>
+                <th>丢包率</th>
                 <th>剩余价值</th>
                 <th>到期时间</th>
-                <th>连续在线</th>
+                <th>最后心跳</th>
                 <th>系统负载</th>
                 <th>操作</th>
               </tr>
@@ -357,6 +358,7 @@ export function NodeTable({
                     <span className="rate-up-text">↑ {formatRate(rate?.up ?? null)}</span>
                   </td>
                   <td className="mono">{formatBytes((node.rx || 0) + (node.tx || 0))}</td>
+                  <td className="mono">{loss !== null && loss !== undefined ? `${loss}%` : '0%'}</td>
                   <td>
                     <span className="mono text-mint" style={{ fontWeight: 700 }}>
                       ¥{calc.remainingValueCNY.toFixed(1)}
@@ -367,7 +369,7 @@ export function NodeTable({
                       {calc.statusText}
                     </span>
                   </td>
-                  <td className="mono">{node.uptime || '—'}</td>
+                  <td className="mono" title={`最后心跳: ${node.lastReportedAt || '—'}`}>{relativeHeartbeat(node.lastReportedAt) || node.uptime || '—'}</td>
                   <td className="mono text-muted">{formatLoad(node.load1, node.load5, node.load15)}</td>
                   <td>
                     <button

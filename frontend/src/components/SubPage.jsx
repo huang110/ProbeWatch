@@ -30,8 +30,8 @@ export function SubPage({ page, data, alerts, onAck, ackingId, onBack, onSelectN
       : page === 'billing' ? <BillingCenter nodes={data} />
       : page === 'alerts' ? <AlertCenterView alerts={alerts} onAck={onAck} ackingId={ackingId} />
       : page === 'media' ? <MediaMatrix nodes={data} />
-      : page === 'network' ? <NetworkMonitorView nodes={data} />
-      : page === 'mtr' ? <MTRRouteView nodes={data} />
+      : page === 'network' ? <NetworkMonitorView nodes={data} readOnly kinds={['tcp', 'http', 'https', 'dns']} />
+      : page === 'mtr' ? <MTRRouteView nodes={data} readOnly kinds={['mtr']} />
       : page === 'targets' ? <TargetManage />
       : page === 'settings' ? <TOTPSettingsCard />
       : <div className="panel placeholder-panel"><div className="placeholder-icon"><Pulse size={22} /></div><h2>{title}数据面板</h2><p>暂无可由当前 API 支撑的数据。</p></div>}

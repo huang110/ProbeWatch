@@ -317,7 +317,7 @@ export function OverviewPage({
             <HardDrives size={18} />
           </div>
           <div className="throughput-info">
-            <span className="throughput-label">全网累计出入流量</span>
+            <span className="throughput-label">全网累计出入流量 (今日流量)</span>
             <div className="throughput-value mono">
               <b>{formatBytes(totalRxBytes + totalTxBytes)}</b>
               <small className="traffic-split-tag" title={`出站: ${formatBytes(totalTxBytes)} | 入站: ${formatBytes(totalRxBytes)}`}>
@@ -333,11 +333,27 @@ export function OverviewPage({
             <Gauge size={18} />
           </div>
           <div className="throughput-info">
-            <span className="throughput-label">平均延迟 / SLA</span>
+            <span className="throughput-label">平均延迟 · 检测通过率</span>
             <div className="throughput-value mono">
               <b>{avgLatency !== null ? `${avgLatency}ms` : '—'}</b>
               <small className="sla-tag text-mint">
                 {successRate !== null ? `${successRate}%` : '99.9%'}
+              </small>
+            </div>
+          </div>
+        </div>
+
+        {/* 全网负载均值 */}
+        <div className="throughput-item">
+          <div className="throughput-icon-wrapper tone-blue">
+            <Cpu size={18} />
+          </div>
+          <div className="throughput-info">
+            <span className="throughput-label">CPU 平均 · 内存平均</span>
+            <div className="throughput-value mono">
+              <b>{data.length ? `${Math.round(data.reduce((acc, n) => acc + (n.cpu || 0), 0) / data.length)}%` : '—'}</b>
+              <small className="sla-tag text-blue">
+                MEM {data.length ? `${Math.round(data.reduce((acc, n) => acc + (n.memory || 0), 0) / data.length)}%` : '—'}
               </small>
             </div>
           </div>

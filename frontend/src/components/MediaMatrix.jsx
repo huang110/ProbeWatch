@@ -282,7 +282,7 @@ export function MediaMatrix({ nodes = [] }) {
                         })
                       ) : (
                         <td colSpan={columns.length} className="media-cell media-cell-muted text-center">
-                          等待该节点上报
+                          暂无上报
                         </td>
                       )}
 
@@ -298,8 +298,8 @@ export function MediaMatrix({ nodes = [] }) {
         ) : (
           <div className="media-empty-guide">
             <EmptyState
-              title="当前尚未配置流媒体检测规则"
-              detail="请点击上方“一键生成全球主流流媒体检测规则”按钮，主控将自动下发 Netflix, YouTube, OpenAI 等主流检测项至所有探针。"
+              title="暂无流媒体上报"
+              detail="当前尚未配置流媒体检测规则，请点击上方“一键生成全球主流流媒体检测规则”按钮，主控将自动下发 Netflix, YouTube, OpenAI 等主流检测项至所有探针。"
             />
             <div className="text-center" style={{ marginTop: '16px' }}>
               <button
