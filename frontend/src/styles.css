@@ -4576,7 +4576,7 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   color: var(--text-muted);
 }
 
-/* ---------- 3. 流量曲线与检测目标时序线条增强 ---------- */
+/* ---------- 3. 流量曲线与检测目标平滑时序线条增强 ---------- */
 .traffic-controls-right {
   display: flex;
   align-items: center;
@@ -4584,29 +4584,123 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   flex-wrap: wrap;
 }
 
-.traffic-mode-toggles {
-  margin-bottom: 0;
+.traffic-chart-wrapper {
+  position: relative;
+  background: rgba(10, 12, 14, 0.45);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px 10px;
+  margin-top: 10px;
+}
+
+.traffic-hover-banner {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  transition: all 0.18s ease;
+}
+
+.traffic-hover-banner.active {
+  background: rgba(94, 106, 210, 0.08);
+  border-color: rgba(94, 106, 210, 0.25);
+}
+
+.hover-badge-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hover-sep {
+  color: var(--text-3);
+  opacity: 0.5;
+}
+
+.hover-badge-hint {
+  color: var(--text-3);
+  font-size: 10px;
+  opacity: 0.7;
+  letter-spacing: -0.01em;
+}
+
+.dot-mint {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.dot-blue {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.6);
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.traffic-svg-canvas {
+  width: 100%;
+  height: 130px;
+  position: relative;
+}
+
+.traffic-spline-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+
+.traffic-grid-line {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-dasharray: 2 3;
+  stroke-width: 0.7;
+  pointer-events: none;
+}
+
+.traffic-area-fill {
+  pointer-events: none;
 }
 
 .traffic-line-stroke {
-  filter: drop-shadow(0 2px 8px rgba(94, 106, 210, 0.25));
+  pointer-events: none;
 }
 
-.traffic-line-rx {
-  filter: drop-shadow(0 2px 8px rgba(48, 164, 108, 0.25));
+.traffic-crosshair {
+  stroke: rgba(255, 255, 255, 0.45);
+  stroke-dasharray: 2 2;
+  stroke-width: 0.8;
+  pointer-events: none;
 }
 
-.traffic-dot-rx,
-.traffic-dot-tx {
-  transition: r 0.15s ease, filter 0.15s ease;
+.traffic-interactive-group {
+  pointer-events: none;
 }
 
-.traffic-dot-rx.active {
-  filter: drop-shadow(0 0 6px rgba(48, 164, 108, 0.8));
-}
-
-.traffic-dot-tx.active {
-  filter: drop-shadow(0 0 6px rgba(94, 106, 210, 0.8));
+.traffic-time-axis {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
 .checks-toolbar-right {
@@ -4619,10 +4713,10 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 
 .checks-chart-wrap {
   position: relative;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(10, 12, 14, 0.45);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px 14px 10px;
+  padding: 12px 14px 10px;
   margin-bottom: 12px;
 }
 
@@ -4646,7 +4740,7 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   color: var(--text-3);
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px dashed rgba(148, 178, 190, 0.08);
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
 .axis-target-name {
@@ -4660,3 +4754,4 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   color: var(--blue-bright);
   font-weight: 600;
 }
+

@@ -1,13 +1,11 @@
 import { useState, useMemo } from 'react'
 import {
   ArrowsDownUp,
-  ChartLine,
   CheckCircle,
   Clock,
   Funnel,
   GlobeHemisphereWest,
   MagnifyingGlass,
-  Rows,
   ShieldCheck,
   Sparkle,
   TrendUp,
@@ -26,28 +24,66 @@ import {
 } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 
+/**
+ * Catmull-Rom 转三次贝塞尔平滑曲线
+ */
+function generateSmoothSpline(pts, bottomY = 90) {
+  if (!pts || !pts.length) return { line: '', area: '' }
+  if (pts.length === 1) {
+    const p = pts[0]
+    return {
+      line: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)}`,
+      area: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} L ${p.x.toFixed(2)} ${bottomY} Z`,
+    }
+  }
+
+  let line = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(i - 1, 0)]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[Math.min(i + 2, pts.length - 1)]
+
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = Math.max(6, Math.min(bottomY - 1, p1.y + (p2.y - p0.y) / 6))
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = Math.max(6, Math.min(bottomY - 1, p2.y - (p3.y - p1.y) / 6))
+
+    line += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+
+  const firstX = pts[0].x.toFixed(2)
+  const lastX = pts[pts.length - 1].x.toFixed(2)
+  const area = `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`
+  return { line, area }
+}
+
 export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
   const [hoveredIdx, setHoveredIdx] = useState(null)
   const targets = safeArray(rows).filter((r) => r && r.name)
   if (!targets.length) return null
 
   const validLatencies = targets.map((r) => r.latency).filter((l) => l !== null && l >= 0)
-  const maxLat = Math.max(...validLatencies, 30)
+  const maxLat = Math.max(...validLatencies, 20)
+  const headroomLat = maxLat * 1.15
+  const baselineY = 90
+  const topY = 16
+  const plotHeight = baselineY - topY
   const count = targets.length
   const slot = 100 / Math.max(count, 1)
 
-  // 构建时延走势曲线与面积路径
+  // 构建平滑时延曲线点
   const latPoints = targets.map((r, i) => {
     const x = i * slot + slot / 2
     const lat = r.latency !== null && r.latency >= 0 ? r.latency : 0
-    const y = 88 - (lat / maxLat) * 72
+    const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
     return { x, y, target: r }
   })
 
-  const linePath = latPoints
-    .map((p, i) => `${i ? 'L' : 'M'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
-    .join(' ')
-  const areaPath = `${linePath} L ${(count > 1 ? (count - 1) * slot + slot / 2 : 100).toFixed(2)} 99 L ${(slot / 2).toFixed(2)} 99 Z`
+  const spline = generateSmoothSpline(
+    latPoints.map((p) => ({ x: p.x, y: p.y })),
+    baselineY
+  )
 
   const active = hoveredIdx !== null && latPoints[hoveredIdx] ? latPoints[hoveredIdx] : null
 
@@ -78,10 +114,14 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
                 </span>
               </>
             )}
+            <span className="hover-sep">·</span>
+            <span className="hover-stat muted mono">
+              基准 {samplingSec}s
+            </span>
           </div>
         ) : (
           <div className="hover-badge-hint mono">
-            <span>移动鼠标至探测目标曲线节点，查看瞬时时延与链路丢包</span>
+            <span>移动鼠标至探测目标平滑曲线节点，查看瞬时时延、丢包率与链路质量</span>
           </div>
         )}
       </div>
@@ -92,39 +132,44 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
           role="img"
-          aria-label="探测目标质量与延迟曲线"
+          aria-label="探测目标质量与平滑延迟走势曲线"
         >
           <defs>
             <linearGradient id="checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--blue)" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="var(--blue)" stopOpacity="0.0" />
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
+              <stop offset="70%" stopColor="#6366f1" stopOpacity="0.05" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
             </linearGradient>
+            <filter id="checks-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodColor="#6366f1" floodOpacity="0.4" />
+            </filter>
           </defs>
 
           {/* 参考水平基准线 */}
-          <line className="traffic-grid-line" x1="0" y1="16" x2="100" y2="16" />
-          <line className="traffic-grid-line" x1="0" y1="52" x2="100" y2="52" />
-          <line className="traffic-grid-line" x1="0" y1="88" x2="100" y2="88" />
+          <line className="traffic-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
+          <line className="traffic-grid-line" x1="0" y1="53" x2="100" y2="53" />
+          <line className="traffic-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
 
           {/* 渐变面积 */}
           {validLatencies.length > 0 && (
-            <path className="checks-area-fill" d={areaPath} fill="url(#checks-lat-grad)" />
+            <path className="checks-area-fill" d={spline.area} fill="url(#checks-lat-grad)" />
           )}
 
           {/* 延迟曲线 */}
           {validLatencies.length > 0 && (
             <path
               className="checks-stroke-line"
-              d={linePath}
+              d={spline.line}
               fill="none"
-              stroke="var(--blue)"
-              strokeWidth="1.8"
+              stroke="#6366f1"
+              strokeWidth="1.9"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ filter: 'url(#checks-glow)' }}
             />
           )}
 
-          {/* 数据点与交互捕获 */}
+          {/* 交互交叉线与发光点 */}
           {latPoints.map((p, index) => {
             const isHovered = hoveredIdx === index
             const hasLoss = p.target.lossRate !== null && p.target.lossRate > 0
@@ -141,31 +186,30 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
                     <line
                       className="traffic-crosshair"
                       x1={p.x}
-                      y1="0"
+                      y1={topY - 4}
                       x2={p.x}
-                      y2="100"
-                      stroke="rgba(255, 255, 255, 0.35)"
+                      y2={baselineY + 2}
+                      stroke="rgba(255, 255, 255, 0.4)"
                       strokeDasharray="2 2"
                       strokeWidth="0.8"
                     />
                     <circle
                       cx={p.x}
                       cy={p.y}
-                      r="4.5"
-                      fill={dotTone}
-                      style={{ filter: 'drop-shadow(0 0 6px rgba(94, 106, 210, 0.6))' }}
+                      r="4.8"
+                      fill={hasLoss ? 'rgba(244, 63, 94, 0.35)' : 'rgba(99, 102, 241, 0.35)'}
                     />
                   </>
                 )}
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={isHovered ? 3.5 : 2}
+                  r={isHovered ? 3.2 : 2}
                   fill={dotTone}
-                  stroke="var(--bg-panel)"
-                  strokeWidth="0.8"
+                  stroke="#fff"
+                  strokeWidth={isHovered ? '1' : '0.6'}
                 />
-                {/* 鼠标捕获区 */}
+                {/* 鼠标灵敏捕捉区 */}
                 <rect
                   x={index * slot}
                   y="0"
@@ -203,7 +247,6 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
   const [kindFilter, setKindFilter] = useState('all')
   const [sortField, setSortField] = useState('lossRate')
   const [sortAsc, setSortAsc] = useState(false)
-  const [viewMode, setViewMode] = useState('dual') // 'dual' (线条走势 + 清单) | 'table'
   const [samplingSec, setSamplingSec] = useState(30) // 默认 30 秒基准时间
 
   const normalized = useMemo(() => {
@@ -407,29 +450,8 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
           ))}
         </div>
 
-        {/* 线条走势与表格视图切换 */}
+        {/* 工具栏右侧：纯线性监控基准微标 */}
         <div className="checks-toolbar-right">
-          <div className="view-mode-toggles" role="group" aria-label="目标展示视图">
-            <button
-              type="button"
-              className={`view-toggle-btn ${viewMode === 'dual' ? 'active' : ''}`}
-              onClick={() => setViewMode('dual')}
-              title="线条曲线走势与详细清单"
-            >
-              <ChartLine size={13} weight="bold" />
-              <span>线条走势</span>
-            </button>
-            <button
-              type="button"
-              className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
-              onClick={() => setViewMode('table')}
-              title="纯表格数据"
-            >
-              <Rows size={13} weight="bold" />
-              <span>纯表格</span>
-            </button>
-          </div>
-
           <div
             className="traffic-period-badge mono"
             title="点击切换采样时间基准"
@@ -442,10 +464,8 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
         </div>
       </div>
 
-      {/* 线条走势视图 */}
-      {viewMode === 'dual' && (
-        <ChecksLatencyLines rows={displayRows} samplingSec={samplingSec} />
-      )}
+      {/* 平滑时延走势曲线视图 */}
+      <ChecksLatencyLines rows={displayRows} samplingSec={samplingSec} />
 
       {/* 目标质量表格（始终严格保留满足契约测试要求） */}
       <div className="table-scroll">
