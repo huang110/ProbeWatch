@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpRight, Cpu, HardDrive, HardDrives, Lightning, Memory, Pulse, Rows, SquaresFour, Timer } from '@phosphor-icons/react'
+import { useEffect, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpRight, Coins, Cpu, HardDrive, HardDrives, Lightning, Memory, Pulse, Rows, Sparkle, SquaresFour, Tag, Timer } from '@phosphor-icons/react'
 import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad } from '../lib/format.js'
+import { calculateRemainingValue, getNodeBilling } from '../lib/billing.js'
 import { ProgressBar, EmptyState, StatusDot } from './Common.jsx'
+import { BillingModal } from './BillingModal.jsx'
 
 const cellPercent = (value) => (
   <span className={value !== null && value >= 85 ? 'cell-meter cell-meter-hot' : 'cell-meter'}>
@@ -11,12 +13,22 @@ const cellPercent = (value) => (
 
 export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null, onSelect, defaultView = 'grid' }) {
   const [viewMode, setViewMode] = useState(defaultView) // 'grid' | 'table'
+  const [billingTargetNode, setBillingTargetNode] = useState(null)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+
+  useEffect(() => {
+    const handleUpdate = () => setRefreshTrigger((prev) => prev + 1)
+    window.addEventListener('probewatch_billing_updated', handleUpdate)
+    return () => window.removeEventListener('probewatch_billing_updated', handleUpdate)
+  }, [])
 
   const rows = nodes.map((node, index) => {
     const key = safeText(node.uuid) || safeText(node.id) || `node-${index}`
     const rate = rates[key] || null
     const loss = lossRates[key] ?? null
-    return { node, key, rate, loss }
+    const billing = getNodeBilling(key, node.name)
+    const calc = calculateRemainingValue(billing)
+    return { node, key, rate, loss, billing, calc }
   })
 
   if (!rows.length) {
@@ -35,7 +47,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
             type="button"
             className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
             onClick={() => setViewMode('grid')}
-            title="宫格卡片视图 (哪吒/ServerStatus风格)"
+            title="DStatus 宫格卡片视图"
           >
             <SquaresFour size={16} weight={viewMode === 'grid' ? 'bold' : 'regular'} />
             <span>卡片</span>
@@ -52,10 +64,10 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
         </div>
       </div>
 
-      {/* 1. 哪吒/ServerStatus 风格卡片宫格模式 */}
+      {/* 1. DStatus (demo.vps.mom) + Lite 剩余价值风格独立服务器卡片 */}
       {viewMode === 'grid' && (
         <div className="mjj-card-grid">
-          {rows.map(({ node, key, rate, loss }) => {
+          {rows.map(({ node, key, rate, loss, billing, calc }) => {
             const isSelected = selectedId && selectedId === key
             const isOnline = node.status === 'online'
             const totalTransfer = (node.rx || 0) + (node.tx || 0)
@@ -63,16 +75,19 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
             return (
               <article
                 key={key}
-                className={`mjj-card ${isSelected ? 'mjj-card-selected' : ''} ${!isOnline ? 'mjj-card-offline' : ''}`}
+                className={`mjj-card dstatus-card ${isSelected ? 'mjj-card-selected' : ''} ${!isOnline ? 'mjj-card-offline' : ''}`}
                 onClick={() => onSelect(node)}
               >
-                {/* 顶部：国旗、节点名、线路与在线徽章 */}
+                {/* 顶部：国旗、商家、节点名、线路与在线徽章 */}
                 <div className="mjj-card-header">
                   <div className="mjj-node-title-group">
                     <span className="mjj-flag" title={node.region || '公网节点'}>{node.flag || '🌐'}</span>
                     <div className="mjj-node-name-block">
                       <div className="mjj-node-name-line">
                         <strong className="mjj-node-name">{node.name}</strong>
+                        {billing.merchant && (
+                          <span className="mjj-merchant-tag">{billing.merchant}</span>
+                        )}
                         {node.tag && <span className="mjj-tag-route">{node.tag}</span>}
                       </div>
                       <div className="mjj-node-sub">
@@ -114,7 +129,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                     <div className="mjj-metric-label">
                       <span className="mjj-metric-name"><Lightning size={13} /> Swap</span>
                       <span className="mjj-metric-val mono">
-                        {node.swapTotal > 0 ? `${formatBytes(node.swapUsed)} / ${formatBytes(node.swapTotal)}` : '无 / 未启用'}
+                        {node.swapTotal > 0 ? `${formatBytes(node.swapUsed)} / ${formatBytes(node.swapTotal)}` : '未开启'}
                       </span>
                     </div>
                     <ProgressBar value={node.swap || 0} tone="violet" height={5} />
@@ -153,7 +168,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
 
                   <div className="mjj-traffic-summary">
                     <span className="mjj-traffic-tag" title={`出站: ${formatBytes(node.tx)} | 入站: ${formatBytes(node.rx)}`}>
-                      <HardDrives size={13} /> 累计流量: <b className="mono">{formatBytes(totalTransfer)}</b>
+                      <HardDrives size={13} /> 累计: <b className="mono">{formatBytes(totalTransfer)}</b>
                     </span>
                     {loss !== null && (
                       <span className={`mjj-loss-tag ${loss > 0 ? 'mjj-loss-warn' : ''}`}>
@@ -163,9 +178,37 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                   </div>
                 </div>
 
+                {/* 🌟 核心特色：Lite 同款小鸡账单与剩余价值组件 (点击唤起配置与出鸡计算) */}
+                <div
+                  className="mjj-billing-strip"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setBillingTargetNode(node)
+                  }}
+                  title="点击编辑小鸡账单或计算二手出鸡指导价"
+                >
+                  <div className="billing-strip-left">
+                    <Coins size={14} className="text-amber" />
+                    <span className="billing-price-tag mono">
+                      {billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`}
+                    </span>
+                    {billing.cycle !== 'free' && (
+                      <span className="billing-val-tag mono">
+                        剩: <b>¥{calc.remainingValueCNY.toFixed(1)}</b>
+                      </span>
+                    )}
+                  </div>
+                  <div className="billing-strip-right">
+                    <span className={`billing-days-badge days-${calc.statusTone} mono`}>
+                      {calc.statusText}
+                    </span>
+                    <Sparkle size={13} className="text-mint hover-spin" />
+                  </div>
+                </div>
+
                 {/* 底部信息栏：在线时长、系统负载与心跳 */}
                 <div className="mjj-card-footer">
-                  <div className="mjj-uptime-badge" title="小鸡连续运行在线时长">
+                  <div className="mjj-uptime-badge" title="小鸡连续在线时长">
                     <Timer size={13} />
                     <span>在线: <b>{node.uptime || '—'}</b></span>
                   </div>
@@ -173,7 +216,7 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                     <span className="mjj-load mono" title="系统 Load 1/5/15">
                       Load: {formatLoad(node.load1, node.load5, node.load15)}
                     </span>
-                    <span className="mjj-heartbeat" title="探针心跳上报">
+                    <span className="mjj-heartbeat" title="探针心跳">
                       {relativeHeartbeat(node.lastReportedAt)}
                     </span>
                   </div>
@@ -192,22 +235,22 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
               <tr>
                 <th>状态</th>
                 <th>节点 / 地区</th>
-                <th>系统</th>
+                <th>商家</th>
                 <th>CPU</th>
                 <th>内存 (已用/总)</th>
                 <th>Swap</th>
                 <th>硬盘</th>
                 <th>实时网络 (↓ / ↑)</th>
                 <th>累计总流量</th>
-                <th>丢包率</th>
+                <th>剩余价值</th>
+                <th>到期时间</th>
                 <th>连续在线</th>
                 <th>负载</th>
-                <th>心跳</th>
-                <th aria-hidden="true" />
+                <th>管理</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ node, key, rate, loss }) => (
+              {rows.map(({ node, key, rate, loss, billing, calc }) => (
                 <tr
                   key={key}
                   tabIndex={0}
@@ -225,8 +268,8 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                       <small>{node.tag || node.hostname || node.id}</small>
                     </span>
                   </td>
-                  <td className="node-cell-os">
-                    <span className="os-badge">{node.os} {node.arch}</span>
+                  <td>
+                    <span className="merchant-tag">{billing.merchant}</span>
                   </td>
                   <td>{cellPercent(node.cpu)}</td>
                   <td>
@@ -248,18 +291,44 @@ export function NodeTable({ nodes, rates = {}, lossRates = {}, selectedId = null
                     <span className="rate-up-text">↑ {formatRate(rate?.up ?? null)}</span>
                   </td>
                   <td className="mono">{formatBytes((node.rx || 0) + (node.tx || 0))}</td>
-                  <td className={loss !== null && loss > 0 ? 'node-cell-loss node-cell-loss-warn' : 'node-cell-loss'}>
-                    {formatLossPercent(loss)}
+                  <td>
+                    <span className="mono text-mint" style={{ fontWeight: 700 }}>
+                      ¥{calc.remainingValueCNY.toFixed(1)}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`days-pill days-${calc.statusTone} mono`}>
+                      {calc.statusText}
+                    </span>
                   </td>
                   <td className="mono">{node.uptime || '—'}</td>
                   <td className="mono text-muted">{formatLoad(node.load1, node.load5, node.load15)}</td>
-                  <td className="node-cell-heartbeat">{relativeHeartbeat(node.lastReportedAt)}</td>
-                  <td className="node-cell-arrow"><ArrowUpRight size={14} /></td>
+                  <td>
+                    <button
+                      type="button"
+                      className="button button-quiet btn-sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setBillingTargetNode(node)
+                      }}
+                    >
+                      <Sparkle size={13} /> 账单
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* 账单配置与出鸡计算弹窗 */}
+      {billingTargetNode && (
+        <BillingModal
+          node={billingTargetNode}
+          onClose={() => setBillingTargetNode(null)}
+          onSaved={() => setRefreshTrigger((p) => p + 1)}
+        />
       )}
     </div>
   )

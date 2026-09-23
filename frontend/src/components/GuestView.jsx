@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, ShieldCheck, SignIn, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowClockwise, CheckCircle, CircleNotch, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { StatusDot, UptimeBars } from './Common.jsx'
 
 export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
+  const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -149,57 +150,136 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess }) {
         </div>
       </section>
 
-      {/* 节点列表展示 (MJJ 风格卡片网格) */}
+      {/* 节点列表展示 (DStatus 宫格与紧凑表格双视图) */}
       <section className="guest-nodes-section">
         <div className="section-title-bar">
           <div>
             <h2>已连接探针节点 ({names.length})</h2>
             <p>提供已脱敏的服务器节点、网络区域与 30 天服务稳定性切片</p>
           </div>
+          {names.length > 0 && (
+            <div className="view-mode-toggles">
+              <button
+                type="button"
+                className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                onClick={() => setViewMode('grid')}
+                title="DStatus 宫格卡片视图"
+              >
+                <SquaresFour size={16} weight={viewMode === 'grid' ? 'bold' : 'regular'} />
+                <span>卡片</span>
+              </button>
+              <button
+                type="button"
+                className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
+                onClick={() => setViewMode('table')}
+                title="紧凑表格视图"
+              >
+                <Rows size={16} weight={viewMode === 'table' ? 'bold' : 'regular'} />
+                <span>表格</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {names.length ? (
-          <div className="guest-node-grid">
-            {names.map((name, index) => {
-              const meta = detectRegionAndFlag(name, '')
-              return (
-                <article className="guest-node-card" key={`${name}-${index}`}>
-                  <div className="guest-node-card-top">
-                    <div className="guest-flag-title">
-                      <span className="guest-flag">{meta.flag}</span>
-                      <div>
-                        <strong className="guest-node-name">{name}</strong>
-                        <div className="guest-node-tags">
-                          <span className="guest-tag">{meta.region}</span>
-                          <span className="guest-tag guest-tag-route">{meta.tag}</span>
+          <>
+            {viewMode === 'grid' ? (
+              <div className="guest-node-grid">
+                {names.map((name, index) => {
+                  const meta = detectRegionAndFlag(name, '')
+                  return (
+                    <article className="guest-node-card" key={`${name}-${index}`}>
+                      <div className="guest-node-card-top">
+                        <div className="guest-flag-title">
+                          <span className="guest-flag">{meta.flag}</span>
+                          <div>
+                            <strong className="guest-node-name">{name}</strong>
+                            <div className="guest-node-tags">
+                              <span className="guest-tag">{meta.region}</span>
+                              <span className="guest-tag guest-tag-route">{meta.tag}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="guest-status-pill">
+                          <StatusDot status="online" size="sm" />
+                          <span>运行正常</span>
                         </div>
                       </div>
-                    </div>
-                    <div className="guest-status-pill">
-                      <StatusDot status="online" size="sm" />
-                      <span>运行正常</span>
-                    </div>
-                  </div>
 
-                  {/* 30 天稳定性切片条 (Uptime Kuma 风格) */}
-                  <div className="guest-uptime-section">
-                    <div className="uptime-bar-label">
-                      <span>30 天可用性历史</span>
-                      <b className="mono">100.0%</b>
-                    </div>
-                    <UptimeBars count={32} uptimePercent={100} />
-                  </div>
+                      {/* 30 天稳定性切片条 (Uptime Kuma / DStatus 风格) */}
+                      <div className="guest-uptime-section">
+                        <div className="uptime-bar-label">
+                          <span>30 天可用性历史</span>
+                          <b className="mono">100.0%</b>
+                        </div>
+                        <UptimeBars count={32} uptimePercent={100} />
+                      </div>
 
-                  <div className="guest-node-card-bottom">
-                    <span className="guest-spec-badge">Linux · x86_64</span>
-                    <span className="guest-latency-badge mono">
-                      {avgLatency !== null ? `~${avgLatency} ms` : '低延迟'}
-                    </span>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+                      <div className="guest-node-card-bottom">
+                        <span className="guest-spec-badge">Linux · x86_64</span>
+                        <span className="guest-latency-badge mono">
+                          {avgLatency !== null ? `~${avgLatency} ms` : '极佳响应'}
+                        </span>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="table-scroll node-table-wrap">
+                <table className="node-table guest-table">
+                  <thead>
+                    <tr>
+                      <th>状态</th>
+                      <th>节点名称</th>
+                      <th>地区 / 线路</th>
+                      <th>30 天可用性切片</th>
+                      <th>探测延迟</th>
+                      <th>系统架构</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {names.map((name, index) => {
+                      const meta = detectRegionAndFlag(name, '')
+                      return (
+                        <tr key={`${name}-${index}`}>
+                          <td>
+                            <div className="inline-flex items-center gap-1.5">
+                              <StatusDot status="online" size="sm" />
+                              <span className="status-text online">正常</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="inline-flex items-center gap-2">
+                              <span className="table-flag">{meta.flag}</span>
+                              <strong className="text-1">{name}</strong>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="inline-flex items-center gap-1.5">
+                              <span className="guest-tag">{meta.region}</span>
+                              <span className="guest-tag guest-tag-route">{meta.tag}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ width: '160px' }}>
+                              <UptimeBars count={24} uptimePercent={100} />
+                            </div>
+                          </td>
+                          <td className="mono text-mint">
+                            {avgLatency !== null ? `${avgLatency} ms` : '—'}
+                          </td>
+                          <td>
+                            <span className="os-badge">Linux · x86_64</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         ) : (
           <div className="empty-state">
             <strong>暂无公开节点</strong>

@@ -8,12 +8,17 @@ import { OverviewPage } from './components/OverviewPage.jsx'
 import { SubPage } from './components/SubPage.jsx'
 import { GuestView } from './components/GuestView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
-import { GlobeHemisphereWest, WifiHigh, Broadcast, CloudArrowDown, SquaresFour, SlidersHorizontal, Database } from '@phosphor-icons/react'
+import { BillingCenter } from './components/BillingCenter.jsx'
+import { GlobeHemisphereWest, WifiHigh, Broadcast, CloudArrowDown, SquaresFour, SlidersHorizontal, Database, Coins } from '@phosphor-icons/react'
 
 const navItems = [
-  { id: 'overview', label: '总览', icon: SquaresFour }, { id: 'nodes', label: '节点', icon: GlobeHemisphereWest },
-  { id: 'network', label: '网络检测', icon: WifiHigh }, { id: 'mtr', label: 'MTR 路由', icon: Broadcast },
-  { id: 'media', label: '流媒体', icon: CloudArrowDown }, { id: 'alerts', label: '告警事件', icon: Bell },
+  { id: 'overview', label: '总览', icon: SquaresFour },
+  { id: 'nodes', label: '节点', icon: GlobeHemisphereWest },
+  { id: 'billing', label: '账单与价值', icon: Coins },
+  { id: 'network', label: '网络检测', icon: WifiHigh },
+  { id: 'mtr', label: 'MTR 路由', icon: Broadcast },
+  { id: 'media', label: '流媒体', icon: CloudArrowDown },
+  { id: 'alerts', label: '告警事件', icon: Bell },
 ]
 const REFRESH_OPTIONS = [10, 30, 60]
 const OVERVIEW_INTERVAL_MS = 300000
@@ -319,7 +324,8 @@ export function App() {
       <div className="content-wrap">
         {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
           : activeNav === 'node-detail' && detailNode ? <NodeDetailPage node={detailNode} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
-            : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} />}
+            : activeNav === 'billing' ? <BillingCenter nodes={data} />
+              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} />}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>
