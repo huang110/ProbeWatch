@@ -137,7 +137,10 @@ export function NetworkMonitorView({ nodes = [] }) {
       await fetch(`/api/targets/${encodeURIComponent(targetId)}`, {
         method: 'DELETE',
         credentials: 'same-origin',
-        headers: { 'X-CSRF-Token': csrfToken },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
       })
       setRefreshTrigger((v) => v + 1)
     } catch {}

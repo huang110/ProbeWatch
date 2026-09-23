@@ -14,6 +14,7 @@ const PRESET_MTR_TARGETS = [
 export function MTRRouteView({ nodes = [] }) {
   const [selectedNodeUuid, setSelectedNodeUuid] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
   const [mtrData, setMtrData] = useState([])
+  const [configuredTargets, setConfiguredTargets] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedTargetId, setSelectedTargetId] = useState(null)
   const [addingPreset, setAddingPreset] = useState(false)
@@ -29,11 +30,20 @@ export function MTRRouteView({ nodes = [] }) {
     }
   }, [nodes, selectedNodeUuid])
 
-  // Fetch MTR results for selected node
+  // Fetch MTR results and configured targets
   const fetchMtr = useCallback(async () => {
     if (!selectedNodeUuid) return
     setLoading(true)
     try {
+      fetch('/api/targets', { credentials: 'same-origin' })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setConfiguredTargets(list.filter((t) => t.kind === 'mtr'))
+          }
+        })
+        .catch(() => {})
+
       const res = await fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/mtr`, {
         credentials: 'same-origin',
       })
@@ -58,9 +68,38 @@ export function MTRRouteView({ nodes = [] }) {
     return () => clearInterval(timer)
   }, [fetchMtr, refreshTrigger])
 
-  const selectedReport = mtrData.find(
+  const handleDeleteTarget = async (tId) => {
+    if (!tId) return
+    if (!window.confirm(`确定删除 MTR 探测目标 [${tId}] 吗？`)) return
+    try {
+      const csrfToken = await fetchCsrfToken()
+      await fetch(`/api/targets/${encodeURIComponent(tId)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken,
+        },
+      })
+      setSelectedTargetId(null)
+      setRefreshTrigger((v) => v + 1)
+    } catch {}
+  }
+
+  const allMtrTabs = (() => {
+    const list = [...mtrData]
+    configuredTargets.forEach((t) => {
+      const exists = list.some((item) => (item.target_id || item.id) === t.id)
+      if (!exists) {
+        list.push({ target_id: t.id, id: t.id, isPending: true, result: { host: t.host, reached: false, hops: [] } })
+      }
+    })
+    return list
+  })()
+
+  const selectedReport = allMtrTabs.find(
     (item) => (item.target_id || item.id || item?.result?.host) === selectedTargetId
-  ) || mtrData[0] || null
+  ) || allMtrTabs[0] || null
 
   const handleAddPreset = async (preset) => {
     setAddingPreset(true)
@@ -240,9 +279,9 @@ export function MTRRouteView({ nodes = [] }) {
       </div>
 
       {/* MTR 目标选择 Tab 栏 */}
-      {mtrData.length > 0 && (
+      {allMtrTabs.length > 0 && (
         <div className="mtr-targets-tabs">
-          {mtrData.map((item) => {
+          {allMtrTabs.map((item) => {
             const tId = item.target_id || item.id || item?.result?.host
             const isCur = tId === selectedTargetId
             return (
@@ -255,7 +294,7 @@ export function MTRRouteView({ nodes = [] }) {
                 <FlowArrow size={15} />
                 <span className="target-chip-name">{item?.result?.host || tId}</span>
                 <span className={`target-chip-status ${item?.result?.reached ? 'status-reached' : ''}`}>
-                  {item?.result?.reached ? '已抵达' : '追踪中'}
+                  {item?.isPending ? '等待探测' : item?.result?.reached ? '已抵达' : '追踪中'}
                 </span>
               </button>
             )
@@ -286,10 +325,20 @@ export function MTRRouteView({ nodes = [] }) {
               </div>
             </div>
 
-            <div className="meta-right">
+            <div className="meta-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span className="update-time">
                 <Clock size={14} /> 检测时间: <b>{result.checked_at ? formatTimeOfDay(result.checked_at * 1000) : '刚刚'}</b>
               </span>
+              {(selectedReport?.target_id || selectedReport?.id || selectedTargetId) && (
+                <button
+                  type="button"
+                  className="button button-quiet btn-sm text-rose"
+                  onClick={() => handleDeleteTarget(selectedReport?.target_id || selectedReport?.id || selectedTargetId)}
+                  title="删除该 MTR 探测目标"
+                >
+                  <Trash size={13} /> 删除目标
+                </button>
+              )}
             </div>
           </div>
 

@@ -123,25 +123,29 @@ export function MediaMatrix({ nodes = [] }) {
   const handleAddMediaPresets = async () => {
     setAddingPreset(true)
     try {
-      const csrfToken = await fetchCsrfToken()
       for (const p of POPULAR_STREAMING_PLATFORMS) {
-        await fetch('/api/targets', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-          body: JSON.stringify({
-            id: `media-${p.id}`,
-            name: p.label,
-            kind: 'media_http',
-            host: p.host,
-            port: 443,
-            path: p.path,
-            interval_seconds: 60,
-            timeout_ms: 5000,
-            enabled: true,
-            region_rules: p.regionRules,
-          }),
-        }).catch(() => {})
+        try {
+          const csrfToken = await fetchCsrfToken()
+          await fetch('/api/targets', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({
+              id: `media-${p.id}`,
+              name: p.label,
+              kind: 'media_http',
+              host: p.host,
+              port: 443,
+              path: p.path,
+              interval_seconds: 60,
+              timeout_ms: 5000,
+              enabled: true,
+              region_rules: p.regionRules,
+            }),
+          })
+        } catch {
+          // ignore single item failure
+        }
       }
       setRefreshTrigger((v) => v + 1)
     } finally {
