@@ -158,7 +158,35 @@ function KomariChartCard({
   )
 }
 
-const TARGET_COLORS = ['#f43f5e', '#38bdf8', '#f59e0b', '#a855f7', '#10b981', '#ec4899', '#06b6d4', '#eab308']
+const TARGET_COLORS = ['#f43f5e', '#2dd4bf', '#a855f7', '#38bdf8', '#f59e0b', '#ec4899', '#6366f1', '#10b981']
+
+function computeYTicks(maxVal) {
+  if (maxVal <= 30) {
+    return { yUpper: 30, ticks: [30, 25, 20, 15, 10, 5, 0] }
+  }
+  if (maxVal <= 60) {
+    return { yUpper: 60, ticks: [60, 50, 40, 30, 20, 10, 0] }
+  }
+  if (maxVal <= 100) {
+    return { yUpper: 100, ticks: [100, 80, 60, 40, 20, 0] }
+  }
+  if (maxVal <= 180) {
+    return { yUpper: 180, ticks: [180, 150, 120, 90, 60, 30, 0] }
+  }
+  if (maxVal <= 240) {
+    return { yUpper: 240, ticks: [240, 200, 160, 120, 80, 40, 0] }
+  }
+  if (maxVal <= 420) {
+    return { yUpper: 420, ticks: [420, 350, 280, 210, 140, 70, 0] }
+  }
+  if (maxVal <= 600) {
+    return { yUpper: 600, ticks: [600, 500, 400, 300, 200, 100, 0] }
+  }
+  const step = Math.ceil(maxVal / 6 / 50) * 50
+  const yUpper = step * 6
+  const ticks = [step * 6, step * 5, step * 4, step * 3, step * 2, step * 1, 0]
+  return { yUpper, ticks }
+}
 
 export function NodeDetailPage({
   node,
@@ -181,6 +209,19 @@ export function NodeDetailPage({
   const [activeTimeRange, setActiveTimeRange] = useState('实时')
   const [activePingRange, setActivePingRange] = useState('1小时')
   const [selectedTargets, setSelectedTargets] = useState({})
+  const [smoothPeaks, setSmoothPeaks] = useState(true)
+  const [targetInfoModal, setTargetInfoModal] = useState(null)
+  const [hoverData, setHoverData] = useState(null)
+  const [visitorIp, setVisitorIp] = useState('')
+
+  useEffect(() => {
+    fetch('https://api.ipify.org?format=json')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ip) setVisitorIp(data.ip)
+      })
+      .catch(() => {})
+  }, [])
 
   // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
   const [nowTick, setNowTick] = useState(() => Date.now())
@@ -399,6 +440,24 @@ export function NodeDetailPage({
     }
   }, [history, cpuPercent, memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal, rate?.down, rate?.up, totalConnections, processCount, nowTick])
 
+  const pingRangeConfig = useMemo(() => {
+    switch (activePingRange) {
+      case '1小时':
+        return { minutes: 60, intervalMin: 2, pointsCount: 31 }
+      case '6小时':
+        return { minutes: 360, intervalMin: 12, pointsCount: 31 }
+      case '12小时':
+        return { minutes: 720, intervalMin: 24, pointsCount: 31 }
+      case '1天':
+        return { minutes: 1440, intervalMin: 48, pointsCount: 31 }
+      case '2天':
+        return { minutes: 2880, intervalMin: 96, pointsCount: 31 }
+      case '自定义':
+      default:
+        return { minutes: 60, intervalMin: 2, pointsCount: 31 }
+    }
+  }, [activePingRange])
+
   // Dynamic Ping Targets mapped directly from checksSummary API
   const pingTargets = useMemo(() => {
     if (Array.isArray(checksSummary) && checksSummary.length > 0) {
@@ -416,6 +475,7 @@ export function NodeDetailPage({
         return {
           id,
           name,
+          host: item.host || item.target || item.name || '',
           latency,
           latencyVal: latencyAvg || 100,
           loss,
@@ -429,10 +489,12 @@ export function NodeDetailPage({
     }
 
     return [
-      { id: 'cq_ct', name: '重庆电信', latencyVal: 381, latency: '381ms', loss: '0.00%', lossColor: 'text-mint', color: '#f43f5e', jitter: 15, lastChecked: '刚刚' },
-      { id: 'cq_cu', name: '重庆联通', latencyVal: 326, latency: '326ms', loss: '0.00%', lossColor: 'text-mint', color: '#f59e0b', jitter: 12, lastChecked: '刚刚' },
-      { id: 'cq_cm', name: '重庆移动', latencyVal: 188, latency: '188ms', loss: '0.00%', lossColor: 'text-mint', color: '#10b981', jitter: 8, lastChecked: '刚刚' },
-      { id: 'cf_any', name: 'Cloudflare Anycast', latencyVal: 2, latency: '2ms', loss: '0.00%', lossColor: 'text-mint', color: '#38bdf8', jitter: 0.5, lastChecked: '刚刚' },
+      { id: 'cq_ct', name: '重庆电信', host: 'cq-ct-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#f43f5e', jitter: 0.0, lastChecked: '刚刚' },
+      { id: 'sc_ct', name: '四川电信', host: 'sc-ct-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#2dd4bf', jitter: 0.0, lastChecked: '刚刚' },
+      { id: 'cq_cu', name: '重庆联通', host: 'cq-cu-dualstack.ip.zstaticcdn.com', latencyVal: 162, latency: '162ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#a855f7', jitter: 0.0, lastChecked: '刚刚' },
+      { id: 'sc_cu', name: '四川联通', host: 'sc-cu-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#38bdf8', jitter: 0.0, lastChecked: '刚刚' },
+      { id: 'cq_cm', name: '重庆移动', host: 'cq-cm-dualstack.ip.zstaticcdn.com', latencyVal: 162, latency: '162ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#f59e0b', jitter: 0.0, lastChecked: '刚刚' },
+      { id: 'sc_cm', name: '四川移动', host: 'sc-cm-dualstack.ip.zstaticcdn.com', latencyVal: 163, latency: '163ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#ec4899', jitter: 0.0, lastChecked: '刚刚' },
     ]
   }, [checksSummary])
 
@@ -461,50 +523,77 @@ export function NodeDetailPage({
     setSelectedTargets(next)
   }
 
-  // Dynamic Ping Chart paths and axis scales
+  // Dynamic Ping Chart paths, spline curves, and axis scales
   const pingChartData = useMemo(() => {
     const selectedList = pingTargets.filter((t) => selectedTargets[t.id])
     const maxLatency = Math.max(
       ...selectedList.map((t) => t.latencyVal),
       100
     )
-    const yUpper = Math.ceil((maxLatency * 1.25) / 50) * 50
-    const yTicks = [
-      yUpper,
-      Math.round(yUpper * 0.75),
-      Math.round(yUpper * 0.5),
-      Math.round(yUpper * 0.25),
-    ]
+    const { yUpper, ticks: yTicks } = computeYTicks(maxLatency)
 
-    const targetPaths = pingTargets.map((t) => {
-      const pointsCount = 18
-      const points = Array.from({ length: pointsCount }, (_, i) => {
-        const hash = (t.id.charCodeAt(0) || 1) * 31 + i
-        const wave = Math.sin((hash + nowTick / 60000) * 0.8)
-        const val = Math.max(1, t.latencyVal + wave * (t.jitter || t.latencyVal * 0.05))
-        return val
-      })
+    const width = 900
+    const height = 240
+    const paddingLeft = 52
+    const paddingRight = 20
+    const paddingTop = 22
+    const paddingBottom = 26
+    const plotW = width - paddingLeft - paddingRight
+    const plotH = height - paddingTop - paddingBottom
 
-      const width = 900
-      const height = 240
-      const paddingX = 40
-      const paddingY = 25
-      const plotW = width - paddingX * 2
-      const plotH = height - paddingY * 2
+    const { minutes, intervalMin, pointsCount } = pingRangeConfig
 
-      const coords = points.map((val, idx) => {
-        const x = paddingX + (idx / (pointsCount - 1)) * plotW
+    const pointsTimes = []
+    const pointsFullTimes = []
+    for (let i = 0; i < pointsCount; i++) {
+      const ms = nowTick - (pointsCount - 1 - i) * intervalMin * 60 * 1000
+      const d = new Date(ms)
+      if (minutes >= 1440) {
+        pointsTimes.push(`${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`)
+      } else {
+        pointsTimes.push(d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }))
+      }
+      pointsFullTimes.push(d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }))
+    }
+
+    const targetPaths = []
+    const targetPointsMap = {}
+
+    pingTargets.forEach((t) => {
+      let seed = 0
+      for (let c = 0; c < t.id.length; c++) {
+        seed = (seed * 31 + t.id.charCodeAt(c)) & 0xfffff
+      }
+
+      const pts = []
+      const jitterAmp = Math.min(Math.max(Number(t.jitter) || 1.0, 0.4), 2.2) * (smoothPeaks ? 0.35 : 1.0)
+
+      for (let i = 0; i < pointsCount; i++) {
+        const x = paddingLeft + (i / (pointsCount - 1)) * plotW
+
+        const phase1 = (i * 0.45) + (seed % 19)
+        const phase2 = (i * 0.85) + (seed % 31)
+        const naturalNoise = Math.sin(phase1) * 0.55 + Math.cos(phase2) * 0.45
+        let val = t.latencyVal + naturalNoise * jitterAmp
+        if (!smoothPeaks && (i + seed) % 13 === 5) {
+          val += 2.6
+        }
+        val = Math.max(0.5, +val.toFixed(2))
+
         const norm = Math.min(1, Math.max(0, val / yUpper))
-        const y = height - paddingY - norm * plotH
-        return { x, y }
-      })
+        const y = paddingTop + plotH - norm * plotH
 
-      let line = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`
-      for (let i = 0; i < coords.length - 1; i++) {
-        const p0 = coords[Math.max(i - 1, 0)]
-        const p1 = coords[i]
-        const p2 = coords[i + 1]
-        const p3 = coords[Math.min(i + 2, coords.length - 1)]
+        pts.push({ x, y, val, time: pointsTimes[i], fullTime: pointsFullTimes[i] })
+      }
+
+      targetPointsMap[t.id] = pts
+
+      let line = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(i - 1, 0)]
+        const p1 = pts[i]
+        const p2 = pts[i + 1]
+        const p3 = pts[Math.min(i + 2, pts.length - 1)]
 
         const cp1x = p1.x + (p2.x - p0.x) / 6
         const cp1y = p1.y + (p2.y - p0.y) / 6
@@ -514,34 +603,89 @@ export function NodeDetailPage({
         line += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
       }
 
-      return {
+      targetPaths.push({
         id: t.id,
-        path: line,
+        name: t.name,
         color: t.color,
-      }
+        path: line,
+      })
     })
 
-    const rangeMinutes = activePingRange === '1小时' ? 60
-      : activePingRange === '6小时' ? 360
-      : activePingRange === '12小时' ? 720
-      : activePingRange === '1天' ? 1440
-      : activePingRange === '7天' ? 10080
-      : 60
-    const stepMinutes = rangeMinutes / 10
-    const timeMarks = Array.from({ length: 11 }, (_, i) => {
-      const t = new Date(nowTick - (10 - i) * stepMinutes * 60 * 1000)
-      if (rangeMinutes > 1440) {
-        return `${t.getMonth() + 1}/${t.getDate()} ${t.getHours().toString().padStart(2, '0')}:00`
-      }
-      return t.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
-    })
+    // X axis ticks
+    const xStep = pointsCount <= 31 ? 3 : 5
+    const displayedXMarks = []
+    for (let i = 0; i < pointsCount; i += xStep) {
+      displayedXMarks.push({
+        idx: i,
+        x: paddingLeft + (i / (pointsCount - 1)) * plotW,
+        text: pointsTimes[i],
+      })
+    }
+    if (pointsCount - 1 - displayedXMarks[displayedXMarks.length - 1].idx >= 2) {
+      displayedXMarks.push({
+        idx: pointsCount - 1,
+        x: paddingLeft + plotW,
+        text: pointsTimes[pointsCount - 1],
+      })
+    }
 
     return {
+      width,
+      height,
+      paddingLeft,
+      paddingRight,
+      paddingTop,
+      paddingBottom,
+      plotW,
+      plotH,
+      yUpper,
       yTicks,
+      pointsCount,
+      pointsTimes,
+      pointsFullTimes,
       targetPaths,
-      timeMarks,
+      targetPointsMap,
+      displayedXMarks,
     }
-  }, [pingTargets, selectedTargets, activePingRange, nowTick])
+  }, [pingTargets, selectedTargets, pingRangeConfig, smoothPeaks, nowTick])
+
+  const handleChartMouseMove = (e) => {
+    if (!pingChartData) return
+    const svgEl = e.currentTarget
+    const rect = svgEl.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
+
+    const { width, height, paddingLeft, paddingRight, paddingTop, paddingBottom, plotW, plotH, yUpper, pointsCount, pointsTimes, pointsFullTimes } = pingChartData
+
+    const svgX = ((e.clientX - rect.left) / rect.width) * width
+    const svgY = ((e.clientY - rect.top) / rect.height) * height
+
+    if (svgX < paddingLeft - 25 || svgX > width - paddingRight + 25) {
+      setHoverData(null)
+      return
+    }
+
+    const clampedX = Math.max(paddingLeft, Math.min(width - paddingRight, svgX))
+    const clampedY = Math.max(paddingTop, Math.min(height - paddingBottom, svgY))
+
+    const ratio = (clampedX - paddingLeft) / plotW
+    const pointIndex = Math.min(pointsCount - 1, Math.max(0, Math.round(ratio * (pointsCount - 1))))
+    const snapX = paddingLeft + (pointIndex / (pointsCount - 1)) * plotW
+    const hoveredLatency = Math.max(0, ((paddingTop + plotH - clampedY) / plotH) * yUpper)
+
+    setHoverData({
+      pointIndex,
+      snapX,
+      mouseY: clampedY,
+      hoveredLatency,
+      time: pointsTimes[pointIndex],
+      fullTime: pointsFullTimes[pointIndex],
+    })
+  }
+
+  const handleChartMouseLeave = () => {
+    setHoverData(null)
+  }
 
   // Net rate dynamic Y bounds
   const maxNetRate = Math.max(...telemetrySeries.downs, ...telemetrySeries.ups, 50 * 1024)
@@ -997,7 +1141,7 @@ export function NodeDetailPage({
       <div className="komari-ping-section">
         <div className="komari-ping-toolbar">
           <div className="komari-time-tabs">
-            {['1小时', '6小时', '12小时', '1天', '7天', '自定义'].map((tab) => (
+            {['1小时', '6小时', '12小时', '1天', '2天', '自定义'].map((tab) => (
               <button
                 key={tab}
                 type="button"
@@ -1012,14 +1156,14 @@ export function NodeDetailPage({
           <div className="komari-ping-actions">
             <button
               type="button"
-              className="button button-quiet btn-sm"
+              className="komari-ping-action-btn komari-btn-select-all"
               onClick={() => handleSelectAllTargets(true)}
             >
               全选
             </button>
             <button
               type="button"
-              className="button button-quiet btn-sm"
+              className="komari-ping-action-btn komari-btn-deselect-all"
               onClick={() => handleSelectAllTargets(false)}
             >
               全不选
@@ -1031,23 +1175,36 @@ export function NodeDetailPage({
         <div className="komari-targets-grid">
           {pingTargets.map((t) => {
             const isChecked = Boolean(selectedTargets[t.id])
+            const jitterText = typeof t.jitter === 'number' ? t.jitter.toFixed(2) : (numeric(t.jitter) || 0).toFixed(2)
             return (
               <div
                 key={t.id}
-                className={`komari-target-card ${isChecked ? 'active' : ''}`}
+                className={`komari-target-card ${isChecked ? 'active' : 'inactive'}`}
                 onClick={() => handleToggleTarget(t.id)}
               >
                 <div className="komari-target-head">
-                  <span className="komari-target-bar" style={{ backgroundColor: t.color }} />
-                  <strong className="komari-target-name">{t.name}</strong>
-                  <span className="komari-target-check">
-                    <input type="checkbox" checked={isChecked} onChange={() => {}} />
-                  </span>
+                  <div className="komari-target-head-left">
+                    <span className="komari-target-bar" style={{ backgroundColor: t.color }} />
+                    <strong className="komari-target-name">{t.name}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="komari-target-info-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setTargetInfoModal(t)
+                    }}
+                    title={`查看 ${t.name} 详情`}
+                  >
+                    ⓘ
+                  </button>
                 </div>
                 <div className="komari-target-stats mono">
-                  <span>{t.latency}</span>
-                  <span className={t.lossColor}>{t.loss}</span>
-                  <span className="text-muted">{t.lastChecked || '刚刚'}</span>
+                  <span className="komari-target-stat-val">{t.latency}</span>
+                  <span className="komari-target-stat-dot">·</span>
+                  <span className={`komari-target-stat-val ${t.lossColor}`}>{t.loss}</span>
+                  <span className="komari-target-stat-dot">·</span>
+                  <span className="komari-target-stat-val text-muted">{jitterText}</span>
                 </div>
               </div>
             )
@@ -1057,22 +1214,54 @@ export function NodeDetailPage({
         {/* 平滑延迟多线对比折线图 */}
         <div className="komari-ping-chart-card">
           <div className="komari-ping-chart-header">
-            <span className="komari-ping-chart-title">平滑延迟 (ms)</span>
+            <button
+              type="button"
+              className={`komari-smooth-pill ${smoothPeaks ? 'active' : ''}`}
+              onClick={() => setSmoothPeaks((prev) => !prev)}
+              title="平滑峰值（过滤瞬时抖动尖峰）"
+            >
+              <span>平滑峰值</span>
+              <span className="komari-smooth-info">ⓘ</span>
+            </button>
+            <span className="komari-ping-y-label">延迟 (ms)</span>
           </div>
 
           <div className="komari-ping-chart-wrap">
-            <svg viewBox="0 0 900 240" className="komari-ping-svg" preserveAspectRatio="none">
-              {/* 背景虚线网格 */}
-              <line x1="20" y1="20" x2="880" y2="20" stroke="currentColor" strokeDasharray="3 3" opacity="0.1" />
-              <line x1="20" y1="75" x2="880" y2="75" stroke="currentColor" strokeDasharray="3 3" opacity="0.1" />
-              <line x1="20" y1="130" x2="880" y2="130" stroke="currentColor" strokeDasharray="3 3" opacity="0.1" />
-              <line x1="20" y1="185" x2="880" y2="185" stroke="currentColor" strokeDasharray="3 3" opacity="0.1" />
-
-              {/* Y轴刻度标注 */}
-              <text x="10" y="24" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[0]}</text>
-              <text x="10" y="79" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[1]}</text>
-              <text x="10" y="134" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[2]}</text>
-              <text x="10" y="189" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[3]}</text>
+            <svg
+              viewBox={`0 0 ${pingChartData.width} ${pingChartData.height}`}
+              className="komari-ping-svg"
+              preserveAspectRatio="none"
+              onMouseMove={handleChartMouseMove}
+              onMouseLeave={handleChartMouseLeave}
+            >
+              {/* 背景虚线网格与Y轴标注 */}
+              {pingChartData.yTicks.map((tick, idx) => {
+                const yPos = pingChartData.paddingTop + pingChartData.plotH - (tick / pingChartData.yUpper) * pingChartData.plotH
+                return (
+                  <g key={idx}>
+                    <line
+                      x1={pingChartData.paddingLeft}
+                      y1={yPos}
+                      x2={pingChartData.width - pingChartData.paddingRight}
+                      y2={yPos}
+                      stroke="currentColor"
+                      strokeDasharray="3 3"
+                      opacity="0.08"
+                    />
+                    <text
+                      x={pingChartData.paddingLeft - 8}
+                      y={yPos + 3.5}
+                      fontSize="10"
+                      fill="currentColor"
+                      opacity="0.45"
+                      fontFamily="monospace"
+                      textAnchor="end"
+                    >
+                      {tick}
+                    </text>
+                  </g>
+                )
+              })}
 
               {/* 多线动态绘制 */}
               {pingChartData.targetPaths.map((t) => {
@@ -1083,17 +1272,124 @@ export function NodeDetailPage({
                     d={t.path}
                     fill="none"
                     stroke={t.color}
-                    strokeWidth="2"
+                    strokeWidth="1.8"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 )
               })}
+
+              {/* 交互 Crosshair 辅助线与坐标刻度 Badge */}
+              {hoverData && (
+                <g className="komari-crosshair-group">
+                  {/* 垂直参考线 */}
+                  <line
+                    x1={hoverData.snapX}
+                    y1={pingChartData.paddingTop}
+                    x2={hoverData.snapX}
+                    y2={pingChartData.paddingTop + pingChartData.plotH}
+                    stroke="currentColor"
+                    strokeDasharray="3 3"
+                    opacity="0.32"
+                    strokeWidth="1"
+                  />
+                  {/* 水平参考线 */}
+                  <line
+                    x1={pingChartData.paddingLeft}
+                    y1={hoverData.mouseY}
+                    x2={pingChartData.width - pingChartData.paddingRight}
+                    y2={hoverData.mouseY}
+                    stroke="currentColor"
+                    strokeDasharray="3 3"
+                    opacity="0.32"
+                    strokeWidth="1"
+                  />
+                  {/* Y 轴紫底数值指示器 */}
+                  <g transform={`translate(2, ${hoverData.mouseY - 9})`}>
+                    <rect width="44" height="18" rx="4" fill="#8b5cf6" />
+                    <text
+                      x="22"
+                      y="12.5"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="10"
+                      fontWeight="600"
+                      fontFamily="monospace"
+                    >
+                      {hoverData.hoveredLatency.toFixed(2)}
+                    </text>
+                  </g>
+                  {/* X 轴蓝底时间指示器 */}
+                  <g transform={`translate(${hoverData.snapX - 22}, ${pingChartData.paddingTop + pingChartData.plotH + 4})`}>
+                    <rect width="44" height="17" rx="4" fill="#3b82f6" />
+                    <text
+                      x="22"
+                      y="12"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="9.5"
+                      fontWeight="600"
+                      fontFamily="monospace"
+                    >
+                      {hoverData.time}
+                    </text>
+                  </g>
+                  {/* 曲线对应点高亮圆点 */}
+                  {pingTargets.map((t) => {
+                    if (!selectedTargets[t.id]) return null
+                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
+                    if (!pt) return null
+                    return (
+                      <circle
+                        key={t.id}
+                        cx={hoverData.snapX}
+                        cy={pt.y}
+                        r="3.8"
+                        fill={t.color}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                    )
+                  })}
+                </g>
+              )}
             </svg>
 
-            {/* X 轴时间轴 */}
+            {/* 浮动实时 Tooltip 悬浮框 */}
+            {hoverData && (
+              <div
+                className="komari-ping-tooltip"
+                style={{
+                  left: `${(hoverData.snapX / pingChartData.width) * 100}%`,
+                  top: `${(hoverData.mouseY / pingChartData.height) * 100}%`,
+                  transform: hoverData.snapX > 560 ? 'translate(-105%, -50%)' : 'translate(15%, -50%)',
+                }}
+              >
+                <div className="komari-tooltip-time mono">{hoverData.fullTime}</div>
+                <div className="komari-tooltip-list">
+                  {pingTargets.filter((t) => selectedTargets[t.id]).map((t) => {
+                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
+                    return (
+                      <div key={t.id} className="komari-tooltip-row">
+                        <div className="komari-tooltip-name">
+                          <span className="komari-tooltip-dot" style={{ backgroundColor: t.color }} />
+                          <span>{t.name}</span>
+                        </div>
+                        <div className="komari-tooltip-val mono">
+                          <strong>{pt ? pt.val.toFixed(1) : t.latencyVal} ms</strong>
+                          <span className="text-muted">{t.loss}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* X 轴时间刻度标注 */}
             <div className="komari-ping-x-axis mono">
-              {pingChartData.timeMarks.map((tm, idx) => (
-                <span key={idx}>{tm}</span>
+              {pingChartData.displayedXMarks.map((m, idx) => (
+                <span key={idx}>{m.text}</span>
               ))}
             </div>
           </div>
@@ -1112,9 +1408,70 @@ export function NodeDetailPage({
             ))}
           </div>
         </div>
+
+        {/* 访问者/节点公网IP胶囊栏 */}
+        <div className="komari-visitor-ip-bar">
+          <span className="komari-visitor-ip-pill mono">
+            🌐 Your IP: {visitorIp || publicIp} | {ispText}
+          </span>
+        </div>
       </div>
 
-      {/* 6. 页脚署名 */}
+      {/* 6. 目标详情信息弹窗 */}
+      {targetInfoModal && (
+        <div className="dialog-backdrop" onClick={() => setTargetInfoModal(null)}>
+          <div className="dialog-window komari-target-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ width: '4px', height: '18px', borderRadius: '2px', backgroundColor: targetInfoModal.color }} />
+                <h3 className="dialog-title">{targetInfoModal.name} 监测详情</h3>
+              </div>
+              <button type="button" className="dialog-close" onClick={() => setTargetInfoModal(null)}>✕</button>
+            </div>
+            <div className="dialog-body">
+              <div className="komari-target-modal-grid">
+                <div className="modal-field-item">
+                  <span className="modal-field-label">目标地址</span>
+                  <span className="modal-field-val mono">{targetInfoModal.host || targetInfoModal.name}</span>
+                </div>
+                <div className="modal-field-item">
+                  <span className="modal-field-label">当前延迟</span>
+                  <span className="modal-field-val mono" style={{ color: targetInfoModal.color, fontWeight: 700 }}>
+                    {targetInfoModal.latency}
+                  </span>
+                </div>
+                <div className="modal-field-item">
+                  <span className="modal-field-label">丢包率</span>
+                  <span className={`modal-field-val mono ${targetInfoModal.lossColor}`}>
+                    {targetInfoModal.loss}
+                  </span>
+                </div>
+                <div className="modal-field-item">
+                  <span className="modal-field-label">网络抖动 (Jitter)</span>
+                  <span className="modal-field-val mono">
+                    {typeof targetInfoModal.jitter === 'number' ? targetInfoModal.jitter.toFixed(2) : targetInfoModal.jitter} ms
+                  </span>
+                </div>
+                <div className="modal-field-item">
+                  <span className="modal-field-label">检测协议</span>
+                  <span className="modal-field-val mono">ICMP Ping / TCP Syn</span>
+                </div>
+                <div className="modal-field-item">
+                  <span className="modal-field-label">最后检测</span>
+                  <span className="modal-field-val mono">{targetInfoModal.lastChecked}</span>
+                </div>
+              </div>
+            </div>
+            <div className="dialog-footer">
+              <button type="button" className="button button-primary" onClick={() => setTargetInfoModal(null)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. 页脚署名 */}
       <footer className="komari-footer">
         <div>Powered by <strong>ProbeWatch Monitor</strong></div>
         <div>Theme by <strong>Komari Glassmorphism</strong></div>
