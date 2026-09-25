@@ -220,5 +220,9 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.nodeTraffic(w, r, uuid)
 		return
 	}
+	if len(parts) == 5 && parts[4] == "media" {
+		s.writeMediaLatest(w, r, node.ID)
+		return
+	}
 	writeJSONError(w, http.StatusNotFound, "not found")
 }

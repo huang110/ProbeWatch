@@ -24,6 +24,8 @@ import {
   CheckCircle,
   WarningCircle,
   LinuxLogo,
+  FilmStrip,
+  CircleNotch,
 } from '@phosphor-icons/react'
 import {
   formatBytes,
@@ -188,6 +190,53 @@ function computeYTicks(maxVal) {
   return { yUpper, ticks }
 }
 
+const POPULAR_MEDIA = [
+  { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
+  { id: 'claude', name: 'Claude', iconBg: '#D97706', symbol: 'CL', alias: ['claude', 'anthropic'] },
+  { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT', alias: ['youtube'] },
+  { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF', alias: ['netflix'] },
+  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney'] },
+  { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK', alias: ['tiktok'] },
+  { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP', alias: ['spotify'] },
+  { id: 'bilibili', name: 'Bilibili', iconBg: '#00A1D6', symbol: 'Bili', alias: ['bilibili'] },
+]
+
+const getMediaStatus = (platform, mediaList) => {
+  const platformId = typeof platform === 'string' ? platform : platform.id
+  const aliases = (typeof platform === 'object' && platform.alias)
+    ? platform.alias
+    : [platformId, platformId === 'chatgpt' ? 'openai' : platformId]
+  const match = (mediaList || []).find((m) => {
+    const dId = (m.detector_id || m.target_id || '').toLowerCase()
+    const dName = (m.result?.detector || '').toLowerCase()
+    return aliases.some((a) => dId.includes(a) || dName.includes(a))
+  })
+  if (!match) return { text: '未测试', tone: 'muted', latency: null }
+  const res = match.result || {}
+  const status = res.status
+  const latency = res.latency_ms ?? null
+  const region = res.region
+
+  if (status === 'available') {
+    return {
+      text: region ? `${region} 解锁` : '原生解锁',
+      tone: 'available',
+      latency,
+    }
+  }
+  if (status === 'unavailable') {
+    return { text: '未解锁', tone: 'unavailable', latency }
+  }
+  if (status === 'error' || status === 'blocked' || status === 'timeout') {
+    return {
+      text: res.reason === 'body exceeds limit' ? '仅自制剧' : '超时/异常',
+      tone: 'warning',
+      latency,
+    }
+  }
+  return { text: status || '未知', tone: 'muted', latency }
+}
+
 export function NodeDetailPage({
   node,
   nodes = [],
@@ -289,6 +338,32 @@ export function NodeDetailPage({
       setIsFavorite(!isFavorite)
     } catch {}
   }
+
+  const [mediaData, setMediaData] = useState([])
+  const [loadingMedia, setLoadingMedia] = useState(false)
+
+  useEffect(() => {
+    if (!nodeUuid) return
+    setLoadingMedia(true)
+    const fetchPath = `/api/public/nodes/${encodeURIComponent(nodeUuid)}/media`
+    fetch(fetchPath, { credentials: 'same-origin' })
+      .then((res) => {
+        if (!res.ok) {
+          return fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/media`, { credentials: 'same-origin' })
+        }
+        return res
+      })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list) => {
+        if (Array.isArray(list)) setMediaData(list)
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMedia(false))
+  }, [nodeUuid])
+
+  const unlockedMediaCount = POPULAR_MEDIA.filter(
+    (p) => getMediaStatus(p, mediaData).tone === 'available'
+  ).length
 
   const resource = node?.resource || {}
   const rate = rates[nodeUuid] || {}
@@ -1093,6 +1168,76 @@ export function NodeDetailPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* 全球流媒体与 AI 服务解锁能力卡片 */}
+      <div className="komari-info-card komari-media-card" style={{ marginBottom: '16px' }}>
+        <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FilmStrip size={16} className="text-amber" />
+            <h3 style={{ margin: 0 }}>全球流媒体与 AI 服务解锁能力</h3>
+          </div>
+          <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: 'var(--primary, #0284c7)' }}>
+            {unlockedMediaCount}/{POPULAR_MEDIA.length} 项已解锁
+          </span>
+        </div>
+        {loadingMedia ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '20px', color: 'var(--muted)' }}>
+            <CircleNotch size={16} className="spin text-amber" />
+            <span style={{ fontSize: '12px' }}>正在加载流媒体与 AI 解锁状态…</span>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '10px', paddingTop: '4px' }}>
+            {POPULAR_MEDIA.map((p) => {
+              const status = getMediaStatus(p, mediaData)
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-subtle, rgba(255, 255, 255, 0.03))',
+                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '22px',
+                        height: '22px',
+                        borderRadius: '5px',
+                        fontSize: '9px',
+                        fontWeight: 'bold',
+                        backgroundColor: p.iconBg,
+                        color: '#fff',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {p.symbol}
+                    </span>
+                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{p.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                    <span className={`media-tag-${status.tone}`} style={{ fontSize: '10px' }}>
+                      {status.text}
+                    </span>
+                    {status.latency !== null && (
+                      <small className="mono text-muted" style={{ fontSize: '9px' }}>
+                        {status.latency}ms
+                      </small>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* 4. 历史时序折线图表区 (带时间范围切换器) */}

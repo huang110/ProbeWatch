@@ -95,6 +95,9 @@ func (d *MediaDetector) Run(parent context.Context, task protocol.CheckTask) pro
 	}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err == nil {
+		request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+		request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		request.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
 		var response *http.Response
 		response, err = client.Do(request)
 		if err == nil {
@@ -143,15 +146,35 @@ func (w *bodyPrefixCapture) Write(p []byte) (int, error) {
 }
 
 // matchRegionRule returns the region of the first rule whose marker occurs in
-// the bounded body prefix, or "" when no rule matches. Rule order is the
-// caller's priority order.
+// the bounded body prefix, or autodetects standard region patterns if none match.
 func matchRegionRule(rules []protocol.RegionRule, prefix []byte) string {
-	if len(rules) == 0 || len(prefix) == 0 {
+	if len(prefix) == 0 {
 		return ""
 	}
 	for _, rule := range rules {
 		if rule.Contains != "" && bytes.Contains(prefix, []byte(rule.Contains)) {
 			return rule.Region
+		}
+	}
+	// Autodetect Cloudflare trace loc=XX (e.g. ChatGPT, Claude)
+	if idx := bytes.Index(prefix, []byte("loc=")); idx != -1 && idx+6 <= len(prefix) {
+		code := string(prefix[idx+4 : idx+6])
+		if len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z' {
+			return code
+		}
+	}
+	// Autodetect standard JSON country_code: "XX"
+	if idx := bytes.Index(prefix, []byte(`"country_code":"`)); idx != -1 && idx+18 <= len(prefix) {
+		code := string(prefix[idx+16 : idx+18])
+		if len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z' {
+			return code
+		}
+	}
+	// Autodetect countryCode: "XX"
+	if idx := bytes.Index(prefix, []byte(`"countryCode":"`)); idx != -1 && idx+17 <= len(prefix) {
+		code := string(prefix[idx+15 : idx+17])
+		if len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z' {
+			return code
 		}
 	}
 	return ""

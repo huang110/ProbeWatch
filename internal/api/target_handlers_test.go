@@ -345,3 +345,53 @@ func TestMediaTargetRejectsInvalidRegionRules(t *testing.T) {
 		t.Fatal("target with invalid rules was persisted")
 	}
 }
+
+func TestSeedMediaTargetsIdempotent(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	handler := NewServer(task4Config(), service).Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	// Without CSRF should be rejected
+	noCSRF := task4AdminWrite(t, handler, http.MethodPost, session, "", "/api/targets/seed-media", "{}")
+	if noCSRF.Code != http.StatusForbidden {
+		t.Fatalf("seed without CSRF status = %d, want 403", noCSRF.Code)
+	}
+
+	// First call seeds all 8 targets
+	res1, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/targets/seed-media", "{}")
+	if res1.Code != http.StatusOK {
+		t.Fatalf("seed status = %d %q, want 200", res1.Code, res1.Body.String())
+	}
+	var data1 map[string]any
+	if err := json.Unmarshal(res1.Body.Bytes(), &data1); err != nil {
+		t.Fatal(err)
+	}
+	if data1["ok"] != true || int(data1["created"].(float64)) != 8 {
+		t.Fatalf("unexpected seed response 1: %#v", data1)
+	}
+
+	// Verify ChatGPT and Claude targets exist
+	chatgptTarget, err := store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-chatgpt")
+	if err != nil || !chatgptTarget.Enabled {
+		t.Fatalf("media-chatgpt target missing or disabled: %v", err)
+	}
+	claudeTarget, err := store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-claude")
+	if err != nil || !claudeTarget.Enabled {
+		t.Fatalf("media-claude target missing or disabled: %v", err)
+	}
+
+	// Second call should be idempotent (created: 0)
+	res2, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/targets/seed-media", "{}")
+	if res2.Code != http.StatusOK {
+		t.Fatalf("seed status 2 = %d %q, want 200", res2.Code, res2.Body.String())
+	}
+	var data2 map[string]any
+	if err := json.Unmarshal(res2.Body.Bytes(), &data2); err != nil {
+		t.Fatal(err)
+	}
+	if data2["ok"] != true || int(data2["created"].(float64)) != 0 {
+		t.Fatalf("unexpected seed response 2: %#v", data2)
+	}
+}
+

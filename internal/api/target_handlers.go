@@ -422,3 +422,128 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	type preset struct {
+		id          string
+		name        string
+		host        string
+		path        string
+		regionRules []protocol.RegionRule
+	}
+	presets := []preset{
+		{
+			id:   "media-chatgpt",
+			name: "OpenAI / ChatGPT",
+			host: "chatgpt.com",
+			path: "/cdn-cgi/trace",
+		},
+		{
+			id:   "media-claude",
+			name: "Claude AI",
+			host: "claude.ai",
+			path: "/cdn-cgi/trace",
+		},
+		{
+			id:          "media-youtube",
+			name:        "YouTube Premium",
+			host:        "www.youtube.com",
+			path:        "/premium",
+			regionRules: []protocol.RegionRule{{Region: "US", Contains: "Premium"}},
+		},
+		{
+			id:          "media-netflix",
+			name:        "Netflix",
+			host:        "www.netflix.com",
+			path:        "/title/80018499",
+			regionRules: []protocol.RegionRule{{Region: "US", Contains: "United States"}},
+		},
+		{
+			id:   "media-disney",
+			name: "Disney+",
+			host: "www.disneyplus.com",
+			path: "/",
+		},
+		{
+			id:   "media-tiktok",
+			name: "TikTok",
+			host: "www.tiktok.com",
+			path: "/",
+		},
+		{
+			id:   "media-spotify",
+			name: "Spotify",
+			host: "www.spotify.com",
+			path: "/",
+		},
+		{
+			id:          "media-bilibili",
+			name:        "Bilibili 港澳台",
+			host:        "api.bilibili.com",
+			path:        "/pgc/player/web/v2/playurl?cid=144541892&ep_id=234405",
+			regionRules: []protocol.RegionRule{
+				{Region: "TW", Contains: "\"code\":0"},
+				{Region: "HK", Contains: "\"code\":-10403"},
+			},
+		},
+	}
+
+	createdCount := 0
+	enabledCount := 0
+	now := time.Now().UTC()
+
+	for _, p := range presets {
+		existing, err := s.service.Store().GetTarget(r.Context(), db.TargetKindMediaHTTP, p.id)
+		if err == nil {
+			if !existing.Enabled {
+				existingDef := db.TargetDefinition{
+					ID:      existing.ID,
+					Name:    existing.Name,
+					Kind:    existing.Kind,
+					Host:    existing.Host,
+					Enabled: true,
+					Payload: existing.Payload,
+				}
+				_, _ = s.service.Store().UpdateTarget(r.Context(), db.TargetKindMediaHTTP, p.id, existingDef, now)
+				enabledCount++
+			}
+			continue
+		}
+
+		payloadObj := targetPayload{
+			Host:            p.host,
+			Port:            443,
+			Path:            p.path,
+			IntervalSeconds: 60,
+			TimeoutMS:       5000,
+			RegionRules:     p.regionRules,
+		}
+		rawPayload, err := json.Marshal(payloadObj)
+		if err != nil {
+			continue
+		}
+
+		def := db.TargetDefinition{
+			ID:      p.id,
+			Name:    p.name,
+			Kind:    db.TargetKindMediaHTTP,
+			Host:    p.host,
+			Enabled: true,
+			Payload: rawPayload,
+		}
+		if _, err := s.service.Store().CreateTarget(r.Context(), def, now); err == nil {
+			createdCount++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"created": createdCount,
+		"enabled": enabledCount,
+		"total":   len(presets),
+	})
+}

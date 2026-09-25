@@ -37,19 +37,25 @@ import { BillingModal } from './BillingModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
 
 const POPULAR_MEDIA = [
-  { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT' },
-  { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF' },
-  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+' },
-  { id: 'openai', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI' },
-  { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK' },
-  { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP' },
+  { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
+  { id: 'claude', name: 'Claude', iconBg: '#D97706', symbol: 'CL', alias: ['claude', 'anthropic'] },
+  { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT', alias: ['youtube'] },
+  { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF', alias: ['netflix'] },
+  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney'] },
+  { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK', alias: ['tiktok'] },
+  { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP', alias: ['spotify'] },
+  { id: 'bilibili', name: 'Bilibili', iconBg: '#00A1D6', symbol: 'Bili', alias: ['bilibili'] },
 ]
 
-const getMediaStatus = (platformId, mediaList) => {
+const getMediaStatus = (platform, mediaList) => {
+  const platformId = typeof platform === 'string' ? platform : platform.id
+  const aliases = (typeof platform === 'object' && platform.alias)
+    ? platform.alias
+    : [platformId, platformId === 'chatgpt' ? 'openai' : platformId]
   const match = (mediaList || []).find((m) => {
     const dId = (m.detector_id || m.target_id || '').toLowerCase()
     const dName = (m.result?.detector || '').toLowerCase()
-    return dId.includes(platformId) || dName.includes(platformId)
+    return aliases.some((a) => dId.includes(a) || dName.includes(a))
   })
   if (!match) return { text: '未测试', tone: 'muted', latency: null }
   const res = match.result || {}
@@ -59,7 +65,7 @@ const getMediaStatus = (platformId, mediaList) => {
 
   if (status === 'available') {
     return {
-      text: region ? `解锁 (${region})` : '原生解锁',
+      text: region ? `${region} 解锁` : '原生解锁',
       tone: 'available',
       latency,
     }

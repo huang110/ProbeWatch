@@ -84,7 +84,7 @@ func TestMTRMonitorBlocksPrivateTarget(t *testing.T) {
 	}
 }
 func TestMTRMonitorUnsupportedIsStructured(t *testing.T) {
-	result := (&MTRMonitor{Resolver: fakeMTRResolver{addresses: []netip.Addr{netip.MustParseAddr("93.184.216.34")}}}).Run(context.Background(), mtrTask())
+	result := (&MTRMonitor{Transport: UnsupportedMTRTransport{}, Resolver: fakeMTRResolver{addresses: []netip.Addr{netip.MustParseAddr("93.184.216.34")}}}).Run(context.Background(), mtrTask())
 	if !strings.HasPrefix(result.Error, "unsupported:") || errors.Is(errors.New(result.Error), ErrMTRUnsupported) {
 		t.Fatalf("error=%q", result.Error)
 	}

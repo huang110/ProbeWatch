@@ -295,7 +295,7 @@ func TestProbeRunBlocksRedirectToPrivateHost(t *testing.T) {
 }
 
 func TestProbeRunBoundsHTTPResponseBodyAndUsesGETWithoutBody(t *testing.T) {
-	body := &countingBody{remaining: 64}
+	body := &countingBody{remaining: 8}
 	var request *http.Request
 	p := &Probe{
 		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
@@ -318,6 +318,22 @@ func TestProbeRunBoundsHTTPResponseBodyAndUsesGETWithoutBody(t *testing.T) {
 	}
 	if request.Body != nil {
 		t.Fatal("HTTP probe supplied a request body")
+	}
+}
+
+func TestProbeRunRejectsHTTPResponseBodyOverLimit(t *testing.T) {
+	body := &countingBody{remaining: 64}
+	p := &Probe{
+		Resolver:     &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		Dialer:       &fakeDialer{conn: nopConn{}},
+		MaxBodyBytes: 8,
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body, Request: req}, nil
+		}),
+	}
+	result := p.Run(context.Background(), networkTask("https"))
+	if result.Status != "error" || !strings.Contains(result.Error, "response body exceeds limit") {
+		t.Fatalf("result = %#v, want body limit error", result)
 	}
 }
 

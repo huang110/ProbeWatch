@@ -157,6 +157,10 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 	if isWriteMethod(r.Method) {
 		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/targets/seed-media" {
+				s.seedMediaTargets(w, r)
+				return
+			}
 			if r.URL.Path == "/api/targets" {
 				s.targetCollection(w, r)
 				return

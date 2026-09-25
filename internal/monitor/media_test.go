@@ -283,3 +283,55 @@ func TestMediaDetectorInvalidRegionRulesAreRejectedAsInvalid(t *testing.T) {
 		t.Fatal("invalid rules reached DNS")
 	}
 }
+
+func TestMediaDetectorAutoDetectsCloudflareAndJSONRegion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		rules      []protocol.RegionRule
+		wantRegion string
+	}{
+		{
+			name:       "cloudflare trace loc=US",
+			body:       "fl=123\nh=chatgpt.com\nip=1.2.3.4\nts=123456\nvisit_scheme=https\nuag=Mozilla\nloc=US\ntls=TLSv1.3\n",
+			wantRegion: "US",
+		},
+		{
+			name:       "cloudflare trace loc=HK",
+			body:       "loc=HK\nsni=plaintext",
+			wantRegion: "HK",
+		},
+		{
+			name:       "json country_code SG",
+			body:       `{"status":"success","country_code":"SG","ip":"1.1.1.1"}`,
+			wantRegion: "SG",
+		},
+		{
+			name:       "json countryCode JP",
+			body:       `{"status":"ok","countryCode":"JP"}`,
+			wantRegion: "JP",
+		},
+		{
+			name:       "explicit rule overrides autodetect",
+			body:       "loc=US; custom-marker",
+			rules:      []protocol.RegionRule{{Region: "CUSTOM", Contains: "custom-marker"}},
+			wantRegion: "CUSTOM",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := mediaTask()
+			task.RegionRules = tc.rules
+			d := &MediaDetector{
+				Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+				roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tc.body)), Header: make(http.Header), Request: req}, nil
+				}),
+			}
+			result := d.Run(context.Background(), task)
+			if result.Status != "available" || result.Region != tc.wantRegion {
+				t.Fatalf("result = %#v, want region %q", result, tc.wantRegion)
+			}
+		})
+	}
+}
+
