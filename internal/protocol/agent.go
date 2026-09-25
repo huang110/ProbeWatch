@@ -114,6 +114,9 @@ type ResourceSnapshot struct {
 	FilesystemUsedBytes  uint64  `json:"filesystem_used_bytes,omitempty"`
 	NetworkRxBytes       uint64  `json:"network_rx_bytes,omitempty"`
 	NetworkTxBytes       uint64  `json:"network_tx_bytes,omitempty"`
+	TCPConnCount         uint64  `json:"tcp_conn_count,omitempty"`
+	UDPConnCount         uint64  `json:"udp_conn_count,omitempty"`
+	ProcessCount         uint64  `json:"process_count,omitempty"`
 	OS                   string  `json:"os,omitempty"`
 	Kernel               string  `json:"kernel,omitempty"`
 	Arch                 string  `json:"arch,omitempty"`

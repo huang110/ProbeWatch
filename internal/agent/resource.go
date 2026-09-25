@@ -57,6 +57,13 @@ func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnaps
 	if network, err := readNetworkCounters(); err == nil {
 		resource.NetworkRxBytes, resource.NetworkTxBytes = network.rx, network.tx
 	}
+	if tcp, udp, err := readSocketCounts(); err == nil {
+		resource.TCPConnCount = tcp
+		resource.UDPConnCount = udp
+	}
+	if procs, err := readProcessCount(); err == nil {
+		resource.ProcessCount = procs
+	}
 	return resource
 }
 
@@ -265,3 +272,41 @@ func parseLoadAvg(line string) ([3]float64, error) {
 var agentStartTime = time.Now().UTC().Unix()
 
 func processStartTime() int64 { return agentStartTime }
+
+func readSocketCounts() (uint64, uint64, error) {
+	data, err := os.ReadFile("/proc/net/sockstat")
+	if err != nil {
+		return 0, 0, err
+	}
+	var tcp, udp uint64
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "TCP:" && fields[1] == "inuse" {
+			if v, err := strconv.ParseUint(fields[2], 10, 64); err == nil {
+				tcp = v
+			}
+		} else if len(fields) >= 3 && fields[0] == "UDP:" && fields[1] == "inuse" {
+			if v, err := strconv.ParseUint(fields[2], 10, 64); err == nil {
+				udp = v
+			}
+		}
+	}
+	return tcp, udp, nil
+}
+
+func readProcessCount() (uint64, error) {
+	line, err := readFirstLine("/proc/loadavg")
+	if err != nil {
+		return 0, err
+	}
+	fields := strings.Fields(line)
+	if len(fields) >= 4 {
+		parts := strings.Split(fields[3], "/")
+		if len(parts) == 2 {
+			if total, err := strconv.ParseUint(parts[1], 10, 64); err == nil {
+				return total, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("unable to parse loadavg process count")
+}

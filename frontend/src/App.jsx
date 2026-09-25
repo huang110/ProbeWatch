@@ -498,7 +498,10 @@ export function App() {
     setIsRefreshing(true)
     try {
       const guestStatus = await fetchGuestStatus()
-      if (guestStatus) setPublicStatus(guestStatus)
+      if (guestStatus) {
+        setPublicStatus(guestStatus)
+        markSync()
+      }
     } finally {
       setIsRefreshing(false)
     }
@@ -778,8 +781,27 @@ export function App() {
   useEffect(() => {
     if (guestPreview || apiState.kind === 'guest') {
       refreshGuest()
+      const interval = activeNav === 'node-detail' ? 3000 : 10000
+      const timer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          refreshGuest()
+        }
+      }, interval)
+      return () => clearInterval(timer)
     }
-  }, [guestPreview, apiState.kind, refreshGuest])
+  }, [guestPreview, apiState.kind, refreshGuest, activeNav])
+
+  // Fast 3-second real-time polling when viewing node-detail in admin mode
+  useEffect(() => {
+    if (activeNav === 'node-detail' && !(guestPreview || apiState.kind === 'guest')) {
+      const timer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          loadCore(false)
+        }
+      }, 3000)
+      return () => clearInterval(timer)
+    }
+  }, [activeNav, guestPreview, apiState.kind, loadCore])
 
   const refreshAll = () => { loadCore(true); loadOverview() }
   const lastSyncText = lastSync ? formatTimeOfDay(lastSync) : '—'

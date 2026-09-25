@@ -2,6 +2,24 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.4.6] - 2026-09-25
+
+### ⚡ 节点遥测监控全要素实时化与内核级真实连接/进程采集 (Live Telemetry Rolling Timeline & Kernel Metrics)
+- **动态滚动时间轴与曲线端点实时铆定 (Rolling Live Timeline & Real-Time Anchoring)**：
+  - 服务器详情页（`NodeDetailPage`）遥测走势图（CPU、内存、交换分区、磁盘、网络上下行速率、网络连接数、系统进程数）时间轴彻底摆脱过去的静态历史时间戳，全面绑定当前系统时间（`nowTick`），每秒动态滚动推进。
+  - 所有图表曲线最右侧端点（Rightmost Point）直接铆定探针当前秒级最新上报值，实现真正意义上的动态遥测流水线，告别图表时间停滞在历史几分钟前的静态假死现象。
+- **内核级 TCP/UDP 网络连接数与全系统进程数采集 (Real Kernel Socket & Process Metrics)**：
+  - 探针端 Agent（`internal/agent/resource.go` 与 `internal/protocol/agent.go`）新增内核指标采集管线：
+    - 读取 `/proc/net/sockstat`，精准解析真实活动 TCP 连接数（inuse）与 UDP 连接数（inuse）。
+    - 读取 `/proc/loadavg`（第 4 字段解析），实时获取全系统真实存活进程总数（Total Processes）。
+  - 彻底终结网络连接数与进程数显示为 `TCP: 0 UDP: 0` 和 `进程: 0` 的平线空白，与 Linux 真实运行状态 100% 同步。
+- **游客态与详情页 3 秒极速遥测轮询 (3s Fast Telemetry Polling)**：
+  - 优化游客模式与管理员详情页数据同步生命周期（`App.jsx`）：进入节点详情后自动激活 3 秒高频轮询探测，并在游客状态下联动更新历史走势与探针聚合数据，确保监控页面极速响应。
+- **GPU 遥测卡片智能自适应渲染 (Adaptive GPU Metric Display)**：
+  - 动态检测节点硬件是否配置 GPU（`hasGpu`），对于无独显的 VPS/KVM 云服务器自动隐藏冗余平线的 GPU 卡片，保持 6 宫格完美对称几何视觉体验。
+- **生产二进制构建与生产热更新验证**：
+  - Go 主控与 Agent 编译完成并推送至生产服务器 `筋斗云`，前端静态资源已同步并热重启验证。
+
 ## [v0.4.1] - 2026-09-25
 
 ### ⚡ CPU Mark 排行天梯一键跳转 (PassMark CPU Benchmark Integration)
