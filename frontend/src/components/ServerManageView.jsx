@@ -453,8 +453,10 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                   // Tags
                   const tags = parseColoredTags(customMeta.tags || (node.tag ? `${node.tag}<blue>;` : ''))
 
-                  // Agent
-                  const agentVersion = node.agentVersion || '2.1.05'
+                  // Agent Version calculation
+                  const rawAgentVer = node.resource?.agent_version || node.agentVersion || ''
+                  const agentVersion = rawAgentVer ? (rawAgentVer.startsWith('v') ? rawAgentVer : `v${rawAgentVer}`) : 'v0.5.6'
+                  const isOldAgent = rawAgentVer && !rawAgentVer.includes('0.5.6')
 
                   return (
                     <tr
@@ -555,7 +557,14 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                       {/* 3. Agent / 状态 */}
                       <td>
                         <div className="space-y-1">
-                          <span className="mono text-xs block text-foreground">{agentVersion}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="mono text-xs block text-foreground font-semibold">{agentVersion}</span>
+                            {isOldAgent && (
+                              <span className="badge badge-warning text-[9px] px-1 py-0 cursor-help" title="可自升级至最新 v0.5.6">
+                                ↑可更新
+                              </span>
+                            )}
+                          </div>
                           <span className={`badge ${isOnline ? 'badge-mint' : 'badge-quiet'} text-[10px]`}>
                             {isOnline ? '已连接' : '未连接'}
                           </span>

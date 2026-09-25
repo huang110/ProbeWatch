@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/version"
 )
-
-const agentVersion = "0.2.0"
 
 func collectResource() protocol.ResourceSnapshot {
 	return collectResourceWith(processStartTime(), newCPUTracker())
@@ -24,7 +23,7 @@ func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnaps
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
-		AgentVersion: agentVersion,
+		AgentVersion: version.AgentVersion,
 		StartedAt:    startedAt,
 	}
 	if hostname, err := os.Hostname(); err == nil {

@@ -96,10 +96,15 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.refresh(ctx); err != nil {
 		return fmt.Errorf("initial config refresh: %w", err)
 	}
+	VerifyAndClearPendingUpgrade(r.cfg.AgentDataDir)
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	configTicker := time.NewTicker(5 * time.Minute)
 	defer configTicker.Stop()
+	updateTicker := time.NewTicker(6 * time.Hour)
+	defer updateTicker.Stop()
+
 	for {
 		if err := r.report(ctx); err != nil && ctx.Err() != nil {
 			return ctx.Err()
@@ -110,7 +115,16 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ticker.C:
 		case <-configTicker.C:
 			_ = r.refresh(ctx)
+		case <-updateTicker.C:
+			r.autoCheckUpdate(ctx)
 		}
+	}
+}
+
+func (r *Runner) autoCheckUpdate(ctx context.Context) {
+	result, err := CheckUpdate(ctx, r.client, r.cfg.AgentEndpoint, r.cfg.AgentNodeToken)
+	if err == nil && result != nil && result.UpdateAvailable {
+		_ = DownloadAndApplyUpdate(ctx, r.client, r.cfg.AgentEndpoint, r.cfg.AgentNodeToken, result, r.cfg.AgentDataDir)
 	}
 }
 

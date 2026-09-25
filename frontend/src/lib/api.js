@@ -310,4 +310,16 @@ export async function fetchPublicNodeBilling(uuid) {
   return await res.json()
 }
 
+export async function fetchPublicVersion() {
+  const res = await fetch('/api/public/version', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch public version')
+  return await res.json()
+}
+
+export async function fetchAgentUpdateCheck() {
+  const res = await fetch('/api/agent/v1/update/check', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to check agent update')
+  return await res.json()
+}
+
 

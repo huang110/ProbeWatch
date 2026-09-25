@@ -106,6 +106,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/agent/v1/network-result", s.networkResultAgent)
 	mux.HandleFunc("/api/agent/v1/mtr-result", s.mtrResultAgent)
 	mux.HandleFunc("/api/agent/v1/media-result", s.mediaResultAgent)
+	mux.HandleFunc("/api/agent/v1/update/check", s.agentUpdateCheck)
+	mux.HandleFunc("/api/agent/v1/update/download", s.agentUpdateDownload)
+	mux.HandleFunc("/api/public/version", s.publicVersion)
 
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete {

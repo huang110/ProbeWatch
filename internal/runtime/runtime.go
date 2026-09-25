@@ -19,6 +19,7 @@ import (
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/notify"
+	"github.com/probewatch/probewatch/internal/version"
 )
 
 // ErrControlPlaneNotConfigured marks the future API/store runtime boundary.
@@ -194,4 +195,66 @@ func StartAgent(cfg config.Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return runner.Run(ctx)
+}
+
+// CheckAgentUpdate checks if a newer agent binary is available from the configured control plane.
+func CheckAgentUpdate() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	fmt.Printf("Current version: %s\n", version.FullAgentVersionString())
+	fmt.Printf("Checking for updates from: %s ...\n", cfg.AgentEndpoint)
+
+	info, err := agent.CheckUpdate(ctx, nil, cfg.AgentEndpoint, cfg.AgentNodeToken)
+	if err != nil {
+		return fmt.Errorf("check update failed: %w", err)
+	}
+
+	fmt.Printf("Control plane version: %s\n", info.ServerVersion)
+	fmt.Printf("Latest available agent: %s\n", info.LatestAgentVersion)
+	if info.UpdateAvailable {
+		fmt.Printf("\n[!] A new version is available! Run 'probewatch-agent --self-update' to upgrade.\n")
+		if info.ReleaseNotes != "" {
+			fmt.Printf("Release Notes: %s\n", info.ReleaseNotes)
+		}
+	} else {
+		fmt.Println("[OK] ProbeWatch Agent is up to date!")
+	}
+	return nil
+}
+
+// SelfUpdateAgent downloads, verifies, and installs the latest agent binary in place.
+func SelfUpdateAgent() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	fmt.Printf("Current version: %s\n", version.FullAgentVersionString())
+	fmt.Printf("Checking for updates from: %s ...\n", cfg.AgentEndpoint)
+
+	info, err := agent.CheckUpdate(ctx, nil, cfg.AgentEndpoint, cfg.AgentNodeToken)
+	if err != nil {
+		return fmt.Errorf("check update failed: %w", err)
+	}
+
+	if !info.UpdateAvailable {
+		fmt.Printf("[OK] Agent is already on the latest version (%s). No upgrade needed.\n", version.AgentVersion)
+		return nil
+	}
+
+	fmt.Printf("Downloading upgrade to v%s ...\n", info.LatestAgentVersion)
+	if err := agent.DownloadAndApplyUpdate(ctx, nil, cfg.AgentEndpoint, cfg.AgentNodeToken, info, cfg.AgentDataDir); err != nil {
+		return fmt.Errorf("self-update failed: %w", err)
+	}
+
+	fmt.Printf("[SUCCESS] ProbeWatch Agent successfully updated to v%s!\n", info.LatestAgentVersion)
+	fmt.Println("Please restart the service: 'systemctl restart probewatch-agent' (or supervisor will automatically reload).")
+	return nil
 }

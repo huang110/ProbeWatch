@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -58,3 +59,19 @@ func clearConfigEnvironment(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+func TestVersionAndHelpFlags(t *testing.T) {
+	origArgs := os.Args
+	defer func() { os.Args = origArgs }()
+
+	os.Args = []string{"probewatch-agent", "--version"}
+	if err := run(); err != nil {
+		t.Fatalf("run(--version) error = %v", err)
+	}
+
+	os.Args = []string{"probewatch-agent", "--help"}
+	if err := run(); err != nil {
+		t.Fatalf("run(--help) error = %v", err)
+	}
+}
+
