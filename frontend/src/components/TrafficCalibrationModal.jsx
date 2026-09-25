@@ -93,8 +93,7 @@ export const computeBillingPeriod = (resetDay = 22) => {
 }
 
 export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
-  if (!node) return null
-  const nodeId = safeText(node.uuid || node.id)
+  const nodeId = safeText(node?.uuid || node?.id)
   const billingStore = getStoredBillingData()
   const nodeBilling = billingStore[nodeId] || {}
   const nodeMeta = getNodeCustomMeta(nodeId, node)
@@ -108,8 +107,8 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  const rawTx = numeric(node.tx) || 0
-  const rawRx = numeric(node.rx) || 0
+  const rawTx = numeric(node?.tx) || 0
+  const rawRx = numeric(node?.rx) || 0
 
   const existingTxOffset = Number(nodeBilling.txOffsetBytes ?? nodeBilling.trafficOffsetBytes ?? 0)
   const existingRxOffset = Number(nodeBilling.rxOffsetBytes ?? 0)
@@ -129,10 +128,12 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
   const diffTxBytes = parsedTxBytes - rawTx
   const diffRxBytes = parsedRxBytes - rawRx
 
-  const timezoneStr = nodeMeta.timezone || 'Asia/Shanghai (UTC+8)'
-  const cyclePeriodStr = computeBillingPeriod(nodeMeta.resetDay ?? 22)
+  const timezoneStr = nodeMeta?.timezone || 'Asia/Shanghai (UTC+8)'
+  const cyclePeriodStr = computeBillingPeriod(nodeMeta?.resetDay ?? 22)
 
   const records = nodeBilling.calibrationRecords || []
+
+  if (!node) return null
 
   const handleSave = (e) => {
     e.preventDefault()

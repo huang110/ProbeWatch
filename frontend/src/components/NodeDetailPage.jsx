@@ -226,52 +226,37 @@ export function NodeDetailPage({
     } catch {}
   }
 
-  if (!node) {
-    return (
-      <section className="subpage node-detail-page">
-        <div className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <p style={{ color: 'var(--text-3)', marginBottom: '16px' }}>
-            {loading ? '正在同步节点清单与详情…' : '未找到指定节点的信息或该节点已被移除。'}
-          </p>
-          <button type="button" className="button button-primary" onClick={onBack}>
-            <ArrowLeft size={15} /> 返回节点列表
-          </button>
-        </div>
-      </section>
-    )
-  }
-
-  const resource = node.resource || {}
+  const resource = node?.resource || {}
   const rate = rates[nodeUuid] || {}
 
-  const memUsed = node.memUsed ?? numeric(resource.memory_used_bytes) ?? 0
-  const memTotal = node.memTotal ?? numeric(resource.memory_total_bytes) ?? 0
-  const swapUsed = node.swapUsed ?? numeric(resource.swap_used_bytes) ?? 0
-  const swapTotal = node.swapTotal ?? numeric(resource.swap_total_bytes) ?? 0
-  const diskUsed = node.diskUsed ?? numeric(resource.filesystem_used_bytes) ?? 0
-  const diskTotal = node.diskTotal ?? numeric(resource.filesystem_total_bytes) ?? 0
+  const memUsed = node?.memUsed ?? numeric(resource.memory_used_bytes) ?? 0
+  const memTotal = node?.memTotal ?? numeric(resource.memory_total_bytes) ?? 0
+  const swapUsed = node?.swapUsed ?? numeric(resource.swap_used_bytes) ?? 0
+  const swapTotal = node?.swapTotal ?? numeric(resource.swap_total_bytes) ?? 0
+  const diskUsed = node?.diskUsed ?? numeric(resource.filesystem_used_bytes) ?? 0
+  const diskTotal = node?.diskTotal ?? numeric(resource.filesystem_total_bytes) ?? 0
 
-  const rawTx = numeric(node.tx) ?? numeric(resource.network_tx_bytes) ?? 0
-  const rawRx = numeric(node.rx) ?? numeric(resource.network_rx_bytes) ?? 0
+  const rawTx = numeric(node?.tx) ?? numeric(resource.network_tx_bytes) ?? 0
+  const rawRx = numeric(node?.rx) ?? numeric(resource.network_rx_bytes) ?? 0
   const totalTraffic = (rawTx + rawRx)
 
-  const cpuPercent = numeric(node.cpu) ?? numeric(resource.cpu_percent) ?? 0.0
-  const cpuModel = resource.cpu_name || resource.cpu_model || node.cpuModel || customMeta.cpuModel || '—'
+  const cpuPercent = numeric(node?.cpu) ?? numeric(resource.cpu_percent) ?? 0.0
+  const cpuModel = resource.cpu_name || resource.cpu_model || node?.cpuModel || customMeta.cpuModel || '—'
   const cleanedCpuModel = (cpuModel || '')
     .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
     .trim()
   const cpuBenchmarkUrl = cpuModel !== '—'
     ? `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
     : 'https://www.cpubenchmark.net/cpu_lookup.php'
-  const publicIp = resource.ip || node.hostname || customMeta.ip || '—'
+  const publicIp = resource.ip || node?.hostname || customMeta.ip || '—'
   const cores = resource.cpu_cores || 1
-  const arch = node.arch || resource.arch || customMeta.arch || 'kvm'
-  const os = node.os || resource.os || customMeta.os || 'Linux'
-  const kernel = node.kernel || resource.kernel || customMeta.kernel || '—'
-  const ispText = customMeta.merchant || customMeta.isp || node.region || 'China Mobile / AS31972'
+  const arch = node?.arch || resource.arch || customMeta.arch || 'kvm'
+  const os = node?.os || resource.os || customMeta.os || 'Linux'
+  const kernel = node?.kernel || resource.kernel || customMeta.kernel || '—'
+  const ispText = customMeta.merchant || customMeta.isp || node?.region || 'China Mobile / AS31972'
 
   // Dynamic ticking uptime
-  const startedAt = numeric(node.startedAt) ?? numeric(resource.started_at)
+  const startedAt = numeric(node?.startedAt) ?? numeric(resource.started_at)
   const uptimeText = useMemo(() => {
     if (startedAt && startedAt > 0) {
       const ms = startedAt < 1e12 ? startedAt * 1000 : startedAt
@@ -284,16 +269,16 @@ export function NodeDetailPage({
       if (hours > 0) return `${hours} 小时 ${minutes} 分钟 ${seconds} 秒`
       return `${minutes} 分钟 ${seconds} 秒`
     }
-    return node.uptime || '—'
-  }, [startedAt, nowTick, node.uptime])
+    return node?.uptime || '—'
+  }, [startedAt, nowTick, node?.uptime])
 
   // Heartbeat status
-  const lastReportedAt = node.lastReportedAt || node.last_reported_at || resource.reported_at
+  const lastReportedAt = node?.lastReportedAt || node?.last_reported_at || resource.reported_at
   const isOnline = useMemo(() => {
-    if (!lastReportedAt) return node.status === 'online'
+    if (!lastReportedAt) return node?.status === 'online'
     const ms = typeof lastReportedAt === 'number' ? (lastReportedAt < 1e12 ? lastReportedAt * 1000 : lastReportedAt) : new Date(lastReportedAt).getTime()
     return (nowTick - ms) <= 120000
-  }, [lastReportedAt, nowTick, node.status])
+  }, [lastReportedAt, nowTick, node?.status])
 
   const heartbeatText = useMemo(() => {
     if (!lastReportedAt) return isOnline ? '在线' : '离线'
@@ -571,6 +556,21 @@ export function NodeDetailPage({
   const maxProc = Math.max(...telemetrySeries.procs, processCount, 50)
   const procYMax = Math.ceil((maxProc * 1.25) / 10) * 10
   const procYMid = Math.round(procYMax / 2)
+
+  if (!node) {
+    return (
+      <section className="subpage node-detail-page">
+        <div className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
+          <p style={{ color: 'var(--text-3)', marginBottom: '16px' }}>
+            {loading ? '正在同步节点清单与详情…' : '未找到指定节点的信息或该节点已被移除。'}
+          </p>
+          <button type="button" className="button button-primary" onClick={onBack}>
+            <ArrowLeft size={15} /> 返回节点列表
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="subpage komari-detail-page">
