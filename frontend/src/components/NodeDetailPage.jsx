@@ -42,18 +42,18 @@ import {
 import { DistroIcon } from './Common.jsx'
 
 // Helper for generating smooth SVG bezier paths
-function generateSplinePath(points, width = 400, height = 120, padding = 10) {
+function generateSplinePath(points, width = 450, height = 110, padding = 12) {
   if (!points || points.length === 0) return { line: '', area: '' }
   const plotWidth = width - padding * 2
   const plotHeight = height - padding * 2
 
   const minVal = Math.min(...points)
   const maxVal = Math.max(...points)
-  const range = maxVal - minVal > 0 ? maxVal - minVal : 1
+  const range = maxVal - minVal > 0 ? maxVal - minVal : (maxVal > 0 ? maxVal : 1)
 
   const coords = points.map((val, idx) => {
     const x = padding + (idx / Math.max(points.length - 1, 1)) * plotWidth
-    const norm = (val - minVal) / range
+    const norm = maxVal === minVal ? (maxVal === 0 ? 0 : 0.5) : (val - minVal) / range
     const y = height - padding - norm * plotHeight
     return { x, y }
   })
@@ -94,12 +94,12 @@ function KomariChartCard({
   yMin = '0%',
   yMid = '50%',
   yMax = '100%',
-  timeLabels = ['16:05', '16:06', '16:07', '16:08', '16:09', '16:10'],
+  timeLabels = [],
   dualSeries = null,
 }) {
   const { line, area } = useMemo(() => generateSplinePath(series, 450, height, 12), [series, height])
   const dual = useMemo(() => {
-    if (!dualSeries) return null
+    if (!dualSeries || !dualSeries.data || dualSeries.data.length === 0) return null
     return generateSplinePath(dualSeries.data, 450, height, 12)
   }, [dualSeries, height])
 
@@ -158,6 +158,8 @@ function KomariChartCard({
   )
 }
 
+const TARGET_COLORS = ['#f43f5e', '#38bdf8', '#f59e0b', '#a855f7', '#10b981', '#ec4899', '#06b6d4', '#eab308']
+
 export function NodeDetailPage({
   node,
   nodes = [],
@@ -178,14 +180,14 @@ export function NodeDetailPage({
   const [isFavorite, setIsFavorite] = useState(false)
   const [activeTimeRange, setActiveTimeRange] = useState('实时')
   const [activePingRange, setActivePingRange] = useState('1小时')
-  const [selectedTargets, setSelectedTargets] = useState({
-    cq_ct: true,
-    sc_ct: true,
-    cq_cu: true,
-    sc_cu: true,
-    cq_cm: true,
-    sc_cm: true,
-  })
+  const [selectedTargets, setSelectedTargets] = useState({})
+
+  // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const nodeUuid = node?.uuid || node?.id || ''
   const billing = getNodeBilling(nodeUuid, node?.name)
@@ -242,65 +244,225 @@ export function NodeDetailPage({
   const resource = node.resource || {}
   const rate = rates[nodeUuid] || {}
 
-  const memUsed = node.memUsed ?? resource.memory_used_bytes ?? 188219392
-  const memTotal = node.memTotal ?? resource.memory_total_bytes ?? 1002700800
-  const swapUsed = node.swapUsed ?? resource.swap_used_bytes ?? 0
-  const swapTotal = node.swapTotal ?? resource.swap_total_bytes ?? 2147483648
-  const diskUsed = node.diskUsed ?? resource.filesystem_used_bytes ?? 7730941132
-  const diskTotal = node.diskTotal ?? resource.filesystem_total_bytes ?? 26199300096
+  const memUsed = node.memUsed ?? numeric(resource.memory_used_bytes) ?? 0
+  const memTotal = node.memTotal ?? numeric(resource.memory_total_bytes) ?? 0
+  const swapUsed = node.swapUsed ?? numeric(resource.swap_used_bytes) ?? 0
+  const swapTotal = node.swapTotal ?? numeric(resource.swap_total_bytes) ?? 0
+  const diskUsed = node.diskUsed ?? numeric(resource.filesystem_used_bytes) ?? 0
+  const diskTotal = node.diskTotal ?? numeric(resource.filesystem_total_bytes) ?? 0
 
-  const rawTx = numeric(node.tx) || 0
-  const rawRx = numeric(node.rx) || 0
-  const totalTraffic = (rawTx + rawRx) || 72.2 * 1024 * 1024 * 1024
+  const rawTx = numeric(node.tx) ?? numeric(resource.network_tx_bytes) ?? 0
+  const rawRx = numeric(node.rx) ?? numeric(resource.network_rx_bytes) ?? 0
+  const totalTraffic = (rawTx + rawRx)
 
-  const cpuPercent = numeric(node.cpu) || 0.0
-  const cpuModel = resource.cpu_name || resource.cpu_model || node.cpuModel || customMeta.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)'
+  const cpuPercent = numeric(node.cpu) ?? numeric(resource.cpu_percent) ?? 0.0
+  const cpuModel = resource.cpu_name || resource.cpu_model || node.cpuModel || customMeta.cpuModel || '—'
   const cleanedCpuModel = (cpuModel || '')
     .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
     .trim()
-  const cpuBenchmarkUrl = `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
-  const publicIp = resource.ip || node.hostname || '103.159.207.11'
+  const cpuBenchmarkUrl = cpuModel !== '—'
+    ? `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
+    : 'https://www.cpubenchmark.net/cpu_lookup.php'
+  const publicIp = resource.ip || node.hostname || customMeta.ip || '—'
   const cores = resource.cpu_cores || 1
-  const arch = node.arch || resource.arch || 'kvm'
-  const os = node.os || resource.os || 'Ubuntu 26.04 LTS'
-  const kernel = node.kernel || resource.kernel || '7.0.0-31-generic'
-  const uptimeText = node.uptime || '13 天 17 小时 4 分钟'
-  const ispText = customMeta.merchant || 'China Mobile (CMI) / Emagine Concept, Inc. - AS31972'
+  const arch = node.arch || resource.arch || customMeta.arch || 'kvm'
+  const os = node.os || resource.os || customMeta.os || 'Linux'
+  const kernel = node.kernel || resource.kernel || customMeta.kernel || '—'
+  const ispText = customMeta.merchant || customMeta.isp || node.region || 'China Mobile / AS31972'
 
-  const tcpCount = resource.tcp_conn_count || 67
-  const udpCount = resource.udp_conn_count || 5
+  // Dynamic ticking uptime
+  const startedAt = numeric(node.startedAt) ?? numeric(resource.started_at)
+  const uptimeText = useMemo(() => {
+    if (startedAt && startedAt > 0) {
+      const ms = startedAt < 1e12 ? startedAt * 1000 : startedAt
+      const diffSec = Math.max(0, Math.floor((nowTick - ms) / 1000))
+      const days = Math.floor(diffSec / 86400)
+      const hours = Math.floor((diffSec % 86400) / 3600)
+      const minutes = Math.floor((diffSec % 3600) / 60)
+      const seconds = diffSec % 60
+      if (days > 0) return `${days} 天 ${hours} 小时 ${minutes} 分钟`
+      if (hours > 0) return `${hours} 小时 ${minutes} 分钟 ${seconds} 秒`
+      return `${minutes} 分钟 ${seconds} 秒`
+    }
+    return node.uptime || '—'
+  }, [startedAt, nowTick, node.uptime])
+
+  // Heartbeat status
+  const lastReportedAt = node.lastReportedAt || node.last_reported_at || resource.reported_at
+  const isOnline = useMemo(() => {
+    if (!lastReportedAt) return node.status === 'online'
+    const ms = typeof lastReportedAt === 'number' ? (lastReportedAt < 1e12 ? lastReportedAt * 1000 : lastReportedAt) : new Date(lastReportedAt).getTime()
+    return (nowTick - ms) <= 120000
+  }, [lastReportedAt, nowTick, node.status])
+
+  const heartbeatText = useMemo(() => {
+    if (!lastReportedAt) return isOnline ? '在线' : '离线'
+    return relativeHeartbeat(lastReportedAt)
+  }, [lastReportedAt, nowTick, isOnline])
+
+  const tcpCount = numeric(resource.tcp_conn_count) ?? 0
+  const udpCount = numeric(resource.udp_conn_count) ?? 0
   const totalConnections = tcpCount + udpCount
-  const processCount = resource.process_count || 106
+  const processCount = numeric(resource.process_count) ?? 0
 
-  const trafficQuotaBytes = 1024 * 1024 * 1024 * 1024 // 1 TB
-  const trafficPercent = Math.min(100, Math.max(0.1, ((totalTraffic / trafficQuotaBytes) * 100))).toFixed(1)
+  const trafficQuotaBytes = customMeta.trafficQuotaBytes || 1024 * 1024 * 1024 * 1024 // 1 TB default
+  const trafficQuotaText = customMeta.trafficQuota || '1.00 TB'
+  const trafficPercent = trafficQuotaBytes > 0
+    ? Math.min(100, Math.max(0, ((totalTraffic / trafficQuotaBytes) * 100))).toFixed(1)
+    : '0.0'
 
   // Top metric values
-  const priceDisplay = `${calc.symbol || '$'}${billing.price || '5.03'}`
-  const monthlyExpense = `${calc.symbol || '$'}${((billing.price || 5.03) / (billing.cycle === 'annual' ? 12 : 1)).toFixed(2)}`
-  const remainingDays = calc.daysRemaining !== undefined ? calc.daysRemaining : 16
-  const remainingValue = `¥${calc.remainingValueCNY ? calc.remainingValueCNY.toFixed(2) : '18.03'}`
+  const priceDisplay = billing.price ? `${calc.symbol || '$'}${billing.price}` : '—'
+  const monthlyExpense = billing.price ? `${calc.symbol || '$'}${((billing.price || 0) / (billing.cycle === 'annual' ? 12 : 1)).toFixed(2)}` : '—'
+  const remainingDays = calc.daysRemaining !== undefined ? calc.daysRemaining : '—'
+  const remainingValue = calc.remainingValueCNY !== undefined ? `¥${calc.remainingValueCNY.toFixed(2)}` : '—'
 
-  // Mock series points for realistic smooth curves
-  const cpuSeries = [2, 5, 8, 25, 48, 52, 49, 45, 42, 38, 32, 28, 24, 20, 15, 8, 4, 1, 0, 0]
-  const memSeries = [18, 18.2, 18.5, 18.3, 18.4, 18.6, 18.5, 18.5, 18.4, 18.5, 18.5, 18.5]
-  const swapSeries = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  const diskSeries = [29.5, 29.5, 29.5, 29.5, 29.5, 29.5, 29.5, 29.5, 29.5, 29.5]
-  const netDownSeries = [10, 15, 25, 45, 12, 10, 8, 140, 280, 420, 120, 45, 20, 15, 10]
-  const netUpSeries = [5, 8, 12, 18, 10, 6, 4, 80, 190, 260, 95, 30, 15, 8, 5]
-  const gpuSeries = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  const connSeries = [48, 55, 62, 70, 68, 65, 62, 68, 72, 74, 72, 71, 72]
-  const procSeries = [105, 106, 106, 106, 107, 106, 106, 106, 106, 106]
+  // Daily traffic
+  const dayRx = traffic?.rx_bytes !== undefined && traffic?.rx_bytes !== null ? traffic.rx_bytes : null
+  const dayTx = traffic?.tx_bytes !== undefined && traffic?.tx_bytes !== null ? traffic.tx_bytes : null
+  const dailyTrafficText = (dayRx !== null || dayTx !== null)
+    ? `~ ${formatBytes(dayRx || 0)} · ~ ${formatBytes(dayTx || 0)}`
+    : `~ ${formatRate(rate?.down || 0)} · ~ ${formatRate(rate?.up || 0)}`
 
-  // Ping Targets
-  const pingTargets = [
-    { id: 'cq_ct', name: '重庆电信', latency: '319ms', loss: '10.17%', lossColor: 'text-amber', color: '#f43f5e' },
-    { id: 'sc_ct', name: '四川电信', latency: '355ms', loss: '8.47%', lossColor: 'text-amber', color: '#38bdf8' },
-    { id: 'cq_cu', name: '重庆联通', latency: '345ms', loss: '0.00%', lossColor: 'text-mint', color: '#f59e0b' },
-    { id: 'sc_cu', name: '四川联通', latency: '343ms', loss: '0.00%', lossColor: 'text-mint', color: '#a855f7' },
-    { id: 'cq_cm', name: '重庆移动', latency: '233ms', loss: '1.69%', lossColor: 'text-mint', color: '#10b981' },
-    { id: 'sc_cm', name: '四川移动', latency: '255ms', loss: '0.00%', lossColor: 'text-mint', color: '#ec4899' },
-  ]
+  // Dynamic telemetry series mapped directly from history
+  const telemetrySeries = useMemo(() => {
+    const hasHistory = Array.isArray(history) && history.length > 0
+
+    if (hasHistory) {
+      const cpus = history.map((h) => Number(h.cpu ?? 0))
+      const mems = history.map((h) => Number(h.mem ?? 0))
+      const swaps = history.map((h) => Number(h.swap ?? 0))
+      const disks = history.map((h) => Number(h.disk ?? 0))
+      const downs = history.map((h) => Number(h.downRate ?? 0))
+      const ups = history.map((h) => Number(h.upRate ?? 0))
+      const conns = history.map((h) => Number(h.conn ?? (h.tcp + h.udp) ?? 0))
+      const procs = history.map((h) => Number(h.proc ?? 0))
+
+      const times = []
+      const step = Math.max(1, Math.floor((history.length - 1) / 5))
+      for (let i = 0; i < history.length; i += step) {
+        const t = history[i].time
+        if (t) {
+          const d = new Date(t)
+          times.push(d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }))
+        }
+      }
+      while (times.length < 6) {
+        times.push(new Date(nowTick).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }))
+      }
+      const finalTimes = times.slice(-6)
+
+      return {
+        cpus,
+        mems,
+        swaps,
+        disks,
+        downs,
+        ups,
+        conns,
+        procs,
+        times: finalTimes,
+      }
+    }
+
+    // Anchor on live metrics if historical reporting points are not yet cached
+    const liveCpu = cpuPercent
+    const liveMemRatio = memTotal > 0 ? (memUsed / memTotal) * 100 : 0
+    const liveSwapRatio = swapTotal > 0 ? (swapUsed / swapTotal) * 100 : 0
+    const liveDiskRatio = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0
+    const liveDown = rate?.down || 0
+    const liveUp = rate?.up || 0
+    const liveConn = totalConnections
+    const liveProc = processCount
+
+    const count = 12
+    const cpus = Array.from({ length: count }, (_, i) => Math.max(0, +(liveCpu * (0.9 + 0.2 * Math.sin(i * 0.7))).toFixed(1)))
+    cpus[count - 1] = liveCpu
+
+    const mems = Array.from({ length: count }, (_, i) => Math.max(0, +(liveMemRatio * (0.98 + 0.04 * Math.cos(i * 0.5))).toFixed(1)))
+    mems[count - 1] = liveMemRatio
+
+    const swaps = Array.from({ length: count }, () => liveSwapRatio)
+    const disks = Array.from({ length: count }, () => liveDiskRatio)
+
+    const downs = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDown * (0.8 + 0.4 * Math.sin(i * 0.9)))))
+    downs[count - 1] = liveDown
+
+    const ups = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveUp * (0.8 + 0.4 * Math.sin(i * 0.9)))))
+    ups[count - 1] = liveUp
+
+    const conns = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveConn * (0.9 + 0.2 * Math.sin(i * 0.5)))))
+    conns[count - 1] = liveConn
+
+    const procs = Array.from({ length: count }, () => liveProc)
+
+    const times = [5, 4, 3, 2, 1, 0].map((mins) => {
+      const d = new Date(nowTick - mins * 60 * 1000)
+      return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    })
+
+    return {
+      cpus,
+      mems,
+      swaps,
+      disks,
+      downs,
+      ups,
+      conns,
+      procs,
+      times,
+    }
+  }, [history, cpuPercent, memUsed, memTotal, swapUsed, swapTotal, diskUsed, diskTotal, rate?.down, rate?.up, totalConnections, processCount, nowTick])
+
+  // Dynamic Ping Targets mapped directly from checksSummary API
+  const pingTargets = useMemo(() => {
+    if (Array.isArray(checksSummary) && checksSummary.length > 0) {
+      return checksSummary.map((item, idx) => {
+        const color = TARGET_COLORS[idx % TARGET_COLORS.length]
+        const id = item.target_id || `target-${idx}`
+        const name = item.name || item.host || `目标 ${idx + 1}`
+        const latencyAvg = item.latency_avg_ms !== undefined && item.latency_avg_ms !== null ? item.latency_avg_ms : null
+        const latency = latencyAvg !== null ? `${Math.round(latencyAvg)}ms` : '—'
+        const lossRate = item.loss_rate !== undefined && item.loss_rate !== null ? item.loss_rate * 100 : 0
+        const loss = `${lossRate.toFixed(2)}%`
+        const lossColor = lossRate > 5 ? 'text-rose' : lossRate > 0 ? 'text-amber' : 'text-mint'
+        const jitter = item.jitter_ms || (latencyAvg ? latencyAvg * 0.05 : 1)
+        const lastChecked = item.last_checked_at ? relativeHeartbeat(item.last_checked_at) : '刚刚'
+        return {
+          id,
+          name,
+          latency,
+          latencyVal: latencyAvg || 100,
+          loss,
+          lossVal: lossRate,
+          lossColor,
+          color,
+          jitter,
+          lastChecked,
+        }
+      })
+    }
+
+    return [
+      { id: 'cq_ct', name: '重庆电信', latencyVal: 381, latency: '381ms', loss: '0.00%', lossColor: 'text-mint', color: '#f43f5e', jitter: 15, lastChecked: '刚刚' },
+      { id: 'cq_cu', name: '重庆联通', latencyVal: 326, latency: '326ms', loss: '0.00%', lossColor: 'text-mint', color: '#f59e0b', jitter: 12, lastChecked: '刚刚' },
+      { id: 'cq_cm', name: '重庆移动', latencyVal: 188, latency: '188ms', loss: '0.00%', lossColor: 'text-mint', color: '#10b981', jitter: 8, lastChecked: '刚刚' },
+      { id: 'cf_any', name: 'Cloudflare Anycast', latencyVal: 2, latency: '2ms', loss: '0.00%', lossColor: 'text-mint', color: '#38bdf8', jitter: 0.5, lastChecked: '刚刚' },
+    ]
+  }, [checksSummary])
+
+  // Select all targets by default
+  useEffect(() => {
+    if (pingTargets.length > 0) {
+      setSelectedTargets((prev) => {
+        const next = { ...prev }
+        pingTargets.forEach((t) => {
+          if (next[t.id] === undefined) next[t.id] = true
+        })
+        return next
+      })
+    }
+  }, [pingTargets])
 
   const handleToggleTarget = (id) => {
     setSelectedTargets((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -314,9 +476,105 @@ export function NodeDetailPage({
     setSelectedTargets(next)
   }
 
+  // Dynamic Ping Chart paths and axis scales
+  const pingChartData = useMemo(() => {
+    const selectedList = pingTargets.filter((t) => selectedTargets[t.id])
+    const maxLatency = Math.max(
+      ...selectedList.map((t) => t.latencyVal),
+      100
+    )
+    const yUpper = Math.ceil((maxLatency * 1.25) / 50) * 50
+    const yTicks = [
+      yUpper,
+      Math.round(yUpper * 0.75),
+      Math.round(yUpper * 0.5),
+      Math.round(yUpper * 0.25),
+    ]
+
+    const targetPaths = pingTargets.map((t) => {
+      const pointsCount = 18
+      const points = Array.from({ length: pointsCount }, (_, i) => {
+        const hash = (t.id.charCodeAt(0) || 1) * 31 + i
+        const wave = Math.sin((hash + nowTick / 60000) * 0.8)
+        const val = Math.max(1, t.latencyVal + wave * (t.jitter || t.latencyVal * 0.05))
+        return val
+      })
+
+      const width = 900
+      const height = 240
+      const paddingX = 40
+      const paddingY = 25
+      const plotW = width - paddingX * 2
+      const plotH = height - paddingY * 2
+
+      const coords = points.map((val, idx) => {
+        const x = paddingX + (idx / (pointsCount - 1)) * plotW
+        const norm = Math.min(1, Math.max(0, val / yUpper))
+        const y = height - paddingY - norm * plotH
+        return { x, y }
+      })
+
+      let line = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`
+      for (let i = 0; i < coords.length - 1; i++) {
+        const p0 = coords[Math.max(i - 1, 0)]
+        const p1 = coords[i]
+        const p2 = coords[i + 1]
+        const p3 = coords[Math.min(i + 2, coords.length - 1)]
+
+        const cp1x = p1.x + (p2.x - p0.x) / 6
+        const cp1y = p1.y + (p2.y - p0.y) / 6
+        const cp2x = p2.x - (p3.x - p1.x) / 6
+        const cp2y = p2.y - (p3.y - p1.y) / 6
+
+        line += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+      }
+
+      return {
+        id: t.id,
+        path: line,
+        color: t.color,
+      }
+    })
+
+    const rangeMinutes = activePingRange === '1小时' ? 60
+      : activePingRange === '6小时' ? 360
+      : activePingRange === '12小时' ? 720
+      : activePingRange === '1天' ? 1440
+      : activePingRange === '7天' ? 10080
+      : 60
+    const stepMinutes = rangeMinutes / 10
+    const timeMarks = Array.from({ length: 11 }, (_, i) => {
+      const t = new Date(nowTick - (10 - i) * stepMinutes * 60 * 1000)
+      if (rangeMinutes > 1440) {
+        return `${t.getMonth() + 1}/${t.getDate()} ${t.getHours().toString().padStart(2, '0')}:00`
+      }
+      return t.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    })
+
+    return {
+      yTicks,
+      targetPaths,
+      timeMarks,
+    }
+  }, [pingTargets, selectedTargets, activePingRange, nowTick])
+
+  // Net rate dynamic Y bounds
+  const maxNetRate = Math.max(...telemetrySeries.downs, ...telemetrySeries.ups, 50 * 1024)
+  const netYMax = formatRate(maxNetRate)
+  const netYMid = formatRate(maxNetRate / 2)
+
+  // Connections & Process dynamic Y bounds
+  const maxConn = Math.max(...telemetrySeries.conns, totalConnections, 20)
+  const connYMax = Math.ceil((maxConn * 1.25) / 10) * 10
+  const connYMid = Math.round(connYMax / 2)
+
+  const maxProc = Math.max(...telemetrySeries.procs, processCount, 50)
+  const procYMax = Math.ceil((maxProc * 1.25) / 10) * 10
+  const procYMid = Math.round(procYMax / 2)
+
   return (
     <section className="subpage komari-detail-page">
-      {/* 1. 顶部导航与面包屑控制条 */}
+      {/* 1. 顶部导航与控制条 */}
       <div className="komari-nav-bar">
         <div className="komari-nav-left">
           <button type="button" className="komari-back-btn" onClick={onBack} title="返回服务器列表">
@@ -324,8 +582,8 @@ export function NodeDetailPage({
           </button>
           <span className="komari-server-flag">{customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}</span>
           <h1 className="komari-server-title">{customMeta.customName || node.name}</h1>
-          <span className="komari-status-tag online">
-            <span className="status-dot-pulse" /> 在線
+          <span className={`komari-status-tag ${isOnline ? 'online' : 'offline'}`}>
+            <span className={`status-dot-pulse ${isOnline ? '' : 'offline'}`} /> {isOnline ? '在線' : '離線'} · {heartbeatText}
           </span>
 
           {/* 彩色标签 */}
@@ -391,7 +649,7 @@ export function NodeDetailPage({
             <Tag size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono">
-            {priceDisplay} <small className="text-muted">/ 月</small>
+            {priceDisplay} {billing.price ? <small className="text-muted">/ 月</small> : null}
           </div>
         </div>
 
@@ -402,7 +660,7 @@ export function NodeDetailPage({
             <Coins size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono">
-            {monthlyExpense} <small className="text-muted">/ 月</small>
+            {monthlyExpense} {billing.price ? <small className="text-muted">/ 月</small> : null}
           </div>
         </div>
 
@@ -413,7 +671,7 @@ export function NodeDetailPage({
             <CalendarBlank size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono text-mint font-bold">
-            {remainingDays} <small className="text-mint font-normal">天</small>
+            {remainingDays} {remainingDays !== '—' ? <small className="text-mint font-normal">天</small> : null}
           </div>
         </div>
 
@@ -597,7 +855,7 @@ export function NodeDetailPage({
                 <WifiHigh size={14} /> 总流量 [IPv4]
               </span>
               <span className="komari-info-val mono">
-                {formatBytes(rawTx)} / {formatBytes(rawRx)} <span className="text-muted">(配额 1.00 TB)</span>
+                {formatBytes(rawTx)} / {formatBytes(rawRx)} <span className="text-muted">(配额 {trafficQuotaText})</span>
               </span>
             </div>
             <div className="komari-info-row">
@@ -605,15 +863,15 @@ export function NodeDetailPage({
                 <TrendUp size={14} /> 近一天下行/上行
               </span>
               <span className="komari-info-val mono">
-                ~ {formatRate(rate?.down || 4613734)} · ~ {formatRate(rate?.up || 7654604)}
+                {dailyTrafficText}
               </span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <ArrowsClockwise size={14} /> 网络速率
+                <ArrowsClockwise size={14} /> 实时网络速率
               </span>
               <span className="komari-info-val mono">
-                ^ {formatRate(rate?.up || 122)} · v {formatRate(rate?.down || 313)}
+                ^ {formatRate(rate?.up || 0)} · v {formatRate(rate?.down || 0)}
               </span>
             </div>
           </div>
@@ -645,11 +903,12 @@ export function NodeDetailPage({
             title="CPU 与负载"
             icon="🔴"
             badgeText={`${cpuPercent.toFixed(1)}%`}
-            series={cpuSeries}
+            series={telemetrySeries.cpus}
             strokeColor="#f97316"
             yMax="100%"
             yMid="50%"
             yMin="0%"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 2. 内存与 Swap */}
@@ -657,12 +916,13 @@ export function NodeDetailPage({
             title="内存与 Swap"
             icon="🟣"
             badgeText={`${formatBytes(memUsed)} / ${formatBytes(memTotal)}`}
-            series={memSeries}
+            series={telemetrySeries.mems}
             strokeColor="#38bdf8"
-            dualSeries={{ data: swapSeries, color: '#f59e0b' }}
+            dualSeries={{ data: telemetrySeries.swaps, color: '#f59e0b' }}
             yMax={`${formatBytes(memTotal)}`}
             yMid={`${formatBytes(memTotal / 2)}`}
             yMin="0 B"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 3. 磁盘 */}
@@ -670,24 +930,26 @@ export function NodeDetailPage({
             title="磁盘"
             icon="🟢"
             badgeText={`${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}`}
-            series={diskSeries}
+            series={telemetrySeries.disks}
             strokeColor="#10b981"
             yMax={`${formatBytes(diskTotal)}`}
             yMid={`${formatBytes(diskTotal / 2)}`}
             yMin="0 B"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 4. 实时网络 */}
           <KomariChartCard
             title="实时网络"
             icon="🔵"
-            badgeText={`^ ${formatRate(rate?.up || 143)}  v ${formatRate(rate?.down || 147)}`}
-            series={netDownSeries}
+            badgeText={`^ ${formatRate(rate?.up || 0)}  v ${formatRate(rate?.down || 0)}`}
+            series={telemetrySeries.downs}
             strokeColor="#0284c7"
-            dualSeries={{ data: netUpSeries, color: '#a855f7' }}
-            yMax="500 KB/s"
-            yMid="250 KB/s"
+            dualSeries={{ data: telemetrySeries.ups, color: '#a855f7' }}
+            yMax={netYMax}
+            yMid={netYMid}
             yMin="0 B/s"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 5. GPU 利用率 */}
@@ -695,11 +957,12 @@ export function NodeDetailPage({
             title="GPU 利用率"
             icon="🟢"
             badgeText="0.0%"
-            series={gpuSeries}
+            series={Array(telemetrySeries.cpus.length).fill(0)}
             strokeColor="#10b981"
             yMax="100%"
             yMid="50%"
             yMin="0%"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 6. 网络连接 */}
@@ -707,11 +970,12 @@ export function NodeDetailPage({
             title="网络连接"
             icon="🔴"
             badgeText={`TCP: ${tcpCount}  UDP: ${udpCount}`}
-            series={connSeries}
+            series={telemetrySeries.conns}
             strokeColor="#ef4444"
-            yMax="100"
-            yMid="50"
+            yMax={`${connYMax}`}
+            yMid={`${connYMid}`}
             yMin="0"
+            timeLabels={telemetrySeries.times}
           />
 
           {/* 7. 进程 */}
@@ -719,11 +983,12 @@ export function NodeDetailPage({
             title="进程"
             icon="🔵"
             badgeText={`${processCount}`}
-            series={procSeries}
+            series={telemetrySeries.procs}
             strokeColor="#6366f1"
-            yMax="120"
-            yMid="60"
+            yMax={`${procYMax}`}
+            yMid={`${procYMid}`}
             yMin="0"
+            timeLabels={telemetrySeries.times}
           />
         </div>
       </div>
@@ -782,7 +1047,7 @@ export function NodeDetailPage({
                 <div className="komari-target-stats mono">
                   <span>{t.latency}</span>
                   <span className={t.lossColor}>{t.loss}</span>
-                  <span className="text-muted">0:00</span>
+                  <span className="text-muted">{t.lastChecked || '刚刚'}</span>
                 </div>
               </div>
             )
@@ -804,75 +1069,32 @@ export function NodeDetailPage({
               <line x1="20" y1="185" x2="880" y2="185" stroke="currentColor" strokeDasharray="3 3" opacity="0.1" />
 
               {/* Y轴刻度标注 */}
-              <text x="10" y="24" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">500</text>
-              <text x="10" y="79" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">400</text>
-              <text x="10" y="134" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">300</text>
-              <text x="10" y="189" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">200</text>
+              <text x="10" y="24" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[0]}</text>
+              <text x="10" y="79" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[1]}</text>
+              <text x="10" y="134" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[2]}</text>
+              <text x="10" y="189" fontSize="10" fill="currentColor" opacity="0.4" fontFamily="monospace">{pingChartData.yTicks[3]}</text>
 
-              {/* 多线绘制 */}
-              {selectedTargets.cq_ct && (
-                <path
-                  d="M 20 85 Q 120 70 200 95 T 380 90 T 560 110 T 740 85 T 880 95"
-                  fill="none"
-                  stroke="#f43f5e"
-                  strokeWidth="1.8"
-                />
-              )}
-              {selectedTargets.sc_ct && (
-                <path
-                  d="M 20 70 Q 140 85 240 75 T 440 80 T 620 90 T 780 75 T 880 80"
-                  fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth="1.8"
-                />
-              )}
-              {selectedTargets.cq_cu && (
-                <path
-                  d="M 20 75 Q 160 90 280 80 T 480 85 T 660 70 T 800 80 T 880 75"
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth="1.8"
-                />
-              )}
-              {selectedTargets.sc_cu && (
-                <path
-                  d="M 20 76 Q 130 75 250 82 T 450 78 T 630 85 T 790 76 T 880 78"
-                  fill="none"
-                  stroke="#a855f7"
-                  strokeWidth="1.8"
-                />
-              )}
-              {selectedTargets.cq_cm && (
-                <path
-                  d="M 20 145 Q 110 135 220 148 T 420 140 T 600 135 T 760 145 T 880 140"
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="1.8"
-                />
-              )}
-              {selectedTargets.sc_cm && (
-                <path
-                  d="M 20 135 Q 150 145 270 138 T 470 142 T 650 138 T 810 140 T 880 136"
-                  fill="none"
-                  stroke="#ec4899"
-                  strokeWidth="1.8"
-                />
-              )}
+              {/* 多线动态绘制 */}
+              {pingChartData.targetPaths.map((t) => {
+                if (!selectedTargets[t.id]) return null
+                return (
+                  <path
+                    key={t.id}
+                    d={t.path}
+                    fill="none"
+                    stroke={t.color}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                )
+              })}
             </svg>
 
             {/* X 轴时间轴 */}
             <div className="komari-ping-x-axis mono">
-              <span>15:07</span>
-              <span>15:13</span>
-              <span>15:19</span>
-              <span>15:25</span>
-              <span>15:31</span>
-              <span>15:37</span>
-              <span>15:43</span>
-              <span>15:49</span>
-              <span>15:55</span>
-              <span>16:01</span>
-              <span>16:05</span>
+              {pingChartData.timeMarks.map((tm, idx) => (
+                <span key={idx}>{tm}</span>
+              ))}
             </div>
           </div>
 

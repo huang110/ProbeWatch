@@ -441,22 +441,32 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [data, activeNav])
 
-  // 页面刷新或通过链接进入 node-detail 时，待节点数据加载后自动恢复 detailNode
+  // 页面刷新、链接进入或数据轮询更新时，保证 detailNode 始终与 data 中最新上报保持实时同步
   useEffect(() => {
-    if (activeNav === 'node-detail') {
+    if (activeNav === 'node-detail' && data.length > 0) {
       const route = parseRouteFromHash()
-      const targetUuid = route?.nodeUuid || initialRouteRef.current?.nodeUuid
-      if (targetUuid && data.length > 0) {
-        const currentDetailUuid = detailNode ? (detailNode.uuid || detailNode.id) : null
-        if (currentDetailUuid !== targetUuid) {
-          const found = data.find((n) => (n.uuid || n.id) === targetUuid)
-          if (found) {
-            setDetailNode(found)
-          }
+      const targetUuid = detailNode?.uuid || detailNode?.id || route?.nodeUuid || initialRouteRef.current?.nodeUuid
+      if (targetUuid) {
+        const latest = data.find((n) => (n.uuid || n.id) === targetUuid)
+        if (latest) {
+          setDetailNode((prev) => {
+            if (!prev) return latest
+            if (
+              prev.cpu !== latest.cpu ||
+              prev.rx !== latest.rx ||
+              prev.tx !== latest.tx ||
+              prev.lastReportedAt !== latest.lastReportedAt ||
+              prev.startedAt !== latest.startedAt ||
+              prev.status !== latest.status
+            ) {
+              return latest
+            }
+            return prev
+          })
         }
       }
     }
-  }, [activeNav, detailNode, data])
+  }, [activeNav, data, detailNode?.uuid, detailNode?.id])
 
   const markSync = () => setLastSync(Date.now())
 
@@ -613,13 +623,24 @@ export function App() {
     fetch(`/api/nodes/${encodeURIComponent(uuid)}/resource/history`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error(`history:${response.status}`)
       const json = await response.json()
-      if (!Array.isArray(json)) throw new Error('history:invalid-json')
-      return json.map((item) => {
+      const asc = [...json].sort((a, b) => {
+        const ta = new Date(a?.reported_at || a?.recorded_at || a?.time || 0).getTime()
+        const tb = new Date(b?.reported_at || b?.recorded_at || b?.time || 0).getTime()
+        return ta - tb
+      })
+      return asc.map((item, index, arr) => {
         const resource = item?.resource || {}
         const memoryTotal = numeric(resource.memory_total_bytes)
         const memoryUsed = numeric(resource.memory_used_bytes)
         const diskTotal = numeric(resource.filesystem_total_bytes)
         const diskUsed = numeric(resource.filesystem_used_bytes)
+        const swapTotal = numeric(resource.swap_total_bytes)
+        const swapUsed = numeric(resource.swap_used_bytes)
+        const rx = numeric(resource.network_rx_bytes) || 0
+        const tx = numeric(resource.network_tx_bytes) || 0
+        const tcp = numeric(resource.tcp_conn_count) || 0
+        const udp = numeric(resource.udp_conn_count) || 0
+        const proc = numeric(resource.process_count) || 0
         const rawTime = item?.reported_at || item?.recorded_at || item?.time
         let timeIso = null
         if (typeof rawTime === 'string') {
@@ -629,16 +650,43 @@ export function App() {
           const ms = rawTime > 1e14 ? Math.round(rawTime / 1e6) : rawTime > 1e11 ? rawTime : Math.round(rawTime * 1000)
           timeIso = new Date(ms).toISOString()
         }
+
+        let downRate = 0
+        let upRate = 0
+        if (index > 0) {
+          const prev = arr[index - 1]
+          const prevRes = prev?.resource || {}
+          const prevRx = numeric(prevRes.network_rx_bytes) || 0
+          const prevTx = numeric(prevRes.network_tx_bytes) || 0
+          const prevRawTime = prev?.reported_at || prev?.recorded_at || prev?.time
+          const curMs = timeIso ? new Date(timeIso).getTime() : 0
+          const prevMs = typeof prevRawTime === 'string' ? new Date(prevRawTime).getTime() : (typeof prevRawTime === 'number' ? (prevRawTime > 1e14 ? prevRawTime / 1e6 : prevRawTime * 1000) : 0)
+          const dt = (curMs - prevMs) / 1000
+          if (dt >= 1 && dt <= 300) {
+            if (rx >= prevRx) downRate = Math.round((rx - prevRx) / dt)
+            if (tx >= prevTx) upRate = Math.round((tx - prevTx) / dt)
+          }
+        }
+
         return {
           time: timeIso,
-          cpu: numeric(resource.cpu_percent),
+          cpu: numeric(resource.cpu_percent) ?? 0,
           mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null,
+          swap: swapUsed !== null && swapTotal !== null && swapTotal > 0 ? Math.round((swapUsed / swapTotal) * 1000) / 10 : 0,
           disk: diskUsed !== null && diskTotal !== null && diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 1000) / 10 : null,
+          rx,
+          tx,
+          tcp,
+          udp,
+          conn: tcp + udp,
+          proc,
+          downRate,
+          upRate,
         }
-      }).reverse()
+      })
     }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
     return () => controller.abort()
-  }, [selectedNode, detailNode, activeNav, targetDetailUuid])
+  }, [selectedNode, detailNode, activeNav, targetDetailUuid, lastSync])
 
   const analyticsNode = selectedNode || detailNode
   const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
@@ -650,7 +698,7 @@ export function App() {
     setChecksLoading(true)
     fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`checks:${response.status}`); const json = await response.json(); if (!Array.isArray(json)) throw new Error('checks:invalid-json'); return json }).then((json) => { if (!controller.signal.aborted) setChecksSummary(json) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setChecksSummary(null) }).finally(() => { if (!controller.signal.aborted) setChecksLoading(false) })
     return () => controller.abort()
-  }, [analyticsUuid])
+  }, [analyticsUuid, lastSync])
 
   useEffect(() => { setTrafficPeriod('day') }, [analyticsUuid])
 
@@ -662,7 +710,19 @@ export function App() {
     setTrafficLoading(true)
     fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`traffic:${response.status}`); const json = await response.json(); if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('traffic:invalid-json'); return json }).then((json) => { if (!controller.signal.aborted) setTraffic(json) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setTraffic(null) }).finally(() => { if (!controller.signal.aborted) setTrafficLoading(false) })
     return () => controller.abort()
-  }, [analyticsUuid, trafficPeriod])
+  }, [analyticsUuid, trafficPeriod, lastSync])
+
+  // 当处于 node-detail 页面时，按 10s 周期自驱刷新节点实时状态
+  useEffect(() => {
+    if (activeNav !== 'node-detail') return undefined
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadCore(false)
+        if (guestPreview || apiState.kind === 'guest') refreshGuest()
+      }
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [activeNav, loadCore, refreshGuest, guestPreview, apiState.kind])
 
   const ackAlert = async (id) => {
     setAckingId(id)
