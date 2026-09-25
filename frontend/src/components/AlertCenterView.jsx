@@ -25,21 +25,6 @@ import {
 import { alertSeverity, formatAlertTime, safeArray, safeText } from '../lib/format.js'
 import { fetchCsrfToken } from '../lib/api.js'
 
-// 官方默认 12 台典型节点名称备用兜底
-const DEFAULT_NODE_NAMES = [
-  'DMIT PRO.WEE',
-  '筋斗云',
-  '牛马云',
-  '六六云',
-  'AWS 光帆',
-  'DataWave',
-  'Taipei101',
-  '甲骨文',
-  '腾讯',
-  'HyVPS',
-  '阿里云 轻量',
-  '喵云',
-]
 
 // 官方 6 大预置网络检测目标及域名
 const DEFAULT_TARGET_CONFIGS = [
@@ -84,7 +69,7 @@ export function AlertCenterView({
     {
       id: 'rule-cpu-high',
       name: 'cpu过高',
-      serversSummary: 'DMIT PRO.WEE, AWS 光帆, 甲骨文, 腾讯, HyVPS, 阿里云 轻量',
+      serversSummary: '所有探针节点',
       metric: 'CPU',
       threshold: '80%',
       ratio: '0.8',
@@ -117,30 +102,22 @@ export function AlertCenterView({
     setTimeout(() => setToastMsg(''), 3000)
   }
 
-  // 规范化服务器列表数据
+  // 规范化服务器列表数据 (仅显示真实连接的探针)
   const displayNodes = useMemo(() => {
     if (nodes && nodes.length > 0) {
       return nodes.map((n, idx) => ({
         id: n.uuid || n.id || `node-${idx}`,
-        name: n.name || DEFAULT_NODE_NAMES[idx % DEFAULT_NODE_NAMES.length],
+        name: n.name || '探针',
         flag: n.flag || '🌐',
         enabled: true,
         gracePeriod: '180秒',
         lastNotified: idx % 3 === 0 ? '2026/8/2 10:05:00' : idx % 5 === 0 ? '2026/9/3 02:14:27' : '-',
         reportType: '日报、周报',
         reportContent: '上行/下行流量',
+        node: n,
       }))
     }
-    return DEFAULT_NODE_NAMES.map((name, idx) => ({
-      id: `default-node-${idx}`,
-      name,
-      flag: '🌐',
-      enabled: true,
-      gracePeriod: '180秒',
-      lastNotified: idx % 3 === 0 ? '2026/8/2 10:05:00' : idx % 5 === 0 ? '2026/9/3 02:14:27' : '-',
-      reportType: '日报、周报',
-      reportContent: '上行/下行流量',
-    }))
+    return []
   }, [nodes])
 
   // 延迟监测告警笛卡尔积矩阵 (Image 5: 6 任务 × 12 节点 = 72 项)
