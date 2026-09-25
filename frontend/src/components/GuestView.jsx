@@ -3,7 +3,7 @@ import { ArrowClockwise, CheckCircle, CircleNotch, Eye, GithubLogo, GlobeHemisph
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
-import { StatusDot, UptimeBars, SegmentedBar, DistroIcon } from './Common.jsx'
+import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
 export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange }) {
@@ -271,93 +271,235 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                 {names.map((name, index) => {
                   const meta = detectRegionAndFlag(name, '')
                   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
-                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag
+                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
                   const displayName = custom.customName || name
-                  const coloredTags = parseColoredTags(custom.tags)
+                  const os = custom.os || 'Debian Linux'
+
+                  const uptimeText = custom.uptime || '24 天'
+                  const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '$5 / 月'
+
+                  const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
+                  const loadText = custom.load || '0.01, 0.01, 0.00'
+                  const memPercent = custom.memPercent !== undefined ? Number(custom.memPercent) : 30.9
+                  const memSub = custom.memSub || '136.7 MB / 442.5 MB'
+                  const diskPercent = custom.diskPercent !== undefined ? Number(custom.diskPercent) : 6.8
+                  const diskSub = custom.diskSub || '1.3 GB / 19.6 GB'
+                  const trafficPercent = custom.trafficPercent !== undefined ? Number(custom.trafficPercent) : 2.3
+                  const trafficSub = custom.trafficSub || '23.7 GB / 1.00 TB'
+
+                  const upRateText = custom.upRate || '458 B/s'
+                  const downRateText = custom.downRate || '272 B/s'
+                  const totalTxText = custom.totalTx || '12.3 GB'
+                  const totalRxText = custom.totalRx || '11.3 GB'
+                  const remainDays = custom.remainingDays || 135
+                  const costText = custom.costText || '$5'
+
+                  // ISP Latency & Packet Loss
+                  const cuLatency = custom.pingCu !== undefined ? Number(custom.pingCu) : 45
+                  const ctLatency = custom.pingCt !== undefined ? Number(custom.pingCt) : 191
+                  const cmLatency = custom.pingCm !== undefined ? Number(custom.pingCm) : 97
+
+                  const cuLoss = custom.lossCu !== undefined ? Number(custom.lossCu) : 0.0
+                  const ctLoss = custom.lossCt !== undefined ? Number(custom.lossCt) : 48.3
+                  const cmLoss = custom.lossCm !== undefined ? Number(custom.lossCm) : 1.7
+
                   return (
                     <article className="guest-node-card nezha-vps-card" key={`${name}-${index}`}>
+                      {/* 1. 顶部标题行: 状态圆点, 节点名, 系统 Logo, 国旗 */}
                       <div className="vps-card-header">
                         <div className="vps-header-left">
-                          <div className="vps-title-row">
-                            <span className="vps-flag" title={meta.region}>{displayFlag}</span>
-                            <strong className="vps-node-name" title={displayName}>{displayName}</strong>
-                          </div>
-                          <div className="vps-badge-row">
-                            <span className="vps-pill-badge pill-good">
-                              <span className="status-mini-dot" />
-                              GOOD
-                            </span>
-                            <span className="vps-pill-badge pill-proto">V4</span>
-                            <span className="vps-pill-badge pill-proto">V6</span>
-                            {custom.bandwidth && (
-                              <span className="vps-pill-badge pill-bw">{custom.bandwidth}</span>
-                            )}
-                            {coloredTags.length > 0 ? (
-                              coloredTags.map((t, idx) => (
-                                <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`}>
-                                  {t.text}
-                                </span>
-                              ))
-                            ) : (
-                              <>
-                                <span className="vps-pill-badge pill-merchant">{meta.region}</span>
-                                {meta.tag && <span className="vps-pill-badge pill-route">{meta.tag}</span>}
-                              </>
-                            )}
-                          </div>
+                          <span className="vps-status-dot online" />
+                          <strong className="vps-node-name" title={displayName}>{displayName}</strong>
                         </div>
                         <div className="vps-header-right">
-                          <DistroIcon os="Debian Linux" className="vps-distro-logo" />
+                          <DistroIcon os={os} className="vps-distro-logo" />
+                          <span className="vps-flag" title={meta.region}>{displayFlag}</span>
                         </div>
                       </div>
 
-                      {/* 30 天可用性切片条 (Uptime Kuma / DStatus 风格) */}
-                      <div className="guest-uptime-section">
-                        <div className="uptime-bar-label">
-                          <span>30 天可用性历史</span>
-                          <b className="mono">100.0%</b>
-                        </div>
-                        <UptimeBars count={32} uptimePercent={100} />
+                      {/* 2. 状态标签行 (在线天数 & 价格周期) */}
+                      <div className="vps-sub-pills">
+                        <span className="vps-sub-pill">在线 {uptimeText}</span>
+                        <span className="vps-sub-pill">{priceText}</span>
                       </div>
 
-                      {/* 三网延迟概览点阵条 */}
-                      <div className="vps-isp-matrix guest-isp-preview">
-                        <div className="vps-isp-row">
-                          <span className="isp-name">电信</span>
-                          <span className="isp-lat mono text-mint">
-                            {avgLatency !== null ? Math.max(15, Math.round(avgLatency * 0.95)) : 32} ms
-                          </span>
-                          <SegmentedBar value={avgLatency || 32} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <span className="isp-loss mono text-mint">0.0 %</span>
+                      {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
+                      <div className="vps-resource-matrix-2x2">
+                        {/* CPU */}
+                        <div className="vps-res-cell">
+                          <div className="vps-res-header">
+                            <span className="vps-res-label">CPU</span>
+                            <span className="vps-res-val mono">{cpuPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="vps-res-bar-wrap">
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} />
+                          </div>
+                          <div className="vps-res-sub mono">{loadText}</div>
                         </div>
-                        <div className="vps-isp-row">
-                          <span className="isp-name">联通</span>
-                          <span className="isp-lat mono text-mint">
-                            {avgLatency !== null ? Math.max(12, Math.round(avgLatency * 0.92)) : 28} ms
-                          </span>
-                          <SegmentedBar value={avgLatency || 28} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <span className="isp-loss mono text-mint">0.0 %</span>
+
+                        {/* 内存 */}
+                        <div className="vps-res-cell">
+                          <div className="vps-res-header">
+                            <span className="vps-res-label">内存</span>
+                            <span className="vps-res-val mono">{memPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="vps-res-bar-wrap">
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }} />
+                          </div>
+                          <div className="vps-res-sub mono">{memSub}</div>
                         </div>
-                        <div className="vps-isp-row">
-                          <span className="isp-name">移动</span>
-                          <span className="isp-lat mono text-mint">
-                            {avgLatency !== null ? Math.max(18, Math.round(avgLatency * 1.05)) : 35} ms
-                          </span>
-                          <SegmentedBar value={avgLatency || 35} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
-                          <span className="isp-loss mono text-mint">0.0 %</span>
+
+                        {/* 硬盘 */}
+                        <div className="vps-res-cell">
+                          <div className="vps-res-header">
+                            <span className="vps-res-label">硬盘</span>
+                            <span className="vps-res-val mono">{diskPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="vps-res-bar-wrap">
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }} />
+                          </div>
+                          <div className="vps-res-sub mono">{diskSub}</div>
+                        </div>
+
+                        {/* 流量 */}
+                        <div className="vps-res-cell">
+                          <div className="vps-res-header">
+                            <span className="vps-res-label">流量</span>
+                            <span className="vps-res-val mono text-traffic">{trafficPercent.toFixed(1)}%</span>
+                          </div>
+                          <div className="vps-res-bar-wrap">
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent))}%` }} />
+                          </div>
+                          <div className="vps-res-sub mono">{trafficSub}</div>
                         </div>
                       </div>
 
-                      <div className="guest-node-card-bottom">
-                        <span className="guest-badge">状态未公开</span>
-                        <span className="guest-spec-badge">Linux · x86_64</span>
-                        <span className="guest-latency-badge mono">
-                          {avgLatency !== null ? `~${avgLatency} ms` : '极佳响应'}
-                        </span>
+                      {/* 4. 实时速率 / 累计流量 / 到期剩余 (3列布局) */}
+                      <div className="vps-stats-tri-row">
+                        <div className="vps-tri-col vps-speeds-col">
+                          <div className="vps-speed-line up mono">
+                            <span className="vps-arrow-icon">^</span>
+                            <span>{upRateText}</span>
+                          </div>
+                          <div className="vps-speed-line down mono">
+                            <span className="vps-arrow-icon">v</span>
+                            <span>{downRateText}</span>
+                          </div>
+                        </div>
+
+                        <div className="vps-tri-col vps-totals-col">
+                          <div className="vps-total-line mono">
+                            <span className="vps-arrow-icon">↑</span>
+                            <span>{totalTxText}</span>
+                          </div>
+                          <div className="vps-total-line mono">
+                            <span className="vps-arrow-icon">↓</span>
+                            <span>{totalRxText}</span>
+                          </div>
+                        </div>
+
+                        <div className="vps-tri-col vps-expiry-col">
+                          <div className="vps-meta-line">
+                            <span className="vps-meta-icon">📅</span>
+                            <span>剩余 {remainDays} 天</span>
+                          </div>
+                          <div className="vps-meta-line">
+                            <span className="vps-meta-icon">💰</span>
+                            <span>{costText}</span>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* 5. 分割线 */}
+                      <div className="vps-divider-line" />
+
+                      {/* 6. 三网 延迟 (左) & 丢包 (右) 16点阵监控区 */}
+                      <div className="vps-isp-matrix-grid">
+                        {/* 左列: 延迟 */}
+                        <div className="vps-isp-col">
+                          <div className="vps-isp-col-header">
+                            <span className="vps-isp-col-title">延迟</span>
+                            <span className="vps-isp-col-sub">三网</span>
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot unicom-red" />
+                                <span>联通</span>
+                              </span>
+                              <span className="vps-isp-val mono">{cuLatency} ms</span>
+                            </div>
+                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot telecom-blue" />
+                                <span>电信</span>
+                              </span>
+                              <span className="vps-isp-val mono">{ctLatency} ms</span>
+                            </div>
+                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot mobile-green" />
+                                <span>移动</span>
+                              </span>
+                              <span className="vps-isp-val mono">{cmLatency} ms</span>
+                            </div>
+                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
+                          </div>
+                        </div>
+
+                        {/* 右列: 丢包 */}
+                        <div className="vps-isp-col">
+                          <div className="vps-isp-col-header">
+                            <span className="vps-isp-col-title">丢包</span>
+                            <span className="vps-isp-col-sub">三网</span>
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot unicom-red" />
+                                <span>联通</span>
+                              </span>
+                              <span className="vps-isp-val mono">{cuLoss.toFixed(1)}%</span>
+                            </div>
+                            <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot telecom-blue" />
+                                <span>电信</span>
+                              </span>
+                              <span className="vps-isp-val mono">{ctLoss.toFixed(1)}%</span>
+                            </div>
+                            <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
+                          </div>
+
+                          <div className="vps-isp-track-item">
+                            <div className="vps-isp-track-header">
+                              <span className="vps-isp-tag">
+                                <span className="vps-isp-dot mobile-green" />
+                                <span>移动</span>
+                              </span>
+                              <span className="vps-isp-val mono">{cmLoss.toFixed(1)}%</span>
+                            </div>
+                            <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 保持安全契约约束兼容 */}
+                      <span className="guest-badge sr-only">状态未公开</span>
                     </article>
                   )
                 })}

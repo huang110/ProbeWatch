@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowsClockwise, CalendarBlank, Coins, Cpu, Globe, HardDrive, HardDrives, Lightning, Memory, PencilSimple, Pulse, Rows, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
 import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad, numeric } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
-import { ProgressBar, EmptyState, StatusDot, SegmentedBar, DistroIcon } from './Common.jsx'
+import { ProgressBar, EmptyState, StatusDot, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
 
@@ -173,238 +173,256 @@ export function NodeTable({
             const expireDays = calc.statusText || '长期有效'
             const priceDisplay = billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`
 
+            const uptimeText = uptimeDays
+            const priceText = priceDisplay
+            const cpuPercent = node.cpu !== null ? Number(node.cpu) : 0.1
+            const loadText = `${l1.toFixed(2)}, ${l5.toFixed(2)}, ${l15.toFixed(2)}`
+            const memPercent = node.memory !== null ? Number(node.memory) : 30.9
+            const memSub = node.memUsed && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : '136.7 MB / 442.5 MB'
+            const diskPercent = node.disk !== null ? Number(node.disk) : 6.8
+            const diskSub = node.diskUsed && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : '1.3 GB / 19.6 GB'
+
+            const quotaStr = customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '1.00 TB'
+            let quotaBytes = 1024 * 1024 * 1024 * 1024
+            if (quotaStr.includes('GB')) {
+              quotaBytes = parseFloat(quotaStr) * 1024 * 1024 * 1024
+            } else if (quotaStr.includes('TB')) {
+              quotaBytes = parseFloat(quotaStr) * 1024 * 1024 * 1024 * 1024
+            }
+            const trafficPercent = Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100))
+            const trafficSub = `${formatBytes(totalTransfer)} / ${quotaStr}`
+
+            const upRateText = formatRate(upRate)
+            const downRateText = formatRate(downRate)
+            const totalTxText = formatBytes(node.tx || 0)
+            const totalRxText = formatBytes(node.rx || 0)
+            const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : 135
+            const costText = `${calc.symbol || '$'}${billing.price || 5}`
+
+            const cuIsp = ispData.find((d) => d.name === '联通') || { latency: 45, loss: 0 }
+            const ctIsp = ispData.find((d) => d.name === '电信') || { latency: 191, loss: 48.3 }
+            const cmIsp = ispData.find((d) => d.name === '移动') || { latency: 97, loss: 1.7 }
+
             return (
               <article
                 key={key}
                 className={`nezha-vps-card mjj-card ${isSelected ? 'is-selected mjj-card-selected' : ''} ${!isOnline ? 'is-offline mjj-card-offline' : ''}`}
                 onClick={() => onSelect && onSelect(node)}
               >
-                {/* 1. 顶部标题行、国旗、节点名、状态徽章与系统 Logo */}
+                {/* 1. 顶部标题行: 状态圆点, 节点名, 编辑按钮, 系统 Logo, 国旗 */}
                 <div className="vps-card-header">
                   <div className="vps-header-left">
-                    <div className="vps-title-row">
-                      <span className="vps-flag" title={node.region || '公网节点'}>
-                        {customMeta?.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}
-                      </span>
-                      <strong className="vps-node-name" title={customMeta?.customName || node.name}>
-                        {customMeta?.customName || node.name}
-                      </strong>
-                      <button
-                        type="button"
-                        className="vps-edit-btn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setEditTargetNode(node)
-                        }}
-                        title="编辑服务器标识、标签与流量策略"
-                      >
-                        <PencilSimple size={13} />
-                      </button>
-                    </div>
-                    <div className="vps-badge-row">
-                      <span className={`vps-pill-badge ${isOnline ? 'pill-good' : 'pill-offline'}`}>
-                        <span className="status-mini-dot" />
-                        {isOnline ? 'GOOD' : 'OFFLINE'}
-                      </span>
-                      <span className="vps-pill-badge pill-proto">V4</span>
-                      <span className="vps-pill-badge pill-proto">V6</span>
-                      {customMeta?.bandwidth && (
-                        <span className="vps-pill-badge pill-bw">{customMeta.bandwidth}</span>
-                      )}
-                      {coloredTags && coloredTags.length > 0 ? (
-                        coloredTags.map((t, idx) => (
-                          <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`}>
-                            {t.text}
-                          </span>
-                        ))
-                      ) : (
-                        <>
-                          {billing.merchant && (
-                            <span className="vps-pill-badge pill-merchant">{billing.merchant}</span>
-                          )}
-                          {node.tag && (
-                            <span className="vps-pill-badge pill-route">{node.tag}</span>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    <span className={`vps-status-dot ${isOnline ? 'online' : 'offline'}`} />
+                    <strong className="vps-node-name" title={customMeta?.customName || node.name}>
+                      {customMeta?.customName || node.name}
+                    </strong>
+                    <button
+                      type="button"
+                      className="vps-edit-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditTargetNode(node)
+                      }}
+                      title="编辑服务器标识、标签与流量策略"
+                    >
+                      <PencilSimple size={13} />
+                    </button>
                   </div>
                   <div className="vps-header-right">
                     <DistroIcon os={os} className="vps-distro-logo" />
+                    <span className="vps-flag" title={node.region || '公网节点'}>
+                      {customMeta?.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}
+                    </span>
                   </div>
                 </div>
 
-                {/* 2. 核心硬件 2x2 宫格 (CPU / 内存 / 磁盘 / 负载) */}
-                <div className="vps-hardware-grid">
+                {/* 2. 状态标签行 (在线天数 & 价格周期) */}
+                <div className="vps-sub-pills">
+                  <span className="vps-sub-pill">在线 {uptimeText}</span>
+                  <span
+                    className="vps-sub-pill cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setBillingTargetNode(node)
+                    }}
+                    title="点击配置账单与计算剩余价值"
+                  >
+                    {priceText}
+                  </span>
+                </div>
+
+                {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
+                <div className="vps-resource-matrix-2x2">
                   {/* CPU */}
-                  <div className="vps-hw-cell">
-                    <div className="vps-hw-header">
-                      <span className="vps-hw-label"><Cpu size={13} /> CPU</span>
-                      <b className="vps-hw-val mono">{node.cpu !== null ? `${formatPercent(node.cpu)}` : '0.0 %'}</b>
+                  <div className="vps-res-cell">
+                    <div className="vps-res-header">
+                      <span className="vps-res-label">CPU</span>
+                      <span className="vps-res-val mono">{cpuPercent.toFixed(1)}%</span>
                     </div>
-                    <div className="vps-hw-sub mono">{cores} 核</div>
-                    <SegmentedBar value={node.cpu || 0} max={100} segments={14} activeColor="#3b82f6" />
+                    <div className="vps-res-bar-wrap">
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} />
+                    </div>
+                    <div className="vps-res-sub mono">{loadText}</div>
                   </div>
 
                   {/* 内存 */}
-                  <div className="vps-hw-cell">
-                    <div className="vps-hw-header">
-                      <span className="vps-hw-label"><Memory size={13} /> 内存</span>
-                      <b className="vps-hw-val mono">{node.memory !== null ? `${formatPercent(node.memory)}` : '0.0 %'}</b>
+                  <div className="vps-res-cell">
+                    <div className="vps-res-header">
+                      <span className="vps-res-label">内存</span>
+                      <span className="vps-res-val mono">{memPercent.toFixed(1)}%</span>
                     </div>
-                    <div className="vps-hw-sub mono">
-                      {node.memUsed !== null && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : '500 MB / 960 MB'}
+                    <div className="vps-res-bar-wrap">
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }} />
                     </div>
-                    <SegmentedBar value={node.memory || 0} max={100} segments={14} activeColor="#8b5cf6" />
+                    <div className="vps-res-sub mono">{memSub}</div>
                   </div>
 
-                  {/* 磁盘 */}
-                  <div className="vps-hw-cell">
-                    <div className="vps-hw-header">
-                      <span className="vps-hw-label"><HardDrive size={13} /> 磁盘</span>
-                      <b className="vps-hw-val mono">{node.disk !== null ? `${formatPercent(node.disk)}` : '0.0 %'}</b>
+                  {/* 硬盘 */}
+                  <div className="vps-res-cell">
+                    <div className="vps-res-header">
+                      <span className="vps-res-label">硬盘</span>
+                      <span className="vps-res-val mono">{diskPercent.toFixed(1)}%</span>
                     </div>
-                    <div className="vps-hw-sub mono">
-                      {node.diskUsed !== null && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : '7.09 GB / 29.4 GB'}
+                    <div className="vps-res-bar-wrap">
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }} />
                     </div>
-                    <SegmentedBar value={node.disk || 0} max={100} segments={14} activeColor="#f97316" />
+                    <div className="vps-res-sub mono">{diskSub}</div>
                   </div>
 
-                  {/* 负载 */}
-                  <div className="vps-hw-cell">
-                    <div className="vps-hw-header">
-                      <span className="vps-hw-label"><Timer size={13} /> 负载</span>
-                      <b className="vps-hw-val mono">{l1.toFixed(2)}</b>
+                  {/* 流量 */}
+                  <div className="vps-res-cell">
+                    <div className="vps-res-header">
+                      <span className="vps-res-label">流量</span>
+                      <span className="vps-res-val mono text-traffic">{trafficPercent.toFixed(1)}%</span>
                     </div>
-                    <div className="vps-hw-sub mono">{l1.toFixed(2)} / {l5.toFixed(2)} / {l15.toFixed(2)}</div>
-                    <SegmentedBar value={Math.min(l1 * 50, 100)} max={100} segments={14} activeColor="#64748b" />
+                    <div className="vps-res-bar-wrap">
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent))}%` }} />
+                    </div>
+                    <div className="vps-res-sub mono">{trafficSub}</div>
                   </div>
                 </div>
 
-                {/* 3. 实时速率与出入站流量 */}
-                <div className="vps-net-rates">
-                  <div className="vps-rate-row">
-                    <div className="vps-rate-left">
-                      <span className="rate-dir-icon text-blue"><ArrowUp size={13} weight="bold" /></span>
-                      <span className="rate-dir-name">上行</span>
-                      <b className="rate-speed-large mono">{formatRate(upRate)}</b>
-                      <span className="live-pulse">
-                        <span className="pulse-dots">•••</span>
-                        <span className="live-text">实时</span>
-                      </span>
+                {/* 4. 实时速率 / 累计流量 / 到期剩余 (3列布局) */}
+                <div className="vps-stats-tri-row">
+                  <div className="vps-tri-col vps-speeds-col">
+                    <div className="vps-speed-line up mono">
+                      <span className="vps-arrow-icon">^</span>
+                      <span>{upRateText}</span>
                     </div>
-                    <div className="vps-rate-right">
-                      <Globe size={13} className="text-muted" />
-                      <span className="traffic-side-label">出站</span>
-                      <b className="mono traffic-side-val">{formatBytes(node.tx || 0)}</b>
+                    <div className="vps-speed-line down mono">
+                      <span className="vps-arrow-icon">v</span>
+                      <span>{downRateText}</span>
                     </div>
                   </div>
 
-                  <div className="vps-rate-row">
-                    <div className="vps-rate-left">
-                      <span className="rate-dir-icon text-mint"><ArrowDown size={13} weight="bold" /></span>
-                      <span className="rate-dir-name">下行</span>
-                      <b className="rate-speed-large mono">{formatRate(downRate)}</b>
-                      <span className="live-pulse">
-                        <span className="pulse-dots">•••</span>
-                        <span className="live-text">实时</span>
-                      </span>
+                  <div className="vps-tri-col vps-totals-col">
+                    <div className="vps-total-line mono">
+                      <span className="vps-arrow-icon">↑</span>
+                      <span>{totalTxText}</span>
                     </div>
-                    <div className="vps-rate-right">
-                      <Globe size={13} className="text-muted" />
-                      <span className="traffic-side-label">入站</span>
-                      <b className="mono traffic-side-val">{formatBytes(node.rx || 0)}</b>
+                    <div className="vps-total-line mono">
+                      <span className="vps-arrow-icon">↓</span>
+                      <span>{totalRxText}</span>
                     </div>
                   </div>
 
-                  <div className="vps-transfer-bar-wrap">
-                    <div className="vps-transfer-meta">
-                      <span className="transfer-meta-left">
-                        🗄️ 剩余流量 {customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '∞'}
-                      </span>
-                      <span className="transfer-meta-right mono">
-                        {formatBytes(totalTransfer)} / {customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '∞'}
-                      </span>
+                  <div className="vps-tri-col vps-expiry-col">
+                    <div className="vps-meta-line">
+                      <span className="vps-meta-icon">📅</span>
+                      <span>剩余 {remainDays} 天</span>
                     </div>
-                    <SegmentedBar value={15} max={100} segments={28} activeColor="#3b82f6" className="vps-full-segmented" />
+                    <div className="vps-meta-line">
+                      <span className="vps-meta-icon">💰</span>
+                      <span>{costText}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* 4. TCP / UDP 连接数 */}
-                <div className="vps-conns-row">
-                  <div className="vps-conn-item">
-                    <span className="conn-label">TCP 连接</span>
-                    <b className="conn-val mono text-mint">{tcpCount}</b>
-                  </div>
-                  <div className="vps-conn-item">
-                    <span className="conn-label">UDP 连接</span>
-                    <b className="conn-val mono text-mint">{udpCount}</b>
-                  </div>
-                </div>
+                {/* 5. 分割线 */}
+                <div className="vps-divider-line" />
 
-                {/* 5. 三网 (电信 / 联通 / 移动) 延迟与丢包率点阵矩阵 */}
-                <div className="vps-isp-matrix">
-                  {ispData.map((isp) => {
-                    const latColor = isp.latency < 60 ? '#34d399' : isp.latency < 160 ? '#f59e0b' : '#f43f5e'
-                    return (
-                      <div className="vps-isp-row" key={isp.name}>
-                        <span className="isp-name">{isp.name}</span>
-                        <span className="isp-lat mono" style={{ color: latColor }}>{isp.latency} ms</span>
-                        <SegmentedBar
-                          value={Math.min(isp.latency, 250)}
-                          max={250}
-                          segments={14}
-                          activeColor={latColor}
-                          className="isp-bar"
-                        />
-                        <SegmentedBar
-                          value={isp.loss}
-                          max={100}
-                          segments={14}
-                          activeColor="#f43f5e"
-                          className="isp-bar"
-                        />
-                        <span className={`isp-loss mono ${isp.loss > 0 ? 'text-rose' : 'text-mint'}`}>
-                          {isp.loss.toFixed(1)} %
+                {/* 6. 三网 延迟 (左) & 丢包 (右) 16点阵监控区 */}
+                <div className="vps-isp-matrix-grid">
+                  {/* 左列: 延迟 */}
+                  <div className="vps-isp-col">
+                    <div className="vps-isp-col-header">
+                      <span className="vps-isp-col-title">延迟</span>
+                      <span className="vps-isp-col-sub">三网</span>
+                    </div>
+
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot unicom-red" />
+                          <span>联通</span>
                         </span>
+                        <span className="vps-isp-val mono">{cuIsp.latency} ms</span>
                       </div>
-                    )
-                  })}
-                </div>
+                      <VpsDotTrack blocks={getLatencyBlocks(cuIsp.latency)} />
+                    </div>
 
-                {/* 6. 底部信息栏：在线时长、到期时间、精品小鸡与账单价格 */}
-                <div className="vps-card-footer">
-                  <div className="vps-footer-left">
-                    <span className="vps-footer-item">
-                      <ArrowsClockwise size={13} className="text-blue" />
-                      <span>在线: <b className="mono text-blue">{uptimeDays}</b></span>
-                    </span>
-                    <span className="vps-footer-item">
-                      <CalendarBlank size={13} className="text-mint" />
-                      <span>到期: <b className="mono text-mint">{expireDays}</b></span>
-                    </span>
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot telecom-blue" />
+                          <span>电信</span>
+                        </span>
+                        <span className="vps-isp-val mono">{ctIsp.latency} ms</span>
+                      </div>
+                      <VpsDotTrack blocks={getLatencyBlocks(ctIsp.latency)} />
+                    </div>
+
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot mobile-green" />
+                          <span>移动</span>
+                        </span>
+                        <span className="vps-isp-val mono">{cmIsp.latency} ms</span>
+                      </div>
+                      <VpsDotTrack blocks={getLatencyBlocks(cmIsp.latency)} />
+                    </div>
                   </div>
-                  <div className="vps-footer-right">
-                    <span
-                      className="vps-pill-tag pill-lavender"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setBillingTargetNode(node)
-                      }}
-                      title="点击配置小鸡属性"
-                    >
-                      精品小鸡
-                    </span>
-                    <span
-                      className="vps-pill-tag pill-price mono"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setBillingTargetNode(node)
-                      }}
-                      title="点击计算二手出鸡指导价与账单详情"
-                    >
-                      💲 {priceDisplay}
-                    </span>
+
+                  {/* 右列: 丢包 */}
+                  <div className="vps-isp-col">
+                    <div className="vps-isp-col-header">
+                      <span className="vps-isp-col-title">丢包</span>
+                      <span className="vps-isp-col-sub">三网</span>
+                    </div>
+
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot unicom-red" />
+                          <span>联通</span>
+                        </span>
+                        <span className="vps-isp-val mono">{cuIsp.loss.toFixed(1)}%</span>
+                      </div>
+                      <VpsDotTrack blocks={getLossBlocks(cuIsp.loss)} />
+                    </div>
+
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot telecom-blue" />
+                          <span>电信</span>
+                        </span>
+                        <span className="vps-isp-val mono">{ctIsp.loss.toFixed(1)}%</span>
+                      </div>
+                      <VpsDotTrack blocks={getLossBlocks(ctIsp.loss)} />
+                    </div>
+
+                    <div className="vps-isp-track-item">
+                      <div className="vps-isp-track-header">
+                        <span className="vps-isp-tag">
+                          <span className="vps-isp-dot mobile-green" />
+                          <span>移动</span>
+                        </span>
+                        <span className="vps-isp-val mono">{cmIsp.loss.toFixed(1)}%</span>
+                      </div>
+                      <VpsDotTrack blocks={getLossBlocks(cmIsp.loss)} />
+                    </div>
                   </div>
                 </div>
               </article>

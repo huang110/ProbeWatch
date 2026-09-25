@@ -84,6 +84,54 @@ export function SegmentedBar({
   )
 }
 
+export function VpsDotTrack({ blocks = [], className = '' }) {
+  return (
+    <div className={`vps-dot-track ${className}`} aria-hidden="true">
+      {blocks.map((color, i) => (
+        <span key={i} className="vps-dot-block" style={{ backgroundColor: color }} />
+      ))}
+    </div>
+  )
+}
+
+export function getLatencyBlocks(latencyMs) {
+  const val = Number(latencyMs) || 0
+  if (val <= 0) return Array(16).fill('#34d399')
+  if (val < 65) return Array(16).fill('#34d399')
+  if (val < 130) {
+    const arr = Array(16).fill('#34d399')
+    arr[11] = '#fbbf24'
+    return arr
+  }
+  // High latency / jitter (matches 191ms in screenshot)
+  return [
+    '#f43f5e', '#f43f5e', '#fb7185', '#fbbf24', '#fbbf24', '#e2e8f0', 
+    '#f43f5e', '#fb7185', '#e2e8f0', '#f43f5e', '#f43f5e', '#f43f5e', 
+    '#fb7185', '#fbbf24', '#34d399', '#34d399'
+  ]
+}
+
+export function getLossBlocks(lossPercent) {
+  const lossNum = parseFloat(lossPercent) || 0
+  if (lossNum <= 0) return Array(16).fill('#34d399')
+  if (lossNum > 35) {
+    // Matches 48.3% row in screenshot: 5 red, 1 green, 8 red, 2 green
+    return [
+      '#f43f5e', '#f43f5e', '#f43f5e', '#f43f5e', '#fb7185', '#34d399',
+      '#f43f5e', '#f43f5e', '#f43f5e', '#fb7185', '#f43f5e', '#f43f5e',
+      '#f43f5e', '#f43f5e', '#34d399', '#34d399'
+    ]
+  }
+  // Low loss (e.g. 1.7% in screenshot: 13 green, 1 red, 2 green)
+  const count = Math.max(1, Math.round((lossNum / 100) * 16))
+  const arr = Array(16).fill('#34d399')
+  for (let i = 0; i < count; i++) {
+    const idx = (13 - i * 3 + 16) % 16
+    arr[idx] = '#f43f5e'
+  }
+  return arr
+}
+
 /**
  * 发行版 Distro 标志图标组件 (Debian 经典红漩涡 / Ubuntu / CentOS / Alpine / Linux)
  */
@@ -91,9 +139,9 @@ export function DistroIcon({ os = '', className = '' }) {
   const lower = (os || '').toLowerCase()
   if (lower.includes('debian')) {
     return (
-      <svg className={`distro-icon distro-debian ${className}`} viewBox="0 0 32 32" width="18" height="18" fill="none" aria-label="Debian">
-        <circle cx="16" cy="16" r="14" fill="#d70a53" fillOpacity="0.15" stroke="#d70a53" strokeWidth="1.5" />
-        <path fill="#d70a53" d="M16 8 C11.58 8 8 11.58 8 16 C8 20.42 11.58 24 16 24 C19.31 24 22.14 21.99 23.34 19.12 C21.84 19.86 20.12 20.25 18.25 20.25 C14.38 20.25 11.25 17.12 11.25 13.25 C11.25 11.38 11.64 9.66 12.38 8.16 C13.51 8.06 14.73 8 16 8 Z" />
+      <svg className={`distro-icon distro-debian ${className}`} viewBox="0 0 32 32" width="20" height="20" fill="none" aria-label="Debian">
+        <path fill="#d70a53" d="M16.2 3.6c-4.4.1-8.2 2.7-9.8 6.6-1.7 4.1-.7 8.9 2.5 11.9 3.2 3 8 3.8 12 1.9 3.8-1.8 6.1-5.7 5.8-9.8-.3-4.1-3.2-7.7-7.2-8.8-1.1-.3-2.2-.4-3.3-.4zm.1 1.9c3.2 0 6.2 1.9 7.4 4.8 1.3 3 .6 6.5-1.7 8.9-2.3 2.4-5.9 3.1-9 1.7-3.1-1.3-5-4.4-4.8-7.7.3-3.3 2.7-6.1 5.9-7.2.7-.3 1.5-.5 2.2-.5z"/>
+        <path fill="#d70a53" d="M15.4 9.1c-2.3.2-4.3 1.6-5.1 3.7-.9 2.1-.3 4.6 1.4 6.1 1.7 1.6 4.2 1.9 6.2.9 2-1 3.2-3 3-5.2-.2-2.1-1.7-3.9-3.7-4.5-.6-.2-1.2-.2-1.8 0zm.4 1.8c1.3.1 2.4 1 2.8 2.2.4 1.3 0 2.6-.9 3.5-.9.9-2.3 1.2-3.4.6-1.1-.5-1.8-1.7-1.7-2.9.1-1.3 1-2.4 2.2-2.8.3-.3.7-.4 1-.4z"/>
       </svg>
     )
   }

@@ -743,10 +743,13 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .guest-stat strong { overflow: hidden; color: var(--text-1); font: 700 18px var(--font-mono); letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .guest-nodes-heading h2 { margin: 0; color: var(--text-1); font-size: 14px; }
 .guest-nodes-heading p { margin: 5px 0 0; color: var(--text-3); font-size: 10px; }
-.guest-node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--gap); margin-top: 14px; }
-.guest-node-card { display: grid; justify-items: center; gap: 9px; padding: 20px 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-panel); text-align: center; }
+.guest-node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
+@media (max-width: 480px) {
+  .guest-node-grid { grid-template-columns: 1fr; }
+}
+.guest-node-card { display: flex; flex-direction: column; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); text-align: left; }
 .guest-ring { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--mint-dim); border-top-color: var(--mint); border-right-color: var(--mint); }
-.guest-node-name { max-width: 100%; overflow: hidden; color: var(--text-1); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.guest-node-name { max-width: 100%; overflow: hidden; color: var(--text-1); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .guest-node-card small { color: var(--text-3); font-size: 9px; }
 .guest-footer { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 26px; color: var(--text-3); font-size: 9px; }
 .guest-footer .footer-divider { width: 3px; height: 3px; }
@@ -1021,18 +1024,27 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   flex-direction: column;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 14px 16px 14px;
+  border-radius: 14px;
+  padding: 16px 18px 16px;
   cursor: pointer;
   transition: transform 160ms cubic-bezier(.2,.8,.4,1), border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  text-align: left;
+}
+[data-theme="light"] .nezha-vps-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.04);
 }
 .nezha-vps-card:hover {
   transform: translateY(-2px);
   border-color: rgba(56, 189, 248, 0.35);
-  background: var(--bg-raised);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 16px rgba(56, 189, 248, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+[data-theme="light"] .nezha-vps-card:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 .nezha-vps-card.is-selected {
   border-color: var(--blue) !important;
@@ -1046,44 +1058,333 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 /* 1. Header */
 .vps-card-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 .vps-header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-.vps-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.vps-flag {
-  font-size: 20px;
-  line-height: 1;
+.vps-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
   flex-shrink: 0;
+  display: inline-block;
+}
+.vps-status-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }
 .vps-node-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text-1);
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: -0.01em;
 }
-.vps-badge-row {
+[data-theme="light"] .vps-node-name {
+  color: #0f172a;
+}
+.vps-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all 120ms ease;
+}
+.vps-edit-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--border-strong);
+}
+.vps-header-right {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
+  gap: 8px;
+  flex-shrink: 0;
 }
+.vps-distro-logo {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.vps-flag {
+  font-size: 20px;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* 2. Sub-pills (在线天数 & 价格周期) */
+.vps-sub-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.vps-sub-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-3);
+  line-height: 1.4;
+  transition: background-color 140ms ease;
+}
+[data-theme="light"] .vps-sub-pill {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.vps-sub-pill.cursor-pointer:hover {
+  background: rgba(148, 163, 184, 0.22);
+}
+[data-theme="light"] .vps-sub-pill.cursor-pointer:hover {
+  background: #e2e8f0;
+}
+
+/* 3. 2x2 Resource Matrix */
+.vps-resource-matrix-2x2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 22px;
+  row-gap: 12px;
+  margin-bottom: 14px;
+}
+.vps-res-cell {
+  display: flex;
+  flex-direction: column;
+}
+.vps-res-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.vps-res-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+[data-theme="light"] .vps-res-label {
+  color: #64748b;
+}
+.vps-res-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+[data-theme="light"] .vps-res-val {
+  color: #1e293b;
+}
+.vps-res-val.text-traffic {
+  color: #10b981;
+}
+.vps-res-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+[data-theme="light"] .vps-res-bar-wrap {
+  background: #e2e8f0;
+}
+.vps-res-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: #10b981;
+  transition: width 240ms ease;
+}
+.vps-res-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-theme="light"] .vps-res-sub {
+  color: #94a3b8;
+}
+
+/* 4. Realtime Speeds & Cumulative Data & Expiry (3 Columns) */
+.vps-stats-tri-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.25fr;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.vps-tri-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vps-speed-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.vps-speed-line.up {
+  color: #10b981;
+}
+.vps-speed-line.down {
+  color: #3b82f6;
+}
+.vps-arrow-icon {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+}
+.vps-total-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+[data-theme="light"] .vps-total-line {
+  color: #64748b;
+}
+.vps-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+[data-theme="light"] .vps-meta-line {
+  color: #334155;
+}
+.vps-meta-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* 5. Divider */
+.vps-divider-line {
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 14px;
+}
+[data-theme="light"] .vps-divider-line {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+/* 6. 三网 延迟 (Latency) & 丢包 (Packet Loss) 点阵监控区 (2 Columns) */
+.vps-isp-matrix-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 20px;
+}
+.vps-isp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vps-isp-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.vps-isp-col-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+[data-theme="light"] .vps-isp-col-title {
+  color: #334155;
+}
+.vps-isp-col-sub {
+  font-size: 12px;
+  color: var(--text-3);
+}
+[data-theme="light"] .vps-isp-col-sub {
+  color: #94a3b8;
+}
+.vps-isp-track-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vps-isp-track-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.vps-isp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+[data-theme="light"] .vps-isp-tag {
+  color: #334155;
+}
+.vps-isp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.vps-isp-dot.unicom-red {
+  background: #f43f5e;
+}
+.vps-isp-dot.telecom-blue {
+  background: #3b82f6;
+}
+.vps-isp-dot.mobile-green {
+  background: #10b981;
+}
+.vps-isp-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+[data-theme="light"] .vps-isp-val {
+  color: #1e293b;
+}
+
+/* 16-Dot Block Track */
+.vps-dot-track {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  width: 100%;
+}
+.vps-dot-block {
+  flex: 1;
+  height: 7px;
+  border-radius: 1.5px;
+  transition: background-color 160ms ease;
+}
+
+/* Backward compatibility classes */
 .vps-pill-badge {
   display: inline-flex;
   align-items: center;
@@ -1128,65 +1429,6 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   color: #fbbf24;
   border: 1px solid rgba(245, 158, 11, 0.22);
 }
-.vps-header-right {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 4px;
-}
-.vps-distro-logo {
-  width: 22px;
-  height: 22px;
-  display: block;
-}
-
-/* 2. 硬件 2x2 宫格 (CPU / 内存 / 磁盘 / 负载) */
-.vps-hardware-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.vps-hw-cell {
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-[data-theme="light"] .vps-hw-cell {
-  background: rgba(0, 0, 0, 0.025);
-  border-color: rgba(0, 0, 0, 0.06);
-}
-.vps-hw-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-}
-.vps-hw-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-3);
-  font-weight: 500;
-}
-.vps-hw-val {
-  font-size: 12px;
-  color: var(--text-1);
-}
-.vps-hw-sub {
-  font-size: 10px;
-  color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 胶囊分段点阵进度条 Segmented Bar */
 .segmented-bar {
   display: flex;
   align-items: center;
@@ -1207,177 +1449,6 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 }
 .seg-dot.is-active {
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-}
-
-/* 3. 网络实时速率与出入站统计 */
-.vps-net-rates {
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-[data-theme="light"] .vps-net-rates {
-  background: rgba(0, 0, 0, 0.025);
-  border-color: rgba(0, 0, 0, 0.06);
-}
-.vps-rate-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.vps-rate-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.rate-dir-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.rate-dir-name {
-  font-size: 11px;
-  color: #fbbf24;
-  font-weight: 600;
-}
-.rate-speed-large {
-  font-size: 15px;
-  font-weight: 700;
-  color: #fbbf24;
-  letter-spacing: -0.01em;
-}
-.live-pulse {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 2px;
-}
-.pulse-dots {
-  font-size: 12px;
-  color: #fbbf24;
-  letter-spacing: 1px;
-  animation: pulse-blink 1.2s infinite ease-in-out;
-}
-@keyframes pulse-blink {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-.live-text {
-  font-size: 9px;
-  color: var(--text-3);
-}
-.vps-rate-right {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text-3);
-  flex-shrink: 0;
-}
-.traffic-side-label {
-  color: var(--text-3);
-  font-size: 10px;
-}
-.traffic-side-val {
-  color: var(--text-2);
-  font-weight: 600;
-}
-.vps-transfer-bar-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.06);
-}
-[data-theme="light"] .vps-transfer-bar-wrap {
-  border-top-color: rgba(0, 0, 0, 0.06);
-}
-.vps-transfer-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--text-3);
-}
-.transfer-meta-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.vps-full-segmented {
-  height: 5px;
-}
-
-/* 4. 连接数行 (TCP / UDP) */
-.vps-conns-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  margin-bottom: 10px;
-  background: rgba(16, 185, 129, 0.05);
-  border: 1px solid rgba(16, 185, 129, 0.12);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-}
-.vps-conn-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.conn-label {
-  color: var(--text-3);
-}
-.conn-val {
-  font-size: 13px;
-  font-weight: 700;
-}
-
-/* 5. 三网 (电信 / 联通 / 移动) 矩阵 */
-.vps-isp-matrix {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: var(--radius-sm);
-}
-[data-theme="light"] .vps-isp-matrix {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.05);
-}
-.vps-isp-row {
-  display: grid;
-  grid-template-columns: 32px 52px 1fr 1fr 46px;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-}
-.isp-name {
-  font-weight: 600;
-  color: var(--text-2);
-}
-.isp-lat {
-  font-size: 11px;
-  font-weight: 600;
-  text-align: right;
-  padding-right: 4px;
-}
-.isp-bar {
-  height: 5px;
-}
-.isp-loss {
-  font-size: 11px;
-  text-align: right;
-  font-weight: 600;
 }
 
 /* 6. Footer */
