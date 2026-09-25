@@ -306,6 +306,29 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS alert_rules_metric_idx ON alert_rules(metric, enabled);
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id TEXT PRIMARY KEY,
+    admin_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    credential_id BLOB NOT NULL UNIQUE,
+    public_key BLOB NOT NULL,
+    algorithm INTEGER NOT NULL DEFAULT -7,
+    sign_count INTEGER NOT NULL DEFAULT 0,
+    aaguid BLOB NOT NULL DEFAULT X'',
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS webauthn_credentials_admin_idx ON webauthn_credentials(admin_id);
+CREATE INDEX IF NOT EXISTS webauthn_credentials_cred_idx ON webauthn_credentials(credential_id);
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+    id TEXT PRIMARY KEY,
+    challenge BLOB NOT NULL,
+    challenge_type TEXT NOT NULL,
+    admin_id TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webauthn_challenges_expiry_idx ON webauthn_challenges(expires_at);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {

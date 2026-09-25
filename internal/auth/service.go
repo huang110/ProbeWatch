@@ -306,6 +306,26 @@ func (s *Service) AuthenticateLocalPassword(w http.ResponseWriter, r *http.Reque
 	return nil
 }
 
+// IssueSessionCookie creates and sets an authenticated session cookie for the given admin user.
+func (s *Service) IssueSessionCookie(w http.ResponseWriter, r *http.Request, adminID string) error {
+	sessionValue, err := s.createSession(r.Context(), adminID, time.Now().UTC())
+	if err != nil {
+		logInternalError("create session", err)
+		return err
+	}
+	setCookie(w, s.cfg, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionValue,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   s.cfg.Environment != "development",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionLifetime / time.Second),
+		Expires:  time.Now().UTC().Add(sessionLifetime),
+	})
+	return nil
+}
+
 func (s *Service) CSRFHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

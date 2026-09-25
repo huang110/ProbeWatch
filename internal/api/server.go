@@ -108,6 +108,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/agent/v1/media-result", s.mediaResultAgent)
 	mux.HandleFunc("/api/agent/v1/update/check", s.agentUpdateCheck)
 	mux.HandleFunc("/api/agent/v1/update/download", s.agentUpdateDownload)
+
+	// WebAuthn / Passkey endpoints
+	mux.HandleFunc("/api/webauthn/login/begin", s.webauthnLoginBegin)
+	mux.HandleFunc("/api/webauthn/login/finish", s.webauthnLoginFinish)
+	mux.Handle("/api/webauthn/register/begin", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.webauthnRegisterBegin))))
+	mux.Handle("/api/webauthn/register/finish", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.webauthnRegisterFinish))))
+	mux.Handle("/api/webauthn/credentials", middleware.RequireCSRF(http.HandlerFunc(s.webauthnCredentialsRoute)))
+	mux.Handle("/api/webauthn/credentials/", middleware.RequireCSRF(http.HandlerFunc(s.webauthnCredentialsRoute)))
 	mux.HandleFunc("/api/public/version", s.publicVersion)
 
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

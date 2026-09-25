@@ -1,6 +1,7 @@
 import { AlertCenterView } from './AlertCenterView.jsx'
 import { MediaMatrix } from './MediaMatrix.jsx'
 import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
+import { PasskeySettingsCard } from './PasskeySettingsCard.jsx'
 import { BackupManagementCard } from './BackupManagementCard.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
@@ -107,6 +108,7 @@ export function SubPage({
         <TargetManage />
       ) : page === 'settings' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <PasskeySettingsCard />
           <TOTPSettingsCard
             interval={refreshInterval}
             onIntervalChange={onIntervalChange}

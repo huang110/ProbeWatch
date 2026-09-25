@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
+import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
@@ -51,6 +52,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+  const [passkeyLoading, setPasskeyLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [internalStatus, setInternalStatus] = useState(null)
   const [localRefreshing, setLocalRefreshing] = useState(false)
@@ -123,6 +125,30 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       setLoginError('网络连接失败，请检查主控运行状态')
     } finally {
       setLoginLoading(false)
+    }
+  }
+
+  const handlePasskeyLogin = async () => {
+    setPasskeyLoading(true)
+    setLoginError('')
+    try {
+      const res = await loginWithPasskey()
+      if (res.status === 'ok') {
+        setShowLogin(false)
+        if (onLoginSuccess) {
+          onLoginSuccess()
+        } else {
+          window.location.reload()
+        }
+      }
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setLoginError('已取消通行密钥验证')
+      } else {
+        setLoginError(err.message || '通行密钥登录失败')
+      }
+    } finally {
+      setPasskeyLoading(false)
     }
   }
 
@@ -780,6 +806,42 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             <p className="modal-desc">
               登录后可查看硬件完整占用、实时流速、MTR 链路指纹与告警管理。
             </p>
+
+            {isWebAuthnSupported() && (
+              <div style={{ marginBottom: '16px' }}>
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={handlePasskeyLogin}
+                  disabled={passkeyLoading || loginLoading}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    width: '100%',
+                    padding: '10px 16px',
+                    borderRadius: '8px',
+                    background: 'rgba(56, 189, 248, 0.1)',
+                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    color: '#38bdf8',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {passkeyLoading ? <CircleNotch size={18} className="spin" /> : <Fingerprint size={18} weight="bold" />}
+                  <span>{passkeyLoading ? '正在验证通行密钥…' : '通行密钥免密登录 (Passkey)'}</span>
+                </button>
+
+                <div className="modal-divider" style={{ margin: '14px 0 10px 0' }}>
+                  <span />
+                  <small>或使用管理口令</small>
+                  <span />
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handlePasswordLogin}>
               <div className="input-group">
