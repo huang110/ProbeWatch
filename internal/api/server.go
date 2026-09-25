@@ -12,11 +12,13 @@ import (
 	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/notify"
 )
 
 type Server struct {
 	cfg           config.Config
 	service       *auth.Service
+	notifier      *notify.Notifier
 	agentLimiter  *rateLimiter
 	agentIPLimiter *rateLimiter
 	registrationLimiter *rateLimiter
@@ -29,9 +31,14 @@ type Server struct {
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
+	n := notify.NewNotifier(cfg)
+	if service != nil && service.Store() != nil {
+		n.SetStore(service.Store())
+	}
 	return &Server{
 		cfg:           cfg,
 		service:       service,
+		notifier:      n,
 		agentLimiter:  newRateLimiter(120, time.Minute, 10000),
 		agentIPLimiter: newRateLimiter(240, time.Minute, 10000),
 		registrationLimiter: newRateLimiter(10, time.Minute, 10000),
@@ -39,6 +46,10 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
 	}
+}
+
+func (s *Server) SetNotifier(n *notify.Notifier) {
+	s.notifier = n
 }
 
 func (s *Server) agentNodeTokenTTL() time.Duration {
@@ -82,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/overview", middleware.RequireAuth(http.HandlerFunc(s.overview)))
 	mux.Handle("/api/alerts", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
 	mux.Handle("/api/alerts/", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
+	mux.Handle("/api/settings", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
+	mux.Handle("/api/settings/", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
 	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
 	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))

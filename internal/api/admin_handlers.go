@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -35,15 +38,344 @@ func alertResponseFrom(a db.AlertEvent) alertResponse {
 }
 
 func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet && r.URL.Path == "/api/alerts" {
+	cleanPath := strings.TrimRight(r.URL.Path, "/")
+	if r.Method == http.MethodGet && cleanPath == "/api/alerts" {
 		s.listAlerts(w, r)
 		return
 	}
-	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/ack") {
+	if r.Method == http.MethodPost && strings.HasSuffix(cleanPath, "/ack") {
 		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.ackAlert)).ServeHTTP(w, r)
 		return
 	}
+
+	// Channel endpoints
+	if cleanPath == "/api/alerts/channels" {
+		switch r.Method {
+		case http.MethodGet:
+			s.listNotificationChannels(w, r)
+		case http.MethodPost:
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createNotificationChannel)).ServeHTTP(w, r)
+		default:
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	if strings.HasPrefix(cleanPath, "/api/alerts/channels/") {
+		parts := strings.Split(cleanPath, "/")
+		if len(parts) == 5 {
+			channelID := parts[4]
+			switch r.Method {
+			case http.MethodGet:
+				s.getNotificationChannel(w, r, channelID)
+			case http.MethodPut:
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.updateNotificationChannel(w, r, channelID)
+				})).ServeHTTP(w, r)
+			case http.MethodDelete:
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.deleteNotificationChannel(w, r, channelID)
+				})).ServeHTTP(w, r)
+			default:
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+			return
+		}
+		if len(parts) == 6 && parts[5] == "test" {
+			channelID := parts[4]
+			if r.Method != http.MethodPost {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.testNotificationChannel(w, r, channelID)
+			})).ServeHTTP(w, r)
+			return
+		}
+	}
+
+	// Direct test endpoint
+	if cleanPath == "/api/alerts/test" {
+		if r.Method != http.MethodPost {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.testNotificationDirect)).ServeHTTP(w, r)
+		return
+	}
+
+	// Settings endpoint
+	if cleanPath == "/api/alerts/settings" {
+		switch r.Method {
+		case http.MethodGet:
+			s.getAlertSettings(w, r)
+		case http.MethodPost, http.MethodPut:
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.saveAlertSettings)).ServeHTTP(w, r)
+		default:
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
 	writeJSONError(w, http.StatusNotFound, "not found")
+}
+
+func (s *Server) settingsRoute(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.getAlertSettings(w, r)
+	case http.MethodPost, http.MethodPut:
+		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.saveAlertSettings)).ServeHTTP(w, r)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+type channelRequest struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Config  string `json:"config"`
+	Enabled bool   `json:"enabled"`
+	Events  string `json:"events"`
+}
+
+type testNotificationRequest struct {
+	ChannelID string `json:"channel_id,omitempty"`
+	Type      string `json:"type,omitempty"`
+	Config    any    `json:"config,omitempty"`
+}
+
+func maskToken(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 8 {
+		return "******"
+	}
+	return token[:4] + "******" + token[len(token)-4:]
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("ch-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func (s *Server) listNotificationChannels(w http.ResponseWriter, r *http.Request) {
+	channels, err := s.service.Store().ListNotificationChannels(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	// Synthesize fallback channels from env if DB has none
+	if len(channels) == 0 {
+		if strings.TrimSpace(s.cfg.TelegramBotToken) != "" && strings.TrimSpace(s.cfg.TelegramChatID) != "" {
+			conf, _ := json.Marshal(map[string]string{
+				"bot_token": maskToken(s.cfg.TelegramBotToken),
+				"chat_id":   s.cfg.TelegramChatID,
+			})
+			channels = append(channels, db.NotificationChannel{
+				ID:        "env-telegram",
+				Name:      "Telegram Bot (环境变量)",
+				Type:      "telegram",
+				Config:    string(conf),
+				Enabled:   true,
+				Events:    "[]",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			})
+		}
+		if strings.TrimSpace(s.cfg.WebhookURL) != "" {
+			conf, _ := json.Marshal(map[string]string{
+				"webhook_url": s.cfg.WebhookURL,
+			})
+			channels = append(channels, db.NotificationChannel{
+				ID:        "env-webhook",
+				Name:      "Webhook (环境变量)",
+				Type:      "webhook",
+				Config:    string(conf),
+				Enabled:   true,
+				Events:    "[]",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, channels)
+}
+
+func (s *Server) getNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
+	ch, err := s.service.Store().GetNotificationChannel(r.Context(), id)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, ch)
+}
+
+func (s *Server) createNotificationChannel(w http.ResponseWriter, r *http.Request) {
+	var req channelRequest
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Type) == "" {
+		writeJSONError(w, http.StatusBadRequest, "name and type are required")
+		return
+	}
+	ch := db.NotificationChannel{
+		ID:        randomHex(8),
+		Name:      strings.TrimSpace(req.Name),
+		Type:      strings.TrimSpace(strings.ToLower(req.Type)),
+		Config:    req.Config,
+		Enabled:   req.Enabled,
+		Events:    req.Events,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.service.Store().UpsertNotificationChannel(r.Context(), ch); err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to save channel")
+		return
+	}
+	writeJSON(w, http.StatusCreated, ch)
+}
+
+func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
+	var req channelRequest
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	ch := db.NotificationChannel{
+		ID:        id,
+		Name:      strings.TrimSpace(req.Name),
+		Type:      strings.TrimSpace(strings.ToLower(req.Type)),
+		Config:    req.Config,
+		Enabled:   req.Enabled,
+		Events:    req.Events,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.service.Store().UpsertNotificationChannel(r.Context(), ch); err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to update channel")
+		return
+	}
+	writeJSON(w, http.StatusOK, ch)
+}
+
+func (s *Server) deleteNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
+	if err := s.service.Store().DeleteNotificationChannel(r.Context(), id); err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to delete channel")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) testNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
+	ch, err := s.service.Store().GetNotificationChannel(r.Context(), id)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if s.notifier == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "notifier service unavailable")
+		return
+	}
+	if err := s.notifier.SendTestNotification(r.Context(), ch.Type, ch.Config); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("测试消息发送失败: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "测试通知已成功推送到 " + ch.Name})
+}
+
+func (s *Server) testNotificationDirect(w http.ResponseWriter, r *http.Request) {
+	var req testNotificationRequest
+	_ = decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req)
+
+	if s.notifier == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "notifier service unavailable")
+		return
+	}
+
+	if req.ChannelID != "" {
+		ch, err := s.service.Store().GetNotificationChannel(r.Context(), req.ChannelID)
+		if err != nil {
+			writeJSONError(w, http.StatusNotFound, "channel not found")
+			return
+		}
+		if err := s.notifier.SendTestNotification(r.Context(), ch.Type, ch.Config); err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("测试消息发送失败: %v", err))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "测试通知已成功推送到 " + ch.Name})
+		return
+	}
+
+	if req.Type != "" && req.Config != nil {
+		var cfgStr string
+		switch v := req.Config.(type) {
+		case string:
+			cfgStr = v
+		default:
+			b, _ := json.Marshal(v)
+			cfgStr = string(b)
+		}
+		if err := s.notifier.SendTestNotification(r.Context(), req.Type, cfgStr); err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("测试消息发送失败: %v", err))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "测试通知已成功推送到 " + req.Type})
+		return
+	}
+
+	// Default: send test alert to all active channels
+	testAlert := db.AlertEvent{
+		ID:              "test-" + strconv.FormatInt(time.Now().Unix(), 10),
+		NodeID:          "probewatch-control-plane",
+		Category:        "node",
+		TargetID:        "heartbeat",
+		Reason:          "测试通知：监控通道连接成功，ProbeWatch 守护就绪！",
+		Severity:        "info",
+		Status:          "open",
+		OccurrenceCount: 1,
+		FirstSeenAt:     time.Now().UTC(),
+		LastSeenAt:      time.Now().UTC(),
+	}
+	testNode := db.Node{
+		ID:   "probewatch-control-plane",
+		Name: "ProbeWatch 监控中心",
+	}
+	if err := s.notifier.Dispatch(r.Context(), testAlert, testNode); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("测试消息发送失败: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "测试通知已成功发送至所有可用渠道"})
+}
+
+func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.service.Store().GetAllSettings(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	if _, ok := settings["offline_grace_seconds"]; !ok {
+		settings["offline_grace_seconds"] = "180"
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) saveAlertSettings(w http.ResponseWriter, r *http.Request) {
+	var body map[string]string
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &body); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	for k, v := range body {
+		if err := s.service.Store().SetSetting(r.Context(), k, v); err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "failed to save settings")
+			return
+		}
+	}
+	s.getAlertSettings(w, r)
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {

@@ -65,7 +65,9 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	go runHistoryAggregation(cleanupCtx, store)
 	notifier := notify.NewNotifier(cfg)
 	go notify.RunAlertDispatcher(cleanupCtx, store, notifier)
-	handler := api.NewServer(cfg, service).Handler()
+	serverInstance := api.NewServer(cfg, service)
+	serverInstance.SetNotifier(notifier)
+	handler := serverInstance.Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		return fmt.Errorf("listen for control plane: %w", err)

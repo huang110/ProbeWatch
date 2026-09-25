@@ -257,6 +257,21 @@ CREATE TABLE IF NOT EXISTS network_results_history_daily (
     PRIMARY KEY(window_start, node_id, target_id)
 );
 CREATE INDEX IF NOT EXISTS network_results_history_daily_node_idx ON network_results_history_daily(node_id, window_start);
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    config TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    events TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {

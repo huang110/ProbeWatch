@@ -23,7 +23,17 @@ import {
   XCircle,
 } from '@phosphor-icons/react'
 import { alertSeverity, formatAlertTime, safeArray, safeText } from '../lib/format.js'
-import { fetchCsrfToken } from '../lib/api.js'
+import {
+  fetchNotificationChannels,
+  createNotificationChannel,
+  updateNotificationChannel,
+  deleteNotificationChannel,
+  testNotificationChannel,
+  testNotificationDirect,
+  fetchAlertSettings,
+  saveAlertSettings,
+  fetchCsrfToken,
+} from '../lib/api.js'
 
 
 // 官方 6 大预置网络检测目标及域名
@@ -47,22 +57,35 @@ export function AlertCenterView({
   const [currentTab, setCurrentTab] = useState(activeSubView)
   const [toastMsg, setToastMsg] = useState('')
 
-  // 1. 通知渠道相关状态 (Image 1)
+  // 1. 通知渠道相关真实状态与后端同步
   const [channelEnabled, setChannelEnabled] = useState(true)
   const [msgTemplate, setMsgTemplate] = useState('')
-  const [channelPlatform, setChannelPlatform] = useState('Javascript')
-  const [settingsExpanded, setSettingsExpanded] = useState(true)
-  const [jsCode, setJsCode] = useState(
-    `/* ====================================================\n   NanoMuse · TG 通知配置\n==================================================== */\nconst TG_TOKEN = "7050097486:AAHQ9SHunWD9yvSA677A1pVF5Ao8yRTynUE"; // Telegram Bot Token\nconst CHAT_ID = "6110992384"; // 目标 Chat ID\n\nasync function sendMessage(message, title) {\n  const text = title ? \`*\${title}*\\n\\n\${message}\` : message;\n  const url = \`https://api.telegram.org/bot\${TG_TOKEN}/sendMessage\`;\n  const res = await fetch(url, {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ chat_id: CHAT_ID, text: text, parse_mode: 'Markdown' })\n  });\n  return res.ok;\n}`
-  )
+  const [channels, setChannels] = useState([])
+  const [loadingChannels, setLoadingChannels] = useState(false)
+  const [channelTestingId, setChannelTestingId] = useState(null)
+  const [globalTesting, setGlobalTesting] = useState(false)
+  const [savingChannel, setSavingChannel] = useState(false)
+  const [testingForm, setTestingForm] = useState(false)
 
-  // 2. 离线通知设置相关状态 (Image 2)
+  // 渠道配置表单
+  const [formName, setFormName] = useState('')
+  const [formPlatform, setFormPlatform] = useState('telegram') // 'telegram' | 'discord' | 'wecom' | 'bark' | 'webhook'
+  const [formTelegramToken, setFormTelegramToken] = useState('')
+  const [formTelegramChatId, setFormTelegramChatId] = useState('')
+  const [formDiscordWebhook, setFormDiscordWebhook] = useState('')
+  const [formWecomWebhook, setFormWecomWebhook] = useState('')
+  const [formBarkKey, setFormBarkKey] = useState('')
+  const [formBarkServer, setFormBarkServer] = useState('https://api.day.app')
+  const [formWebhookUrl, setFormWebhookUrl] = useState('')
+  const [formEvents, setFormEvents] = useState(['node', 'resource', 'network', 'mtr', 'traffic', 'billing'])
+
+  // 2. 离线通知设置相关状态
   const [offlineSearch, setOfflineSearch] = useState('')
   const [selectedOfflineNodes, setSelectedOfflineNodes] = useState([])
   const [editingOfflineNode, setEditingOfflineNode] = useState(null)
   const [offlineGracePeriod, setOfflineGracePeriod] = useState(180)
 
-  // 3. 负载通知相关状态 (Image 3)
+  // 3. 负载通知相关状态
   const [loadSubTab, setLoadSubTab] = useState('config') // 'config' | 'current'
   const [loadSearch, setLoadSearch] = useState('')
   const [loadRules, setLoadRules] = useState([
@@ -78,17 +101,46 @@ export function AlertCenterView({
   ])
   const [showAddLoadModal, setShowAddLoadModal] = useState(false)
 
-  // 4. 流量定时报告相关状态 (Image 4)
+  // 4. 流量定时报告相关状态
   const [reportPushTime, setReportPushTime] = useState('00:00')
   const [reportSearch, setReportSearch] = useState('')
   const [selectedReportNodes, setSelectedReportNodes] = useState([])
 
-  // 5. 延迟监测告警相关状态 (Image 5)
+  // 5. 延迟监测告警相关状态
   const [latencyAlertView, setLatencyAlertView] = useState('tasks') // 'tasks' | 'servers'
   const [latencyStatusFilter, setLatencyStatusFilter] = useState('all')
   const [latencySearch, setLatencySearch] = useState('')
   const [selectedLatencyAlerts, setSelectedLatencyAlerts] = useState([])
   const [latencyPage, setLatencyPage] = useState(1)
+
+  // 后端渠道与配置加载
+  const loadChannelsAndSettings = async () => {
+    setLoadingChannels(true)
+    try {
+      const chs = await fetchNotificationChannels()
+      setChannels(Array.isArray(chs) ? chs : [])
+    } catch (e) {
+      console.error('Failed to load notification channels:', e)
+    } finally {
+      setLoadingChannels(false)
+    }
+
+    try {
+      const sets = await fetchAlertSettings()
+      if (sets?.offline_grace_seconds) {
+        setOfflineGracePeriod(parseInt(sets.offline_grace_seconds, 10) || 180)
+      }
+      if (sets?.msg_template) {
+        setMsgTemplate(sets.msg_template)
+      }
+    } catch (e) {
+      console.error('Failed to load alert settings:', e)
+    }
+  }
+
+  useEffect(() => {
+    loadChannelsAndSettings()
+  }, [])
 
   // 同步外部传进来的子路由
   useEffect(() => {
@@ -102,6 +154,192 @@ export function AlertCenterView({
     setTimeout(() => setToastMsg(''), 3000)
   }
 
+  const handleToggleChannel = async (ch) => {
+    try {
+      await updateNotificationChannel(ch.id, {
+        name: ch.name,
+        type: ch.type,
+        config: ch.config,
+        enabled: !ch.enabled,
+        events: ch.events,
+      })
+      setChannels((prev) =>
+        prev.map((item) => (item.id === ch.id ? { ...item, enabled: !item.enabled } : item))
+      )
+      showToast(`已${ch.enabled ? '停用' : '启用'}渠道: ${ch.name}`)
+    } catch (err) {
+      showToast(`修改状态失败: ${err.message}`)
+    }
+  }
+
+  const handleDeleteChannel = async (id, name) => {
+    if (!window.confirm(`确定要删除通知渠道「${name}」吗？`)) return
+    try {
+      await deleteNotificationChannel(id)
+      setChannels((prev) => prev.filter((item) => item.id !== id))
+      showToast(`已删除通知渠道: ${name}`)
+    } catch (err) {
+      showToast(`删除失败: ${err.message}`)
+    }
+  }
+
+  const handleTestChannel = async (id, name) => {
+    setChannelTestingId(id)
+    try {
+      const res = await testNotificationChannel(id)
+      showToast(res.message || `测试通知已成功推送到 ${name}`)
+    } catch (err) {
+      showToast(`测试失败: ${err.message}`)
+    } finally {
+      setChannelTestingId(null)
+    }
+  }
+
+  const handleTestCurrentForm = async () => {
+    setTestingForm(true)
+    try {
+      let configObj = {}
+      if (formPlatform === 'telegram') {
+        if (!formTelegramToken.trim() || !formTelegramChatId.trim()) {
+          showToast('请先输入 Telegram Bot Token 与 Chat ID')
+          setTestingForm(false)
+          return
+        }
+        configObj = { bot_token: formTelegramToken.trim(), chat_id: formTelegramChatId.trim() }
+      } else if (formPlatform === 'discord') {
+        if (!formDiscordWebhook.trim()) {
+          showToast('请先输入 Discord Webhook 地址')
+          setTestingForm(false)
+          return
+        }
+        configObj = { webhook_url: formDiscordWebhook.trim() }
+      } else if (formPlatform === 'wecom') {
+        if (!formWecomWebhook.trim()) {
+          showToast('请先输入企业微信机器人 Webhook 地址')
+          setTestingForm(false)
+          return
+        }
+        configObj = { webhook_url: formWecomWebhook.trim() }
+      } else if (formPlatform === 'bark') {
+        if (!formBarkKey.trim()) {
+          showToast('请先输入 Bark Device Key')
+          setTestingForm(false)
+          return
+        }
+        configObj = { server_url: formBarkServer.trim(), device_key: formBarkKey.trim() }
+      } else {
+        if (!formWebhookUrl.trim()) {
+          showToast('请先输入 Webhook URL')
+          setTestingForm(false)
+          return
+        }
+        configObj = { webhook_url: formWebhookUrl.trim() }
+      }
+      const res = await testNotificationDirect({
+        type: formPlatform,
+        config: configObj,
+      })
+      showToast(res.message || '测试通知已成功送达！')
+    } catch (err) {
+      showToast(`测试失败: ${err.message}`)
+    } finally {
+      setTestingForm(false)
+    }
+  }
+
+  const handleSaveCurrentChannel = async () => {
+    if (!formName.trim()) {
+      showToast('请输入渠道名称')
+      return
+    }
+    let configObj = {}
+    if (formPlatform === 'telegram') {
+      if (!formTelegramToken.trim() || !formTelegramChatId.trim()) {
+        showToast('请完整填写 Telegram Bot Token 和 Chat ID')
+        return
+      }
+      configObj = { bot_token: formTelegramToken.trim(), chat_id: formTelegramChatId.trim() }
+    } else if (formPlatform === 'discord') {
+      if (!formDiscordWebhook.trim()) {
+        showToast('请填写 Discord Webhook 地址')
+        return
+      }
+      configObj = { webhook_url: formDiscordWebhook.trim() }
+    } else if (formPlatform === 'wecom') {
+      if (!formWecomWebhook.trim()) {
+        showToast('请填写企业微信机器人 Webhook 地址')
+        return
+      }
+      configObj = { webhook_url: formWecomWebhook.trim() }
+    } else if (formPlatform === 'bark') {
+      if (!formBarkKey.trim()) {
+        showToast('请填写 Bark Device Key')
+        return
+      }
+      configObj = { server_url: formBarkServer.trim(), device_key: formBarkKey.trim() }
+    } else {
+      if (!formWebhookUrl.trim()) {
+        showToast('请填写 Webhook URL')
+        return
+      }
+      configObj = { webhook_url: formWebhookUrl.trim() }
+    }
+
+    setSavingChannel(true)
+    try {
+      const newCh = await createNotificationChannel({
+        name: formName.trim(),
+        type: formPlatform,
+        config: JSON.stringify(configObj),
+        enabled: true,
+        events: JSON.stringify(formEvents),
+      })
+      setChannels((prev) => [...prev, newCh])
+      showToast(`成功添加通知渠道: ${formName}`)
+      setFormName('')
+      setFormTelegramToken('')
+      setFormTelegramChatId('')
+      setFormDiscordWebhook('')
+      setFormWecomWebhook('')
+      setFormBarkKey('')
+      setFormWebhookUrl('')
+    } catch (err) {
+      showToast(`保存失败: ${err.message}`)
+    } finally {
+      setSavingChannel(false)
+    }
+  }
+
+  const handleGlobalTest = async () => {
+    setGlobalTesting(true)
+    try {
+      const res = await testNotificationDirect({})
+      showToast(res.message || '全量测试消息已成功推送')
+    } catch (err) {
+      showToast(`测试失败: ${err.message}`)
+    } finally {
+      setGlobalTesting(false)
+    }
+  }
+
+  const handleSaveGracePeriod = async () => {
+    try {
+      await saveAlertSettings({ offline_grace_seconds: String(offlineGracePeriod) })
+      showToast(`已成功保存离线宽限期为 ${offlineGracePeriod} 秒`)
+    } catch (err) {
+      showToast(`保存失败: ${err.message}`)
+    }
+  }
+
+  const handleSaveMsgTemplate = async () => {
+    try {
+      await saveAlertSettings({ msg_template: msgTemplate })
+      showToast('消息通知模板已保存')
+    } catch (err) {
+      showToast(`保存失败: ${err.message}`)
+    }
+  }
+
   // 规范化服务器列表数据 (仅显示真实连接的探针)
   const displayNodes = useMemo(() => {
     if (nodes && nodes.length > 0) {
@@ -109,16 +347,17 @@ export function AlertCenterView({
         id: n.uuid || n.id || `node-${idx}`,
         name: n.name || '探针',
         flag: n.flag || '🌐',
+        status: n.status || 'online',
         enabled: true,
-        gracePeriod: '180秒',
-        lastNotified: idx % 3 === 0 ? '2026/8/2 10:05:00' : idx % 5 === 0 ? '2026/9/3 02:14:27' : '-',
+        gracePeriod: `${offlineGracePeriod}秒`,
+        lastNotified: n.last_reported_at ? new Date(n.last_reported_at).toLocaleString() : '-',
         reportType: '日报、周报',
         reportContent: '上行/下行流量',
         node: n,
       }))
     }
     return []
-  }, [nodes])
+  }, [nodes, offlineGracePeriod])
 
   // 延迟监测告警笛卡尔积矩阵 (Image 5: 6 任务 × 12 节点 = 72 项)
   const latencyAlertMatrix = useMemo(() => {
@@ -284,103 +523,339 @@ export function AlertCenterView({
               <button
                 type="button"
                 className="lite-btn-primary"
-                onClick={() => showToast('消息通知模板已保存')}
+                onClick={handleSaveMsgTemplate}
               >
-                保存
+                保存模板
               </button>
             </div>
           </div>
 
-          {/* 卡片 3: 通知渠道 */}
+          {/* 卡片 3: 已配置通知渠道列表 */}
           <div className="lite-card-box">
-            <div className="lite-card-row">
+            <div className="flex items-center justify-between pb-2 border-b border-subtle">
               <div className="lite-card-meta">
-                <span className="lite-card-title">通知渠道</span>
-                <span className="lite-card-desc">选择您偏好的通知平台</span>
+                <span className="lite-card-title">已配置通知渠道 ({channels.length})</span>
+                <span className="lite-card-desc">当前生效并准备派发告警消息的通知端点</span>
               </div>
-              <select
-                className="monitor-filter-select"
-                style={{ minWidth: '150px' }}
-                value={channelPlatform}
-                onChange={(e) => setChannelPlatform(e.target.value)}
-              >
-                <option value="Javascript">Javascript</option>
-                <option value="Telegram">Telegram Bot</option>
-                <option value="Webhook">Webhook (HTTP POST)</option>
-                <option value="Email">Email 邮件通知</option>
-                <option value="Bark">Bark (iOS 推送)</option>
-                <option value="ServerChan">Server酱</option>
-              </select>
-            </div>
-          </div>
-
-          {/* 卡片 4: 发送设置 */}
-          <div className="lite-card-box">
-            <div
-              className="lite-card-row cursor-pointer"
-              onClick={() => setSettingsExpanded(!settingsExpanded)}
-            >
-              <div className="lite-card-meta">
-                <span className="lite-card-title">发送设置</span>
-                <span className="lite-card-desc">详细设置您选择的信息发送渠道</span>
-              </div>
-              <button type="button" className="icon-action-btn">
-                {settingsExpanded ? <CaretUp size={16} /> : <CaretDown size={16} />}
-              </button>
+              {loadingChannels && <CircleNotch size={18} className="animate-spin text-muted" />}
             </div>
 
-            {settingsExpanded && (
-              <div className="space-y-3 pt-2">
-                <div className="lite-card-meta">
-                  <span className="lite-card-title" style={{ fontSize: '13px' }}>
-                    JavaScript 代码 *
-                  </span>
-                  <p className="lite-card-desc">
-                    实现 sendMessage(message, title) 及可选的 sendEvent(event) 函数的 JavaScript 代码（部分支持 ES6）。两者均应返回 Promise 或布尔值。可用 API: fetch()、xhr()、console.log()。指南:{' '}
-                    <a
-                      href="https://nuomiiii.github.io/komari-document/faq/notification-template.html"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      https://nuomiiii.github.io/komari-document/faq/notification-template.html
-                    </a>
-                  </p>
-                </div>
+            {channels.length === 0 ? (
+              <div className="text-center py-6 text-muted text-xs">
+                当前暂无配置通知渠道，请在下方添加 Telegram、Discord、企业微信、Bark 或自定义 Webhook 接收告警。
+              </div>
+            ) : (
+              <div className="divide-y divide-subtle mt-2">
+                {channels.map((ch) => {
+                  let badgeClass = 'badge-subtle'
+                  let typeLabel = ch.type
+                  if (ch.type === 'telegram') {
+                    badgeClass = 'badge-sky font-bold'
+                    typeLabel = 'Telegram'
+                  } else if (ch.type === 'discord') {
+                    badgeClass = 'badge-indigo font-bold'
+                    typeLabel = 'Discord'
+                  } else if (ch.type === 'wecom') {
+                    badgeClass = 'badge-mint font-bold'
+                    typeLabel = '企业微信'
+                  } else if (ch.type === 'bark') {
+                    badgeClass = 'badge-amber font-bold'
+                    typeLabel = 'Bark (iOS)'
+                  } else if (ch.type === 'webhook') {
+                    badgeClass = 'badge-subtle font-bold'
+                    typeLabel = 'Webhook'
+                  }
 
-                <textarea
-                  className="lite-code-editor"
-                  rows={9}
-                  value={jsCode}
-                  onChange={(e) => setJsCode(e.target.value)}
-                  spellCheck="false"
-                />
+                  let subscribedEvents = []
+                  try {
+                    subscribedEvents = JSON.parse(ch.events || '[]')
+                  } catch {
+                    subscribedEvents = []
+                  }
 
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    className="lite-btn-primary"
-                    onClick={() => showToast('发送设置代码已保存')}
-                  >
-                    保存
-                  </button>
-                </div>
+                  return (
+                    <div key={ch.id} className="py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`badge ${badgeClass}`}>{typeLabel}</span>
+                          <strong className="text-sm" style={{ color: 'var(--text-1)' }}>{ch.name}</strong>
+                          {!ch.enabled && (
+                            <span className="badge badge-rose text-xs">已停用</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted flex flex-wrap items-center gap-1.5 pt-0.5">
+                          <span>订阅事件:</span>
+                          {subscribedEvents.length === 0 || subscribedEvents.includes('*') ? (
+                            <span className="badge badge-subtle text-xs">全量告警事件</span>
+                          ) : (
+                            subscribedEvents.map((ev) => (
+                              <span key={ev} className="badge badge-subtle text-xs mono">
+                                {ev === 'node' ? '节点离线' : ev === 'resource' ? '资源负载' : ev === 'network' ? '网络质量' : ev === 'mtr' ? 'MTR路由' : ev === 'media' ? '流媒体' : ev}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          className="button button-quiet text-xs flex items-center gap-1"
+                          disabled={channelTestingId === ch.id}
+                          onClick={() => handleTestChannel(ch.id, ch.name)}
+                          title="向该渠道发送一条测试告警"
+                        >
+                          {channelTestingId === ch.id ? (
+                            <CircleNotch size={14} className="animate-spin text-blue" />
+                          ) : (
+                            <PaperPlaneTilt size={14} />
+                          )}
+                          <span>测试</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`switch-toggle ${ch.enabled ? 'active' : ''}`}
+                          onClick={() => handleToggleChannel(ch)}
+                          title={ch.enabled ? '点击禁用该通知渠道' : '点击启用该通知渠道'}
+                        >
+                          <span className="switch-thumb" />
+                        </button>
+
+                        <button
+                          type="button"
+                          className="icon-action-btn text-rose"
+                          onClick={() => handleDeleteChannel(ch.id, ch.name)}
+                          title="删除此渠道"
+                        >
+                          <Trash size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
 
-          {/* 卡片 5: 发送测试消息 */}
+          {/* 卡片 4: 添加 / 配置通知渠道 */}
+          <div className="lite-card-box">
+            <div className="lite-card-meta pb-2 border-b border-subtle">
+              <span className="lite-card-title">添加通知渠道</span>
+              <span className="lite-card-desc">配置 Telegram Bot、Discord、企业微信、Bark 或自定义 Webhook 接收告警</span>
+            </div>
+
+            <div className="space-y-4 pt-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="field">
+                  <label className="field-label required">渠道平台</label>
+                  <select
+                    className="field-select"
+                    value={formPlatform}
+                    onChange={(e) => setFormPlatform(e.target.value)}
+                  >
+                    <option value="telegram">Telegram Bot</option>
+                    <option value="discord">Discord Webhook</option>
+                    <option value="wecom">企业微信机器人 (WeCom)</option>
+                    <option value="bark">Bark (iOS 实时推送)</option>
+                    <option value="webhook">自定义 Webhook / Server酱</option>
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label className="field-label required">渠道名称</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    placeholder="如: 运维群 Telegram 告警"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Telegram 表单 */}
+              {formPlatform === 'telegram' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+                  <div className="field">
+                    <label className="field-label required">Telegram Bot Token</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="例如: 7050097486:AAHQ9SHunWD9yvSA677A1pVF5Ao8yRTynUE"
+                      value={formTelegramToken}
+                      onChange={(e) => setFormTelegramToken(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">通过 @BotFather 机器人创建 Bot 获取。</span>
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label required">目标 Chat ID</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="例如: 6110992384 或群组 ID -100..."
+                      value={formTelegramChatId}
+                      onChange={(e) => setFormTelegramChatId(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">向 @userinfobot 发送消息或在群内获取 Chat ID。</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Discord 表单 */}
+              {formPlatform === 'discord' && (
+                <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+                  <div className="field">
+                    <label className="field-label required">Discord Webhook URL</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="https://discord.com/api/webhooks/..."
+                      value={formDiscordWebhook}
+                      onChange={(e) => setFormDiscordWebhook(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">在 Discord 频道的「设置」-「整合」-「Webhook」中创建并复制。</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 企业微信机器人表单 */}
+              {formPlatform === 'wecom' && (
+                <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+                  <div className="field">
+                    <label className="field-label required">企业微信机器人 Webhook 地址</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+                      value={formWecomWebhook}
+                      onChange={(e) => setFormWecomWebhook(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">在企业微信内部群右上角点击「添加群机器人」复制 Webhook 地址。</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Bark 表单 */}
+              {formPlatform === 'bark' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+                  <div className="field">
+                    <label className="field-label required">Bark Device Key</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="复制 Bark App 中的推送 Key"
+                      value={formBarkKey}
+                      onChange={(e) => setFormBarkKey(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">iOS App Store 下载 Bark，打开即刻复制专属推送 Key。</span>
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label">Bark 服务器地址</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="https://api.day.app"
+                      value={formBarkServer}
+                      onChange={(e) => setFormBarkServer(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">默认官方服务器 https://api.day.app，亦支持私有部署服务器。</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Webhook 表单 */}
+              {formPlatform === 'webhook' && (
+                <div className="p-3 rounded-lg" style={{ background: 'var(--surface-2)' }}>
+                  <div className="field">
+                    <label className="field-label required">Webhook URL</label>
+                    <input
+                      type="text"
+                      className="field-input mono text-xs"
+                      placeholder="https://... 支持 Server酱 (https://sctapi.ftqq.com/...) 或自定义 HTTP POST"
+                      value={formWebhookUrl}
+                      onChange={(e) => setFormWebhookUrl(e.target.value)}
+                    />
+                    <span className="text-muted text-xs mt-1 block">支持标准 JSON Webhook 自动化接口与 Server酱（自动解析标题与正文参数）。</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 订阅事件多选 */}
+              <div className="space-y-1.5">
+                <label className="field-label font-bold">订阅告警事件</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
+                  {[
+                    { id: 'node', label: '节点离线与恢复' },
+                    { id: 'resource', label: '资源高负载告警' },
+                    { id: 'network', label: '网络丢包与延迟' },
+                    { id: 'mtr', label: 'MTR 路由拓扑' },
+                    { id: 'media', label: '流媒体/AI 解锁' },
+                    { id: 'traffic', label: '流量限额预警' },
+                    { id: 'billing', label: '账单到期提醒' },
+                  ].map((item) => (
+                    <label
+                      key={item.id}
+                      className="flex items-center gap-1.5 p-2 rounded cursor-pointer border border-subtle hover:bg-surface-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formEvents.includes(item.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormEvents((prev) => [...prev, item.id])
+                          } else {
+                            setFormEvents((prev) => prev.filter((x) => x !== item.id))
+                          }
+                        }}
+                      />
+                      <span>{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 底部按钮 */}
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  className="button button-quiet flex items-center gap-1.5"
+                  disabled={testingForm}
+                  onClick={handleTestCurrentForm}
+                >
+                  {testingForm ? <CircleNotch size={14} className="animate-spin text-blue" /> : <PaperPlaneTilt size={14} />}
+                  <span>测试当前参数</span>
+                </button>
+                <button
+                  type="button"
+                  className="lite-btn-primary flex items-center gap-1.5"
+                  disabled={savingChannel}
+                  onClick={handleSaveCurrentChannel}
+                >
+                  {savingChannel ? <CircleNotch size={14} className="animate-spin" /> : <Plus size={14} weight="bold" />}
+                  <span>保存并启用此渠道</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 卡片 5: 发送全量测试消息 */}
           <div className="lite-card-box">
             <div className="lite-card-row">
               <div className="lite-card-meta">
-                <span className="lite-card-title">发送测试消息</span>
-                <span className="lite-card-desc">发送测试消息</span>
+                <span className="lite-card-title">发送全量测试通知</span>
+                <span className="lite-card-desc">向所有已启用的通知渠道立即派发一条测试告警，检验通知通道连通性与格式渲染效果。</span>
               </div>
               <button
                 type="button"
-                className="lite-btn-primary"
-                onClick={() => showToast('测试消息已成功推送')}
+                className="lite-btn-primary flex items-center gap-1.5"
+                disabled={globalTesting}
+                onClick={handleGlobalTest}
               >
-                发送测试消息
+                {globalTesting ? <CircleNotch size={14} className="animate-spin" /> : <PaperPlaneTilt size={14} />}
+                <span>发送测试消息</span>
               </button>
             </div>
           </div>
@@ -512,7 +987,13 @@ export function AlertCenterView({
                           <span style={{ fontWeight: 600 }}>{node.name}</span>
                         </td>
                         <td>
-                          <span className="badge badge-mint font-bold">启用</span>
+                          {node.status === 'offline' ? (
+                            <span className="badge badge-rose font-bold">离线</span>
+                          ) : node.status === 'attention' ? (
+                            <span className="badge badge-amber font-bold">关注</span>
+                          ) : (
+                            <span className="badge badge-mint font-bold">在线</span>
+                          )}
                         </td>
                         <td className="mono">{node.gracePeriod}</td>
                         <td className="mono text-muted">{node.lastNotified}</td>
@@ -1379,9 +1860,9 @@ export function AlertCenterView({
               <button
                 type="button"
                 className="button button-primary"
-                onClick={() => {
+                onClick={async () => {
                   setEditingOfflineNode(null)
-                  showToast(`${editingOfflineNode.name} 离线宽限期已更新为 ${offlineGracePeriod} 秒`)
+                  await handleSaveGracePeriod()
                 }}
               >
                 确认修改

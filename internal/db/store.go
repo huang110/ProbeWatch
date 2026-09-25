@@ -2324,3 +2324,134 @@ func tokenPrefix(token string) string {
 	}
 	return token
 }
+
+type NotificationChannel struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"` // "telegram", "discord", "wecom", "bark", "webhook"
+	Config    string    `json:"config"`
+	Enabled   bool      `json:"enabled"`
+	Events    string    `json:"events"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (s *Store) ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, type, config, enabled, events, created_at, updated_at FROM notification_channels ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list notification channels: %w", err)
+	}
+	defer rows.Close()
+
+	channels := make([]NotificationChannel, 0)
+	for rows.Next() {
+		var ch NotificationChannel
+		var enabled int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Type, &ch.Config, &enabled, &ch.Events, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan notification channel: %w", err)
+		}
+		ch.Enabled = enabled != 0
+		ch.CreatedAt = time.Unix(0, createdAt).UTC()
+		ch.UpdatedAt = time.Unix(0, updatedAt).UTC()
+		channels = append(channels, ch)
+	}
+	return channels, rows.Err()
+}
+
+func (s *Store) GetNotificationChannel(ctx context.Context, id string) (NotificationChannel, error) {
+	var ch NotificationChannel
+	var enabled int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, type, config, enabled, events, created_at, updated_at FROM notification_channels WHERE id = ?`, id).
+		Scan(&ch.ID, &ch.Name, &ch.Type, &ch.Config, &enabled, &ch.Events, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return NotificationChannel{}, errors.New("notification channel not found")
+	}
+	if err != nil {
+		return NotificationChannel{}, fmt.Errorf("get notification channel: %w", err)
+	}
+	ch.Enabled = enabled != 0
+	ch.CreatedAt = time.Unix(0, createdAt).UTC()
+	ch.UpdatedAt = time.Unix(0, updatedAt).UTC()
+	return ch, nil
+}
+
+func (s *Store) UpsertNotificationChannel(ctx context.Context, ch NotificationChannel) error {
+	now := time.Now().UTC()
+	enabledInt := 0
+	if ch.Enabled {
+		enabledInt = 1
+	}
+	events := ch.Events
+	if events == "" {
+		events = "[]"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO notification_channels (id, name, type, config, enabled, events, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			type = excluded.type,
+			config = excluded.config,
+			enabled = excluded.enabled,
+			events = excluded.events,
+			updated_at = excluded.updated_at
+	`, ch.ID, ch.Name, ch.Type, ch.Config, enabledInt, events, unixNano(now), unixNano(now))
+	if err != nil {
+		return fmt.Errorf("upsert notification channel: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteNotificationChannel(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM notification_channels WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete notification channel: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetSetting(ctx context.Context, key string, fallback string) (string, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key = ?`, key).Scan(&val)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fallback, nil
+	}
+	if err != nil {
+		return fallback, err
+	}
+	return val, nil
+}
+
+func (s *Store) SetSetting(ctx context.Context, key, val string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO system_settings (key, value, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+	`, key, val, unixNano(now))
+	if err != nil {
+		return fmt.Errorf("set setting %s: %w", key, err)
+	}
+	return nil
+}
+
+func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM system_settings`)
+	if err != nil {
+		return nil, fmt.Errorf("get all settings: %w", err)
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		settings[k] = v
+	}
+	return settings, rows.Err()
+}
+
