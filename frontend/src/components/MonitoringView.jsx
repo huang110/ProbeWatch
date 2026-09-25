@@ -273,7 +273,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                   <Globe size={16} />
                 </span>
               </div>
-              <div className="monitor-stat-val mono">{nodes.length || 12}</div>
+              <div className="monitor-stat-val mono">{nodes.length}</div>
             </div>
 
             {/* 默认开启任务 */}
@@ -374,7 +374,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                           <td className="mono text-muted">{target.host}</td>
 
                           <td>
-                            <span className="badge badge-subtle mono">{nodes.length || 12} 台</span>
+                            <span className="badge badge-subtle mono">{nodes.length} 台</span>
                           </td>
 
                           <td>
@@ -684,7 +684,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                             <strong style={{ color: 'var(--text-1)' }}>{task.name}</strong>
                           </td>
                           <td>
-                            <span className="badge badge-subtle mono">{nodes.length || 12} 台</span>
+                            <span className="badge badge-subtle mono">{nodes.length} 台</span>
                           </td>
                           <td className="mono text-muted">{task.host}</td>
                           <td>

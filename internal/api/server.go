@@ -115,7 +115,10 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-			if cleanPath == "" || cleanPath == "." {
+			if cleanPath == "" || cleanPath == "." || cleanPath == "index.html" {
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
 				fileServer.ServeHTTP(w, r)
 				return
 			}
@@ -126,6 +129,9 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			// SPA fallback: serve index.html for client-side routing
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 		})
