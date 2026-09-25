@@ -81,7 +81,21 @@ export function AddServerModal({ onClose, onInstalled }) {
   const originUrl = window.location.origin
 
   const linuxScript = enrollment
-    ? `curl -sSL ${originUrl}/deploy/install.sh -o install.sh && sudo PROBEWATCH_AGENT_ENDPOINT="${enrollment.endpoint}" PROBEWATCH_AGENT_NODE_UUID="${enrollment.nodeUuid}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${enrollment.token}" bash install.sh agent`
+    ? `curl -sSL ${originUrl}/deploy/install.sh -o install.sh && sudo PROBEWATCH_AGENT_ENDPOINT="${enrollment.endpoint}" PROBEWATCH_AGENT_NODE_UUID="${enrollment.nodeUuid}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${enrollment.token}" sh install.sh agent`
+    : ''
+
+  const openwrtScript = enrollment
+    ? `wget -qO /tmp/install.sh ${originUrl}/deploy/install.sh && PROBEWATCH_AGENT_ENDPOINT="${enrollment.endpoint}" PROBEWATCH_AGENT_NODE_UUID="${enrollment.nodeUuid}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${enrollment.token}" sh /tmp/install.sh agent`
+    : ''
+
+  const dockerScript = enrollment
+    ? `docker run -d --name probewatch-agent --restart always --net host \\
+  -e PROBEWATCH_ENV=production \\
+  -e PROBEWATCH_AGENT_ENDPOINT="${enrollment.endpoint}" \\
+  -e PROBEWATCH_AGENT_NODE_UUID="${enrollment.nodeUuid}" \\
+  -e PROBEWATCH_AGENT_REGISTRATION_TOKEN="${enrollment.token}" \\
+  -v /var/lib/probewatch:/var/lib/probewatch \\
+  probewatch/agent:latest`
     : ''
 
   const envScript = enrollment
@@ -94,7 +108,14 @@ export function AddServerModal({ onClose, onInstalled }) {
       ].join('\n')
     : ''
 
-  const currentCommand = activeTab === 'linux' ? linuxScript : envScript
+  const currentCommand =
+    activeTab === 'linux'
+      ? linuxScript
+      : activeTab === 'openwrt'
+      ? openwrtScript
+      : activeTab === 'docker'
+      ? dockerScript
+      : envScript
 
   const handleCopy = async () => {
     if (!currentCommand) return
@@ -117,7 +138,7 @@ export function AddServerModal({ onClose, onInstalled }) {
             </div>
             <div>
               <h3>添加服务器 / 探针接入向导</h3>
-              <p>哪吒/Komari 标准部署流程 · 15 分钟临时安全 Token</p>
+              <p>跨架构支持 (x86_64, aarch64, arm, mips) · 15 分钟临时安全 Token</p>
             </div>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
@@ -141,15 +162,31 @@ export function AddServerModal({ onClose, onInstalled }) {
                 onClick={() => setActiveTab('linux')}
               >
                 <LinuxLogo size={16} weight="fill" />
-                <span>Linux 一键安装命令 (推荐)</span>
+                <span>Linux 一键安装 (推荐)</span>
+              </button>
+              <button
+                type="button"
+                className={`install-tab ${activeTab === 'openwrt' ? 'active' : ''}`}
+                onClick={() => setActiveTab('openwrt')}
+              >
+                <Terminal size={16} />
+                <span>OpenWrt / 软路由 (procd)</span>
+              </button>
+              <button
+                type="button"
+                className={`install-tab ${activeTab === 'docker' ? 'active' : ''}`}
+                onClick={() => setActiveTab('docker')}
+              >
+                <HardDrives size={16} />
+                <span>Docker 容器</span>
               </button>
               <button
                 type="button"
                 className={`install-tab ${activeTab === 'env' ? 'active' : ''}`}
                 onClick={() => setActiveTab('env')}
               >
-                <HardDrives size={16} />
-                <span>系统环境配置 (Systemd / Docker)</span>
+                <ShieldCheck size={16} />
+                <span>环境配置 (ENV)</span>
               </button>
             </div>
 

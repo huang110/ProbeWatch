@@ -13,6 +13,7 @@ import (
 	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/deploy"
 	"github.com/probewatch/probewatch/internal/notify"
 )
 
@@ -138,6 +139,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/mcp", s.mcpHandler)
 	mux.HandleFunc("/mcp", s.mcpHandler)
 
+	// Deployment script endpoints
+	mux.HandleFunc("/deploy/install.sh", s.installScriptHandler)
+	mux.HandleFunc("/install.sh", s.installScriptHandler)
+
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -157,7 +162,7 @@ func (s *Server) Handler() http.Handler {
 	if err == nil {
 		fileServer := http.FileServer(http.FS(distFS))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") || strings.HasPrefix(r.URL.Path, "/mcp") || r.URL.Path == "/healthz" {
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") || strings.HasPrefix(r.URL.Path, "/mcp") || strings.HasPrefix(r.URL.Path, "/deploy/") || r.URL.Path == "/install.sh" || r.URL.Path == "/healthz" {
 				http.NotFound(w, r)
 				return
 			}
@@ -363,3 +368,10 @@ func writeRateLimitError(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "60")
 	writeJSONError(w, http.StatusTooManyRequests, "too many attempts")
 }
+
+func (s *Server) installScriptHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	_, _ = w.Write(deploy.InstallScript)
+}
+
