@@ -97,6 +97,7 @@ type Store struct {
 	db     *sql.DB
 	pepper []byte
 	mu     sync.Mutex
+	path   string
 }
 
 type RegistrationToken struct {
@@ -235,7 +236,7 @@ func OpenStore(databasePath string, pepper []byte) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set database permissions: %w", err)
 	}
-	store := &Store{db: db, pepper: append([]byte(nil), pepper...)}
+	store := &Store{db: db, pepper: append([]byte(nil), pepper...), path: databasePath}
 	if err := migrate(context.Background(), db); err != nil {
 		db.Close()
 		return nil, err
@@ -244,6 +245,18 @@ func OpenStore(databasePath string, pepper []byte) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) DatabasePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
+}
+
+func (s *Store) Pepper() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.pepper...)
+}
 
 func (s *Store) CreateOAuthState(ctx context.Context, stateDigest []byte, expiresAt time.Time) (string, error) {
 	id, err := randomID()

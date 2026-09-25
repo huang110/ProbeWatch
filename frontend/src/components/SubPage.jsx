@@ -1,6 +1,7 @@
 import { AlertCenterView } from './AlertCenterView.jsx'
 import { MediaMatrix } from './MediaMatrix.jsx'
 import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
+import { BackupManagementCard } from './BackupManagementCard.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -105,12 +106,17 @@ export function SubPage({
       ) : page === 'targets' ? (
         <TargetManage />
       ) : page === 'settings' ? (
-        <TOTPSettingsCard
-          interval={refreshInterval}
-          onIntervalChange={onIntervalChange}
-          theme={theme}
-          onThemeChange={onThemeChange}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <TOTPSettingsCard
+            interval={refreshInterval}
+            onIntervalChange={onIntervalChange}
+            theme={theme}
+            onThemeChange={onThemeChange}
+          />
+          <BackupManagementCard />
+        </div>
+      ) : page === 'backups' ? (
+        <BackupManagementCard />
       ) : (
         <div className="panel placeholder-panel">
           <div className="placeholder-icon">

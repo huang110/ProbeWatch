@@ -39,6 +39,7 @@ type ProviderEndpoints struct {
 
 type Service struct {
 	cfg             config.Config
+	storeMu         sync.RWMutex
 	store           *db.Store
 	provider        ProviderEndpoints
 	client          *http.Client
@@ -72,7 +73,20 @@ func NewService(cfg config.Config, store *db.Store, provider ProviderEndpoints) 
 
 // Store exposes the persistence boundary to the API layer without exposing it
 // to HTTP callers or placing persistence logic in handlers.
-func (s *Service) Store() *db.Store { return s.store }
+func (s *Service) Store() *db.Store {
+	s.storeMu.RLock()
+	defer s.storeMu.RUnlock()
+	return s.store
+}
+
+// SwapStore atomically replaces the active database store and returns the old store.
+func (s *Service) SwapStore(newStore *db.Store) *db.Store {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	old := s.store
+	s.store = newStore
+	return old
+}
 
 func (s *Service) BeginOAuth(w http.ResponseWriter, r *http.Request) {
 	state, err := security.GenerateToken()
@@ -81,7 +95,7 @@ func (s *Service) BeginOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	if _, err := s.store.CreateOAuthState(r.Context(), security.Digest([]byte(s.cfg.SessionSecret), state), now.Add(oauthStateLifetime)); err != nil {
+	if _, err := s.Store().CreateOAuthState(r.Context(), security.Digest([]byte(s.cfg.SessionSecret), state), now.Add(oauthStateLifetime)); err != nil {
 		logInternalError("create oauth state", err)
 		writeError(w, http.StatusInternalServerError, "authentication unavailable")
 		return
@@ -118,7 +132,7 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "authentication failed")
 		return
 	}
-	if err := s.store.ConsumeOAuthState(r.Context(), security.Digest([]byte(s.cfg.SessionSecret), cookie.Value), time.Now().UTC()); err != nil {
+	if err := s.Store().ConsumeOAuthState(r.Context(), security.Digest([]byte(s.cfg.SessionSecret), cookie.Value), time.Now().UTC()); err != nil {
 		if errors.Is(err, db.ErrOAuthStateConsumed) || errors.Is(err, db.ErrOAuthStateExpired) || errors.Is(err, db.ErrOAuthStateInvalid) {
 			writeError(w, http.StatusForbidden, "authentication failed")
 			return
@@ -154,13 +168,13 @@ func (s *Service) Callback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "authentication failed")
 		return
 	}
-	admin, err := s.store.UpsertAdminUser(r.Context(), "github", providerUser.ID, providerUser.Login, time.Now().UTC())
+	admin, err := s.Store().UpsertAdminUser(r.Context(), "github", providerUser.ID, providerUser.Login, time.Now().UTC())
 	if err != nil {
 		logInternalError("upsert admin user", err)
 		writeError(w, http.StatusInternalServerError, "authentication unavailable")
 		return
 	}
-	totpSecret, totpEnabled, err := s.store.GetAdminUserTOTP(r.Context(), admin.ID)
+	totpSecret, totpEnabled, err := s.Store().GetAdminUserTOTP(r.Context(), admin.ID)
 	if err != nil {
 		logInternalError("read admin totp state", err)
 		writeError(w, http.StatusInternalServerError, "authentication unavailable")
@@ -201,7 +215,7 @@ func (s *Service) createSession(ctx context.Context, adminID string, now time.Ti
 	if err != nil {
 		return "", err
 	}
-	if err := s.store.CreateSessionWithPolicy(ctx, id, []byte(value), adminID, now.Add(sessionLifetime), now, s.policyDigest()); err != nil {
+	if err := s.Store().CreateSessionWithPolicy(ctx, id, []byte(value), adminID, now.Add(sessionLifetime), now, s.policyDigest()); err != nil {
 		return "", err
 	}
 	return value, nil
@@ -225,13 +239,13 @@ func (s *Service) AuthenticateWithError(r *http.Request, now time.Time) (db.Sess
 	if err != nil || cookie.Value == "" {
 		return db.Session{}, db.ErrSessionNotFound
 	}
-	session, err := s.store.GetSessionWithPolicy(r.Context(), []byte(cookie.Value), now, s.policyDigest())
+	session, err := s.Store().GetSessionWithPolicy(r.Context(), []byte(cookie.Value), now, s.policyDigest())
 	if err != nil {
 		if !errors.Is(err, db.ErrSessionNotFound) && !errors.Is(err, db.ErrSessionExpired) && !errors.Is(err, db.ErrSessionPolicyChanged) {
 			logInternalError("authenticate session", err)
 		}
 		if errors.Is(err, db.ErrSessionPolicyChanged) {
-			_ = s.store.DeleteSession(r.Context(), []byte(cookie.Value))
+			_ = s.Store().DeleteSession(r.Context(), []byte(cookie.Value))
 		}
 		s.dropCSRFState(cookie.Value)
 		return db.Session{}, err
@@ -241,7 +255,7 @@ func (s *Service) AuthenticateWithError(r *http.Request, now time.Time) (db.Sess
 
 func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
-		if err := s.store.DeleteSession(r.Context(), []byte(cookie.Value)); err != nil {
+		if err := s.Store().DeleteSession(r.Context(), []byte(cookie.Value)); err != nil {
 			logInternalError("delete session", err)
 			writeError(w, http.StatusInternalServerError, "logout unavailable")
 			return
@@ -260,12 +274,12 @@ func (s *Service) AuthenticateLocalPassword(w http.ResponseWriter, r *http.Reque
 	if subtle.ConstantTimeCompare([]byte(password), []byte(trimmedAdminPassword)) != 1 {
 		return errors.New("invalid credentials")
 	}
-	admin, err := s.store.UpsertAdminUser(r.Context(), "local", "admin", "admin", time.Now().UTC())
+	admin, err := s.Store().UpsertAdminUser(r.Context(), "local", "admin", "admin", time.Now().UTC())
 	if err != nil {
 		logInternalError("upsert local admin user", err)
 		return err
 	}
-	totpSecret, totpEnabled, err := s.store.GetAdminUserTOTP(r.Context(), admin.ID)
+	totpSecret, totpEnabled, err := s.Store().GetAdminUserTOTP(r.Context(), admin.ID)
 	if err != nil {
 		logInternalError("read admin totp state", err)
 		return err
@@ -315,7 +329,7 @@ func (s *Service) CSRFHandler(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		unlock()
 	}()
-	token, err := s.store.RotateCSRF(r.Context(), []byte(cookie.Value), time.Now().UTC())
+	token, err := s.Store().RotateCSRF(r.Context(), []byte(cookie.Value), time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, db.ErrSessionNotFound) {
 			writeError(w, http.StatusUnauthorized, "authentication required")
@@ -340,7 +354,7 @@ func (s *Service) ClaimCSRFWithError(r *http.Request, token string) (string, err
 	if err != nil || cookie.Value == "" || token == "" {
 		return "", db.ErrTokenInvalid
 	}
-	next, err := s.store.ClaimCSRF(r.Context(), []byte(cookie.Value), token, time.Now().UTC())
+	next, err := s.Store().ClaimCSRF(r.Context(), []byte(cookie.Value), token, time.Now().UTC())
 	if err != nil && !errors.Is(err, db.ErrTokenInvalid) && !errors.Is(err, db.ErrSessionNotFound) {
 		logInternalError("claim csrf token", err)
 	}
@@ -415,7 +429,7 @@ func (s *Service) csrfRegistrySize() int {
 }
 
 func (s *Service) CleanupExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	deleted, err := s.store.CleanupExpiredSessions(ctx, now)
+	deleted, err := s.Store().CleanupExpiredSessions(ctx, now)
 	s.csrfRegistryMu.Lock()
 	for sessionValue, state := range s.csrfStates {
 		if state.refs == 0 && state.pending.Load() == 0 {
@@ -427,11 +441,11 @@ func (s *Service) CleanupExpiredSessions(ctx context.Context, now time.Time) (in
 }
 
 func (s *Service) CleanupExpiredOAuthStates(ctx context.Context, now time.Time) (int64, error) {
-	return s.store.CleanupExpiredOAuthStates(ctx, now)
+	return s.Store().CleanupExpiredOAuthStates(ctx, now)
 }
 
 func (s *Service) CleanupExpiredTOTPPendingStates(ctx context.Context, now time.Time) (int64, error) {
-	return s.store.CleanupExpiredTOTPPendingStates(ctx, now)
+	return s.Store().CleanupExpiredTOTPPendingStates(ctx, now)
 }
 
 func (s *Service) CurrentUser(r *http.Request, now time.Time) (db.AdminUser, error) {
@@ -439,7 +453,7 @@ func (s *Service) CurrentUser(r *http.Request, now time.Time) (db.AdminUser, err
 	if err != nil {
 		return db.AdminUser{}, err
 	}
-	user, err := s.store.GetAdminUser(r.Context(), session.AdminUserID)
+	user, err := s.Store().GetAdminUser(r.Context(), session.AdminUserID)
 	if err != nil {
 		logInternalError("get current admin user", err)
 	}

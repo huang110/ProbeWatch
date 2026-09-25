@@ -98,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
 	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
+	mux.Handle("/api/system/backups", middleware.RequireAuth(http.HandlerFunc(s.backupRoute)))
+	mux.Handle("/api/system/backups/", middleware.RequireAuth(http.HandlerFunc(s.backupRoute)))
 	mux.HandleFunc("/api/agent/v1/register", s.registerAgent)
 	mux.HandleFunc("/api/agent/v1/config", s.agentConfig)
 	mux.HandleFunc("/api/agent/v1/report", s.reportAgent)

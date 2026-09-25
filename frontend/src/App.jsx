@@ -88,6 +88,7 @@ const pageTitleFor = (page) =>
         media: '流媒体',
         targets: '检测目标',
         settings: '系统设置',
+        backups: '数据备份',
       }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
@@ -132,6 +133,7 @@ const VALID_NAV_PAGES = [
   'media',
   'targets',
   'settings',
+  'backups',
   'node-detail',
 ]
 

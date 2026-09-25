@@ -135,3 +135,71 @@ export async function saveAlertSettings(settings) {
   }
   return await res.json()
 }
+
+export async function fetchBackups() {
+  const res = await fetch('/api/system/backups', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch backups')
+  return await res.json()
+}
+
+export async function createBackup() {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/system/backups', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create backup')
+  }
+  return await res.json()
+}
+
+export async function deleteBackup(filename) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/system/backups/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete backup')
+  }
+  return true
+}
+
+export async function restoreBackup(filename) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/system/backups/${encodeURIComponent(filename)}/restore`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to restore backup')
+  }
+  return await res.json()
+}
+
+export async function uploadBackupFile(file) {
+  const csrf = await fetchCsrfToken()
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/system/backups/upload', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-CSRF-Token': csrf },
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to upload backup')
+  }
+  return await res.json()
+}
+
