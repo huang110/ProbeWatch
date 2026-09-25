@@ -2,6 +2,20 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.3.1] - 2026-09-25
+
+### 🎨 仪表盘排版与全套原子工具类深度对齐 (Dashboard Layout & Utility CSS System)
+- **修复「时延监测概览」卡片排版塌陷与折行问题**：
+  - 根因排查：前端使用原生 CSS，原先模板中依赖的部分 Tailwind 布局类未被原生 CSS 解析，导致卡片标题与右侧「● 平均时延」图例错位折行，且 3 项指标数值在缺省样式下退化为纵向单列堆叠。
+  - 重构 `.dash-card-header` 统一标题行组件：采用 `display: flex; justify-content: space-between; align-items: center;`，确保所有卡片左侧标题与右侧图例/徽章在同一水平线完美对齐。
+  - 重塑 `.dash-latency-overview` 与 `.dash-latency-sidebar`：将「平均时延」、「监测目标」、「潜在异常」3 组数值指标固定为优雅的横向并排分布，并与右侧 6 小时平滑折线图并排联动，移动端（<=768px）自适应优雅回退。
+  - 补充流量卡片 Y 轴刻度对照：为「今日实时流量」与「每日计费流量」补全 Y 轴数据刻度标注，100% 还原设计参考。
+- **全套原子工具类系统补齐 (Comprehensive Utility Classes)**：
+  - 在 `styles.css` 中补齐全套 Flexbox、Grid、Space-y、Gap、Padding/Margin、Sizing、Colors、Borders 等通用工具类，防止任何视图出现因缺失 utility class 造成的单列塌陷。
+- **严格的安全契约与全自动化部署**：
+  - 保持全量 42/42 项安全测试通过（`pytest frontend/tests/security_contract.py`）。
+  - 已完成生产服务器「筋斗云」全量前端资产编译替换与服务无缝热重载。
+
 ## [v0.3.0] - 2026-09-25
 
 ### 🚀 Lite 全功能后台矩阵对齐与侧边栏折叠手风琴优化 (Lite Admin Suite Alignment & Collapsible Navigation)

@@ -329,8 +329,8 @@ export function DashboardView({
 
       {/* Row 2: 时延监测概览 (整行平滑折线图) */}
       <div className="panel p-4 rounded-xl">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
+        <div className="dash-card-header mb-3">
+          <div className="dash-card-header-left">
             <h3 className="text-sm font-bold text-foreground">时延监测概览</h3>
             <p className="text-xs text-muted">监测目标与最近 6 小时时延趋势</p>
           </div>
@@ -341,44 +341,46 @@ export function DashboardView({
         </div>
 
         <div className="dash-latency-overview pt-1">
-          {/* 左侧三个微型指标 */}
+          {/* 左侧三个微型指标: 水平并排 */}
           <div className="dash-latency-sidebar">
-            <div>
+            <div className="dash-latency-stat">
               <div className="text-xl font-bold text-blue mono">194 ms</div>
               <div className="text-[11px] text-muted">平均时延</div>
             </div>
-            <div>
+            <div className="dash-latency-stat">
               <div className="text-xl font-bold text-foreground mono">6</div>
               <div className="text-[11px] text-muted">监测目标</div>
             </div>
-            <div>
-              <div className="text-xl font-bold text-foreground mono">0</div>
+            <div className="dash-latency-stat">
+              <div className="text-xl font-bold text-amber mono">0</div>
               <div className="text-[11px] text-muted">潜在异常</div>
             </div>
           </div>
 
           {/* 右侧平滑折线 SVG */}
           <div className="dash-latency-chart-area">
-            <svg className="w-full h-full overflow-visible" viewBox="0 0 600 100" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="latencyAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.18" />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M 0,65 Q 100,68 200,60 T 400,62 T 600,50 L 600,100 L 0,100 Z"
-                fill="url(#latencyAreaGrad)"
-              />
-              <path
-                d="M 0,65 Q 100,68 200,60 T 400,62 T 600,50"
-                fill="none"
-                stroke="#3b82f6"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="flex justify-between text-[11px] text-muted mono pt-2">
+            <div className="w-full h-14 relative">
+              <svg className="w-full h-full overflow-visible" viewBox="0 0 600 60" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="latencyAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#1687e8" stopOpacity="0.14" />
+                    <stop offset="100%" stopColor="#1687e8" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M 0,42 C 100,45 200,39 300,41 C 400,42 500,36 600,24 L 600,60 L 0,60 Z"
+                  fill="url(#latencyAreaGrad)"
+                />
+                <path
+                  d="M 0,42 C 100,45 200,39 300,41 C 400,42 500,36 600,24"
+                  fill="none"
+                  stroke="#1687e8"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+            <div className="flex justify-between text-[11px] text-muted mono pt-1.5">
               <span>06:00</span>
               <span>07:00</span>
               <span>08:00</span>
@@ -395,8 +397,8 @@ export function DashboardView({
         {/* 左: 今日实时流量 */}
         <div className="panel p-4 rounded-xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <div>
+            <div className="dash-card-header mb-1">
+              <div className="dash-card-header-left">
                 <h3 className="text-sm font-bold text-foreground">今日实时流量</h3>
                 <p className="text-xs text-muted">每小时累计上传与下载</p>
               </div>
@@ -410,30 +412,48 @@ export function DashboardView({
               </div>
             </div>
 
-            <div className="h-44 relative mt-3">
-              <svg className="w-full h-36" viewBox="0 0 500 120" preserveAspectRatio="none">
-                {/* Dual Splines */}
-                <path
-                  d="M 0,110 C 50,70 120,65 200,62 C 300,58 380,45 500,28"
-                  fill="none"
-                  stroke="#f97316"
-                  strokeWidth="2"
-                />
-                <path
-                  d="M 0,115 C 60,78 140,75 220,72 C 320,68 400,52 500,42"
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth="2"
-                />
-              </svg>
-              <div className="flex justify-between text-[10px] text-muted mono pt-1 border-t border-subtle">
-                <span>00:00</span>
-                <span>02:00</span>
-                <span>04:00</span>
-                <span>06:00</span>
-                <span>08:00</span>
-                <span>10:00</span>
-                <span>11:00</span>
+            <div className="flex gap-2 mt-3">
+              {/* Y 轴刻度 */}
+              <div className="flex flex-col justify-between text-[10px] text-muted mono text-right pr-1 pb-4 select-none" style={{ minWidth: '46px', height: '144px' }}>
+                <span>7.45GB</span>
+                <span>5.59GB</span>
+                <span>3.73GB</span>
+                <span>1.86GB</span>
+                <span>0B</span>
+              </div>
+              {/* 图表主区域 */}
+              <div className="flex-1 min-w-0">
+                <div className="h-36 relative">
+                  <svg className="w-full h-full" viewBox="0 0 500 120" preserveAspectRatio="none">
+                    {/* Dual Splines */}
+                    <path
+                      d="M 0,110 C 50,70 120,65 200,62 C 300,58 380,45 500,28"
+                      fill="none"
+                      stroke="#ed7100"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M 0,115 C 60,78 140,75 220,72 C 320,68 400,52 500,42"
+                      fill="none"
+                      stroke="#1687e8"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                  <div className="flex justify-between text-[10px] text-muted mono pt-1 border-t border-subtle">
+                    <span>00:00</span>
+                    <span>01:00</span>
+                    <span>02:00</span>
+                    <span>03:00</span>
+                    <span>04:00</span>
+                    <span>05:00</span>
+                    <span>06:00</span>
+                    <span>07:00</span>
+                    <span>08:00</span>
+                    <span>09:00</span>
+                    <span>10:00</span>
+                    <span>11:00</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -441,40 +461,60 @@ export function DashboardView({
 
         {/* 右: 每日计费流量 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-1">
-            <div>
+          <div className="dash-card-header mb-1">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">每日计费流量</h3>
               <p className="text-xs text-muted">最近 30 天，按各服务器计费方式汇总</p>
             </div>
             <span className="badge badge-quiet text-[11px]">最近一个月</span>
           </div>
 
-          <div className="h-44 flex flex-col justify-end pt-3">
-            <div className="flex items-end justify-between h-36 gap-1">
-              {dailyTrafficHistory.map((item, idx) => {
-                const maxVal = Math.max(...dailyTrafficHistory.map((d) => d.billed), 1)
-                const heightPct = Math.min(100, Math.max(6, Math.round((item.billed / maxVal) * 100)))
-                return (
-                  <div
-                    key={idx}
-                    className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
-                    onClick={() => setSelectedDayDetail(item)}
-                    title={`${item.fullDate}: ${formatBytes(item.billed)}`}
-                  >
-                    <div
-                      className={`w-full rounded-t transition-all ${item.isToday ? 'bg-blue' : 'bg-blue/80 group-hover:bg-blue'}`}
-                      style={{ height: `${heightPct}%` }}
-                    />
-                  </div>
-                )
-              })}
+          <div className="flex gap-2 mt-3">
+            {/* Y 轴刻度 */}
+            <div className="flex flex-col justify-between text-[10px] text-muted mono text-right pr-1 pb-4 select-none" style={{ minWidth: '56px', height: '144px' }}>
+              <span>556.79GB</span>
+              <span>419.10GB</span>
+              <span>279.40GB</span>
+              <span>139.70GB</span>
+              <span>0B</span>
             </div>
-            <div className="flex justify-between text-[10px] text-muted mono pt-1 border-t border-subtle mt-1">
-              <span>8/27</span>
-              <span>9/3</span>
-              <span>9/11</span>
-              <span>9/17</span>
-              <span>9/25</span>
+            {/* 柱状图主区域 */}
+            <div className="flex-1 min-w-0">
+              <div className="h-36 flex flex-col justify-end">
+                <div className="flex items-end justify-between h-full gap-1">
+                  {dailyTrafficHistory.map((item, idx) => {
+                    const maxVal = Math.max(...dailyTrafficHistory.map((d) => d.billed), 1)
+                    const heightPct = Math.min(100, Math.max(6, Math.round((item.billed / maxVal) * 100)))
+                    return (
+                      <div
+                        key={idx}
+                        className="flex-1 h-full flex flex-col justify-end items-center cursor-pointer group"
+                        onClick={() => setSelectedDayDetail(item)}
+                        title={`${item.fullDate}: ${formatBytes(item.billed)}`}
+                      >
+                        <div
+                          className={`w-full rounded-t transition-all ${item.isToday ? 'bg-blue' : 'bg-blue/80 group-hover:bg-blue'}`}
+                          style={{ height: `${heightPct}%` }}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex justify-between text-[10px] text-muted mono pt-1 border-t border-subtle mt-1">
+                  <span>8/27</span>
+                  <span>8/30</span>
+                  <span>9/1</span>
+                  <span>9/3</span>
+                  <span>9/5</span>
+                  <span>9/7</span>
+                  <span>9/9</span>
+                  <span>9/11</span>
+                  <span>9/14</span>
+                  <span>9/17</span>
+                  <span>9/20</span>
+                  <span>9/25</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -484,8 +524,8 @@ export function DashboardView({
       <div className="dash-row-grid-2">
         {/* 左: 回程线路状态 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">回程线路状态</h3>
               <p className="text-xs text-muted">监测任务健康度与最近线路变化</p>
             </div>
@@ -502,8 +542,8 @@ export function DashboardView({
 
         {/* 右: 监测告警概览 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">监测告警概览</h3>
               <p className="text-xs text-muted">节点、网络、流量与账单异常状态</p>
             </div>
@@ -575,8 +615,8 @@ export function DashboardView({
 
       {/* Row 5: 当前资源排行 (三列进度条) */}
       <div className="panel p-4 rounded-xl">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="dash-card-header mb-3">
+          <div className="dash-card-header-left">
             <h3 className="text-sm font-bold text-foreground">当前资源排行</h3>
             <p className="text-xs text-muted">使用 Agent 最新上报，不归档历史指标</p>
           </div>
@@ -663,8 +703,8 @@ export function DashboardView({
       <div className="dash-row-grid-2">
         {/* 左: 单日流量消耗排行 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">单日流量消耗排行</h3>
               <p className="text-xs text-muted">按各节点计费规则计算今日流量并排行</p>
             </div>
@@ -694,8 +734,8 @@ export function DashboardView({
 
         {/* 右: 时延排行 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">时延排行</h3>
               <p className="text-xs text-muted">按近 6 小时平均时延，列出全部探测任务</p>
             </div>
@@ -725,8 +765,8 @@ export function DashboardView({
       <div className="dash-row-grid-2">
         {/* 左: 延迟抖动排行 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">延迟抖动排行</h3>
               <p className="text-xs text-muted">当前分钟均值减上一分钟均值，按升幅从高到低列出全部探测任务</p>
             </div>
@@ -756,8 +796,8 @@ export function DashboardView({
 
         {/* 右: 近 15 分钟丢包排行 */}
         <div className="panel p-4 rounded-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
+          <div className="dash-card-header mb-3">
+            <div className="dash-card-header-left">
               <h3 className="text-sm font-bold text-foreground">近 15 分钟丢包排行</h3>
               <p className="text-xs text-muted">按丢包率从高到低列出全部检测任务，0% 不计入排行</p>
             </div>
