@@ -56,11 +56,29 @@ export const nodeColor = (id = '') => {
 
 export const formatAlertTime = (value) => {
   if (!value || (typeof value !== 'string' && typeof value !== 'number')) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false })
+  let ms = NaN
+  if (typeof value === 'number') {
+    if (value > 1e14) ms = Math.floor(value / 1e6)
+    else if (value < 1e11) ms = value * 1000
+    else ms = value
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed)
+      if (num > 1e14) ms = Math.floor(num / 1e6)
+      else if (num < 1e11) ms = num * 1000
+      else ms = num
+    } else {
+      ms = new Date(trimmed).getTime()
+    }
+  }
+  if (!Number.isFinite(ms) || Number.isNaN(ms)) return '—'
+  const date = new Date(ms)
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
 
 export const formatTimeOfDay = (value) => {
+  if (!value) return '—'
   const date = value instanceof Date ? value : new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString('zh-CN', { hour12: false })
 }
@@ -208,3 +226,77 @@ export const normalizeAlert = (alert) => {
 }
 
 export const alertSeverity = (severity) => ['critical', 'warning', 'info'].includes(severity) ? severity : 'info'
+
+// 5 种流量统计口径 (参考 Lite admin/traffic 与 admin/servers)
+export const TRAFFIC_ACCOUNTING_METHODS = [
+  { id: 'total', label: '总和 (上传 + 下载)', description: '按上传与下载之和计算用量' },
+  { id: 'tx', label: '仅计流出 (上传)', description: '只计流出流量 (适合 AWS / 腾讯云等)' },
+  { id: 'rx', label: '仅计流入 (下载)', description: '只计流入流量' },
+  { id: 'max', label: '较大值 (Max)', description: '取上传与下载中数值较大的一方' },
+  { id: 'min', label: '较小值 (Min)', description: '取上传与下载中数值较小的一方' },
+]
+
+export const calcEffectiveTraffic = (rx, tx, method = 'total', offsetBytes = 0) => {
+  const inBytes = numeric(rx) || 0
+  const outBytes = numeric(tx) || 0
+  let base = inBytes + outBytes
+  if (method === 'tx') base = outBytes
+  else if (method === 'rx') base = inBytes
+  else if (method === 'max') base = Math.max(inBytes, outBytes)
+  else if (method === 'min') base = Math.min(inBytes, outBytes)
+
+  const effective = Math.max(0, base + (Number(offsetBytes) || 0))
+  return {
+    rawIn: inBytes,
+    rawOut: outBytes,
+    rawBase: base,
+    offset: Number(offsetBytes) || 0,
+    effective,
+  }
+}
+
+// 三大运营商精品骨干线路指纹库 (参考 Lite admin/monitoring)
+export const identifyCarrierRoute = (hops = [], targetCarrier = 'telecom') => {
+  const text = (Array.isArray(hops) ? hops.map((h) => `${h.ip || ''} ${h.as || ''} ${h.name || ''}`).join(' ') : String(hops)).toUpperCase()
+  const isCU = targetCarrier === 'unicom' || /10099|联通|UNICOM|9929|4837/.test(text)
+  const isCT = targetCarrier === 'telecom' || /4809|4134|电信|TELECOM|CN2/.test(text)
+  const isCM = targetCarrier === 'mobile' || /58807|58453|9808|移动|CMIN2|CMI/.test(text)
+
+  if (isCT) {
+    if (text.includes('4809') || text.includes('CN2')) {
+      if (text.includes('4134') || text.includes('163')) {
+        return { carrier: '中国电信', line: 'CN2 GT (半程优化)', badge: 'cn2-gt', quality: 'high', verified: true }
+      }
+      return { carrier: '中国电信', line: 'CN2 GIA (全程极速)', badge: 'cn2-gia', quality: 'elite', verified: true }
+    }
+    return { carrier: '中国电信', line: '163 骨干直连 (AS4134)', badge: '163', quality: 'standard', verified: true }
+  }
+
+  if (isCU) {
+    if (text.includes('10099')) {
+      if (text.includes('9929')) {
+        return { carrier: '中国联通', line: 'CUG VIP (10099 + 9929)', badge: 'cug-vip', quality: 'elite', verified: true }
+      }
+      if (text.includes('4837')) {
+        return { carrier: '中国联通', line: 'CUG 优化 (10099 + 4837)', badge: 'cug-opt', quality: 'high', verified: true }
+      }
+    }
+    if (text.includes('9929')) {
+      return { carrier: '中国联通', line: '联通 9929 A网精品', badge: 'cu-9929', quality: 'elite', verified: true }
+    }
+    return { carrier: '中国联通', line: '联通 4837 普通网', badge: 'cu-4837', quality: 'standard', verified: true }
+  }
+
+  if (isCM) {
+    if (text.includes('58807') || text.includes('CMIN2')) {
+      return { carrier: '中国移动', line: 'CMIN2 精品二期 (AS58807)', badge: 'cmin2', quality: 'elite', verified: true }
+    }
+    if (text.includes('58453') || text.includes('CMI')) {
+      return { carrier: '中国移动', line: 'CMI 国际骨干 (AS58453)', badge: 'cmi', quality: 'high', verified: true }
+    }
+    return { carrier: '中国移动', line: 'CMNET 普通骨干 (AS9808)', badge: 'cmnet', quality: 'standard', verified: true }
+  }
+
+  return { carrier: '国际 BGP', line: '标准公网 BGP 互联', badge: 'bgp', quality: 'standard', verified: false }
+}
+

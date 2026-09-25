@@ -70,7 +70,7 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("listen for control plane: %w", err)
 	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	shutdownDone := make(chan struct{})
 	go func() {
 		select {

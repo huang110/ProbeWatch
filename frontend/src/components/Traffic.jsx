@@ -105,21 +105,21 @@ export function TrafficBars({ series }) {
         {activePoint ? (
           <div className="hover-badge-content">
             <span className="hover-time mono">{formatTimeLabel(activePoint.time)}</span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-mint mono">
               <span className="nezha-arrow">↓</span> 接收: <b>{formatBytes(activePoint.rx)}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-blue mono">
               <span className="nezha-arrow">↑</span> 发送: <b>{formatBytes(activePoint.tx)}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-1 mono">
               总计: <b>{formatBytes((activePoint.rx || 0) + (activePoint.tx || 0))}</b>
             </span>
             {max > 0 && (
               <>
-                <span className="hover-sep">│</span>
+                <span className="hover-sep" aria-hidden="true" />
                 <span className="hover-stat muted mono">
                   峰值占比: <b>{(((activePoint.rx || 0) + (activePoint.tx || 0)) / max * 100).toFixed(0)}%</b>
                 </span>
@@ -182,22 +182,7 @@ export function TrafficBars({ series }) {
             strokeLinejoin="round"
           />
 
-          {/* Y 轴极简刻度水印标注 */}
-          {max > 0 && (
-            <g className="nezha-axis-scale-group" aria-hidden="true">
-              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                {formatBytes(max)}
-              </text>
-              <text x="98.5" y="53" textAnchor="end" className="nezha-axis-text mono">
-                {formatBytes(max * 0.5)}
-              </text>
-              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                0 B
-              </text>
-            </g>
-          )}
-
-          {/* 交互微细十字线与 2px 清爽发光点 */}
+          {/* 交互微细十字线 */}
           {activePoint && (
             <g className="nezha-interactive-group">
               <line
@@ -206,26 +191,6 @@ export function TrafficBars({ series }) {
                 y1={topY - 3}
                 x2={activePoint.x}
                 y2={baselineY}
-              />
-              {/* Rx 悬浮点 */}
-              <circle
-                className="nezha-dot-rx"
-                cx={activePoint.x}
-                cy={activePoint.rxY}
-                r="1.9"
-                fill="#10b981"
-                stroke="#ffffff"
-                strokeWidth="0.75"
-              />
-              {/* Tx 悬浮点 */}
-              <circle
-                className="nezha-dot-tx"
-                cx={activePoint.x}
-                cy={activePoint.txY}
-                r="1.9"
-                fill="#6366f1"
-                stroke="#ffffff"
-                strokeWidth="0.75"
               />
             </g>
           )}
@@ -255,6 +220,29 @@ export function TrafficBars({ series }) {
             />
           ))}
         </svg>
+
+        {/* 交互真圆高亮指示点（HTML 像素渲染，彻底杜绝 SVG 非等比拉伸导致圆点被压扁拉长） */}
+        {activePoint && (
+          <div className="nezha-chart-dots" aria-hidden="true">
+            <div
+              className="nezha-indicator-dot dot-mint nezha-dot-rx"
+              style={{ left: `${activePoint.x}%`, top: `${activePoint.rxY}%` }}
+            />
+            <div
+              className="nezha-indicator-dot dot-blue nezha-dot-tx"
+              style={{ left: `${activePoint.x}%`, top: `${activePoint.txY}%` }}
+            />
+          </div>
+        )}
+
+        {/* Y 轴刻度标注（标准 HTML 浮层，彻底解决 SVG 非等比拉伸导致数字变形变大） */}
+        {max > 0 && (
+          <div className="nezha-y-axis-labels mono" aria-hidden="true">
+            <span style={{ top: `${topY}%` }}>{formatBytes(max)}</span>
+            <span style={{ top: '55%' }}>{formatBytes(max * 0.5)}</span>
+            <span style={{ top: `${baselineY}%` }}>0 B</span>
+          </div>
+        )}
       </div>
 
       {/* X 轴时间刻度 */}

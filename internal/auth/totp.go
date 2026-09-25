@@ -228,6 +228,11 @@ func (s *Service) VerifyTOTPLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "same-origin request required")
 		return
 	}
+	mediaType := strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])
+	if !strings.EqualFold(mediaType, "application/json") {
+		writeError(w, http.StatusBadRequest, "content type must be application/json")
+		return
+	}
 	cookie, err := r.Cookie(totpPendingCookieName)
 	if err != nil || cookie.Value == "" {
 		writeError(w, http.StatusUnauthorized, "two-factor verification required")
@@ -241,7 +246,14 @@ func (s *Service) VerifyTOTPLogin(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Code string `json:"code"`
 	}
-	if json.Unmarshal(body, &payload) != nil {
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&payload) != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

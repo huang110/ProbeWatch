@@ -1,5 +1,6 @@
-import { ArrowLeft, Broadcast } from '@phosphor-icons/react'
-import { dash, formatBytes, formatEpochSeconds, formatRate, relativeHeartbeat, safeText, statusLabel } from '../lib/format.js'
+import { useEffect, useState } from 'react'
+import { ArrowLeft, Broadcast, Check, Copy } from '@phosphor-icons/react'
+import { dash, formatBytes, formatEpochSeconds, formatRate, relativeHeartbeat, safeText, statusLabel, formatLoad } from '../lib/format.js'
 import { DualLineChart, RingGauge, StatusDot } from './Common.jsx'
 import { ChecksSummaryPanel } from './ChecksTable.jsx'
 import { TrafficPanel } from './Traffic.jsx'
@@ -18,6 +19,30 @@ export function NodeDetailPage({
   onBack,
   rates = {},
 }) {
+  const [copied, setCopied] = useState(false)
+  const [networkHistory, setNetworkHistory] = useState([])
+
+  const nodeUuid = node?.uuid || node?.id || ''
+
+  useEffect(() => {
+    if (!nodeUuid) {
+      setNetworkHistory([])
+      return undefined
+    }
+    const controller = new AbortController()
+    fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/network/history?limit=60`, {
+      credentials: 'same-origin',
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((json) => {
+        if (!controller.signal.aborted && Array.isArray(json)) {
+          setNetworkHistory(json)
+        }
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [nodeUuid])
   if (!node) {
     return (
       <section className="subpage node-detail-page">
@@ -31,6 +56,15 @@ export function NodeDetailPage({
         </div>
       </section>
     )
+  }
+
+  const handleCopyUuid = () => {
+    const text = node.uuid || node.id
+    if (text && navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
 
   const nodeKey = node.uuid || node.id || ''
@@ -57,11 +91,34 @@ export function NodeDetailPage({
               <StatusDot status={node.status} />
               {statusLabel(node.status)}
             </span>
+            {node.flag && (
+              <span className="badge badge-subtle">
+                <span>{node.flag}</span>
+                <span>{node.region || '公网节点'}</span>
+              </span>
+            )}
+            {node.uptime && (
+              <span className="badge badge-subtle mono">
+                <span>运行时长: {node.uptime}</span>
+              </span>
+            )}
           </div>
           <p>
             UUID：{node.uuid || node.id || '—'}
             {node.hostname ? ` · 主机名：${node.hostname}` : ''}
             {' · '}心跳：{relativeHeartbeat(node.lastReportedAt)}
+            {(node.uuid || node.id) && (
+              <button
+                type="button"
+                className="copy-chip-btn"
+                onClick={handleCopyUuid}
+                title="复制节点 UUID"
+                aria-label="复制节点 UUID"
+              >
+                {copied ? <Check size={11} className="text-mint" /> : <Copy size={11} />}
+                <span>{copied ? '已复制' : '复制 UUID'}</span>
+              </button>
+            )}
           </p>
         </div>
         <button type="button" className="button button-quiet" onClick={onBack}>
@@ -70,9 +127,27 @@ export function NodeDetailPage({
       </div>
 
       <div className="gauge-grid" aria-label="资源仪表">
-        <RingGauge label="CPU" value={node.cpu} tone="mint" />
-        <RingGauge label="内存" value={node.memory} tone="blue" />
-        <RingGauge label="磁盘" value={node.disk} tone="amber" />
+        <RingGauge
+          label="CPU"
+          value={node.cpu}
+          tone="mint"
+          detail={formatLoad(node.load1 ?? resource.load1, node.load5 ?? resource.load5, node.load15 ?? resource.load15)}
+          series={Array.isArray(history) && history.length ? history.map((h) => (h && typeof h === 'object' ? h.cpu : h)).filter((v) => v !== null && v !== undefined) : [node.cpu]}
+        />
+        <RingGauge
+          label="内存"
+          value={node.memory}
+          tone="blue"
+          detail={memUsed !== null && memTotal ? `${formatBytes(memUsed)} / ${formatBytes(memTotal)}` : null}
+          series={Array.isArray(history) && history.length ? history.map((h) => (h && typeof h === 'object' ? h.mem : h)).filter((v) => v !== null && v !== undefined) : [node.memory]}
+        />
+        <RingGauge
+          label="磁盘"
+          value={node.disk}
+          tone="amber"
+          detail={diskUsed !== null && diskTotal ? `${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}` : null}
+          series={Array.isArray(history) && history.length ? history.map((h) => (h && typeof h === 'object' ? h.disk : h)).filter((v) => v !== null && v !== undefined) : [node.disk]}
+        />
       </div>
 
       <div className="panel">
@@ -98,7 +173,7 @@ export function NodeDetailPage({
             <p>checks/summary 窗口聚合质量与丢包</p>
           </div>
         </div>
-        <ChecksSummaryPanel rows={checksSummary} loading={checksLoading} />
+        <ChecksSummaryPanel rows={checksSummary} loading={checksLoading} networkHistory={networkHistory} />
       </div>
 
       <div className="panel">

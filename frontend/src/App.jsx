@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
+import { Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay } from './lib/format.js'
 import { fetchCsrfToken, fetchGuestStatus, performLogout } from './lib/api.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
@@ -9,21 +9,85 @@ import { SubPage } from './components/SubPage.jsx'
 import { GuestView } from './components/GuestView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { BillingCenter } from './components/BillingCenter.jsx'
+import { DashboardView } from './components/DashboardView.jsx'
+import { ServerManageView } from './components/ServerManageView.jsx'
+import { MonitoringView } from './components/MonitoringView.jsx'
+import { TrafficReportView } from './components/TrafficReportView.jsx'
+import { AlertCenterView } from './components/AlertCenterView.jsx'
+import { LogsView } from './components/LogsView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
-import { GlobeHemisphereWest, WifiHigh, Broadcast, CloudArrowDown, SquaresFour, SlidersHorizontal, Database, Coins } from '@phosphor-icons/react'
+import {
+  GlobeHemisphereWest,
+  WifiHigh,
+  Broadcast,
+  CloudArrowDown,
+  SquaresFour,
+  SlidersHorizontal,
+  Database,
+  Coins,
+  ChartBar,
+  Scroll,
+} from '@phosphor-icons/react'
 
 const navItems = [
-  { id: 'overview', label: '总览', icon: SquaresFour },
-  { id: 'nodes', label: '节点', icon: GlobeHemisphereWest },
-  { id: 'billing', label: '账单与价值', icon: Coins },
-  { id: 'network', label: '网络检测', icon: WifiHigh },
-  { id: 'mtr', label: 'MTR 路由', icon: Broadcast },
-  { id: 'media', label: '流媒体', icon: CloudArrowDown },
-  { id: 'alerts', label: '告警事件', icon: Bell },
+  { id: 'overview', label: '仪表盘', icon: SquaresFour },
+  { id: 'servers', label: '服务器管理', icon: GlobeHemisphereWest },
+  { id: 'billing', label: '成本中心', icon: Coins },
+  {
+    id: 'monitoring',
+    label: '监测',
+    icon: Broadcast,
+    children: [
+      { id: 'latency', label: '延迟监测' },
+      { id: 'route', label: '回程线路监测' },
+    ],
+  },
+  { id: 'traffic', label: '流量与报告', icon: ChartBar },
+  {
+    id: 'notifications',
+    label: '通知与告警',
+    icon: Bell,
+    children: [
+      { id: 'notify-channel', label: '通知渠道' },
+      { id: 'notify-offline', label: '离线通知' },
+      { id: 'notify-load', label: '负载通知' },
+      { id: 'notify-traffic', label: '流量定时报告' },
+      { id: 'notify-latency', label: '延迟监测告警' },
+      { id: 'notify-general', label: '通用' },
+    ],
+  },
+  { id: 'logs', label: '系统日志', icon: Scroll },
 ]
 const REFRESH_OPTIONS = [10, 30, 60]
 const OVERVIEW_INTERVAL_MS = 300000
-const pageTitleFor = (page) => page === 'node-detail' ? '节点详情' : navItems.find((item) => item.id === page)?.label || ({ targets: '检测目标', settings: '系统设置' }[page] || '总览')
+const pageTitleFor = (page) =>
+  page === 'node-detail'
+    ? '节点详情'
+    : ({
+        overview: '仪表盘',
+        dashboard: '仪表盘',
+        servers: '服务器管理',
+        nodes: '服务器管理',
+        billing: '成本中心',
+        monitoring: '延迟监测',
+        latency: '延迟监测',
+        route: '回程线路监测',
+        network: '延迟监测',
+        mtr: '回程线路监测',
+        traffic: '流量与报告',
+        notifications: '通知与告警',
+        alerts: '通知与告警',
+        'notify-channel': '通知渠道',
+        'notify-offline': '离线通知设置',
+        'notify-load': '负载通知',
+        'notify-traffic': '流量定时报告',
+        'notify-latency': '延迟监测告警',
+        'notify-general': '通用设置',
+        logs: '系统日志',
+        media: '流媒体',
+        targets: '检测目标',
+        settings: '系统设置',
+      }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
 function getSavedTheme() {
@@ -43,7 +107,32 @@ function saveTheme(val) {
   } catch {}
 }
 
-const VALID_NAV_PAGES = ['overview', 'nodes', 'billing', 'network', 'mtr', 'media', 'alerts', 'targets', 'settings', 'node-detail']
+const VALID_NAV_PAGES = [
+  'overview',
+  'dashboard',
+  'servers',
+  'nodes',
+  'billing',
+  'monitoring',
+  'latency',
+  'route',
+  'network',
+  'mtr',
+  'traffic',
+  'notifications',
+  'alerts',
+  'notify-channel',
+  'notify-offline',
+  'notify-load',
+  'notify-traffic',
+  'notify-latency',
+  'notify-general',
+  'logs',
+  'media',
+  'targets',
+  'settings',
+  'node-detail',
+]
 
 function parseRouteFromHash() {
   try {
@@ -120,6 +209,35 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
 }
 
 function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleCollapse, mobileOpen, onCloseMobile, onSwitchToGuest, onLogout }) {
+  const [openMenus, setOpenMenus] = useState(() => {
+    const initial = { monitoring: false, notifications: false }
+    if (activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr') {
+      initial.monitoring = true
+    }
+    if (activeNav === 'notifications' || activeNav === 'alerts' || (typeof activeNav === 'string' && activeNav.startsWith('notify-'))) {
+      initial.notifications = true
+    }
+    return initial
+  })
+
+  useEffect(() => {
+    if (activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr') {
+      setOpenMenus((prev) => ({ ...prev, monitoring: true }))
+    } else if (activeNav === 'notifications' || activeNav === 'alerts' || (typeof activeNav === 'string' && activeNav.startsWith('notify-'))) {
+      setOpenMenus((prev) => ({ ...prev, notifications: true }))
+    }
+  }, [activeNav])
+
+  const handleToggleMenu = (itemId, firstChildId, isChildActive) => {
+    setOpenMenus((prev) => {
+      const willOpen = !prev[itemId]
+      if (willOpen && !isChildActive) {
+        onNavigate(firstChildId)
+      }
+      return { ...prev, [itemId]: willOpen }
+    })
+  }
+
   return <>
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''} ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="侧边栏">
       <div className="sidebar-head">
@@ -128,16 +246,83 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
       </div>
       <div className="workspace-switcher"><div className="workspace-avatar">P</div><div className="workspace-text"><span>工作区</span><strong>{me?.login || me?.name || 'ProbeWatch'}</strong></div></div>
       <nav className="side-nav" aria-label="主导航">
-        <span className="nav-section-label">监控</span>
-        {navItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" title={label} className={`nav-item ${activeNav === id ? 'nav-item-active' : ''}`} onClick={() => onNavigate(id)}><Icon size={18} weight={activeNav === id ? 'fill' : 'regular'} /><span>{label}</span></button>)}
-        <span className="nav-section-label nav-section-spaced">配置</span>
+        <span className="nav-section-label">Lite 核心管理</span>
+        {navItems.map((item) => {
+          const Icon = item.icon
+          if (item.children) {
+            const isChildActive =
+              item.children.some((c) => activeNav === c.id) ||
+              activeNav === item.id ||
+              (item.id === 'monitoring' && (activeNav === 'network' || activeNav === 'mtr')) ||
+              (item.id === 'notifications' && activeNav === 'alerts')
+            const isOpen = !!openMenus[item.id]
+            return (
+              <div key={item.id} className="nav-expandable-wrap">
+                <button
+                  type="button"
+                  title={item.label}
+                  className={`nav-item ${isChildActive ? 'nav-item-active' : ''}`}
+                  onClick={() => handleToggleMenu(item.id, item.children[0].id, isChildActive)}
+                >
+                  <Icon size={18} weight={isChildActive ? 'fill' : 'regular'} />
+                  <span>{item.label}</span>
+                  <span
+                    className={`nav-chevron-icon ${isOpen ? 'nav-chevron-open' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setOpenMenus((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
+                    }}
+                    title={isOpen ? '收起子菜单' : '展开子菜单'}
+                  >
+                    <CaretDown size={13} weight="bold" />
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="nav-sub-list">
+                    {item.children.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        className={`nav-sub-item ${
+                          activeNav === child.id ||
+                          (child.id === 'latency' && (activeNav === 'monitoring' || activeNav === 'network')) ||
+                          (child.id === 'route' && activeNav === 'mtr') ||
+                          (child.id === 'notify-channel' && (activeNav === 'notifications' || activeNav === 'alerts'))
+                            ? 'nav-sub-item-active'
+                            : ''
+                        }`}
+                        onClick={() => onNavigate(child.id)}
+                      >
+                        <span>{child.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }
+          return (
+            <button
+              key={item.id}
+              type="button"
+              title={item.label}
+              className={`nav-item ${activeNav === item.id ? 'nav-item-active' : ''}`}
+              onClick={() => onNavigate(item.id)}
+            >
+              <Icon size={item.id === activeNav ? 18 : 18} weight={activeNav === item.id ? 'fill' : 'regular'} />
+              <span>{item.label}</span>
+            </button>
+          )
+        })}
+        <span className="nav-section-label nav-section-spaced">拓展与配置</span>
+        <button type="button" title="流媒体矩阵" className={`nav-item ${activeNav === 'media' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('media')}><CloudArrowDown size={18} /><span>流媒体</span></button>
         <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
         <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('settings')}><Database size={18} /><span>系统设置</span></button>
         <span className="nav-section-label nav-section-spaced">模式切换</span>
         <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.2.4</span></div>
+        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.3.0</span></div>
         <div className="profile-row">
           <div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
@@ -428,7 +613,28 @@ export function App() {
       if (!response.ok) throw new Error(`history:${response.status}`)
       const json = await response.json()
       if (!Array.isArray(json)) throw new Error('history:invalid-json')
-      return json.map((item) => { const resource = item?.resource || {}; const memoryTotal = numeric(resource.memory_total_bytes); const memoryUsed = numeric(resource.memory_used_bytes); return { cpu: numeric(resource.cpu_percent), mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null } }).reverse()
+      return json.map((item) => {
+        const resource = item?.resource || {}
+        const memoryTotal = numeric(resource.memory_total_bytes)
+        const memoryUsed = numeric(resource.memory_used_bytes)
+        const diskTotal = numeric(resource.filesystem_total_bytes)
+        const diskUsed = numeric(resource.filesystem_used_bytes)
+        const rawTime = item?.reported_at || item?.recorded_at || item?.time
+        let timeIso = null
+        if (typeof rawTime === 'string') {
+          const d = new Date(rawTime)
+          if (!Number.isNaN(d.getTime())) timeIso = d.toISOString()
+        } else if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
+          const ms = rawTime > 1e14 ? Math.round(rawTime / 1e6) : rawTime > 1e11 ? rawTime : Math.round(rawTime * 1000)
+          timeIso = new Date(ms).toISOString()
+        }
+        return {
+          time: timeIso,
+          cpu: numeric(resource.cpu_percent),
+          mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null,
+          disk: diskUsed !== null && diskTotal !== null && diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 1000) / 10 : null,
+        }
+      }).reverse()
     }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
     return () => controller.abort()
   }, [selectedNode, detailNode, activeNav, targetDetailUuid])
@@ -492,17 +698,52 @@ export function App() {
       document.cookie = `pb_nav=${encodeURIComponent(page)}; path=/; max-age=2592000; SameSite=Lax`
     } catch {}
   }, [detailNode])
+
+  const refreshGuest = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      const guestStatus = await fetchGuestStatus()
+      if (guestStatus) setPublicStatus(guestStatus)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [])
+
+  const handleSwitchToGuest = useCallback(() => {
+    setGuestPreview(true)
+    refreshGuest()
+  }, [refreshGuest])
+
+  useEffect(() => {
+    if (guestPreview || apiState.kind === 'guest') {
+      refreshGuest()
+    }
+  }, [guestPreview, apiState.kind, refreshGuest])
+
   const refreshAll = () => { loadCore(true); loadOverview() }
   const lastSyncText = lastSync ? formatTimeOfDay(lastSync) : '—'
   const clockText = formatTimeOfDay(clock)
 
   if (window.location.pathname === '/login/2fa') return <TOTPVerifyPage />
   if (guestPreview || apiState.kind === 'guest') {
+    const previewFallback = (guestPreview && data.length > 0) ? {
+      nodes: {
+        online: data.filter((n) => n.status === 'online').length,
+        total: data.length,
+        names: data.map((n) => safeText(n.name)).filter(Boolean),
+      },
+      checks: {
+        success_rate: overview?.checks?.success_rate ?? 100,
+        avg_latency_ms: overview?.checks?.avg_latency_ms ?? null,
+      },
+      last_updated_at: new Date().toISOString(),
+    } : null
+
     return (
       <GuestView
-        status={publicStatus}
+        status={publicStatus || previewFallback}
         isRefreshing={isRefreshing}
-        onRefresh={refreshAll}
+        onRefresh={refreshGuest}
         onLoginSuccess={() => { setGuestPreview(false); refreshAll() }}
         isPreview={guestPreview}
         onExitPreview={() => setGuestPreview(false)}
@@ -522,7 +763,7 @@ export function App() {
       onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
       mobileOpen={mobileNavOpen}
       onCloseMobile={() => setMobileNavOpen(false)}
-      onSwitchToGuest={() => setGuestPreview(true)}
+      onSwitchToGuest={handleSwitchToGuest}
       onLogout={performLogout}
     />
     <main className="main-content">
@@ -538,16 +779,125 @@ export function App() {
         me={me}
         onNavigate={navigate}
         onOpenMobileNav={() => setMobileNavOpen(true)}
-        onSwitchToGuest={() => setGuestPreview(true)}
+        onSwitchToGuest={handleSwitchToGuest}
         onLogout={performLogout}
         theme={theme}
         onThemeChange={setTheme}
       />
       <div className="content-wrap">
-        {activeNav === 'overview' ? <OverviewPage data={data} overview={overview} alerts={alerts} lossRates={lossRates} rates={rates} statHistory={statHistory} onAck={ackAlert} ackingId={ackingId} selectedNode={selectedNode} onSelectNode={setSelectedNode} onNavigate={navigate} isRefreshing={isRefreshing} onRefresh={refreshAll} lastSyncText={lastSyncText} apiState={apiState} />
-          : activeNav === 'node-detail' ? <NodeDetailPage node={detailNode} loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)} history={history} historyLoading={historyLoading} checksSummary={checksSummary} checksLoading={checksLoading} traffic={traffic} trafficLoading={trafficLoading} trafficPeriod={trafficPeriod} onTrafficPeriodChange={setTrafficPeriod} onBack={() => navigate('nodes')} rates={rates} />
-            : activeNav === 'billing' ? <BillingCenter nodes={data} />
-              : <SubPage page={activeNav} data={data} alerts={alerts} onAck={ackAlert} ackingId={ackingId} onBack={() => navigate('overview')} onSelectNode={setSelectedNode} rates={rates} lossRates={lossRates} refreshInterval={refreshInterval} onIntervalChange={setRefreshInterval} theme={theme} onThemeChange={setTheme} />}
+        {activeNav === 'overview' || activeNav === 'dashboard' ? (
+          <DashboardView
+            nodes={data}
+            overview={overview}
+            alerts={alerts}
+            lossRates={lossRates}
+            rates={rates}
+            onNavigate={navigate}
+            onSelectNode={setSelectedNode}
+            refreshInterval={refreshInterval}
+            onRefresh={refreshAll}
+          />
+        ) : activeNav === 'classic-overview' ? (
+          <OverviewPage
+            data={data}
+            overview={overview}
+            alerts={alerts}
+            lossRates={lossRates}
+            rates={rates}
+            statHistory={statHistory}
+            onAck={ackAlert}
+            ackingId={ackingId}
+            selectedNode={selectedNode}
+            onSelectNode={setSelectedNode}
+            onNavigate={navigate}
+            isRefreshing={isRefreshing}
+            onRefresh={refreshAll}
+            lastSyncText={lastSyncText}
+            apiState={apiState}
+          />
+        ) : activeNav === 'node-detail' ? (
+          <NodeDetailPage
+            node={detailNode}
+            loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)}
+            history={history}
+            historyLoading={historyLoading}
+            checksSummary={checksSummary}
+            checksLoading={checksLoading}
+            traffic={traffic}
+            trafficLoading={trafficLoading}
+            trafficPeriod={trafficPeriod}
+            onTrafficPeriodChange={setTrafficPeriod}
+            onBack={() => navigate('servers')}
+            rates={rates}
+          />
+        ) : activeNav === 'servers' || activeNav === 'nodes' ? (
+          <ServerManageView
+            nodes={data}
+            rates={rates}
+            lossRates={lossRates}
+            onSelectNode={setSelectedNode}
+          />
+        ) : activeNav === 'billing' ? (
+          <BillingCenter nodes={data} />
+        ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (
+          <MonitoringView
+            nodes={data}
+            readOnly={true}
+            initialTab={activeNav === 'route' || activeNav === 'mtr' ? 'route' : 'latency'}
+            onNavigate={navigate}
+          />
+        ) : activeNav === 'traffic' ? (
+          <TrafficReportView nodes={data} onSelectNode={setSelectedNode} />
+        ) : activeNav === 'notifications' ||
+            activeNav === 'alerts' ||
+            activeNav === 'notify-channel' ||
+            activeNav === 'notify-offline' ||
+            activeNav === 'notify-load' ||
+            activeNav === 'notify-traffic' ||
+            activeNav === 'notify-latency' ||
+            activeNav === 'notify-general' ? (
+          <AlertCenterView
+            alerts={alerts}
+            nodes={data}
+            onAck={ackAlert}
+            ackingId={ackingId}
+            activeSubView={
+              activeNav === 'notify-offline'
+                ? 'offline'
+                : activeNav === 'notify-load'
+                ? 'load'
+                : activeNav === 'notify-traffic'
+                ? 'traffic_report'
+                : activeNav === 'notify-latency'
+                ? 'latency_alert'
+                : activeNav === 'notify-general'
+                ? 'general'
+                : 'channel'
+            }
+            onNavigate={navigate}
+          />
+        ) : activeNav === 'logs' ? (
+          <LogsView />
+        ) : (
+          <SubPage
+            page={activeNav}
+            data={data}
+            alerts={alerts}
+            onAck={ackAlert}
+            ackingId={ackingId}
+            onBack={() => navigate('overview')}
+            onSelectNode={setSelectedNode}
+            onNavigate={navigate}
+            rates={rates}
+            lossRates={lossRates}
+            refreshInterval={refreshInterval}
+            onIntervalChange={setRefreshInterval}
+            theme={theme}
+            onThemeChange={setTheme}
+            overview={overview}
+            onRefresh={refreshAll}
+          />
+        )}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>

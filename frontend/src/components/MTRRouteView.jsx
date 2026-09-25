@@ -3,6 +3,7 @@ import { ArrowRight, Broadcast, CheckCircle, CircleNotch, Clock, FlowArrow, Glob
 import { formatTimeOfDay, numeric, safeArray, safeObject, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
+import { NewRouteMonitorModal } from './NewRouteMonitorModal.jsx'
 
 const PRESET_MTR_TARGETS = [
   { id: 'mtr-1', name: 'Route 1 (198.51.100.1)', host: '198.51.100.1', max_hops: 20 },
@@ -86,21 +87,21 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
         {active ? (
           <div className="hover-badge-content">
             <span className="hover-stat mono" style={{ fontWeight: 600 }}>第 #{active.hop.ttl} 跳</span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat mono text-blue">
               IP: <b>{active.hop.ip || '超时无响应'}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat mono text-mint">
               时延: <b>{active.hop.latency !== null ? `${active.hop.latency} ms` : '—'}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className={`hover-stat mono ${active.hop.ttl === count && isReached ? 'text-mint' : active.hop.isTimedOut ? 'text-rose' : 'text-1'}`}>
               状态: <b>{active.hop.ttl === count && isReached ? '宿主机抵达' : active.hop.isTimedOut ? 'ICMP 过滤' : '骨干中继'}</b>
             </span>
             {destination && (
               <>
-                <span className="hover-sep">│</span>
+                <span className="hover-sep" aria-hidden="true" />
                 <span className="hover-stat muted mono">目标: {destination}</span>
               </>
             )}
@@ -150,24 +151,9 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
             />
           )}
 
-          {/* Y 轴刻度标注 */}
-          {maxLat > 0 && (
-            <g className="nezha-axis-scale-group" aria-hidden="true">
-              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                {Math.round(maxLat)} ms
-              </text>
-              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                0 ms
-              </text>
-            </g>
-          )}
-
-          {/* 交互交叉线与发光点 */}
+          {/* 交互交叉线 */}
           {pts.map((p, index) => {
             const isHovered = hoveredIdx === index
-            const isTimeout = p.hop.isTimedOut
-            const isFinal = p.hop.ttl === count && isReached
-            const dotTone = isFinal ? '#10b981' : isTimeout ? '#f43f5e' : '#6366f1'
 
             return (
               <g key={`mtr-pt-${index}`}>
@@ -180,14 +166,6 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
                     y2={baselineY}
                   />
                 )}
-                <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r={isHovered ? 2.4 : 1.6}
-                  fill={dotTone}
-                  stroke="#ffffff"
-                  strokeWidth="0.75"
-                />
                 <rect
                   x={index * slot}
                   y="0"
@@ -202,6 +180,31 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
             )
           })}
         </svg>
+
+        {/* 交互真圆高亮指示点（HTML 像素渲染，彻底杜绝 SVG 非等比拉伸导致圆点被压扁拉长） */}
+        {hoveredIdx !== null && pts[hoveredIdx] && (
+          <div className="nezha-chart-dots" aria-hidden="true">
+            <div
+              className={`nezha-indicator-dot ${
+                pts[hoveredIdx].hop.ttl === count && isReached
+                  ? 'dot-mint'
+                  : pts[hoveredIdx].hop.isTimedOut
+                  ? 'dot-rose'
+                  : 'dot-blue'
+              }`}
+              style={{ left: `${pts[hoveredIdx].x}%`, top: `${pts[hoveredIdx].y}%` }}
+            />
+          </div>
+        )}
+
+        {/* Y 轴刻度标注（标准 HTML 浮层，彻底解决 SVG 非等比拉伸导致数字变形变大） */}
+        {maxLat > 0 && (
+          <div className="nezha-y-axis-labels mono" aria-hidden="true">
+            <span style={{ top: `${topY}%` }}>{Math.round(maxLat)} ms</span>
+            <span style={{ top: `${(topY + baselineY) / 2}%` }}>{Math.round(maxLat / 2)} ms</span>
+            <span style={{ top: `${baselineY}%` }}>0 ms</span>
+          </div>
+        )}
       </div>
 
       {/* X 轴跳数指示 */}
@@ -227,6 +230,7 @@ export function MTRRouteView({ nodes = [] }) {
   const [loading, setLoading] = useState(false)
   const [selectedTargetId, setSelectedTargetId] = useState(null)
   const [addingPreset, setAddingPreset] = useState(false)
+  const [showRouteModal, setShowRouteModal] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   const [newTarget, setNewTarget] = useState({ id: '', name: '', host: '', maxHops: '20' })
   const [formError, setFormError] = useState('')
@@ -410,14 +414,14 @@ export function MTRRouteView({ nodes = [] }) {
           <div className="mtr-header-actions">
             <button
               type="button"
-              className="button button-quiet btn-sm"
-              onClick={() => setShowAddForm((v) => !v)}
+              className="button button-primary btn-sm"
+              onClick={() => setShowRouteModal(true)}
             >
-              <Plus size={14} /> 新建 MTR 目标
+              <Plus size={14} weight="bold" /> 新建回程监测
             </button>
             <button
               type="button"
-              className="button button-primary btn-sm"
+              className="button button-quiet btn-sm"
               onClick={fetchMtr}
               disabled={loading}
             >
@@ -652,6 +656,17 @@ export function MTRRouteView({ nodes = [] }) {
           />
         </div>
       )}
+
+      {/* 新建回程监测弹窗 */}
+      <NewRouteMonitorModal
+        isOpen={showRouteModal}
+        onClose={() => setShowRouteModal(false)}
+        nodes={nodes}
+        onCreated={(target) => {
+          setRefreshTrigger((v) => v + 1)
+          if (target?.id) setSelectedTargetId(target.id)
+        }}
+      />
     </div>
   )
 }

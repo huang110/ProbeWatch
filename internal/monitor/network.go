@@ -223,9 +223,12 @@ func (p *Probe) runHTTP(ctx context.Context, task protocol.CheckTask) (int, erro
 		return 0, err
 	}
 	defer response.Body.Close()
-	_, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, p.maxBodyBytes()))
+	read, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, p.maxBodyBytes()+1))
 	if readErr != nil {
 		return response.StatusCode, readErr
+	}
+	if read > p.maxBodyBytes() {
+		return response.StatusCode, fmt.Errorf("response body exceeds limit")
 	}
 	return response.StatusCode, nil
 }
@@ -285,6 +288,7 @@ func (p *Probe) httpTransport() http.RoundTripper {
 		DisableKeepAlives:     true,
 		ForceAttemptHTTP2:     false,
 		ResponseHeaderTimeout: p.timeoutFor(0),
+		MaxResponseHeaderBytes: 32 << 10,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, portText, err := net.SplitHostPort(address)
 			if err != nil {

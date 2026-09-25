@@ -147,6 +147,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("MAX_REQUEST_BODY must be no more than 16MiB")
 	}
 	if cfg.Environment == "production" {
+		if err := validateAgentEndpoint(cfg.AgentEndpoint, true); err != nil {
+			return Config{}, err
+		}
+		if err := validateWebhookURL(cfg.WebhookURL, true); err != nil {
+			return Config{}, err
+		}
 		publicURL, err := validateProductionHTTPSURL("PROBEWATCH_PUBLIC_BASE_URL", cfg.PublicBaseURL)
 		if err != nil {
 			return Config{}, err
@@ -186,6 +192,59 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func validateAgentEndpoint(raw string, production bool) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return fmt.Errorf("PROBEWATCH_AGENT_ENDPOINT must be an absolute URL without credentials, query, or fragment")
+	}
+	if production && !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("PROBEWATCH_AGENT_ENDPOINT must use HTTPS in production")
+	}
+	if !production && !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("PROBEWATCH_AGENT_ENDPOINT must use HTTP or HTTPS")
+	}
+	return nil
+}
+
+func validateWebhookURL(raw string, production bool) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return fmt.Errorf("PROBEWATCH_WEBHOOK_URL must be an absolute URL without credentials, query, or fragment")
+	}
+	if production && !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("PROBEWATCH_WEBHOOK_URL must use HTTPS in production")
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("PROBEWATCH_WEBHOOK_URL must use HTTP or HTTPS")
+	}
+	if production && isLocalWebhookHost(parsed.Hostname()) {
+		return fmt.Errorf("PROBEWATCH_WEBHOOK_URL must not target a local or private address in production")
+	}
+	return nil
+}
+
+func isLocalWebhookHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" || host == "localhost.localdomain" || host == "ip6-localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return true
+		}
+		if ip.Equal(net.ParseIP("169.254.169.254")) || ip.Equal(net.ParseIP("100.100.100.200")) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLoopbackListen(raw string) bool {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/frontend"
@@ -17,9 +18,14 @@ type Server struct {
 	cfg           config.Config
 	service       *auth.Service
 	agentLimiter  *rateLimiter
+	agentIPLimiter *rateLimiter
+	registrationLimiter *rateLimiter
 	publicLimiter *rateLimiter
 	loginLimiter  *rateLimiter
 	totpLimiter   *rateLimiter
+	publicCacheMu sync.RWMutex
+	publicCacheAt time.Time
+	publicCache    publicStatusResponse
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
@@ -27,6 +33,8 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		cfg:           cfg,
 		service:       service,
 		agentLimiter:  newRateLimiter(120, time.Minute, 10000),
+		agentIPLimiter: newRateLimiter(240, time.Minute, 10000),
+		registrationLimiter: newRateLimiter(10, time.Minute, 10000),
 		publicLimiter: newRateLimiter(60, time.Minute, 10000),
 		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
@@ -123,7 +131,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	return securityHeaders(mux)
+	return securityHeaders(mux, s.cfg)
 }
 
 func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
@@ -213,10 +221,20 @@ func (s *Server) githubCallback(w http.ResponseWriter, r *http.Request) {
 	s.service.Callback(w, r)
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func securityHeaders(next http.Handler, cfg config.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if cfg.Environment == "production" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		if strings.HasPrefix(r.URL.Path, "/auth/") {
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}

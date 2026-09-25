@@ -45,47 +45,101 @@ function generateNezhaSpline(pts, bottomY = 90) {
   return { line, area }
 }
 
-export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(), selectedNodeName = '' }) {
+export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(), history = [], selectedNodeName = '' }) {
   const [hoveredIdx, setHoveredIdx] = useState(null)
-  if (!targets.length) return null
+  const isTimeMode = Array.isArray(history) && history.length > 0
+  if (!isTimeMode && !targets.length) return null
 
-  const items = targets.map((t) => {
-    const report = resultsByTargetId.get(t.id)
-    const res = report?.result || {}
-    const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
-    const lat = numeric(res.latency_ms)
-    return {
-      target: t,
-      report,
-      latency: lat,
-      isOk,
-      statusCode: res.status_code,
-      error: res.error,
-    }
-  })
-
-  const validLatencies = items.map((i) => i.latency).filter((l) => l !== null && l >= 0)
-  const maxLat = Math.max(...validLatencies, 20)
-  const headroomLat = maxLat * 1.15
   const baselineY = 90
   const topY = 16
   const plotHeight = baselineY - topY
-  const count = items.length
-  const slot = 100 / Math.max(count, 1)
 
-  const pts = items.map((it, i) => {
-    const x = i * slot + slot / 2
-    const lat = it.latency !== null && it.latency >= 0 ? it.latency : 0
-    const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
-    return { x, y, item: it }
-  })
+  let items = []
+  let validLatencies = []
+  let slot = 0
+  let maxLat = 20
+  let headroomLat = 20
+
+  if (isTimeMode) {
+    const sortedHistory = [...history].sort(
+      (a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0)
+    )
+    validLatencies = sortedHistory
+      .map((h) => {
+        const res = h.result || {}
+        return numeric(res.latency_ms ?? h.latency_ms ?? h.latency)
+      })
+      .filter((l) => l !== null && l >= 0)
+    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 20
+    maxLat = Math.max(rawMax, 10)
+    headroomLat = maxLat * 1.15
+    const count = sortedHistory.length
+    slot = 100 / Math.max(count, 1)
+
+    items = sortedHistory.map((h, i) => {
+      const res = h.result || {}
+      const lat = numeric(res.latency_ms ?? h.latency_ms ?? h.latency)
+      const hasLat = lat !== null && lat >= 0
+      const effectiveLat = hasLat ? lat : 0
+      const x = i * slot + slot / 2
+      const y = baselineY - Math.min((effectiveLat / headroomLat) * plotHeight, plotHeight)
+      const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
+      const matched = targets.find((t) => t.id === h.target_id || t.name === h.target_id)
+      const targetName = matched?.name || h.target_id || 'TCP 探测目标'
+      const targetKind = (matched?.kind || 'TCP').toUpperCase()
+
+      return {
+        x,
+        y,
+        hasLat,
+        latency: lat,
+        isOk,
+        targetName,
+        targetKind,
+        time: h.checked_at,
+        error: res.error,
+      }
+    })
+  } else {
+    // 降级兼容：按目标列表排布
+    const targetItems = targets.map((t) => {
+      const report = resultsByTargetId.get(t.id)
+      const res = report?.result || {}
+      const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
+      const lat = numeric(res.latency_ms)
+      return {
+        target: t,
+        targetName: t.name,
+        targetKind: (t.kind || 'TCP').toUpperCase(),
+        report,
+        latency: lat,
+        isOk,
+        statusCode: res.status_code,
+        error: res.error,
+        time: report?.checked_at,
+      }
+    })
+    validLatencies = targetItems.map((i) => i.latency).filter((l) => l !== null && l >= 0)
+    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 20
+    maxLat = Math.max(rawMax, 10)
+    headroomLat = maxLat * 1.15
+    const count = targetItems.length
+    slot = 100 / Math.max(count, 1)
+
+    items = targetItems.map((it, i) => {
+      const x = i * slot + slot / 2
+      const lat = it.latency !== null && it.latency >= 0 ? it.latency : 0
+      const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
+      return { ...it, x, y, hasLat: it.latency !== null && it.latency >= 0 }
+    })
+  }
 
   const spline = generateNezhaSpline(
-    pts.map((p) => ({ x: p.x, y: p.y })),
+    items.map((p) => ({ x: p.x, y: p.y })),
     baselineY
   )
 
-  const active = hoveredIdx !== null && pts[hoveredIdx] ? pts[hoveredIdx] : null
+  const active = hoveredIdx !== null && items[hoveredIdx] ? items[hoveredIdx] : null
 
   return (
     <div className="network-latency-wrap nezha-traffic-wrap" onMouseLeave={() => setHoveredIdx(null)}>
@@ -93,31 +147,44 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
       <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
         {active ? (
           <div className="hover-badge-content">
-            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.item.target.name}</span>
-            <span className="hover-sep">│</span>
+            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.targetName}</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-mint mono">
-              协议: <b>{active.item.target.kind.toUpperCase()}</b>
+              协议: <b>{active.targetKind}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-blue mono">
-              延迟: <b>{active.item.latency !== null ? `${active.item.latency} ms` : '—'}</b>
+              延迟: <b>{active.latency !== null ? `${active.latency} ms` : '—'}</b>
             </span>
-            <span className="hover-sep">│</span>
-            <span className={`hover-stat mono ${active.item.isOk ? 'text-mint' : 'text-rose'}`}>
-              状态: <b>{active.item.isOk ? '连通正常' : active.item.error || '连接超时'}</b>
+            <span className="hover-sep" aria-hidden="true" />
+            <span className={`hover-stat mono ${active.isOk ? 'text-mint' : 'text-rose'}`}>
+              状态: <b>{active.isOk ? '连通正常' : active.error || '连接超时'}</b>
             </span>
+            {active.time && (
+              <>
+                <span className="hover-sep" aria-hidden="true" />
+                <span className="hover-stat text-amber mono">
+                  采样时间: <b>{formatTimeOfDay(active.time)}</b>
+                </span>
+              </>
+            )}
             {selectedNodeName && (
               <>
-                <span className="hover-sep">│</span>
+                <span className="hover-sep" aria-hidden="true" />
                 <span className="hover-stat muted mono">源: {selectedNodeName}</span>
               </>
             )}
-            <span className="hover-sep">│</span>
-            <span className="hover-stat muted mono">基准 30s</span>
+            <span className="hover-sep" aria-hidden="true" />
+            <span className="hover-stat muted mono">{isTimeMode ? '历史时序采样' : '基准 30s'}</span>
           </div>
         ) : (
           <div className="hover-badge-hint mono">
-            <span>哪吒 2.0 网络延迟探针流线 · 鼠标滑过节点查看实时连通性与时延</span>
+            <Clock size={13} className="text-mint inline-icon" />
+            <span>
+              {isTimeMode
+                ? '哪吒 2.0 TCP 延迟时序走势 · 鼠标滑过节点查看对应时间点的检测延迟与状态'
+                : '哪吒 2.0 网络延迟探针流线 · 鼠标滑过节点查看实时连通性与时延'}
+            </span>
           </div>
         )}
       </div>
@@ -160,23 +227,9 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
             />
           )}
 
-          {/* Y 轴刻度标注 */}
-          {maxLat > 0 && (
-            <g className="nezha-axis-scale-group" aria-hidden="true">
-              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                {Math.round(maxLat)} ms
-              </text>
-              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                0 ms
-              </text>
-            </g>
-          )}
-
-          {/* 交互交叉线与发光点 */}
-          {pts.map((p, index) => {
+          {/* 交互交叉线 */}
+          {items.map((p, index) => {
             const isHovered = hoveredIdx === index
-            const isOk = p.item.isOk
-            const dotTone = !isOk ? '#f43f5e' : p.item.latency !== null && p.item.latency < 50 ? '#10b981' : '#6366f1'
 
             return (
               <g key={`net-pt-${index}`}>
@@ -189,14 +242,6 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
                     y2={baselineY}
                   />
                 )}
-                <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r={isHovered ? 2.4 : 1.6}
-                  fill={dotTone}
-                  stroke="#ffffff"
-                  strokeWidth="0.75"
-                />
                 <rect
                   x={index * slot}
                   y="0"
@@ -211,20 +256,55 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
             )
           })}
         </svg>
+
+        {/* 交互真圆高亮指示点（HTML 像素渲染，彻底杜绝 SVG 非等比拉伸导致圆点被压扁拉长） */}
+        {hoveredIdx !== null && items[hoveredIdx] && (
+          <div className="nezha-chart-dots" aria-hidden="true">
+            <div
+              className={`nezha-indicator-dot ${
+                !items[hoveredIdx].isOk
+                  ? 'dot-rose'
+                  : items[hoveredIdx].latency !== null && items[hoveredIdx].latency < 50
+                  ? 'dot-mint'
+                  : 'dot-blue'
+              }`}
+              style={{ left: `${items[hoveredIdx].x}%`, top: `${items[hoveredIdx].y}%` }}
+            />
+          </div>
+        )}
+
+        {/* Y 轴刻度标注（标准 HTML 浮层，彻底解决 SVG 非等比拉伸导致数字变形变大） */}
+        {maxLat > 0 && (
+          <div className="nezha-y-axis-labels mono" aria-hidden="true">
+            <span style={{ top: `${topY}%` }}>{Math.round(maxLat)} ms</span>
+            <span style={{ top: '53%' }}>{Math.round(maxLat / 2)} ms</span>
+            <span style={{ top: `${baselineY}%` }}>0 ms</span>
+          </div>
+        )}
       </div>
 
-      {/* X 轴目标名称指示 */}
-      <div className="checks-time-axis nezha-time-axis mono">
-        {items.map((it, idx) => (
-          <span
-            key={`x-net-${idx}`}
-            className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
-            style={{ width: `${slot}%`, textAlign: 'center' }}
-          >
-            {it.target.name}
-          </span>
-        ))}
-      </div>
+      {/* X 轴目标/时间指示 */}
+      {isTimeMode ? (
+        <div className="checks-time-axis nezha-time-axis mono" aria-hidden="true">
+          <span>{formatTimeOfDay(items[0]?.time)}</span>
+          {items.length > 2 && (
+            <span>{formatTimeOfDay(items[Math.floor(items.length / 2)]?.time)}</span>
+          )}
+          <span>{formatTimeOfDay(items[items.length - 1]?.time)}</span>
+        </div>
+      ) : (
+        <div className="checks-time-axis nezha-time-axis mono">
+          {items.map((it, idx) => (
+            <span
+              key={`x-net-${idx}`}
+              className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
+              style={{ width: `${slot}%`, textAlign: 'center' }}
+            >
+              {it.targetName}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -232,6 +312,7 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
 export function NetworkMonitorView({ nodes = [] }) {
   const [selectedNodeUuid, setSelectedNodeUuid] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
   const [results, setResults] = useState([])
+  const [history, setHistory] = useState([])
   const [targets, setTargets] = useState([])
   const [loading, setLoading] = useState(false)
   const [activeKindFilter, setActiveKindFilter] = useState('all') // 'all' | 'tcp' | 'http' | 'dns'
@@ -260,14 +341,23 @@ export function NetworkMonitorView({ nodes = [] }) {
         if (Array.isArray(tJson)) setTargets(tJson)
       }
 
-      // 2. Fetch network results from selected node
+      // 2. Fetch network results and history from selected node
       if (selectedNodeUuid) {
-        const nRes = await fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/network`, {
-          credentials: 'same-origin',
-        })
+        const [nRes, hRes] = await Promise.all([
+          fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/network`, {
+            credentials: 'same-origin',
+          }),
+          fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/network/history?limit=60`, {
+            credentials: 'same-origin',
+          }),
+        ])
         if (nRes.ok) {
           const nJson = await nRes.json()
           if (Array.isArray(nJson)) setResults(nJson)
+        }
+        if (hRes.ok) {
+          const hJson = await hRes.json()
+          if (Array.isArray(hJson)) setHistory(hJson)
         }
       }
     } catch {
@@ -554,6 +644,7 @@ export function NetworkMonitorView({ nodes = [] }) {
       <NetworkLatencyLines
         targets={filteredTargets}
         resultsByTargetId={resultsByTargetId}
+        history={history}
         selectedNodeName={selectedNode?.name}
       />
 

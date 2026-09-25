@@ -5,18 +5,41 @@ export const CURRENCY_RATES = {
   USD: { symbol: '$', name: '美元', rate: 7.20 },
   EUR: { symbol: '€', name: '欧元', rate: 7.85 },
   GBP: { symbol: '£', name: '英镑', rate: 9.30 },
+  CAD: { symbol: 'C$', name: '加元', rate: 5.20 },
   HKD: { symbol: 'HK$', name: '港币', rate: 0.92 },
   JPY: { symbol: '円', name: '日元', rate: 0.048 },
 }
 
+export const resolveCurrency = (curr) => {
+  if (!curr) return CURRENCY_RATES.CNY
+  const clean = String(curr).trim()
+  if (CURRENCY_RATES[clean.toUpperCase()]) return CURRENCY_RATES[clean.toUpperCase()]
+  for (const info of Object.values(CURRENCY_RATES)) {
+    if (info.symbol === clean || info.name === clean) return info
+  }
+  return { symbol: clean, name: clean, rate: 1.0 }
+}
+
+export const convertCNYToCurrency = (amountCNY, targetCode = 'CNY') => {
+  const code = (targetCode || 'CNY').toUpperCase()
+  const rateInfo = CURRENCY_RATES[code] || CURRENCY_RATES.CNY
+  const rate = rateInfo.rate || 1.0
+  const converted = rate > 0 ? (Number(amountCNY) / rate) : Number(amountCNY)
+  return {
+    symbol: rateInfo.symbol,
+    amount: converted,
+    formatted: `${rateInfo.symbol}${converted.toFixed(2)}`,
+  }
+}
+
 export const BILLING_CYCLES = [
-  { id: 'month', label: '月付', days: 30 },
-  { id: 'quarter', label: '季付', days: 90 },
-  { id: 'semiannual', label: '半年付', days: 180 },
-  { id: 'annual', label: '年付', days: 365 },
-  { id: 'biennial', label: '两年付', days: 730 },
-  { id: 'triennial', label: '三年付', days: 1095 },
-  { id: 'free', label: '永久/免费', days: 0 },
+  { id: 'month', label: '月', days: 30 },
+  { id: 'quarter', label: '季', days: 90 },
+  { id: 'semiannual', label: '半年', days: 180 },
+  { id: 'annual', label: '年', days: 365 },
+  { id: 'biennial', label: '两年', days: 730 },
+  { id: 'triennial', label: '三年', days: 1095 },
+  { id: 'free', label: '一次性/长期免费', days: 0 },
 ]
 
 export const COMMON_MERCHANTS = [
@@ -99,6 +122,51 @@ export const getNodeBilling = (nodeId, defaultName = '') => {
   }
 }
 
+export const getNodeCustomMeta = (nodeId, defaultNode = {}) => {
+  const all = getStoredBillingData()
+  const found = all[nodeId] || {}
+  return {
+    customName: found.customName || defaultNode?.name || '',
+    customFlag: found.customFlag || defaultNode?.flag || '自动识别',
+    tags: found.tags || (defaultNode?.tag ? `${defaultNode.tag}<blue>;` : '电信CN2GIA<Red>;联通9929<blue>;移动CMIN2<Green>;'),
+    bandwidth: found.bandwidth || '500 Mbps',
+    group: found.group || '',
+    privateNote: found.privateNote || '',
+    publicNote: found.publicNote || '',
+    hidden: found.hidden || false,
+    timezone: found.timezone || 'Asia/Shanghai (UTC+8)',
+    resetDay: found.resetDay !== undefined ? found.resetDay : 22,
+    resetTime: found.resetTime || '00:00:00',
+    trafficCalculation: found.trafficCalculation || 'sum',
+    trafficQuota: found.trafficQuota || '500.00 GB',
+    resetAllowance: found.resetAllowance || '0 B',
+  }
+}
+
+export const getAllNodeCustomMeta = () => {
+  return getStoredBillingData()
+}
+
+export const saveNodeCustomMeta = (nodeId, data) => {
+  return saveNodeBillingData(nodeId, data)
+}
+
+export const parseColoredTags = (tagString = '') => {
+  if (!tagString) return []
+  return tagString
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const match = item.match(/^([^<]+)(?:<([^>]+)>)?$/)
+      if (!match) return { text: item, color: 'default' }
+      return {
+        text: match[1].trim(),
+        color: (match[2] || 'default').toLowerCase(),
+      }
+    })
+}
+
 // 核心：计算剩余天数与剩余价值 (折合人民币 CNY)
 export const calculateRemainingValue = (billing) => {
   if (!billing || billing.cycle === 'free') {
@@ -121,7 +189,7 @@ export const calculateRemainingValue = (billing) => {
 
   const cycleObj = BILLING_CYCLES.find((c) => c.id === billing.cycle) || BILLING_CYCLES[3]
   const cycleDays = cycleObj.days || 365
-  const rateInfo = CURRENCY_RATES[billing.currency] || CURRENCY_RATES.CNY
+  const rateInfo = resolveCurrency(billing.currency)
   const exchangeRate = rateInfo.rate || 1.0
 
   // 年化支出折合人民币
@@ -174,7 +242,7 @@ export const calculateRemainingValue = (billing) => {
 // 一键生成 Hostloc / NodeSeek 社区标准的出鸡发帖文案
 export const generateForumSalesPost = (node, billing, calc, markupCNY = 0) => {
   const totalPriceCNY = Math.max(0, calc.remainingValueCNY + Number(markupCNY))
-  const rateInfo = CURRENCY_RATES[billing.currency] || CURRENCY_RATES.CNY
+  const rateInfo = resolveCurrency(billing.currency)
 
   return `[出] ${billing.merchant} - ${node.name} (${node.flag || '🌐'} ${node.region || '优化线路'})
 ------------------------------------------------

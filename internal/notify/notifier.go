@@ -6,15 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
+	"net"
+	"net/netip"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/security"
 )
+
+const maxWebhookResponseBytes = 64 * 1024
 
 type Notifier struct {
 	telegramBotToken string
@@ -26,13 +33,56 @@ type Notifier struct {
 }
 
 func NewNotifier(cfg config.Config) *Notifier {
+	webhookURL := strings.TrimSpace(cfg.WebhookURL)
+	allowedOrigin := ""
+	if parsed, err := url.Parse(webhookURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		allowedOrigin = strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+	}
 	return &Notifier{
 		telegramBotToken: strings.TrimSpace(cfg.TelegramBotToken),
 		telegramChatID:   strings.TrimSpace(cfg.TelegramChatID),
-		webhookURL:       strings.TrimSpace(cfg.WebhookURL),
-		client:           &http.Client{Timeout: 10 * time.Second},
+		webhookURL:       webhookURL,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				Proxy: nil,
+				MaxResponseHeaderBytes: 32 << 10,
+				DialContext: safeDialContext,
+			},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 3 {
+					return fmt.Errorf("webhook redirect limit exceeded")
+				}
+				origin := strings.ToLower(req.URL.Scheme) + "://" + strings.ToLower(req.URL.Host)
+				if allowedOrigin != "" && origin != allowedOrigin {
+					return fmt.Errorf("webhook redirect changed origin")
+				}
+				return nil
+			},
+		},
 		dispatched:       make(map[string]int64),
 	}
+}
+
+func safeDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
+		if security.IsBlockedAddress(ip) {
+			return nil, fmt.Errorf("notification target address is blocked")
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if err := security.ValidateResolvedIPs(addresses); err != nil {
+		return nil, fmt.Errorf("notification target address is blocked: %w", err)
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(addresses[0].String(), port))
 }
 
 func (n *Notifier) Enabled() bool {
@@ -45,17 +95,10 @@ func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.No
 	}
 	n.mu.Lock()
 	lastCount, exists := n.dispatched[alert.ID]
+	n.mu.Unlock()
 	if exists && lastCount >= int64(alert.OccurrenceCount) {
-		n.mu.Unlock()
 		return nil
 	}
-	n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
-	if len(n.dispatched) > 5000 {
-		// Prune memory cache
-		n.dispatched = make(map[string]int64)
-		n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
-	}
-	n.mu.Unlock()
 
 	var errs []string
 	if n.telegramBotToken != "" && n.telegramChatID != "" {
@@ -72,6 +115,14 @@ func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.No
 	if len(errs) > 0 {
 		return fmt.Errorf("dispatch errors: %s", strings.Join(errs, "; "))
 	}
+	n.mu.Lock()
+	n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
+	if len(n.dispatched) > 5000 {
+		trimmed := make(map[string]int64)
+		trimmed[alert.ID] = int64(alert.OccurrenceCount)
+		n.dispatched = trimmed
+	}
+	n.mu.Unlock()
 	return nil
 }
 
@@ -131,6 +182,16 @@ func (n *Notifier) sendTelegram(ctx context.Context, alert db.AlertEvent, node d
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.ContentLength > maxWebhookResponseBytes {
+		return fmt.Errorf("telegram response too large")
+	}
+	read, readErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxWebhookResponseBytes+1))
+	if readErr != nil {
+		return fmt.Errorf("read telegram response: %w", readErr)
+	}
+	if read > maxWebhookResponseBytes {
+		return fmt.Errorf("telegram response too large")
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("telegram API returned status %d", resp.StatusCode)
@@ -170,6 +231,16 @@ func (n *Notifier) sendWebhook(ctx context.Context, alert db.AlertEvent, node db
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.ContentLength > maxWebhookResponseBytes {
+		return fmt.Errorf("webhook response too large")
+	}
+	read, err := io.Copy(io.Discard, io.LimitReader(resp.Body, maxWebhookResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read webhook response: %w", err)
+	}
+	if read > maxWebhookResponseBytes {
+		return fmt.Errorf("webhook response too large")
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
@@ -193,7 +264,7 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 			Limit:    100,
 		})
 		if err != nil {
-			slog.Error("scan alert events failed", "error", err)
+			slog.Error("scan alert events failed", "error_class", fmt.Sprintf("%T", err))
 			return
 		}
 
@@ -203,7 +274,7 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 				node = db.Node{ID: alert.NodeID, Name: alert.NodeID}
 			}
 			if err := notifier.Dispatch(scanCtx, alert, node); err != nil {
-				slog.Error("dispatch alert failed", "alert_id", alert.ID, "error", err)
+				slog.Error("dispatch alert failed", "alert_id", alert.ID, "error_class", fmt.Sprintf("%T", err))
 			}
 		}
 	}

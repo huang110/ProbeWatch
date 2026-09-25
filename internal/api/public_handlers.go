@@ -65,6 +65,14 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	s.publicCacheMu.RLock()
+	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 5*time.Second {
+		cached := s.publicCache
+		s.publicCacheMu.RUnlock()
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
+	s.publicCacheMu.RUnlock()
 	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
@@ -139,12 +147,26 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	response.GeneratedAt = now
 	sort.Strings(response.Nodes.Names)
+	s.publicCacheMu.Lock()
+	s.publicCache = response
+	s.publicCacheAt = now
+	s.publicCacheMu.Unlock()
 	writeJSON(w, http.StatusOK, response)
 }
 
 func publicLimiterKey(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && isLoopbackHost(host) {
+		if forwarded := strings.TrimSpace(r.Header.Get("X-Real-IP")); forwarded != "" && net.ParseIP(forwarded) != nil {
+			return forwarded
+		}
+	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+func isLoopbackHost(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
 }

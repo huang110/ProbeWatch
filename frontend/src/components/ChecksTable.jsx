@@ -21,19 +21,20 @@ import {
   formatLossPercent,
   formatNumber,
   formatAlertTime,
+  formatTimeOfDay,
 } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 
 /**
  * Catmull-Rom 转三次贝塞尔平滑曲线
  */
-function generateNezhaSpline(pts, bottomY = 90) {
+function generateNezhaSpline(pts, bottomY = 88) {
   if (!pts || !pts.length) return { line: '', area: '' }
   if (pts.length === 1) {
     const p = pts[0]
     return {
-      line: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)}`,
-      area: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} L ${p.x.toFixed(2)} ${bottomY} Z`,
+      line: `M 0 ${p.y.toFixed(2)} L 100 ${p.y.toFixed(2)}`,
+      area: `M 0 ${p.y.toFixed(2)} L 100 ${p.y.toFixed(2)} L 100 ${bottomY} L 0 ${bottomY} Z`,
     }
   }
 
@@ -58,34 +59,102 @@ function generateNezhaSpline(pts, bottomY = 90) {
   return { line, area }
 }
 
-export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
+export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   const [hoveredIdx, setHoveredIdx] = useState(null)
+  const isTimeMode = Array.isArray(networkHistory) && networkHistory.length > 0
   const targets = safeArray(rows).filter((r) => r && r.name)
-  if (!targets.length) return null
 
-  const validLatencies = targets.map((r) => r.latency).filter((l) => l !== null && l >= 0)
-  const maxLat = Math.max(...validLatencies, 20)
-  const headroomLat = maxLat * 1.15
-  const baselineY = 90
+  if (!isTimeMode && !targets.length) return null
+
+  const baselineY = 88
   const topY = 16
+  const midY = (topY + baselineY) / 2
   const plotHeight = baselineY - topY
-  const count = targets.length
-  const slot = 100 / Math.max(count, 1)
 
-  // 构建平滑时延曲线点
-  const latPoints = targets.map((r, i) => {
-    const x = i * slot + slot / 2
-    const lat = r.latency !== null && r.latency >= 0 ? r.latency : 0
-    const y = baselineY - Math.min((lat / headroomLat) * plotHeight, plotHeight)
-    return { x, y, target: r }
-  })
+  let points = []
+  let validLatencies = []
+  let slot = 0
+  let maxLat = 10
+
+  if (isTimeMode) {
+    // 按照检测采样时间正序排列（从早到晚）
+    const sortedHistory = [...networkHistory].sort(
+      (a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0)
+    )
+
+    validLatencies = sortedHistory
+      .map((item) => {
+        const res = item.result || {}
+        return numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
+      })
+      .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
+
+    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 10
+    maxLat = Math.max(Math.ceil(rawMax * 1.25), 5)
+    const count = sortedHistory.length
+    slot = 100 / Math.max(count, 1)
+
+    points = sortedHistory.map((item, i) => {
+      const res = item.result || {}
+      const lat = numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
+      const hasLat = lat !== null && lat >= 0 && Number.isFinite(lat)
+      const effectiveLat = hasLat ? lat : 0
+      const x = i * slot + slot / 2
+      const y = baselineY - Math.min((effectiveLat / maxLat) * plotHeight, plotHeight)
+      const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
+      const matched = targets.find(
+        (t) => t.key?.startsWith(item.target_id) || t.name === item.target_id || t.target_id === item.target_id
+      )
+      const targetName = matched?.name || item.target_id || 'TCP 探测目标'
+      const targetKind = (matched?.kind || 'TCP').toUpperCase()
+
+      return {
+        x,
+        y,
+        hasLat,
+        latency: lat,
+        time: item.checked_at,
+        isOk,
+        targetName,
+        targetKind,
+        error: res.error,
+      }
+    })
+  } else {
+    // 降级兼容：按目标列表横向排布
+    validLatencies = targets
+      .map((r) => r.latency)
+      .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
+    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 10
+    maxLat = Math.max(Math.ceil(rawMax * 1.25), 5)
+    const count = targets.length
+    slot = 100 / Math.max(count, 1)
+
+    points = targets.map((r, i) => {
+      const x = i * slot + slot / 2
+      const hasLat = r.latency !== null && r.latency >= 0 && Number.isFinite(r.latency)
+      const lat = hasLat ? r.latency : 0
+      const y = baselineY - Math.min((lat / maxLat) * plotHeight, plotHeight)
+      return {
+        x,
+        y,
+        hasLat,
+        latency: r.latency,
+        target: r,
+        targetName: r.name,
+        targetKind: r.kind,
+        isOk: r.lossRate === 0 || r.lossRate === null,
+        time: r.lastChecked,
+      }
+    })
+  }
 
   const spline = generateNezhaSpline(
-    latPoints.map((p) => ({ x: p.x, y: p.y })),
+    points.map((p) => ({ x: p.x, y: p.y })),
     baselineY
   )
 
-  const active = hoveredIdx !== null && latPoints[hoveredIdx] ? latPoints[hoveredIdx] : null
+  const active = hoveredIdx !== null && points[hoveredIdx] ? points[hoveredIdx] : null
 
   return (
     <div className="checks-chart-wrap nezha-checks-wrap" onMouseLeave={() => setHoveredIdx(null)}>
@@ -93,35 +162,40 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
       <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
         {active ? (
           <div className="hover-badge-content">
-            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.target.name}</span>
-            <span className="hover-sep">│</span>
+            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.targetName}</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-mint mono">
-              协议: <b>{active.target.kind}</b>
+              协议: <b>{active.targetKind}</b>
             </span>
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-blue mono">
-              延迟: <b>{active.target.latency !== null ? `${formatNumber(active.target.latency)} ms` : '—'}</b>
+              延迟: <b>{active.latency !== null ? `${formatNumber(active.latency)} ms` : '—'}</b>
             </span>
-            <span className="hover-sep">│</span>
-            <span className="hover-stat text-1 mono">
-              丢包: <b>{active.target.lossRate !== null ? formatLossPercent(active.target.lossRate) : '0%'}</b>
+            <span className="hover-sep" aria-hidden="true" />
+            <span className={`hover-stat mono ${active.isOk ? 'text-mint' : 'text-rose'}`}>
+              状态: <b>{active.isOk ? '连通正常' : active.error || '连接异常'}</b>
             </span>
-            {active.target.jitter !== null && (
+            {active.time && (
               <>
-                <span className="hover-sep">│</span>
+                <span className="hover-sep" aria-hidden="true" />
                 <span className="hover-stat text-amber mono">
-                  抖动: <b>{formatNumber(active.target.jitter)} ms</b>
+                  检测时间: <b>{formatTimeOfDay(active.time)}</b>
                 </span>
               </>
             )}
-            <span className="hover-sep">│</span>
+            <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat muted mono">
-              基准 {samplingSec}s
+              {isTimeMode ? '时序历史' : '统计窗口 24h'}
             </span>
           </div>
         ) : (
           <div className="hover-badge-hint mono">
-            <span>哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标时延与丢包</span>
+            <Clock size={13} className="text-mint inline-icon" />
+            <span>
+              {isTimeMode
+                ? '哪吒 2.0 TCP 延迟历史走势 · 鼠标滑过节点查看对应时间点的检测延迟与状态'
+                : '哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标时延与丢包'}
+            </span>
           </div>
         )}
       </div>
@@ -132,18 +206,18 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
           role="img"
-          aria-label="探测目标质量细线条走势图"
+          aria-label="TCP探测延迟走势图"
         >
           <defs>
             <linearGradient id="nezha-checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.08" />
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.12" />
               <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
             </linearGradient>
           </defs>
 
           {/* 参考水平极细虚线 */}
           <line className="nezha-grid-line" x1="0" y1={topY} x2="100" y2={topY} />
-          <line className="nezha-grid-line" x1="0" y1="53" x2="100" y2="53" />
+          <line className="nezha-grid-line" x1="0" y1={midY} x2="100" y2={midY} />
           <line className="nezha-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
 
           {/* 渐变微透明面积 */}
@@ -164,27 +238,9 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
             />
           )}
 
-          {/* Y 轴刻度标注 */}
-          {maxLat > 0 && (
-            <g className="nezha-axis-scale-group" aria-hidden="true">
-              <text x="98.5" y={topY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                {Math.round(maxLat)} ms
-              </text>
-              <text x="98.5" y={baselineY - 2.5} textAnchor="end" className="nezha-axis-text mono">
-                0 ms
-              </text>
-            </g>
-          )}
-
           {/* 交互交叉线与发光点 */}
-          {latPoints.map((p, index) => {
+          {points.map((p, index) => {
             const isHovered = hoveredIdx === index
-            const hasLoss = p.target.lossRate !== null && p.target.lossRate > 0
-            const dotTone = hasLoss
-              ? '#f43f5e'
-              : p.target.latency !== null && p.target.latency < 50
-              ? '#10b981'
-              : '#6366f1'
 
             return (
               <g key={`check-pt-${index}`}>
@@ -197,14 +253,6 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
                     y2={baselineY}
                   />
                 )}
-                <circle
-                  cx={p.x}
-                  cy={p.y}
-                  r={isHovered ? 2.4 : 1.6}
-                  fill={dotTone}
-                  stroke="#ffffff"
-                  strokeWidth="0.75"
-                />
                 {/* 鼠标灵敏捕捉区 */}
                 <rect
                   x={index * slot}
@@ -220,30 +268,64 @@ export function ChecksLatencyLines({ rows, samplingSec = 30 }) {
             )
           })}
         </svg>
+
+        {/* 交互真圆高亮指示点（HTML 像素渲染，彻底杜绝 SVG 非等比拉伸导致圆点被压扁拉长） */}
+        {active && (
+          <div className="nezha-chart-dots" aria-hidden="true">
+            <div
+              className={`nezha-indicator-dot ${
+                !active.isOk
+                  ? 'dot-rose'
+                  : active.latency !== null && active.latency < 50
+                  ? 'dot-mint'
+                  : 'dot-blue'
+              }`}
+              style={{ left: `${active.x}%`, top: `${active.y}%` }}
+            />
+          </div>
+        )}
+
+        {/* Y 轴刻度标注（标准 HTML 浮层，彻底解决 SVG 非等比拉伸导致数字变形变大） */}
+        {validLatencies.length > 0 && (
+          <div className="nezha-y-axis-labels mono" aria-hidden="true">
+            <span style={{ top: `${topY}%` }}>{maxLat} ms</span>
+            <span style={{ top: `${midY}%` }}>{(maxLat / 2).toFixed(maxLat >= 10 ? 0 : 1)} ms</span>
+            <span style={{ top: `${baselineY}%` }}>0 ms</span>
+          </div>
+        )}
       </div>
 
-      {/* X 轴目标名称指示 */}
-      <div className="checks-time-axis nezha-time-axis mono">
-        {targets.map((t, idx) => (
-          <span
-            key={`x-${idx}`}
-            className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
-            style={{ width: `${slot}%`, textAlign: 'center' }}
-          >
-            {t.name}
-          </span>
-        ))}
-      </div>
+      {/* X 轴刻度指示：历史时序模式按时间显示，目标模式按目标名称显示 */}
+      {isTimeMode ? (
+        <div className="checks-time-axis nezha-time-axis mono" aria-hidden="true">
+          <span>{formatTimeOfDay(points[0]?.time)}</span>
+          {points.length > 2 && (
+            <span>{formatTimeOfDay(points[Math.floor(points.length / 2)]?.time)}</span>
+          )}
+          <span>{formatTimeOfDay(points[points.length - 1]?.time)}</span>
+        </div>
+      ) : (
+        <div className="checks-time-axis nezha-time-axis mono">
+          {targets.map((t, idx) => (
+            <span
+              key={`x-${idx}`}
+              className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
+              style={{ width: `${slot}%`, textAlign: 'center' }}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export function ChecksSummaryPanel({ rows, loading = false }) {
+export function ChecksSummaryPanel({ rows, loading = false, networkHistory = [] }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [kindFilter, setKindFilter] = useState('all')
   const [sortField, setSortField] = useState('lossRate')
   const [sortAsc, setSortAsc] = useState(false)
-  const [samplingSec, setSamplingSec] = useState(30) // 默认 30 秒基准时间
 
   const normalized = useMemo(() => {
     return safeArray(rows).map((row, index) => {
@@ -268,11 +350,27 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
     const totalTargets = normalized.length
     const totalChecks = normalized.reduce((acc, r) => acc + (r.total || 0), 0)
     const totalFailures = normalized.reduce((acc, r) => acc + (r.failure || 0), 0)
-    const validLatencies = normalized.map((r) => r.latency).filter((l) => l !== null)
+    const validLatencies = normalized
+      .map((r) => r.latency)
+      .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
+
+    // 加权平均延迟：按有效响应样本数加权
+    const weightedSum = normalized.reduce(
+      (acc, r) =>
+        acc + (r.latency !== null && r.latency >= 0 && r.success ? r.latency * r.success : 0),
+      0
+    )
+    const weightedSuccess = normalized.reduce(
+      (acc, r) => (r.latency !== null && r.latency >= 0 && r.success ? acc + r.success : acc),
+      0
+    )
     const avgLatency =
-      validLatencies.length > 0
+      weightedSuccess > 0
+        ? (weightedSum / weightedSuccess).toFixed(1)
+        : validLatencies.length > 0
         ? (validLatencies.reduce((a, b) => a + b, 0) / validLatencies.length).toFixed(1)
         : null
+
     const lossTargets = normalized.filter((r) => r.lossRate !== null && r.lossRate > 0).length
     const availability =
       totalChecks > 0 ? (((totalChecks - totalFailures) / totalChecks) * 100).toFixed(1) : null
@@ -375,7 +473,9 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
             {kpis.availability !== null ? `${kpis.availability}%` : '—'}
           </div>
           <div className="kpi-card-sub muted">
-            累计 {dash(kpis.totalChecks)} 次探测采样
+            {kpis.totalChecks > 0
+              ? `累计 ${kpis.totalChecks.toLocaleString()} 次探测采样`
+              : '暂无采样记录'}
           </div>
         </div>
 
@@ -387,19 +487,30 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
           <div className="kpi-card-val mono text-blue">
             {kpis.avgLatency !== null ? `${kpis.avgLatency} ms` : '—'}
           </div>
-          <div className="kpi-card-sub muted">有效响应目标加权均值</div>
+          <div className="kpi-card-sub muted">有效响应样本加权均值</div>
         </div>
 
         <div className="checks-kpi-card">
           <div className="kpi-card-header">
-            <WarningCircle size={15} className={kpis.lossTargets > 0 ? 'text-rose' : 'text-mint'} />
-            <span>链路丢包异常</span>
+            <WarningCircle
+              size={15}
+              className={kpis.lossTargets > 0 ? 'text-rose' : 'text-mint'}
+            />
+            <span>链路质量状态</span>
           </div>
           <div className={`kpi-card-val mono ${kpis.lossTargets > 0 ? 'text-rose' : 'text-mint'}`}>
-            {kpis.lossTargets > 0 ? `${kpis.lossTargets} 项丢包` : '链路全优 0 丢包'}
+            {kpis.totalChecks === 0
+              ? '未开启探测'
+              : kpis.lossTargets > 0
+              ? `${kpis.lossTargets} 项丢包`
+              : '链路全优 0 丢包'}
           </div>
           <div className="kpi-card-sub muted">
-            {kpis.lossTargets > 0 ? '存在丢包隐患，需关注' : '所有目标均保持 100% 畅通'}
+            {kpis.totalChecks === 0
+              ? '当前周期暂无检测数据'
+              : kpis.lossTargets > 0
+              ? '存在丢包隐患，需关注'
+              : '所有目标均保持 100% 畅通'}
           </div>
         </div>
       </div>
@@ -446,22 +557,20 @@ export function ChecksSummaryPanel({ rows, loading = false }) {
           ))}
         </div>
 
-        {/* 工具栏右侧：纯线性监控基准微标 */}
+        {/* 工具栏右侧：明确最近 24 小时聚合窗口指示 */}
         <div className="checks-toolbar-right">
           <div
             className="traffic-period-badge mono"
-            title="点击切换采样时间基准"
-            onClick={() => setSamplingSec((s) => (s === 30 ? 60 : s === 60 ? 10 : 30))}
-            style={{ cursor: 'pointer' }}
+            title="checks/summary 统计窗口为最近 24 小时聚合"
           >
             <Clock size={12} className="text-mint" />
-            <span>基准时间: {samplingSec}秒</span>
+            <span>统计周期: 最近24小时</span>
           </div>
         </div>
       </div>
 
       {/* 平滑时延走势曲线视图 */}
-      <ChecksLatencyLines rows={displayRows} samplingSec={samplingSec} />
+      <ChecksLatencyLines rows={displayRows} networkHistory={networkHistory} />
 
       {/* 目标质量表格（始终严格保留满足契约测试要求） */}
       <div className="table-scroll">

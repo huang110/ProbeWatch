@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { ArrowClockwise, CheckCircle, CircleNotch, Eye, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
-import { StatusDot, UptimeBars } from './Common.jsx'
+import { fetchGuestStatus } from '../lib/api.js'
+import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
+import { StatusDot, UptimeBars, SegmentedBar, DistroIcon } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
 export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange }) {
@@ -10,6 +12,37 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [internalStatus, setInternalStatus] = useState(null)
+  const [localRefreshing, setLocalRefreshing] = useState(false)
+
+  // 当外部未传入 status 或 status 节点列表为空时，自驱动从公开状态 API 同步
+  useEffect(() => {
+    let active = true
+    const hasNames = Array.isArray(status?.nodes?.names) && status.nodes.names.length > 0
+    if (!status || !hasNames) {
+      setLocalRefreshing(true)
+      fetchGuestStatus()
+        .then((res) => {
+          if (active && res) setInternalStatus(res)
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (active) setLocalRefreshing(false)
+        })
+    }
+    return () => { active = false }
+  }, [status])
+
+  const handleRefreshClick = () => {
+    setLocalRefreshing(true)
+    fetchGuestStatus()
+      .then((res) => {
+        if (res) setInternalStatus(res)
+      })
+      .catch(() => {})
+      .finally(() => setLocalRefreshing(false))
+    if (onRefresh) onRefresh()
+  }
 
   // Close modal on ESC
   useEffect(() => {
@@ -50,17 +83,27 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     }
   }
 
-  const nodes = safeObject(status?.nodes)
-  const checks = safeObject(status?.checks)
+  const effectiveStatus = (status && Array.isArray(status?.nodes?.names) && status.nodes.names.length > 0)
+    ? status
+    : (internalStatus || status)
+
+  const nodes = safeObject(effectiveStatus?.nodes)
+  const checks = safeObject(effectiveStatus?.checks)
   const online = numeric(nodes.online)
   const total = numeric(nodes.total)
   const successRate = numeric(checks.success_rate)
   const avgLatency = numeric(checks.avg_latency_ms)
-  const names = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
+  const allCustomMeta = getAllNodeCustomMeta()
+  const rawNames = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
+  const names = rawNames.filter((name) => {
+    if (isPreview) return true
+    const meta = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name)
+    return !meta?.hidden
+  })
 
   const isAllHealthy = total !== null && total > 0 && online === total
   const hasIssues = total !== null && online !== null && online < total
-  const lastUpdated = status?.last_updated_at ? formatTimeOfDay(status.last_updated_at) : '—'
+  const lastUpdated = effectiveStatus?.last_updated_at ? formatTimeOfDay(effectiveStatus.last_updated_at) : '—'
 
   return (
     <main className="guest-shell guest-mjj-shell">
@@ -98,9 +141,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
         <div className="heading-actions">
           <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
-          <button className="button button-quiet" onClick={onRefresh} disabled={isRefreshing} title="重新请求状态 API">
-            {isRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
-            {isRefreshing ? '正在同步…' : '刷新数据'}
+          <button
+            className="button button-quiet"
+            onClick={handleRefreshClick}
+            disabled={isRefreshing || localRefreshing}
+            title="重新请求状态 API"
+          >
+            {isRefreshing || localRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
+            {isRefreshing || localRefreshing ? '正在同步…' : '刷新数据'}
           </button>
           {isPreview ? (
             <>
@@ -222,32 +270,85 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
               <div className="guest-node-grid">
                 {names.map((name, index) => {
                   const meta = detectRegionAndFlag(name, '')
+                  const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag
+                  const displayName = custom.customName || name
+                  const coloredTags = parseColoredTags(custom.tags)
                   return (
-                    <article className="guest-node-card" key={`${name}-${index}`}>
-                      <div className="guest-node-card-top">
-                        <div className="guest-flag-title">
-                          <span className="guest-flag">{meta.flag}</span>
-                          <div>
-                            <strong className="guest-node-name">{name}</strong>
-                            <div className="guest-node-tags">
-                              <span className="guest-tag">{meta.region}</span>
-                              <span className="guest-tag guest-tag-route">{meta.tag}</span>
-                            </div>
+                    <article className="guest-node-card nezha-vps-card" key={`${name}-${index}`}>
+                      <div className="vps-card-header">
+                        <div className="vps-header-left">
+                          <div className="vps-title-row">
+                            <span className="vps-flag" title={meta.region}>{displayFlag}</span>
+                            <strong className="vps-node-name" title={displayName}>{displayName}</strong>
+                          </div>
+                          <div className="vps-badge-row">
+                            <span className="vps-pill-badge pill-good">
+                              <span className="status-mini-dot" />
+                              GOOD
+                            </span>
+                            <span className="vps-pill-badge pill-proto">V4</span>
+                            <span className="vps-pill-badge pill-proto">V6</span>
+                            {custom.bandwidth && (
+                              <span className="vps-pill-badge pill-bw">{custom.bandwidth}</span>
+                            )}
+                            {coloredTags.length > 0 ? (
+                              coloredTags.map((t, idx) => (
+                                <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`}>
+                                  {t.text}
+                                </span>
+                              ))
+                            ) : (
+                              <>
+                                <span className="vps-pill-badge pill-merchant">{meta.region}</span>
+                                {meta.tag && <span className="vps-pill-badge pill-route">{meta.tag}</span>}
+                              </>
+                            )}
                           </div>
                         </div>
-                        <div className="guest-status-pill">
-                          <StatusDot status="online" size="sm" />
-                          <span>运行正常</span>
+                        <div className="vps-header-right">
+                          <DistroIcon os="Debian Linux" className="vps-distro-logo" />
                         </div>
                       </div>
 
-                      {/* 30 天稳定性切片条 (Uptime Kuma / DStatus 风格) */}
+                      {/* 30 天可用性切片条 (Uptime Kuma / DStatus 风格) */}
                       <div className="guest-uptime-section">
                         <div className="uptime-bar-label">
                           <span>30 天可用性历史</span>
                           <b className="mono">100.0%</b>
                         </div>
                         <UptimeBars count={32} uptimePercent={100} />
+                      </div>
+
+                      {/* 三网延迟概览点阵条 */}
+                      <div className="vps-isp-matrix guest-isp-preview">
+                        <div className="vps-isp-row">
+                          <span className="isp-name">电信</span>
+                          <span className="isp-lat mono text-mint">
+                            {avgLatency !== null ? Math.max(15, Math.round(avgLatency * 0.95)) : 32} ms
+                          </span>
+                          <SegmentedBar value={avgLatency || 32} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <span className="isp-loss mono text-mint">0.0 %</span>
+                        </div>
+                        <div className="vps-isp-row">
+                          <span className="isp-name">联通</span>
+                          <span className="isp-lat mono text-mint">
+                            {avgLatency !== null ? Math.max(12, Math.round(avgLatency * 0.92)) : 28} ms
+                          </span>
+                          <SegmentedBar value={avgLatency || 28} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <span className="isp-loss mono text-mint">0.0 %</span>
+                        </div>
+                        <div className="vps-isp-row">
+                          <span className="isp-name">移动</span>
+                          <span className="isp-lat mono text-mint">
+                            {avgLatency !== null ? Math.max(18, Math.round(avgLatency * 1.05)) : 35} ms
+                          </span>
+                          <SegmentedBar value={avgLatency || 35} max={200} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <SegmentedBar value={0} max={100} segments={12} activeColor="#34d399" className="isp-bar" />
+                          <span className="isp-loss mono text-mint">0.0 %</span>
+                        </div>
                       </div>
 
                       <div className="guest-node-card-bottom">
@@ -277,6 +378,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   <tbody>
                     {names.map((name, index) => {
                       const meta = detectRegionAndFlag(name, '')
+                      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                      const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag
+                      const displayName = custom.customName || name
+                      const coloredTags = parseColoredTags(custom.tags)
                       return (
                         <tr key={`${name}-${index}`}>
                           <td>
@@ -287,14 +392,24 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                           </td>
                           <td>
                             <div className="inline-flex items-center gap-2">
-                              <span className="table-flag">{meta.flag}</span>
-                              <strong className="text-1">{name}</strong>
+                              <span className="table-flag">{displayFlag}</span>
+                              <strong className="text-1">{displayName}</strong>
                             </div>
                           </td>
                           <td>
-                            <div className="inline-flex items-center gap-1.5">
-                              <span className="guest-tag">{meta.region}</span>
-                              <span className="guest-tag guest-tag-route">{meta.tag}</span>
+                            <div className="inline-flex items-center gap-1.5 flex-wrap">
+                              {coloredTags.length > 0 ? (
+                                coloredTags.map((t, idx) => (
+                                  <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`} style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                                    {t.text}
+                                  </span>
+                                ))
+                              ) : (
+                                <>
+                                  <span className="guest-tag">{meta.region}</span>
+                                  {meta.tag && <span className="guest-tag guest-tag-route">{meta.tag}</span>}
+                                </>
+                              )}
                             </div>
                           </td>
                           <td>

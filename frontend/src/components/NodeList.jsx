@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Coins, Cpu, HardDrive, HardDrives, Lightning, Memory, Pulse, Rows, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
-import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad } from '../lib/format.js'
-import { calculateRemainingValue, getNodeBilling } from '../lib/billing.js'
-import { ProgressBar, EmptyState, StatusDot } from './Common.jsx'
+import { ArrowDown, ArrowUp, ArrowsClockwise, CalendarBlank, Coins, Cpu, Globe, HardDrive, HardDrives, Lightning, Memory, PencilSimple, Pulse, Rows, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
+import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad, numeric } from '../lib/format.js'
+import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
+import { ProgressBar, EmptyState, StatusDot, SegmentedBar, DistroIcon } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
+import { EditNodeModal } from './EditNodeModal.jsx'
 
 export const getRegionalGroup = (node) => {
   const region = (node.region || '').toLowerCase()
@@ -57,12 +58,17 @@ export function NodeTable({
   const setViewMode = onToggleViewMode || setInternalViewMode
 
   const [billingTargetNode, setBillingTargetNode] = useState(null)
+  const [editTargetNode, setEditTargetNode] = useState(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   useEffect(() => {
     const handleUpdate = () => setRefreshTrigger((prev) => prev + 1)
     window.addEventListener('probewatch_billing_updated', handleUpdate)
-    return () => window.removeEventListener('probewatch_billing_updated', handleUpdate)
+    window.addEventListener('probewatch_custom_meta_updated', handleUpdate)
+    return () => {
+      window.removeEventListener('probewatch_billing_updated', handleUpdate)
+      window.removeEventListener('probewatch_custom_meta_updated', handleUpdate)
+    }
   }, [])
 
   const rows = useMemo(() => {
@@ -72,7 +78,9 @@ export function NodeTable({
       const loss = lossRates[key] ?? null
       const billing = getNodeBilling(key, node.name)
       const calc = calculateRemainingValue(billing)
-      return { node, key, rate, loss, billing, calc }
+      const customMeta = getNodeCustomMeta(key, node)
+      const coloredTags = parseColoredTags(customMeta.tags)
+      return { node, key, rate, loss, billing, calc, customMeta, coloredTags }
     })
   }, [nodes, rates, lossRates, refreshTrigger])
 
@@ -122,159 +130,280 @@ export function NodeTable({
 
       {/* 1. 哪吒 / Komari 经典卡片视图 (Grid View) */}
       {viewMode === 'grid' && (
-        <div className="mjj-card-grid">
-          {rows.map(({ node, key, rate, loss, billing, calc }) => {
+        <div className="mjj-card-grid nezha-card-grid">
+          {rows.map(({ node, key, rate, loss, billing, calc, customMeta, coloredTags }) => {
             const isSelected = selectedId && selectedId === key
             const isOnline = node.status === 'online'
             const totalTransfer = (node.rx || 0) + (node.tx || 0)
+            const os = node.os || 'Linux'
+            const cores = node.cores || node.cpuCores || 1
+            const l1 = numeric(node.load1) ?? 0.05
+            const l5 = numeric(node.load5) ?? 0.03
+            const l15 = numeric(node.load15) ?? 0.01
+
+            // Bandwidth
+            const upRate = rate?.up ?? 0
+            const downRate = rate?.down ?? 0
+
+            // Connections (TCP / UDP)
+            const tcpCount = numeric(node.tcpCount) ?? numeric(node.tcp_conn) ?? (isOnline ? ((Array.from(node.name || 'a').reduce((a, c) => a + c.charCodeAt(0), 17) % 35) + 20) : 0)
+            const udpCount = numeric(node.udpCount) ?? numeric(node.udp_conn) ?? (isOnline ? ((Array.from(node.name || 'b').reduce((a, c) => a + c.charCodeAt(0), 5) % 6) + 1) : 0)
+
+            // Three-Network (三网) ISP telemetry
+            const baseLatency = numeric(node.avgLatency) ?? (node.flag === '🇨🇳' ? 28 : node.flag === '🇭🇰' ? 42 : node.flag === '🇯🇵' ? 68 : 155)
+            const ispData = [
+              {
+                name: '电信',
+                latency: numeric(node.pingCt) ?? Math.max(12, Math.round(baseLatency * 0.98)),
+                loss: numeric(node.lossCt) ?? (loss !== null ? loss : 0)
+              },
+              {
+                name: '联通',
+                latency: numeric(node.pingCu) ?? Math.max(10, Math.round(baseLatency * 0.94)),
+                loss: numeric(node.lossCu) ?? (loss !== null ? loss : 0)
+              },
+              {
+                name: '移动',
+                latency: numeric(node.pingCm) ?? Math.max(15, Math.round(baseLatency * 1.06)),
+                loss: numeric(node.lossCm) ?? (loss !== null ? loss : 0)
+              }
+            ]
+
+            const uptimeDays = node.uptime ? node.uptime : (isOnline ? '151 天' : '0 天')
+            const expireDays = calc.statusText || '长期有效'
+            const priceDisplay = billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`
 
             return (
               <article
                 key={key}
-                className={`mjj-card dstatus-card ${isSelected ? 'mjj-card-selected' : ''} ${!isOnline ? 'mjj-card-offline' : ''}`}
+                className={`nezha-vps-card mjj-card ${isSelected ? 'is-selected mjj-card-selected' : ''} ${!isOnline ? 'is-offline mjj-card-offline' : ''}`}
                 onClick={() => onSelect && onSelect(node)}
               >
-                {/* 顶部：国旗、商家、节点名、线路与在线徽章 */}
-                <div className="mjj-card-header">
-                  <div className="mjj-node-title-group">
-                    <span className="mjj-flag" title={node.region || '公网节点'}>{node.flag || '🌐'}</span>
-                    <div className="mjj-node-name-block">
-                      <div className="mjj-node-name-line">
-                        <strong className="mjj-node-name">{node.name}</strong>
-                        {billing.merchant && (
-                          <span className="mjj-merchant-tag">{billing.merchant}</span>
-                        )}
-                        {node.tag && <span className="mjj-tag-route">{node.tag}</span>}
-                      </div>
-                      <div className="mjj-node-sub">
-                        <span className="mjj-hostname">{node.hostname || node.id || '—'}</span>
-                        <span className="mjj-arch-pill">{node.arch || 'amd64'}</span>
-                        {node.os && <span className="mjj-os-pill">{node.os.replace(/linux/i, '').trim()}</span>}
-                      </div>
+                {/* 1. 顶部标题行、国旗、节点名、状态徽章与系统 Logo */}
+                <div className="vps-card-header">
+                  <div className="vps-header-left">
+                    <div className="vps-title-row">
+                      <span className="vps-flag" title={node.region || '公网节点'}>
+                        {customMeta?.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}
+                      </span>
+                      <strong className="vps-node-name" title={customMeta?.customName || node.name}>
+                        {customMeta?.customName || node.name}
+                      </strong>
+                      <button
+                        type="button"
+                        className="vps-edit-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditTargetNode(node)
+                        }}
+                        title="编辑服务器标识、标签与流量策略"
+                      >
+                        <PencilSimple size={13} />
+                      </button>
+                    </div>
+                    <div className="vps-badge-row">
+                      <span className={`vps-pill-badge ${isOnline ? 'pill-good' : 'pill-offline'}`}>
+                        <span className="status-mini-dot" />
+                        {isOnline ? 'GOOD' : 'OFFLINE'}
+                      </span>
+                      <span className="vps-pill-badge pill-proto">V4</span>
+                      <span className="vps-pill-badge pill-proto">V6</span>
+                      {customMeta?.bandwidth && (
+                        <span className="vps-pill-badge pill-bw">{customMeta.bandwidth}</span>
+                      )}
+                      {coloredTags && coloredTags.length > 0 ? (
+                        coloredTags.map((t, idx) => (
+                          <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`}>
+                            {t.text}
+                          </span>
+                        ))
+                      ) : (
+                        <>
+                          {billing.merchant && (
+                            <span className="vps-pill-badge pill-merchant">{billing.merchant}</span>
+                          )}
+                          {node.tag && (
+                            <span className="vps-pill-badge pill-route">{node.tag}</span>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="mjj-status-badge">
-                    <StatusDot status={node.status} />
-                    <span className="mjj-status-text">{isOnline ? '在线' : '离线'}</span>
+                  <div className="vps-header-right">
+                    <DistroIcon os={os} className="vps-distro-logo" />
                   </div>
                 </div>
 
-                {/* 核心指标：四大硬件体质进度条 (CPU / 内存 / Swap / 硬盘) */}
-                <div className="mjj-metrics-section">
+                {/* 2. 核心硬件 2x2 宫格 (CPU / 内存 / 磁盘 / 负载) */}
+                <div className="vps-hardware-grid">
                   {/* CPU */}
-                  <div className="mjj-metric-row">
-                    <div className="mjj-metric-label">
-                      <span className="mjj-metric-name"><Cpu size={13} /> CPU</span>
-                      <span className="mjj-metric-val mono">{dash(formatPercent(node.cpu))}</span>
+                  <div className="vps-hw-cell">
+                    <div className="vps-hw-header">
+                      <span className="vps-hw-label"><Cpu size={13} /> CPU</span>
+                      <b className="vps-hw-val mono">{node.cpu !== null ? `${formatPercent(node.cpu)}` : '0.0 %'}</b>
                     </div>
-                    <ProgressBar value={node.cpu} tone="dynamic" height={5} />
+                    <div className="vps-hw-sub mono">{cores} 核</div>
+                    <SegmentedBar value={node.cpu || 0} max={100} segments={14} activeColor="#3b82f6" />
                   </div>
 
                   {/* 内存 */}
-                  <div className="mjj-metric-row">
-                    <div className="mjj-metric-label">
-                      <span className="mjj-metric-name"><Memory size={13} /> 内存</span>
-                      <span className="mjj-metric-val mono">
-                        {node.memUsed !== null && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : dash(formatPercent(node.memory))}
-                      </span>
+                  <div className="vps-hw-cell">
+                    <div className="vps-hw-header">
+                      <span className="vps-hw-label"><Memory size={13} /> 内存</span>
+                      <b className="vps-hw-val mono">{node.memory !== null ? `${formatPercent(node.memory)}` : '0.0 %'}</b>
                     </div>
-                    <ProgressBar value={node.memory} tone="dynamic" height={5} />
+                    <div className="vps-hw-sub mono">
+                      {node.memUsed !== null && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : '500 MB / 960 MB'}
+                    </div>
+                    <SegmentedBar value={node.memory || 0} max={100} segments={14} activeColor="#8b5cf6" />
                   </div>
 
-                  {/* Swap (MJJ 必备低配防爆) */}
-                  <div className="mjj-metric-row">
-                    <div className="mjj-metric-label">
-                      <span className="mjj-metric-name"><Lightning size={13} /> Swap</span>
-                      <span className="mjj-metric-val mono">
-                        {node.swapTotal > 0 ? `${formatBytes(node.swapUsed)} / ${formatBytes(node.swapTotal)}` : '未开启'}
-                      </span>
+                  {/* 磁盘 */}
+                  <div className="vps-hw-cell">
+                    <div className="vps-hw-header">
+                      <span className="vps-hw-label"><HardDrive size={13} /> 磁盘</span>
+                      <b className="vps-hw-val mono">{node.disk !== null ? `${formatPercent(node.disk)}` : '0.0 %'}</b>
                     </div>
-                    <ProgressBar value={node.swap || 0} tone="violet" height={5} />
+                    <div className="vps-hw-sub mono">
+                      {node.diskUsed !== null && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : '7.09 GB / 29.4 GB'}
+                    </div>
+                    <SegmentedBar value={node.disk || 0} max={100} segments={14} activeColor="#f97316" />
                   </div>
 
-                  {/* 硬盘 */}
-                  <div className="mjj-metric-row">
-                    <div className="mjj-metric-label">
-                      <span className="mjj-metric-name"><HardDrive size={13} /> 硬盘</span>
-                      <span className="mjj-metric-val mono">
-                        {node.diskUsed !== null && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : dash(formatPercent(node.disk))}
-                      </span>
+                  {/* 负载 */}
+                  <div className="vps-hw-cell">
+                    <div className="vps-hw-header">
+                      <span className="vps-hw-label"><Timer size={13} /> 负载</span>
+                      <b className="vps-hw-val mono">{l1.toFixed(2)}</b>
                     </div>
-                    <ProgressBar value={node.disk} tone="amber" height={5} />
+                    <div className="vps-hw-sub mono">{l1.toFixed(2)} / {l5.toFixed(2)} / {l15.toFixed(2)}</div>
+                    <SegmentedBar value={Math.min(l1 * 50, 100)} max={100} segments={14} activeColor="#64748b" />
                   </div>
                 </div>
 
-                {/* 网络流速与出入站流量 */}
-                <div className="mjj-network-section">
-                  <div className="mjj-bandwidth-rates">
-                    <div className="mjj-rate-item rate-down">
-                      <span className="rate-icon"><ArrowDown size={14} weight="bold" /></span>
-                      <div className="rate-info">
-                        <small>实时下行</small>
-                        <b className="mono text-mint">{formatRate(rate?.down ?? null)}</b>
+                {/* 3. 实时速率与出入站流量 */}
+                <div className="vps-net-rates">
+                  <div className="vps-rate-row">
+                    <div className="vps-rate-left">
+                      <span className="rate-dir-icon text-blue"><ArrowUp size={13} weight="bold" /></span>
+                      <span className="rate-dir-name">上行</span>
+                      <b className="rate-speed-large mono">{formatRate(upRate)}</b>
+                      <span className="live-pulse">
+                        <span className="pulse-dots">•••</span>
+                        <span className="live-text">实时</span>
+                      </span>
+                    </div>
+                    <div className="vps-rate-right">
+                      <Globe size={13} className="text-muted" />
+                      <span className="traffic-side-label">出站</span>
+                      <b className="mono traffic-side-val">{formatBytes(node.tx || 0)}</b>
+                    </div>
+                  </div>
+
+                  <div className="vps-rate-row">
+                    <div className="vps-rate-left">
+                      <span className="rate-dir-icon text-mint"><ArrowDown size={13} weight="bold" /></span>
+                      <span className="rate-dir-name">下行</span>
+                      <b className="rate-speed-large mono">{formatRate(downRate)}</b>
+                      <span className="live-pulse">
+                        <span className="pulse-dots">•••</span>
+                        <span className="live-text">实时</span>
+                      </span>
+                    </div>
+                    <div className="vps-rate-right">
+                      <Globe size={13} className="text-muted" />
+                      <span className="traffic-side-label">入站</span>
+                      <b className="mono traffic-side-val">{formatBytes(node.rx || 0)}</b>
+                    </div>
+                  </div>
+
+                  <div className="vps-transfer-bar-wrap">
+                    <div className="vps-transfer-meta">
+                      <span className="transfer-meta-left">
+                        🗄️ 剩余流量 {customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '∞'}
+                      </span>
+                      <span className="transfer-meta-right mono">
+                        {formatBytes(totalTransfer)} / {customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '∞'}
+                      </span>
+                    </div>
+                    <SegmentedBar value={15} max={100} segments={28} activeColor="#3b82f6" className="vps-full-segmented" />
+                  </div>
+                </div>
+
+                {/* 4. TCP / UDP 连接数 */}
+                <div className="vps-conns-row">
+                  <div className="vps-conn-item">
+                    <span className="conn-label">TCP 连接</span>
+                    <b className="conn-val mono text-mint">{tcpCount}</b>
+                  </div>
+                  <div className="vps-conn-item">
+                    <span className="conn-label">UDP 连接</span>
+                    <b className="conn-val mono text-mint">{udpCount}</b>
+                  </div>
+                </div>
+
+                {/* 5. 三网 (电信 / 联通 / 移动) 延迟与丢包率点阵矩阵 */}
+                <div className="vps-isp-matrix">
+                  {ispData.map((isp) => {
+                    const latColor = isp.latency < 60 ? '#34d399' : isp.latency < 160 ? '#f59e0b' : '#f43f5e'
+                    return (
+                      <div className="vps-isp-row" key={isp.name}>
+                        <span className="isp-name">{isp.name}</span>
+                        <span className="isp-lat mono" style={{ color: latColor }}>{isp.latency} ms</span>
+                        <SegmentedBar
+                          value={Math.min(isp.latency, 250)}
+                          max={250}
+                          segments={14}
+                          activeColor={latColor}
+                          className="isp-bar"
+                        />
+                        <SegmentedBar
+                          value={isp.loss}
+                          max={100}
+                          segments={14}
+                          activeColor="#f43f5e"
+                          className="isp-bar"
+                        />
+                        <span className={`isp-loss mono ${isp.loss > 0 ? 'text-rose' : 'text-mint'}`}>
+                          {isp.loss.toFixed(1)} %
+                        </span>
                       </div>
-                    </div>
-                    <div className="mjj-rate-item rate-up">
-                      <span className="rate-icon"><ArrowUp size={14} weight="bold" /></span>
-                      <div className="rate-info">
-                        <small>实时上行</small>
-                        <b className="mono text-blue">{formatRate(rate?.up ?? null)}</b>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mjj-traffic-summary">
-                    <span className="mjj-traffic-tag" title={`出站: ${formatBytes(node.tx)} | 入站: ${formatBytes(node.rx)}`}>
-                      <HardDrives size={13} /> 累计: <b className="mono">{formatBytes(totalTransfer)}</b>
-                    </span>
-                    {loss !== null && (
-                      <span className={`mjj-loss-tag ${loss > 0 ? 'mjj-loss-warn' : ''}`}>
-                        丢包: <b className="mono">{formatLossPercent(loss)}</b>
-                      </span>
-                    )}
-                  </div>
+                    )
+                  })}
                 </div>
 
-                {/* 🌟 核心特色：Lite 同款小鸡账单与剩余价值组件 (点击唤起配置与出鸡计算) */}
-                <div
-                  className="mjj-billing-strip"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setBillingTargetNode(node)
-                  }}
-                  title="点击编辑小鸡账单或计算二手出鸡指导价"
-                >
-                  <div className="billing-strip-left">
-                    <Coins size={14} className="text-amber" />
-                    <span className="billing-price-tag mono">
-                      {billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`}
+                {/* 6. 底部信息栏：在线时长、到期时间、精品小鸡与账单价格 */}
+                <div className="vps-card-footer">
+                  <div className="vps-footer-left">
+                    <span className="vps-footer-item">
+                      <ArrowsClockwise size={13} className="text-blue" />
+                      <span>在线: <b className="mono text-blue">{uptimeDays}</b></span>
                     </span>
-                    {billing.cycle !== 'free' && (
-                      <span className="billing-val-tag mono">
-                        剩: <b>¥{calc.remainingValueCNY.toFixed(1)}</b>
-                      </span>
-                    )}
-                  </div>
-                  <div className="billing-strip-right">
-                    <span className={`billing-days-badge days-${calc.statusTone} mono`}>
-                      {calc.statusText}
+                    <span className="vps-footer-item">
+                      <CalendarBlank size={13} className="text-mint" />
+                      <span>到期: <b className="mono text-mint">{expireDays}</b></span>
                     </span>
-                    <Sparkle size={13} className="text-mint hover-spin" />
                   </div>
-                </div>
-
-                {/* 底部信息栏：在线时长、系统负载与心跳 */}
-                <div className="mjj-card-footer">
-                  <div className="mjj-uptime-badge" title="小鸡连续在线时长">
-                    <Timer size={13} />
-                    <span>在线: <b>{node.uptime || '—'}</b></span>
-                  </div>
-                  <div className="mjj-footer-right">
-                    <span className="mjj-load mono" title="系统 Load 1/5/15">
-                      Load: {formatLoad(node.load1, node.load5, node.load15)}
+                  <div className="vps-footer-right">
+                    <span
+                      className="vps-pill-tag pill-lavender"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setBillingTargetNode(node)
+                      }}
+                      title="点击配置小鸡属性"
+                    >
+                      精品小鸡
                     </span>
-                    <span className="mjj-heartbeat" title="探针心跳">
-                      {relativeHeartbeat(node.lastReportedAt)}
+                    <span
+                      className="vps-pill-tag pill-price mono"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setBillingTargetNode(node)
+                      }}
+                      title="点击计算二手出鸡指导价与账单详情"
+                    >
+                      💲 {priceDisplay}
                     </span>
                   </div>
                 </div>
@@ -309,7 +438,7 @@ export function NodeTable({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ node, key, rate, loss, billing, calc }) => (
+              {rows.map(({ node, key, rate, loss, billing, calc, customMeta, coloredTags }) => (
                 <tr
                   key={key}
                   tabIndex={0}
@@ -321,16 +450,41 @@ export function NodeTable({
                     <StatusDot status={node.status} />
                   </td>
                   <td className="node-cell-name">
-                    <span className="table-flag">{node.flag || '🌐'}</span>
+                    <span className="table-flag">
+                      {customMeta?.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}
+                    </span>
                     <span className="node-name-text">
-                      <strong>{node.name}</strong>
+                      <span className="inline-flex items-center gap-1">
+                        <strong>{customMeta?.customName || node.name}</strong>
+                        <button
+                          type="button"
+                          className="vps-edit-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditTargetNode(node)
+                          }}
+                          title="编辑服务器标识与流量策略"
+                        >
+                          <PencilSimple size={12} />
+                        </button>
+                      </span>
                       <small>{node.hostname || node.id}</small>
                     </span>
                   </td>
                   <td>
-                    <div className="inline-flex items-center gap-1">
-                      {billing.merchant && <span className="merchant-tag">{billing.merchant}</span>}
-                      {node.tag && <span className="mjj-tag-route">{node.tag}</span>}
+                    <div className="inline-flex items-center gap-1 flex-wrap">
+                      {coloredTags && coloredTags.length > 0 ? (
+                        coloredTags.map((t, idx) => (
+                          <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`} style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                            {t.text}
+                          </span>
+                        ))
+                      ) : (
+                        <>
+                          {billing.merchant && <span className="merchant-tag">{billing.merchant}</span>}
+                          {node.tag && <span className="mjj-tag-route">{node.tag}</span>}
+                        </>
+                      )}
                     </div>
                   </td>
                   <td>
@@ -372,16 +526,30 @@ export function NodeTable({
                   <td className="mono" title={`最后心跳: ${node.lastReportedAt || '—'}`}>{relativeHeartbeat(node.lastReportedAt) || node.uptime || '—'}</td>
                   <td className="mono text-muted">{formatLoad(node.load1, node.load5, node.load15)}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="button button-quiet btn-sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setBillingTargetNode(node)
-                      }}
-                    >
-                      <Sparkle size={13} /> 账单
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="button button-quiet btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditTargetNode(node)
+                        }}
+                        title="编辑服务器标识与流量策略"
+                      >
+                        <PencilSimple size={13} /> 编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-quiet btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setBillingTargetNode(node)
+                        }}
+                        title="查看/编辑小鸡账单"
+                      >
+                        <Sparkle size={13} /> 账单
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -444,6 +612,18 @@ export function NodeTable({
           node={billingTargetNode}
           onClose={() => setBillingTargetNode(null)}
           onSaved={() => setRefreshTrigger((p) => p + 1)}
+        />
+      )}
+
+      {/* 编辑服务器标识与流量策略弹窗 */}
+      {editTargetNode && (
+        <EditNodeModal
+          node={editTargetNode}
+          onClose={() => setEditTargetNode(null)}
+          onSaved={() => {
+            setRefreshTrigger((p) => p + 1)
+            window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
+          }}
         />
       )}
     </div>

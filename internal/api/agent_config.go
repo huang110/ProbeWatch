@@ -36,6 +36,7 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 	if _, _, _, ok := s.authenticateAgentRequest(w, r); !ok {
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	tasks := make([]protocol.CheckTask, 0)
 	for _, kind := range targetKinds() {
 		targets, err := s.service.Store().ListTargets(r.Context(), kind)

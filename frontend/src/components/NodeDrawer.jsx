@@ -15,6 +15,7 @@ import {
   Lightning,
   LinuxLogo,
   Memory,
+  PencilSimple,
   Pulse,
   Sparkle,
   WindowsLogo,
@@ -30,9 +31,10 @@ import {
   safeText,
   statusLabel,
 } from '../lib/format.js'
-import { calculateRemainingValue, getNodeBilling } from '../lib/billing.js'
+import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { ProgressBar, StatusDot } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
+import { EditNodeModal } from './EditNodeModal.jsx'
 
 const POPULAR_MEDIA = [
   { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT' },
@@ -135,6 +137,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   const closeButtonRef = useRef(null)
   const [showBillingModal, setShowBillingModal] = useState(false)
   const [billingVersion, setBillingVersion] = useState(0)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [metaVersion, setMetaVersion] = useState(0)
 
   // 扩展诊断数据状态：网络检测、MTR 路由、流媒体
   const [checksData, setChecksData] = useState([])
@@ -212,6 +216,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   const rate = rates[key] || null
   const billing = getNodeBilling(key, node.name)
   const calc = calculateRemainingValue(billing)
+  const customMeta = getNodeCustomMeta(key, node)
+  const coloredTags = parseColoredTags(customMeta.tags)
   const totalTransfer = (node.rx || 0) + (node.tx || 0)
   const isWindows = (node.os || '').toLowerCase().includes('windows')
 
@@ -241,11 +247,21 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
         <div className="drawer-header modern-drawer-header">
           <div className="drawer-title-group">
             <div className="drawer-title-row">
-              <span className="drawer-flag">{node.flag || '🌐'}</span>
+              <span className="drawer-flag">
+                {customMeta.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}
+              </span>
               <h2 id="node-drawer-title" className="drawer-name">
-                {node.name}
+                {customMeta.customName || node.name}
               </h2>
-              {node.tag && <span className="mjj-tag-badge">{node.tag}</span>}
+              {coloredTags.length > 0 ? (
+                coloredTags.map((t, idx) => (
+                  <span key={idx} className={`vps-pill-badge vps-tag-badge tag-color-${t.color}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
+                    {t.text}
+                  </span>
+                ))
+              ) : (
+                node.tag && <span className="mjj-tag-badge">{node.tag}</span>
+              )}
             </div>
             <div className="drawer-subtitle">
               <StatusDot status={node.status} size="sm" />
@@ -259,6 +275,15 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
             </div>
           </div>
           <div className="drawer-header-actions inline-flex items-center gap-2">
+            <button
+              type="button"
+              className="button button-quiet btn-sm"
+              onClick={() => setShowEditModal(true)}
+              title="调整服务器标识、展示信息与流量策略"
+            >
+              <PencilSimple size={14} />
+              <span>编辑信息</span>
+            </button>
             <kbd className="linear-kbd">ESC</kbd>
             <button
               ref={closeButtonRef}
@@ -796,6 +821,19 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
           onSaved={() => {
             setShowBillingModal(false)
             setBillingVersion((v) => v + 1)
+          }}
+        />
+      )}
+
+      {/* 编辑服务器标识与流量策略弹窗 */}
+      {showEditModal && (
+        <EditNodeModal
+          node={node}
+          onClose={() => setShowEditModal(false)}
+          onSaved={() => {
+            setShowEditModal(false)
+            setMetaVersion((v) => v + 1)
+            window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
           }}
         />
       )}

@@ -26,6 +26,8 @@ const (
 	maxOutboxFiles    = 100
 	maxOutboxFileSize = 1 << 20
 	maxOutboxAttempts = 8
+	maxOutboxAge      = 7 * 24 * time.Hour
+	maxConfigResponseBytes = 2 << 20
 )
 
 // Runner is the outbound-only monitoring agent. It never opens a listener.
@@ -76,7 +78,14 @@ func New(cfg config.Config) (*Runner, error) {
 	if strings.TrimSpace(cfg.AgentEndpoint) == "" || strings.TrimSpace(cfg.AgentNodeUUID) == "" || strings.TrimSpace(cfg.AgentNodeToken) == "" {
 		return nil, fmt.Errorf("agent endpoint, node UUID, and node token are required")
 	}
-	return &Runner{cfg: cfg, client: &http.Client{Timeout: 35 * time.Second}, next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(), cpu: newCPUTracker(), probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{}}, nil
+	return &Runner{
+		cfg: cfg,
+		client: &http.Client{Timeout: 35 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("agent endpoint redirects are not allowed")
+		}},
+		next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(),
+		cpu: newCPUTracker(), probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{},
+	}, nil
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -115,6 +124,12 @@ func (r *Runner) refresh(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.lastConfigVersion > 0 && response.ConfigVersion <= 0 {
+		return fmt.Errorf("configuration version regressed from %d to legacy", r.lastConfigVersion)
+	}
+	if response.ConfigVersion > 0 && r.lastConfigVersion > 0 && response.ConfigVersion < r.lastConfigVersion {
+		return fmt.Errorf("configuration version regressed from %d to %d", r.lastConfigVersion, response.ConfigVersion)
+	}
 	updated := append([]protocol.CheckTask(nil), response.Tasks...)
 	valid := make(map[string]struct{}, len(updated))
 	for _, task := range updated {
@@ -273,7 +288,17 @@ func (r *Runner) doJSON(ctx context.Context, method, path string, body any, dest
 		return fmt.Errorf("control plane returned HTTP %d", response.StatusCode)
 	}
 	if destination != nil {
-		return json.NewDecoder(response.Body).Decode(destination)
+		limited := io.LimitReader(response.Body, maxConfigResponseBytes+1)
+		body, readErr := io.ReadAll(limited)
+		if readErr != nil {
+			return readErr
+		}
+		if len(body) > maxConfigResponseBytes {
+			return fmt.Errorf("control plane response too large")
+		}
+		if err := json.Unmarshal(body, destination); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -363,7 +388,7 @@ func (r *Runner) replayOutbox(ctx context.Context) error {
 		}
 		path := filepath.Join(dir, entry.Name())
 		info, statErr := entry.Info()
-		if statErr != nil || info.Size() > maxOutboxFileSize {
+		if statErr != nil || info.Size() > maxOutboxFileSize || r.now().Sub(info.ModTime()) > maxOutboxAge {
 			_ = os.Remove(path)
 			continue
 		}
@@ -377,6 +402,7 @@ func (r *Runner) replayOutbox(ctx context.Context) error {
 			continue
 		}
 		if item.Attempts >= maxOutboxAttempts {
+			_ = os.Remove(path)
 			continue
 		}
 		if err := r.sendReport(ctx, item.RequestID, item.Payload); err == nil {

@@ -13,8 +13,13 @@ import (
 )
 
 func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.registrationLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
 		return
 	}
 	var request protocol.RegisterRequest
@@ -41,6 +46,7 @@ func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -110,6 +116,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -152,6 +159,7 @@ func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) mtrResultAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -194,6 +202,7 @@ func (s *Server) mtrResultAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) mediaResultAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -236,6 +245,10 @@ func (s *Server) mediaResultAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request) (db.Node, string, time.Time, bool) {
+	if !s.agentIPLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
+		return db.Node{}, "", time.Time{}, false
+	}
 	token, ok := parseBearer(r.Header.Get("Authorization"))
 	if !ok {
 		writeJSONError(w, http.StatusUnauthorized, "authentication failed")

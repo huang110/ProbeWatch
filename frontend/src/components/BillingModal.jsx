@@ -1,33 +1,60 @@
-import { useState } from 'react'
-import { Check, Coins, Copy, Sparkle, Tag, X } from '@phosphor-icons/react'
-import { BILLING_CYCLES, COMMON_MERCHANTS, CURRENCY_RATES, calculateRemainingValue, generateForumSalesPost, getNodeBilling, saveNodeBillingData } from '../lib/billing.js'
+import { useEffect, useState } from 'react'
+import { CalendarBlank, CaretDown, Check, Copy, Info, Sparkle, X } from '@phosphor-icons/react'
+import {
+  calculateRemainingValue,
+  generateForumSalesPost,
+  getNodeBilling,
+  resolveCurrency,
+  saveNodeBillingData,
+} from '../lib/billing.js'
+import { safeText } from '../lib/format.js'
 
 export function BillingModal({ node, onClose, onSaved }) {
-  const initial = getNodeBilling(node.uuid || node.id, node.name)
-  const [merchant, setMerchant] = useState(initial.merchant)
-  const [price, setPrice] = useState(initial.price)
-  const [currency, setCurrency] = useState(initial.currency)
-  const [cycle, setCycle] = useState(initial.cycle)
-  const [dueDate, setDueDate] = useState(initial.dueDate)
+  const nodeId = safeText(node?.uuid || node?.id)
+  const initial = getNodeBilling(nodeId, node?.name)
+
+  const [price, setPrice] = useState(initial.price !== undefined ? initial.price : 39.9)
+  const [currency, setCurrency] = useState(initial.currency || '$')
+  const [cycle, setCycle] = useState(initial.cycle || 'annual')
+  const [dueDate, setDueDate] = useState(initial.dueDate || '2026-12-22')
+  const [autoRenew, setAutoRenew] = useState(initial.autoRenew !== undefined ? initial.autoRenew : true)
+
+  const [showCalculator, setShowCalculator] = useState(false)
   const [markup, setMarkup] = useState(0)
   const [copied, setCopied] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [activeTab, setActiveTab] = useState('config') // 'config' | 'calculator'
+  const [saveSuccess, setSaveSuccess] = useState(false)
 
-  const currentBilling = { merchant, price: Number(price) || 0, currency, cycle, dueDate }
+  // ESC 键关闭
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  const currentBilling = {
+    merchant: initial.merchant || '云服务器',
+    price: Number(price) || 0,
+    currency: currency.trim() || '$',
+    cycle,
+    dueDate,
+    autoRenew,
+  }
+
   const calc = calculateRemainingValue(currentBilling)
   const totalPriceCNY = Math.max(0, calc.remainingValueCNY + Number(markup))
 
   const handleSave = (e) => {
     e.preventDefault()
-    setSaveError('')
-    const ok = saveNodeBillingData(node.uuid || node.id, { merchant, price: Number(price) || 0, currency, cycle, dueDate })
-    if (ok === false) {
-      setSaveError('保存账单数据失败，本地存储可能已被禁用或已满。')
-      return
-    }
-    if (onSaved) onSaved()
-    onClose()
+    saveNodeBillingData(nodeId, {
+      ...currentBilling,
+    })
+    setSaveSuccess(true)
+    setTimeout(() => {
+      if (onSaved) onSaved()
+      onClose()
+    }, 280)
   }
 
   const handleCopyPost = () => {
@@ -43,153 +70,159 @@ export function BillingModal({ node, onClose, onSaved }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="billing-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay edit-node-modal-overlay" onClick={onClose}>
+      <div className="edit-node-modal-card billing-lite-modal-card" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="billing-modal-header">
-          <div className="billing-modal-title">
-            <Coins size={22} className="text-amber" weight="duotone" />
-            <div>
-              <strong>小鸡账单与剩余价值管理</strong>
-              <small>{node.flag} {node.name} · {node.region}</small>
-            </div>
+        <div className="edit-node-header">
+          <div className="edit-node-header-text">
+            <h2 className="edit-node-title">账单</h2>
+            <p className="edit-node-desc">设置价格、计费周期与到期续费策略。</p>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button>
-        </div>
-
-        {/* Tab 导航 */}
-        <div className="billing-modal-tabs">
-          <button
-            type="button"
-            className={`billing-tab-btn ${activeTab === 'config' ? 'active' : ''}`}
-            onClick={() => setActiveTab('config')}
-          >
-            <Tag size={15} /> 账单配置
-          </button>
-          <button
-            type="button"
-            className={`billing-tab-btn ${activeTab === 'calculator' ? 'active' : ''}`}
-            onClick={() => setActiveTab('calculator')}
-          >
-            <Sparkle size={15} /> 论坛出鸡/收鸡计算器
+          <button type="button" className="edit-node-close-btn" onClick={onClose} aria-label="关闭">
+            <X size={18} />
           </button>
         </div>
 
-        {/* Tab 1: 账单配置 */}
-        {activeTab === 'config' && (
-          <form onSubmit={handleSave} className="billing-form">
-            <div className="billing-form-grid">
-              <div className="input-group">
-                <label>商家 / 服务商</label>
-                <input
-                  list="merchant-list"
-                  className="modal-input"
-                  value={merchant}
-                  onChange={(e) => setMerchant(e.target.value)}
-                  placeholder="例如: 搬瓦工 / DMIT / 腾讯云"
-                />
-                <datalist id="merchant-list">
-                  {COMMON_MERCHANTS.map((m) => <option key={m} value={m} />)}
-                </datalist>
-              </div>
-
-              <div className="input-group">
-                <label>续费币种</label>
-                <select className="modal-input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                  {Object.entries(CURRENCY_RATES).map(([code, info]) => (
-                    <option key={code} value={code}>{code} ({info.symbol} · 汇率约 {info.rate})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="input-group">
-                <label>续费价格 ({CURRENCY_RATES[currency]?.symbol || '¥'})</label>
+        {/* 2-Column Form Body */}
+        <form onSubmit={handleSave} className="edit-node-form">
+          <div className="edit-node-grid">
+            {/* Left Column: 价格与货币 */}
+            <div className="edit-node-col">
+              {/* 价格 */}
+              <div className="edit-field-group">
+                <label className="edit-label">
+                  价格 <span className="edit-label-sub">0不显示，-1表示免费</span>
+                </label>
                 <input
                   type="number"
-                  step="0.01"
-                  className="modal-input mono"
+                  step="any"
+                  className="edit-input mono"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  placeholder="如: 18.88"
+                  placeholder="39.9"
                 />
               </div>
 
-              <div className="input-group">
-                <label>支付周期</label>
-                <select className="modal-input" value={cycle} onChange={(e) => setCycle(e.target.value)}>
-                  {BILLING_CYCLES.map((c) => (
-                    <option key={c.id} value={c.id}>{c.label} ({c.days > 0 ? `${c.days}天` : '永久'})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="input-group full-width">
-                <label>下次到期 / 续费日</label>
-                <input
-                  type="date"
-                  className="modal-input mono"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* 实时剩余价值预览面板 */}
-            <div className="billing-preview-card">
-              <div className="preview-stat">
-                <span>剩余天数</span>
-                <b className={`mono ${calc.daysRemaining <= 7 ? 'text-rose' : calc.daysRemaining <= 30 ? 'text-amber' : 'text-mint'}`}>
-                  {calc.daysRemaining > 0 ? `${calc.daysRemaining} 天` : '已到期'}
-                </b>
-              </div>
-              <div className="preview-stat">
-                <span>原币剩余价值</span>
-                <b className="mono">{calc.symbol}{calc.remainingValueOriginal}</b>
-              </div>
-              <div className="preview-stat primary-stat">
-                <span>折合剩余价值 (CNY)</span>
-                <b className="mono text-mint">¥{calc.remainingValueCNY.toFixed(2)}</b>
-              </div>
-              <div className="preview-stat">
-                <span>年化折合成本</span>
-                <b className="mono text-muted">¥{calc.annualCostCNY.toFixed(0)}/年</b>
-              </div>
-            </div>
-
-            {saveError && <div className="modal-error-text" style={{ marginBottom: 12 }}>{saveError}</div>}
-
-            <div className="modal-actions-row">
-              <button type="button" className="button button-quiet" onClick={onClose}>取消</button>
-              <button type="submit" className="button button-primary">保存账单配置</button>
-            </div>
-          </form>
-        )}
-
-        {/* Tab 2: 出鸡/收鸡交易计算器 */}
-        {activeTab === 'calculator' && (
-          <div className="sales-calculator-view">
-            <div className="calc-banner">
-              <div className="calc-banner-header">
-                <div>
-                  <small>官方折算剩余价值</small>
-                  <div className="calc-hero-val mono">¥{calc.remainingValueCNY.toFixed(2)}</div>
-                </div>
-                <div className="text-right">
-                  <small>建议交易总价 (包Push)</small>
-                  <div className="calc-total-val mono text-amber">¥{totalPriceCNY.toFixed(2)}</div>
-                </div>
-              </div>
-
-              <div className="markup-input-box">
-                <label>
-                  <span>心理溢价 / 骨折优惠金额 (元)</span>
-                  <small className="text-muted">正数代表传家宝溢价，负数代表打折出机</small>
+              {/* 货币 */}
+              <div className="edit-field-group">
+                <label className="edit-label">
+                  货币 <span className="edit-label-sub">¥-人民币，$-美元，€-欧元，£-英镑，C$-加元，HK$-港币</span>
                 </label>
+                <input
+                  type="text"
+                  className="edit-input mono"
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  placeholder="$"
+                />
+              </div>
+            </div>
+
+            {/* Right Column: 计费周期、到期时间、自动续费 */}
+            <div className="edit-node-col">
+              {/* 计费周期 */}
+              <div className="edit-field-group">
+                <div className="edit-label-with-info">
+                  <label className="edit-label">计费周期</label>
+                  <span className="edit-info-icon" title="根据计费周期核算小鸡剩余价值与自动续费间隔">
+                    <Info size={13} />
+                  </span>
+                </div>
+                <div className="edit-select-wrap">
+                  <select
+                    className="edit-input edit-select"
+                    value={cycle}
+                    onChange={(e) => setCycle(e.target.value)}
+                  >
+                    <option value="annual">年</option>
+                    <option value="semiannual">半年</option>
+                    <option value="quarter">季</option>
+                    <option value="month">月</option>
+                    <option value="biennial">两年</option>
+                    <option value="triennial">三年</option>
+                    <option value="free">一次性/长期免费</option>
+                  </select>
+                  <CaretDown size={14} className="edit-select-arrow" />
+                </div>
+              </div>
+
+              {/* 到期时间 */}
+              <div className="edit-field-group">
+                <label className="edit-label">到期时间</label>
+                <div className="billing-date-row">
+                  <div className="billing-date-wrap">
+                    <input
+                      type="date"
+                      className="edit-input mono billing-date-input"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                    />
+                    <CalendarBlank size={14} className="billing-cal-icon" />
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-quiet btn-sm billing-permanent-btn"
+                    onClick={() => {
+                      setDueDate('2099-12-31')
+                      if (price === 0 || price === '0') setPrice(-1)
+                    }}
+                  >
+                    设置为长期
+                  </button>
+                </div>
+              </div>
+
+              {/* 自动续费 */}
+              <div className="edit-field-group edit-hide-row billing-autorenew-row">
+                <div className="edit-hide-text">
+                  <strong className="edit-label">自动续费</strong>
+                  <span className="edit-hint-text">
+                    如果服务器过期且当前在线，Lite 将自动将到期时间设置为下个自然月（年）
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={`edit-switch ${autoRenew ? 'is-active' : ''}`}
+                  onClick={() => setAutoRenew((v) => !v)}
+                  aria-pressed={autoRenew}
+                  aria-label="自动续费开关"
+                >
+                  <span className="edit-switch-thumb" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 实时折算信息与论坛发帖计算器可折叠工具条 */}
+          <div className="billing-mjj-toggle-bar">
+            <div className="billing-calc-summary">
+              <span>折合剩余价值：</span>
+              <b className="mono text-mint">¥{calc.remainingValueCNY.toFixed(2)}</b>
+              <span className={`days-pill days-${calc.statusTone} mono`}>{calc.statusText}</span>
+            </div>
+            <button
+              type="button"
+              className="billing-calc-toggle-btn"
+              onClick={() => setShowCalculator((v) => !v)}
+            >
+              <Sparkle size={13} className="text-amber" />
+              <span>{showCalculator ? '收起发帖文案' : '论坛出鸡计算器'}</span>
+            </button>
+          </div>
+
+          {showCalculator && (
+            <div className="billing-calc-expandable">
+              <div className="markup-input-box">
+                <div className="inline-flex items-center justify-between w-full">
+                  <label className="edit-label">心理溢价 / 骨折优惠金额 (元)</label>
+                  <span className="mono text-amber">
+                    建议总价: <b>¥{totalPriceCNY.toFixed(2)}</b>
+                  </span>
+                </div>
                 <div className="markup-input-wrap">
-                  <span className="currency-prefix">¥</span>
                   <input
                     type="number"
-                    className="modal-input mono"
+                    className="edit-input mono"
                     value={markup}
                     onChange={(e) => setMarkup(Number(e.target.value))}
                     placeholder="如: 50 或 -20"
@@ -203,20 +236,37 @@ export function BillingModal({ node, onClose, onSaved }) {
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="post-preview-box">
-              <div className="post-preview-header">
-                <span>NodeSeek / Hostloc 论坛发帖格式预览</span>
-                <button type="button" className="text-button copy-btn" onClick={handleCopyPost}>
-                  {copied ? <Check size={14} className="text-mint" /> : <Copy size={14} />}
-                  <span>{copied ? '已复制到剪贴板！' : '一键复制出鸡帖文'}</span>
-                </button>
+              <div className="post-preview-box">
+                <div className="post-preview-header">
+                  <span>Hostloc / NodeSeek 论坛发帖格式预览</span>
+                  <button type="button" className="text-button copy-btn" onClick={handleCopyPost}>
+                    {copied ? <Check size={14} className="text-mint" /> : <Copy size={14} />}
+                    <span>{copied ? '已复制！' : '一键复制'}</span>
+                  </button>
+                </div>
+                <pre className="post-code mono">{generateForumSalesPost(node, currentBilling, calc, markup)}</pre>
               </div>
-              <pre className="post-code mono">{generateForumSalesPost(node, currentBilling, calc, markup)}</pre>
             </div>
+          )}
+
+          {/* Footer Actions */}
+          <div className="edit-node-actions">
+            <button type="button" className="button button-quiet" onClick={onClose}>
+              取消
+            </button>
+            <button type="submit" className="button button-primary">
+              {saveSuccess ? (
+                <>
+                  <Check size={16} weight="bold" />
+                  <span>已保存</span>
+                </>
+              ) : (
+                <span>保存</span>
+              )}
+            </button>
           </div>
-        )}
+        </form>
       </div>
     </div>
   )

@@ -161,7 +161,7 @@ func (d *MediaDetector) httpTransport(probe *Probe) http.RoundTripper {
 	if d.roundTripper != nil {
 		return d.roundTripper
 	}
-	return &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, DisableKeepAlives: true, ForceAttemptHTTP2: false, ResponseHeaderTimeout: d.timeoutFor(0), DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+	return &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, DisableKeepAlives: true, ForceAttemptHTTP2: false, ResponseHeaderTimeout: d.timeoutFor(0), MaxResponseHeaderBytes: 32 << 10, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, portText, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
