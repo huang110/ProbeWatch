@@ -818,6 +818,8 @@ export function App() {
         ) : activeNav === 'node-detail' ? (
           <NodeDetailPage
             node={detailNode}
+            nodes={data}
+            onSelectNode={setSelectedNode}
             loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)}
             history={history}
             historyLoading={historyLoading}
