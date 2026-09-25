@@ -494,6 +494,16 @@ export function App() {
     setApiState({ kind: 'guest', message: '' })
   }, [])
 
+  const refreshGuest = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      const guestStatus = await fetchGuestStatus()
+      if (guestStatus) setPublicStatus(guestStatus)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [])
+
   // 实时数据轮询：节点 / 告警 / 会话，间隔由顶栏开关控制（默认 30s）。
   const loadCore = useCallback(async (manual = false) => {
     const current = ++coreRequestRef.current
@@ -759,16 +769,6 @@ export function App() {
       document.cookie = `pb_nav=${encodeURIComponent(page)}; path=/; max-age=2592000; SameSite=Lax`
     } catch {}
   }, [detailNode])
-
-  const refreshGuest = useCallback(async () => {
-    setIsRefreshing(true)
-    try {
-      const guestStatus = await fetchGuestStatus()
-      if (guestStatus) setPublicStatus(guestStatus)
-    } finally {
-      setIsRefreshing(false)
-    }
-  }, [])
 
   const handleSwitchToGuest = useCallback(() => {
     setGuestPreview(true)
