@@ -1566,7 +1566,7 @@ func (s *Store) PersistAgentReport(ctx context.Context, input AgentReportInput) 
 			return err
 		}
 	}
-	if err := evaluateResourceAlertTx(ctx, tx, input.NodeID, input.ResourcePayload, input.Now); err != nil {
+	if err := s.evaluateResourceAlertTx(ctx, tx, input.NodeID, input.ResourcePayload, input.Now); err != nil {
 		return err
 	}
 
@@ -1794,9 +1794,12 @@ func evaluateMTRPathChangeAlertTx(ctx context.Context, tx *sql.Tx, nodeID string
 	}, now)
 }
 
-func evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
+func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
 	var r struct {
 		CPUPercent           float64 `json:"cpu_percent"`
+		Load1                float64 `json:"load1"`
+		Load5                float64 `json:"load5"`
+		Load15               float64 `json:"load15"`
 		MemoryTotalBytes     uint64  `json:"memory_total_bytes"`
 		MemoryUsedBytes      uint64  `json:"memory_used_bytes"`
 		FilesystemTotalBytes uint64  `json:"filesystem_total_bytes"`
@@ -1805,13 +1808,71 @@ func evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, pay
 	if err := json.Unmarshal(payload, &r); err != nil {
 		return err
 	}
-	checks := []AlertEvaluation{{Category: "resource", TargetID: "cpu", Reason: "cpu_high", Severity: AlertSeverityCrit, Failing: r.CPUPercent > 90}, {Category: "resource", TargetID: "memory", Reason: "memory_high", Severity: AlertSeverityCrit, Failing: r.MemoryTotalBytes > 0 && float64(r.MemoryUsedBytes)/float64(r.MemoryTotalBytes)*100 > 90}, {Category: "resource", TargetID: "filesystem", Reason: "filesystem_high", Severity: AlertSeverityCrit, Failing: r.FilesystemTotalBytes > 0 && float64(r.FilesystemUsedBytes)/float64(r.FilesystemTotalBytes)*100 > 90}}
-	for _, e := range checks {
-		if err := evaluateAlertTx(ctx, tx, nodeID, e, now); err != nil {
-			return err
-		}
+	metrics := map[string]float64{
+		"cpu":    r.CPUPercent,
+		"load1":  r.Load1,
+		"load5":  r.Load5,
+		"load15": r.Load15,
 	}
-	return nil
+	if r.MemoryTotalBytes > 0 {
+		metrics["memory"] = float64(r.MemoryUsedBytes) / float64(r.MemoryTotalBytes) * 100.0
+	}
+	if r.FilesystemTotalBytes > 0 {
+		metrics["disk"] = float64(r.FilesystemUsedBytes) / float64(r.FilesystemTotalBytes) * 100.0
+	}
+
+	// Compute traffic_percent if billing settings are configured
+	var (
+		quotaBytes uint64
+		bonusBytes uint64
+		resetRx    uint64
+		resetTx    uint64
+		acctMethod string
+		incIfaces  string
+	)
+	errBilling := tx.QueryRowContext(ctx, `
+		SELECT traffic_quota_bytes, bonus_quota_bytes, last_reset_rx_bytes, last_reset_tx_bytes, accounting_method, included_interfaces
+		FROM node_billing_settings WHERE node_id = ?
+	`, nodeID).Scan(&quotaBytes, &bonusBytes, &resetRx, &resetTx, &acctMethod, &incIfaces)
+	if errBilling == nil && (quotaBytes+bonusBytes) > 0 {
+		rawRx, rawTx := extractRawTraffic(payload, incIfaces)
+		var cRx, cTx uint64
+		if rawRx >= resetRx {
+			cRx = rawRx - resetRx
+		} else {
+			cRx = rawRx
+		}
+		if rawTx >= resetTx {
+			cTx = rawTx - resetTx
+		} else {
+			cTx = rawTx
+		}
+		var cUsed uint64
+		switch acctMethod {
+		case "tx":
+			cUsed = cTx
+		case "rx":
+			cUsed = cRx
+		case "max":
+			if cTx > cRx {
+				cUsed = cTx
+			} else {
+				cUsed = cRx
+			}
+		case "min":
+			if cTx < cRx {
+				cUsed = cTx
+			} else {
+				cUsed = cRx
+			}
+		default:
+			cUsed = cRx + cTx
+		}
+		tot := quotaBytes + bonusBytes
+		metrics["traffic_percent"] = float64(cUsed) / float64(tot) * 100.0
+	}
+
+	return s.EvaluateResourceMetricsWithRules(ctx, tx, nodeID, metrics, now)
 }
 
 func alertFingerprint(nodeID string, e AlertEvaluation) string {

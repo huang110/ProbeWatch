@@ -136,6 +136,71 @@ export async function saveAlertSettings(settings) {
   return await res.json()
 }
 
+export async function fetchAlertRules() {
+  const res = await fetch('/api/alerts/rules', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch alert rules')
+  return await res.json()
+}
+
+export async function createAlertRule(rule) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/alerts/rules', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(rule),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create alert rule')
+  }
+  return await res.json()
+}
+
+export async function updateAlertRule(id, rule) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/alerts/rules/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(rule),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update alert rule')
+  }
+  return await res.json()
+}
+
+export async function deleteAlertRule(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/alerts/rules/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete alert rule')
+  }
+  return await res.json()
+}
+
+export async function toggleAlertRule(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/alerts/rules/${encodeURIComponent(id)}/toggle`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to toggle alert rule')
+  }
+  return await res.json()
+}
+
 export async function fetchBackups() {
   const res = await fetch('/api/system/backups', { credentials: 'same-origin' })
   if (!res.ok) throw new Error('Failed to fetch backups')

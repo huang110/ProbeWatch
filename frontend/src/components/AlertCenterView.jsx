@@ -33,8 +33,25 @@ import {
   fetchAlertSettings,
   saveAlertSettings,
   fetchCsrfToken,
+  fetchAlertRules,
+  createAlertRule,
+  updateAlertRule,
+  deleteAlertRule,
+  toggleAlertRule,
 } from '../lib/api.js'
 
+
+const METRIC_LABELS = {
+  cpu: 'CPU 使用率',
+  memory: '物理内存',
+  disk: '磁盘根分区',
+  load1: '系统负载 (1m)',
+  load5: '系统负载 (5m)',
+  load15: '系统负载 (15m)',
+  traffic_percent: '周期流量百分比',
+  network_loss: '网络丢包率',
+  network_latency: '网络延迟',
+}
 
 // 官方 6 大预置网络检测目标及域名
 const DEFAULT_TARGET_CONFIGS = [
@@ -85,21 +102,34 @@ export function AlertCenterView({
   const [editingOfflineNode, setEditingOfflineNode] = useState(null)
   const [offlineGracePeriod, setOfflineGracePeriod] = useState(180)
 
-  // 3. 负载通知相关状态
+  // 3. 负载通知与多指标自定义告警规则状态
   const [loadSubTab, setLoadSubTab] = useState('config') // 'config' | 'current'
   const [loadSearch, setLoadSearch] = useState('')
-  const [loadRules, setLoadRules] = useState([
-    {
-      id: 'rule-cpu-high',
-      name: 'cpu过高',
-      serversSummary: '所有探针节点',
-      metric: 'CPU',
-      threshold: '80%',
-      ratio: '0.8',
-      interval: '15 分钟',
-    },
-  ])
+  const [loadRules, setLoadRules] = useState([])
+  const [loadingRules, setLoadingRules] = useState(false)
   const [showAddLoadModal, setShowAddLoadModal] = useState(false)
+  const [editingRule, setEditingRule] = useState(null)
+  const [ruleFormName, setRuleFormName] = useState('')
+  const [ruleFormMetric, setRuleFormMetric] = useState('cpu')
+  const [ruleFormOperator, setRuleFormOperator] = useState('>')
+  const [ruleFormThreshold, setRuleFormThreshold] = useState('85')
+  const [ruleFormDuration, setRuleFormDuration] = useState('0')
+  const [ruleFormSeverity, setRuleFormSeverity] = useState('warning')
+  const [ruleFormNodeFilter, setRuleFormNodeFilter] = useState('*')
+  const [ruleFormEnabled, setRuleFormEnabled] = useState(true)
+  const [savingRule, setSavingRule] = useState(false)
+
+  const filteredLoadRules = useMemo(() => {
+    return loadRules.filter((r) => {
+      if (!loadSearch) return true
+      const s = loadSearch.toLowerCase()
+      return (
+        (r.name && r.name.toLowerCase().includes(s)) ||
+        (r.metric && r.metric.toLowerCase().includes(s)) ||
+        (r.node_filter && r.node_filter.toLowerCase().includes(s))
+      )
+    })
+  }, [loadRules, loadSearch])
 
   // 4. 流量定时报告相关状态
   const [reportPushTime, setReportPushTime] = useState('00:00')
@@ -138,9 +168,105 @@ export function AlertCenterView({
     }
   }
 
+  const loadRulesData = async () => {
+    setLoadingRules(true)
+    try {
+      const data = await fetchAlertRules()
+      setLoadRules(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load alert rules:', e)
+    } finally {
+      setLoadingRules(false)
+    }
+  }
+
   useEffect(() => {
     loadChannelsAndSettings()
+    loadRulesData()
   }, [])
+
+  const handleOpenAddRule = () => {
+    setEditingRule(null)
+    setRuleFormName('')
+    setRuleFormMetric('cpu')
+    setRuleFormOperator('>')
+    setRuleFormThreshold('85')
+    setRuleFormDuration('0')
+    setRuleFormSeverity('warning')
+    setRuleFormNodeFilter('*')
+    setRuleFormEnabled(true)
+    setShowAddLoadModal(true)
+  }
+
+  const handleOpenEditRule = (rule) => {
+    setEditingRule(rule)
+    setRuleFormName(rule.name || '')
+    setRuleFormMetric(rule.metric || 'cpu')
+    setRuleFormOperator(rule.operator || '>')
+    setRuleFormThreshold(String(rule.threshold ?? 85))
+    setRuleFormDuration(String(rule.duration_seconds ?? 0))
+    setRuleFormSeverity(rule.severity || 'warning')
+    setRuleFormNodeFilter(rule.node_filter || '*')
+    setRuleFormEnabled(rule.enabled ?? true)
+    setShowAddLoadModal(true)
+  }
+
+  const handleSaveRule = async (e) => {
+    if (e) e.preventDefault()
+    if (!ruleFormName.trim()) {
+      showToast('请输入规则名称')
+      return
+    }
+    setSavingRule(true)
+    try {
+      const payload = {
+        name: ruleFormName.trim(),
+        metric: ruleFormMetric,
+        operator: ruleFormOperator,
+        threshold: parseFloat(ruleFormThreshold) || 0,
+        duration_seconds: parseInt(ruleFormDuration, 10) || 0,
+        severity: ruleFormSeverity,
+        node_filter: ruleFormNodeFilter.trim() || '*',
+        enabled: ruleFormEnabled,
+      }
+      if (editingRule && editingRule.id) {
+        await updateAlertRule(editingRule.id, payload)
+        showToast('规则已成功更新')
+      } else {
+        await createAlertRule(payload)
+        showToast('规则已成功创建')
+      }
+      setShowAddLoadModal(false)
+      await loadRulesData()
+    } catch (err) {
+      showToast(err.message || '保存规则失败')
+    } finally {
+      setSavingRule(false)
+    }
+  }
+
+  const handleToggleRule = async (rule) => {
+    try {
+      const res = await toggleAlertRule(rule.id)
+      setLoadRules((prev) =>
+        prev.map((r) => (r.id === rule.id ? { ...r, enabled: res.enabled } : r))
+      )
+      showToast(res.enabled ? `已启用规则: ${rule.name}` : `已停用规则: ${rule.name}`)
+    } catch (err) {
+      showToast(`切换状态失败: ${err.message}`)
+    }
+  }
+
+  const handleDeleteRule = async (id, name) => {
+    if (!window.confirm(`确定要删除告警规则「${name}」吗？`)) return
+    try {
+      await deleteAlertRule(id)
+      setLoadRules((prev) => prev.filter((r) => r.id !== id))
+      showToast(`已删除规则: ${name}`)
+    } catch (err) {
+      showToast(`删除规则失败: ${err.message}`)
+    }
+  }
 
   // 同步外部传进来的子路由
   useEffect(() => {
@@ -1096,77 +1222,116 @@ export function AlertCenterView({
                 <button
                   type="button"
                   className="lite-btn-primary"
-                  onClick={() => setShowAddLoadModal(true)}
+                  onClick={handleOpenAddRule}
                 >
                   <Plus size={14} weight="bold" />
-                  <span>添加</span>
+                  <span>添加规则</span>
                 </button>
               )}
             </div>
           </div>
 
           {loadSubTab === 'config' ? (
-            /* 告警配置表格 (严格对齐 Image 3) */
+            /* 告警配置表格 */
             <div className="monitor-table-card">
               <div className="table-scroll">
                 <table className="monitor-table">
                   <thead>
                     <tr>
-                      <th style={{ minWidth: '120px' }}>名称</th>
-                      <th style={{ minWidth: '320px' }}>服务器</th>
-                      <th style={{ width: '100px' }}>监控项</th>
-                      <th style={{ width: '100px' }}>阈值</th>
-                      <th style={{ width: '110px' }}>时间占比</th>
-                      <th style={{ width: '110px' }}>间隔</th>
+                      <th style={{ width: '64px' }}>启用</th>
+                      <th style={{ minWidth: '150px' }}>规则名称</th>
+                      <th style={{ minWidth: '200px' }}>适用服务器</th>
+                      <th style={{ width: '130px' }}>监控指标</th>
+                      <th style={{ width: '110px' }}>判定条件</th>
+                      <th style={{ width: '80px' }}>级别</th>
                       <th style={{ width: '90px', textAlign: 'right' }}>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {loadRules.map((rule) => (
-                      <tr key={rule.id}>
-                        <td>
-                          <strong style={{ color: 'var(--text-1)' }}>{rule.name}</strong>
-                        </td>
-                        <td className="text-muted text-xs leading-relaxed">
-                          {rule.serversSummary} <span className="text-blue cursor-pointer">···</span>
-                        </td>
-                        <td>
-                          <span className="badge badge-subtle font-bold mono">{rule.metric}</span>
-                        </td>
-                        <td className="mono text-rose font-bold">{rule.threshold}</td>
-                        <td className="mono">{rule.ratio}</td>
-                        <td className="mono">{rule.interval}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              className="icon-action-btn"
-                              title="编辑规则"
-                              onClick={() => setShowAddLoadModal(true)}
-                            >
-                              <PencilSimple size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-action-btn text-rose"
-                              title="删除规则"
-                              onClick={() => {
-                                setLoadRules((prev) => prev.filter((r) => r.id !== rule.id))
-                                showToast('已删除告警规则')
-                              }}
-                            >
-                              <Trash size={15} />
-                            </button>
-                          </div>
+                    {loadingRules ? (
+                      <tr>
+                        <td colSpan={7} className="text-center py-8 text-muted">
+                          <CircleNotch size={20} className="animate-spin inline mr-2" />
+                          加载规则列表中...
                         </td>
                       </tr>
-                    ))}
+                    ) : filteredLoadRules.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="text-center py-8 text-muted">
+                          暂无匹配的告警规则，点击右上角「添加规则」创建自定义监控阈值
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLoadRules.map((rule) => {
+                        const isPercent = ['cpu', 'memory', 'disk', 'traffic_percent', 'network_loss'].includes(rule.metric)
+                        return (
+                          <tr key={rule.id}>
+                            <td>
+                              <button
+                                type="button"
+                                className={`switch-toggle ${rule.enabled ? 'active' : ''}`}
+                                title={rule.enabled ? '点击停用规则' : '点击启用规则'}
+                                onClick={() => handleToggleRule(rule)}
+                              >
+                                <span className="switch-thumb" />
+                              </button>
+                            </td>
+                            <td>
+                              <strong style={{ color: 'var(--text-1)' }}>{rule.name}</strong>
+                              <div className="text-xs text-muted mono">{rule.id}</div>
+                            </td>
+                            <td className="text-muted text-xs leading-relaxed">
+                              {rule.node_filter === '*' ? (
+                                <span className="badge badge-subtle">所有探针节点</span>
+                              ) : (
+                                <span className="mono">{rule.node_filter}</span>
+                              )}
+                            </td>
+                            <td>
+                              <span className="badge badge-subtle font-bold mono">
+                                {METRIC_LABELS[rule.metric] || rule.metric}
+                              </span>
+                            </td>
+                            <td className="mono text-rose font-bold">
+                              {rule.operator} {rule.threshold}{isPercent ? '%' : ''}
+                            </td>
+                            <td>
+                              <span className={`badge ${rule.severity === 'critical' ? 'badge-danger' : rule.severity === 'warning' ? 'badge-warning' : 'badge-subtle'}`}>
+                                {rule.severity === 'critical' ? '严重' : rule.severity === 'warning' ? '警告' : '提示'}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  className="icon-action-btn"
+                                  title="编辑规则"
+                                  onClick={() => handleOpenEditRule(rule)}
+                                >
+                                  <PencilSimple size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-action-btn text-rose"
+                                  title="删除规则"
+                                  onClick={() => handleDeleteRule(rule.id, rule.name)}
+                                >
+                                  <Trash size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
 
               <div className="lite-pagination-row">
-                <div />
+                <div className="text-xs text-muted">
+                  共 {filteredLoadRules.length} 条告警规则
+                </div>
                 <div className="lite-pagination-right">
                   <select className="lite-page-select" defaultValue="20">
                     <option value="20">20 条/页</option>
@@ -1727,7 +1892,7 @@ export function AlertCenterView({
         </div>
       )}
 
-      {/* 新增负载规则弹窗 */}
+      {/* 添加/编辑负载与多指标告警规则弹窗 */}
       {showAddLoadModal && (
         <div className="modal-backdrop" onClick={() => setShowAddLoadModal(false)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -1737,8 +1902,8 @@ export function AlertCenterView({
                   <Sliders size={20} />
                 </div>
                 <div>
-                  <h2 className="modal-title">添加负载通知规则</h2>
-                  <p className="modal-subtitle">设置 CPU、内存或负载阈值与报警周期</p>
+                  <h2 className="modal-title">{editingRule ? '编辑告警规则' : '添加告警规则'}</h2>
+                  <p className="modal-subtitle">设置 CPU、内存、负载或流量周期的自定义监控阈值闭环</p>
                 </div>
               </div>
               <button
@@ -1750,61 +1915,133 @@ export function AlertCenterView({
               </button>
             </div>
 
-            <div className="modal-body space-y-4">
-              <div className="field">
-                <label className="field-label required">规则名称</label>
-                <input className="field-input" placeholder="如: cpu过高" defaultValue="cpu过高" />
+            <form onSubmit={handleSaveRule}>
+              <div className="modal-body space-y-4">
+                <div className="field">
+                  <label className="field-label required">规则名称</label>
+                  <input
+                    className="field-input"
+                    placeholder="如: CPU持续过高告警"
+                    value={ruleFormName}
+                    onChange={(e) => setRuleFormName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-grid-2">
+                  <div className="field">
+                    <label className="field-label">监控指标</label>
+                    <select
+                      className="field-select"
+                      value={ruleFormMetric}
+                      onChange={(e) => setRuleFormMetric(e.target.value)}
+                    >
+                      <option value="cpu">CPU 使用率 (%)</option>
+                      <option value="memory">物理内存使用率 (%)</option>
+                      <option value="disk">磁盘根分区使用率 (%)</option>
+                      <option value="load1">系统负载 Load 1m</option>
+                      <option value="load5">系统负载 Load 5m</option>
+                      <option value="load15">系统负载 Load 15m</option>
+                      <option value="traffic_percent">周期流量使用率 (%)</option>
+                      <option value="network_loss">丢包率 (%)</option>
+                      <option value="network_latency">网络延迟 (ms)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="field">
+                      <label className="field-label">判定符</label>
+                      <select
+                        className="field-select"
+                        value={ruleFormOperator}
+                        onChange={(e) => setRuleFormOperator(e.target.value)}
+                      >
+                        <option value=">">&gt; 大于</option>
+                        <option value=">=">&gt;= 大于等于</option>
+                        <option value="<">&lt; 小于</option>
+                        <option value="<=">&lt;= 小于等于</option>
+                        <option value="==">== 等于</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label className="field-label required">触发阈值</label>
+                      <input
+                        className="field-input mono"
+                        type="number"
+                        step="any"
+                        placeholder="85"
+                        value={ruleFormThreshold}
+                        onChange={(e) => setRuleFormThreshold(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-grid-2">
+                  <div className="field">
+                    <label className="field-label">告警严重度</label>
+                    <select
+                      className="field-select"
+                      value={ruleFormSeverity}
+                      onChange={(e) => setRuleFormSeverity(e.target.value)}
+                    >
+                      <option value="warning">警告 (Warning)</option>
+                      <option value="critical">严重 (Critical)</option>
+                      <option value="info">提示 (Info)</option>
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label className="field-label">适用服务器范围</label>
+                    <input
+                      className="field-input mono"
+                      placeholder="* 代表所有服务器，或逗号分隔节点 UUID"
+                      value={ruleFormNodeFilter}
+                      onChange={(e) => setRuleFormNodeFilter(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)]">
+                  <div>
+                    <div className="font-semibold text-sm">启用此告警规则</div>
+                    <div className="text-xs text-muted">开启后自动在节点遥测上报时进行多维阈值计算并触发告警</div>
+                  </div>
+                  <button
+                    type="button"
+                    className={`switch-toggle ${ruleFormEnabled ? 'active' : ''}`}
+                    onClick={() => setRuleFormEnabled(!ruleFormEnabled)}
+                  >
+                    <span className="switch-thumb" />
+                  </button>
+                </div>
               </div>
 
-              <div className="form-grid-2">
-                <div className="field">
-                  <label className="field-label">监控项</label>
-                  <select className="field-select" defaultValue="CPU">
-                    <option value="CPU">CPU 使用率</option>
-                    <option value="Memory">内存使用率</option>
-                    <option value="Load">系统负载 (Load)</option>
-                    <option value="Disk">磁盘使用率</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label className="field-label">报警阈值</label>
-                  <input className="field-input mono" placeholder="80%" defaultValue="80%" />
-                </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowAddLoadModal(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={savingRule}
+                >
+                  {savingRule ? (
+                    <>
+                      <CircleNotch size={14} className="animate-spin inline mr-1" />
+                      保存中...
+                    </>
+                  ) : (
+                    '保存规则'
+                  )}
+                </button>
               </div>
-
-              <div className="form-grid-2">
-                <div className="field">
-                  <label className="field-label">持续时间占比</label>
-                  <input className="field-input mono" placeholder="0.8" defaultValue="0.8" />
-                </div>
-
-                <div className="field">
-                  <label className="field-label">静默间隔</label>
-                  <input className="field-input mono" placeholder="15 分钟" defaultValue="15 分钟" />
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="button button-quiet"
-                onClick={() => setShowAddLoadModal(false)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => {
-                  setShowAddLoadModal(false)
-                  showToast('告警规则已成功创建')
-                }}
-              >
-                保存规则
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}

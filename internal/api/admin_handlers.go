@@ -48,6 +48,52 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Alert Rules endpoints
+	if cleanPath == "/api/alerts/rules" {
+		switch r.Method {
+		case http.MethodGet:
+			s.listAlertRules(w, r)
+		case http.MethodPost:
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createAlertRule)).ServeHTTP(w, r)
+		default:
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	if strings.HasPrefix(cleanPath, "/api/alerts/rules/") {
+		parts := strings.Split(cleanPath, "/")
+		if len(parts) == 5 {
+			ruleID := parts[4]
+			switch r.Method {
+			case http.MethodGet:
+				s.getAlertRule(w, r, ruleID)
+			case http.MethodPut:
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.updateAlertRule(w, r, ruleID)
+				})).ServeHTTP(w, r)
+			case http.MethodDelete:
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.deleteAlertRule(w, r, ruleID)
+				})).ServeHTTP(w, r)
+			default:
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+			return
+		}
+		if len(parts) == 6 && parts[5] == "toggle" {
+			ruleID := parts[4]
+			if r.Method != http.MethodPost {
+				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.toggleAlertRule(w, r, ruleID)
+			})).ServeHTTP(w, r)
+			return
+		}
+	}
+
 	// Channel endpoints
 	if cleanPath == "/api/alerts/channels" {
 		switch r.Method {

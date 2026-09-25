@@ -292,6 +292,20 @@ CREATE TABLE IF NOT EXISTS node_billing_settings (
     auto_renew INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    operator TEXT NOT NULL DEFAULT '>',
+    threshold REAL NOT NULL,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    severity TEXT NOT NULL DEFAULT 'warning',
+    node_filter TEXT NOT NULL DEFAULT '*',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS alert_rules_metric_idx ON alert_rules(metric, enabled);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -326,6 +340,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureMediaDetectorHost(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureDefaultAlertRules(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -638,6 +655,37 @@ func ensureSessionPolicy(ctx context.Context, db *sql.DB) error {
 	}
 	if _, err := db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN policy_digest BLOB NOT NULL DEFAULT X''`); err != nil {
 		return fmt.Errorf("add session policy digest: %w", err)
+	}
+	return nil
+}
+
+func ensureDefaultAlertRules(ctx context.Context, db *sql.DB) error {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alert_rules`).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("count alert rules: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	now := time.Now().UTC().UnixNano()
+	rules := []struct {
+		id, name, metric, op, severity string
+		threshold                      float64
+	}{
+		{"rule-default-cpu", "CPU 持续过高告警", "cpu", ">", "warning", 85.0},
+		{"rule-default-memory", "物理内存超限告警", "memory", ">", "warning", 90.0},
+		{"rule-default-disk", "磁盘根分区耗尽告警", "disk", ">", "critical", 90.0},
+		{"rule-default-traffic", "周期流量耗尽预警", "traffic_percent", ">", "warning", 85.0},
+	}
+	for _, r := range rules {
+		_, err := db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO alert_rules (id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, 0, ?, '*', 1, ?, ?)
+		`, r.id, r.name, r.metric, r.op, r.threshold, r.severity, now, now)
+		if err != nil {
+			return fmt.Errorf("seed alert rule %s: %w", r.id, err)
+		}
 	}
 	return nil
 }
