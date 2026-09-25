@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -387,7 +388,41 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, 200, map[string]any{"nodes": nc, "checks": checks, "resources": resources, "window": map[string]time.Time{"from": from, "to": to}, "generated_at": now})
+	database := map[string]any{
+		"file_bytes":  uint64(0),
+		"wal_bytes":   uint64(0),
+		"shm_bytes":   uint64(0),
+		"total_bytes": uint64(0),
+	}
+	if s.cfg.DatabasePath != "" {
+		if fi, err := os.Stat(s.cfg.DatabasePath); err == nil {
+			database["file_bytes"] = uint64(fi.Size())
+		}
+		if fi, err := os.Stat(s.cfg.DatabasePath + "-wal"); err == nil {
+			database["wal_bytes"] = uint64(fi.Size())
+		}
+		if fi, err := os.Stat(s.cfg.DatabasePath + "-shm"); err == nil {
+			database["shm_bytes"] = uint64(fi.Size())
+		}
+		database["total_bytes"] = database["file_bytes"].(uint64) + database["wal_bytes"].(uint64) + database["shm_bytes"].(uint64)
+	}
+
+	targetsCount := 0
+	for _, kind := range targetKinds() {
+		if tgts, err := s.service.Store().ListTargets(r.Context(), kind); err == nil {
+			targetsCount += len(tgts)
+		}
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"nodes":         nc,
+		"checks":        checks,
+		"resources":     resources,
+		"database":      database,
+		"targets_count": targetsCount,
+		"window":        map[string]time.Time{"from": from, "to": to},
+		"generated_at":  now,
+	})
 }
 
 func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
