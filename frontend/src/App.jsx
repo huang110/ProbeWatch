@@ -360,6 +360,8 @@ export function App() {
   const [rates, setRates] = useState({})
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyTimeRange, setHistoryTimeRange] = useState('实时')
+  const [pingTimeRange, setPingTimeRange] = useState('1小时')
   const historyAbortRef = useRef(null)
   const [checksSummary, setChecksSummary] = useState(null)
   const [checksLoading, setChecksLoading] = useState(false)
@@ -633,9 +635,30 @@ export function App() {
     const controller = new AbortController()
     historyAbortRef.current = controller
     setHistoryLoading(true)
-    fetch(`/api/nodes/${encodeURIComponent(uuid)}/resource/history`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => {
+
+    const rangeParam = historyTimeRange === '实时' ? '15m'
+      : historyTimeRange === '4小时' ? '4h'
+      : historyTimeRange === '1天' ? '1d'
+      : historyTimeRange === '7天' ? '7d'
+      : historyTimeRange === '30天' ? '30d'
+      : '15m'
+
+    const fetchHistoryFromApi = async () => {
+      let response
+      try {
+        response = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/resource/history?range=${rangeParam}`, { credentials: 'same-origin', signal: controller.signal })
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e
+      }
+      if (!response || response.status === 401 || response.status === 404) {
+        response = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/resource/history?range=${rangeParam}`, { credentials: 'same-origin', signal: controller.signal })
+      }
       if (!response.ok) throw new Error(`history:${response.status}`)
-      const json = await response.json()
+      return response.json()
+    }
+
+    fetchHistoryFromApi().then((json) => {
+      if (!Array.isArray(json)) throw new Error('history:invalid-json')
       const asc = [...json].sort((a, b) => {
         const ta = new Date(a?.reported_at || a?.recorded_at || a?.time || 0).getTime()
         const tb = new Date(b?.reported_at || b?.recorded_at || b?.time || 0).getTime()
@@ -675,7 +698,7 @@ export function App() {
           const curMs = timeIso ? new Date(timeIso).getTime() : 0
           const prevMs = typeof prevRawTime === 'string' ? new Date(prevRawTime).getTime() : (typeof prevRawTime === 'number' ? (prevRawTime > 1e14 ? prevRawTime / 1e6 : prevRawTime * 1000) : 0)
           const dt = (curMs - prevMs) / 1000
-          if (dt >= 1 && dt <= 300) {
+          if (dt >= 1 && dt <= 7200) {
             if (rx >= prevRx) downRate = Math.round((rx - prevRx) / dt)
             if (tx >= prevTx) upRate = Math.round((tx - prevTx) / dt)
           }
@@ -699,7 +722,7 @@ export function App() {
       })
     }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
     return () => controller.abort()
-  }, [selectedNode, detailNode, activeNav, targetDetailUuid, lastSync])
+  }, [selectedNode, detailNode, activeNav, targetDetailUuid, historyTimeRange, lastSync])
 
   const analyticsNode = selectedNode || detailNode
   const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
@@ -709,9 +732,37 @@ export function App() {
     const controller = new AbortController()
     checksAbortRef.current = controller
     setChecksLoading(true)
-    fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`checks:${response.status}`); const json = await response.json(); if (!Array.isArray(json)) throw new Error('checks:invalid-json'); return json }).then((json) => { if (!controller.signal.aborted) setChecksSummary(json) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setChecksSummary(null) }).finally(() => { if (!controller.signal.aborted) setChecksLoading(false) })
+
+    const pingParam = pingTimeRange === '1小时' ? '1h'
+      : pingTimeRange === '6小时' ? '6h'
+      : pingTimeRange === '12小时' ? '12h'
+      : pingTimeRange === '1天' ? '1d'
+      : '1h'
+
+    const fetchChecksFromApi = async () => {
+      let response
+      try {
+        response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary?range=${pingParam}`, { credentials: 'same-origin', signal: controller.signal })
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e
+      }
+      if (!response || response.status === 401 || response.status === 404) {
+        response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary?range=${pingParam}`, { credentials: 'same-origin', signal: controller.signal })
+      }
+      if (!response.ok) throw new Error(`checks:${response.status}`)
+      return response.json()
+    }
+
+    fetchChecksFromApi().then((json) => {
+      if (!Array.isArray(json)) throw new Error('checks:invalid-json')
+      if (!controller.signal.aborted) setChecksSummary(json)
+    }).catch((error) => {
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) setChecksSummary(null)
+    }).finally(() => {
+      if (!controller.signal.aborted) setChecksLoading(false)
+    })
     return () => controller.abort()
-  }, [analyticsUuid, lastSync])
+  }, [analyticsUuid, pingTimeRange, lastSync])
 
   useEffect(() => { setTrafficPeriod('day') }, [analyticsUuid])
 
@@ -721,7 +772,29 @@ export function App() {
     const controller = new AbortController()
     trafficAbortRef.current = controller
     setTrafficLoading(true)
-    fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal }).then(async (response) => { if (!response.ok) throw new Error(`traffic:${response.status}`); const json = await response.json(); if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('traffic:invalid-json'); return json }).then((json) => { if (!controller.signal.aborted) setTraffic(json) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setTraffic(null) }).finally(() => { if (!controller.signal.aborted) setTrafficLoading(false) })
+
+    const fetchTrafficFromApi = async () => {
+      let response
+      try {
+        response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal })
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e
+      }
+      if (!response || response.status === 401 || response.status === 404) {
+        response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal })
+      }
+      if (!response.ok) throw new Error(`traffic:${response.status}`)
+      return response.json()
+    }
+
+    fetchTrafficFromApi().then((json) => {
+      if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('traffic:invalid-json')
+      if (!controller.signal.aborted) setTraffic(json)
+    }).catch((error) => {
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) setTraffic(null)
+    }).finally(() => {
+      if (!controller.signal.aborted) setTrafficLoading(false)
+    })
     return () => controller.abort()
   }, [analyticsUuid, trafficPeriod, lastSync])
 
@@ -956,8 +1029,12 @@ export function App() {
               loading={false}
               history={history}
               historyLoading={historyLoading}
+              historyTimeRange={historyTimeRange}
+              onHistoryTimeRangeChange={setHistoryTimeRange}
               checksSummary={checksSummary}
               checksLoading={checksLoading}
+              pingTimeRange={pingTimeRange}
+              onPingTimeRangeChange={setPingTimeRange}
               traffic={traffic}
               trafficLoading={trafficLoading}
               trafficPeriod={trafficPeriod}
@@ -1064,8 +1141,12 @@ export function App() {
             loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)}
             history={history}
             historyLoading={historyLoading}
+            historyTimeRange={historyTimeRange}
+            onHistoryTimeRangeChange={setHistoryTimeRange}
             checksSummary={checksSummary}
             checksLoading={checksLoading}
+            pingTimeRange={pingTimeRange}
+            onPingTimeRangeChange={setPingTimeRange}
             traffic={traffic}
             trafficLoading={trafficLoading}
             trafficPeriod={trafficPeriod}

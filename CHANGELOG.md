@@ -2,6 +2,23 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.5.0] - 2026-09-25
+
+### 🚀 节点多时间窗真实时序降采样联动 & 游客大屏多维检索与公开遥测 (Historical Downsampling & Guest Multi-Dimensional Search)
+- **时序历史多时间窗全真实拉取与等距降采样 (Real-Time & Historical Downsampling Window Query)**：
+  - 服务器详情页（`NodeDetailPage`）「实时 / 4小时 / 1天 / 7天 / 30天」按钮全面打通后端 History API，支持按 `?range=15m|4h|1d|7d|30d` 动态拉取。
+  - 在底层 SQLite 查询引擎（`internal/db/store.go`）中独创引入基于窗口函数 `ROW_NUMBER() OVER (PARTITION BY (reported_at / bucket) ORDER BY reported_at ASC)` 的全时间窗等距降采样算法，彻底根治多日长周期查询时数据点因频率限制而扎堆在前几十分钟的顽疾，真正实现 4 小时、1 天、7 天乃至 30 天横跨整周月的真实监控走势。
+  - 三网时延检测（`checksSummary`）同步联动时间窗，支持 `1小时 / 6小时 / 12小时 / 1天` 动态聚合与平滑呈现。
+- **游客大屏公开只读遥测穿透 (Public Guest Node Telemetry)**：
+  - 后端新增公开只读路由 `/api/public/nodes/{uuid}/[resource/history|checks/summary|traffic]`，集成 IP 限流保护与 UUID 安全校验。
+  - 访客在未登录状态下点击进入任意节点详情，均可流畅加载该服务器的真实历史遥测折线图与三网测速，告别虚拟仿真平滑曲线。
+- **游客大屏多维检索、标签过滤与指标排序 (Multi-Dimensional Search & Filter & Sort on Guest View)**：
+  - 顶部新增实时搜索框：支持根据节点名称、操作系统、地区国旗、IP 地址或自定义标签即时模糊搜索。
+  - 动态标签筛选 Chips：自适应提取所有节点的标签与地区国旗，支持一键切换「全部 / 自定义标签 / 地区」。
+  - 多维指标排序器：支持「默认排序」、「CPU 占用从高到低 ⬇」、「内存占用从高到低 ⬇」，轻松应对大规模 VPS 机群快速把脉。
+- **生产构建与平滑热更验证**：
+  - 前端静态构建已打包并在生产服务器 `筋斗云` 完成静态资产与 Go 主控双重热替换及全线在线验证。
+
 ## [v0.4.6] - 2026-09-25
 
 ### ⚡ 节点遥测监控全要素实时化与内核级真实连接/进程采集 (Live Telemetry Rolling Timeline & Kernel Metrics)

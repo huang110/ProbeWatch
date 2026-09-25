@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, Eye, GithubLogo, GlobeHemisphereWest, Key, LockKey, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
@@ -54,6 +54,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [loginError, setLoginError] = useState('')
   const [internalStatus, setInternalStatus] = useState(null)
   const [localRefreshing, setLocalRefreshing] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedTag, setSelectedTag] = useState('all')
+  const [sortKey, setSortKey] = useState('default')
 
   // 当外部未传入 status 或 status 节点列表为空时，自驱动从公开状态 API 同步
   useEffect(() => {
@@ -140,6 +143,63 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     const meta = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name)
     return !meta?.hidden
   })
+
+  const availableTags = useMemo(() => {
+    const set = new Set()
+    names.forEach((name) => {
+      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+      if (custom.tags) {
+        custom.tags.split(/[,，\s]+/).forEach((t) => { if (t.trim()) set.add(t.trim()) })
+      }
+      const meta = detectRegionAndFlag(name, '')
+      const flag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+      if (flag) set.add(flag)
+    })
+    return Array.from(set)
+  }, [names, allCustomMeta])
+
+  const filteredNames = useMemo(() => {
+    return names.filter((name) => {
+      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+      const meta = detectRegionAndFlag(name, '')
+      const flag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+      const displayName = custom.customName || name
+      const os = custom.os || 'Debian Linux'
+      const tags = custom.tags || ''
+
+      if (selectedTag !== 'all') {
+        const matchesTag = tags.includes(selectedTag) || flag === selectedTag
+        if (!matchesTag) return false
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim()
+        const matches = displayName.toLowerCase().includes(q) ||
+          name.toLowerCase().includes(q) ||
+          os.toLowerCase().includes(q) ||
+          tags.toLowerCase().includes(q) ||
+          (custom.ip && custom.ip.includes(q))
+        if (!matches) return false
+      }
+
+      return true
+    }).sort((a, b) => {
+      if (sortKey === 'default') return 0
+      const customA = allCustomMeta[a] || Object.values(allCustomMeta).find((m) => m.customName === a) || {}
+      const customB = allCustomMeta[b] || Object.values(allCustomMeta).find((m) => m.customName === b) || {}
+      if (sortKey === 'cpu') {
+        const cpuA = Number(customA.cpu ?? 0)
+        const cpuB = Number(customB.cpu ?? 0)
+        return cpuB - cpuA
+      }
+      if (sortKey === 'mem') {
+        const memA = Number(customA.memUsed ?? 0)
+        const memB = Number(customB.memUsed ?? 0)
+        return memB - memA
+      }
+      return 0
+    })
+  }, [names, searchQuery, selectedTag, sortKey, allCustomMeta])
 
   const isAllHealthy = total !== null && total > 0 && online === total
   const hasIssues = total !== null && online !== null && online < total
@@ -277,7 +337,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       <section className="guest-nodes-section">
         <div className="section-title-bar">
           <div>
-            <h2>已连接探针节点 ({names.length})</h2>
+            <h2>已连接探针节点 ({filteredNames.length}{filteredNames.length !== names.length ? ` / ${names.length}` : ''})</h2>
             <p>提供已脱敏的服务器节点、网络区域与 30 天服务稳定性切片</p>
           </div>
           {names.length > 0 && (
@@ -304,11 +364,72 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           )}
         </div>
 
+        {names.length > 0 && (
+          <div className="guest-filter-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border-subtle, rgba(255,255,255,0.06))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 240px', maxWidth: '380px', background: 'var(--surface-card, rgba(0,0,0,0.2))', border: '1px solid var(--border-subtle, rgba(255,255,255,0.1))', borderRadius: '8px', padding: '6px 10px' }}>
+              <MagnifyingGlass size={15} style={{ opacity: 0.6 }} />
+              <input
+                type="text"
+                placeholder="搜索节点名称、标签、地区或 IP..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ background: 'transparent', border: 'none', outline: 'none', color: 'inherit', width: '100%', fontSize: '13px' }}
+              />
+              {searchQuery && (
+                <button type="button" onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, opacity: 0.6, color: 'inherit' }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {availableTags.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto', maxWidth: '340px' }}>
+                  <button
+                    type="button"
+                    className={`button button-quiet btn-sm ${selectedTag === 'all' ? 'active' : ''}`}
+                    onClick={() => setSelectedTag('all')}
+                    style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: selectedTag === 'all' ? 'var(--primary-color, rgba(14,165,233,0.2))' : undefined }}
+                  >
+                    全部
+                  </button>
+                  {availableTags.slice(0, 5).map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className={`button button-quiet btn-sm ${selectedTag === tag ? 'active' : ''}`}
+                      onClick={() => setSelectedTag(selectedTag === tag ? 'all' : tag)}
+                      style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: selectedTag === tag ? 'var(--primary-color, rgba(14,165,233,0.2))' : undefined }}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value)}
+                style={{ background: 'var(--surface-card, rgba(0,0,0,0.2))', border: '1px solid var(--border-subtle, rgba(255,255,255,0.1))', color: 'inherit', fontSize: '12px', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                <option value="default">默认排序</option>
+                <option value="cpu">CPU 占用 ⬇</option>
+                <option value="mem">内存占用 ⬇</option>
+              </select>
+            </div>
+          </div>
+        )}
+
         {names.length ? (
           <>
-            {viewMode === 'grid' ? (
+            {filteredNames.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-muted)' }}>
+                <p style={{ fontSize: '15px', fontWeight: 500 }}>未找到匹配的服务器节点</p>
+                <p style={{ fontSize: '13px', marginTop: '6px' }}>请尝试调整搜索关键词或重置标签筛选条件</p>
+              </div>
+            ) : viewMode === 'grid' ? (
               <div className="guest-node-grid">
-                {names.map((name, index) => {
+                {filteredNames.map((name, index) => {
                   const meta = detectRegionAndFlag(name, '')
                   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
                   const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
@@ -564,7 +685,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                     </tr>
                   </thead>
                   <tbody>
-                    {names.map((name, index) => {
+                    {filteredNames.map((name, index) => {
                       const meta = detectRegionAndFlag(name, '')
                       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
                       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag

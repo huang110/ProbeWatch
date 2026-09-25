@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"regexp"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 // publicStatusResponse is the complete, allow-listed shape of the
@@ -65,6 +68,10 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	s.publicCacheMu.RLock()
 	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 5*time.Second {
 		cached := s.publicCache
@@ -73,10 +80,6 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publicCacheMu.RUnlock()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
-		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
-		return
-	}
 	nodes, err := s.service.Store().ListNodes(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
@@ -169,4 +172,53 @@ func publicLimiterKey(r *http.Request) string {
 func isLoopbackHost(host string) bool {
 	ip := net.ParseIP(strings.TrimSpace(host))
 	return ip != nil && ip.IsLoopback()
+}
+
+// publicNodeRoute serves unauthenticated, read-only GET requests for node telemetry
+// on the guest dashboard (e.g. /api/public/nodes/{uuid}/resource/history,
+// /api/public/nodes/{uuid}/checks/summary, /api/public/nodes/{uuid}/traffic).
+func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	now := time.Now().UTC()
+	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	// Expected parts: ["api", "public", "nodes", "{uuid}", ...]
+	if len(parts) < 4 || parts[0] != "api" || parts[1] != "public" || parts[2] != "nodes" {
+		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+	uuid := parts[3]
+	if !security.IsRFC4122UUID(uuid) {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	if len(parts) == 6 && parts[4] == "resource" && parts[5] == "history" {
+		s.writeNodeHistory(w, r, node.ID, "resource")
+		return
+	}
+	if len(parts) == 6 && parts[4] == "checks" && parts[5] == "summary" {
+		s.nodeChecksSummary(w, r, uuid)
+		return
+	}
+	if len(parts) == 5 && parts[4] == "traffic" {
+		s.nodeTraffic(w, r, uuid)
+		return
+	}
+	writeJSONError(w, http.StatusNotFound, "not found")
 }

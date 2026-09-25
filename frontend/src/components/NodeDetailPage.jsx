@@ -195,8 +195,12 @@ export function NodeDetailPage({
   loading = false,
   history = [],
   historyLoading = false,
+  historyTimeRange = '实时',
+  onHistoryTimeRangeChange,
   checksSummary = null,
   checksLoading = false,
+  pingTimeRange = '1小时',
+  onPingTimeRangeChange,
   traffic = null,
   trafficLoading = false,
   trafficPeriod = 'day',
@@ -206,8 +210,27 @@ export function NodeDetailPage({
 }) {
   const [copied, setCopied] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
-  const [activeTimeRange, setActiveTimeRange] = useState('实时')
-  const [activePingRange, setActivePingRange] = useState('1小时')
+  const [activeTimeRange, setActiveTimeRange] = useState(historyTimeRange || '实时')
+  const [activePingRange, setActivePingRange] = useState(pingTimeRange || '1小时')
+
+  useEffect(() => {
+    if (historyTimeRange) setActiveTimeRange(historyTimeRange)
+  }, [historyTimeRange])
+
+  useEffect(() => {
+    if (pingTimeRange) setActivePingRange(pingTimeRange)
+  }, [pingTimeRange])
+
+  const handleTimeRangeChange = (tab) => {
+    setActiveTimeRange(tab)
+    onHistoryTimeRangeChange?.(tab)
+  }
+
+  const handlePingRangeChange = (tab) => {
+    setActivePingRange(tab)
+    onPingTimeRangeChange?.(tab)
+  }
+
   const [selectedTargets, setSelectedTargets] = useState({})
   const [smoothPeaks, setSmoothPeaks] = useState(true)
   const [targetInfoModal, setTargetInfoModal] = useState(null)
@@ -362,11 +385,15 @@ export function NodeDetailPage({
       : activeTimeRange === '4小时' ? 240
       : activeTimeRange === '1天' ? 1440
       : activeTimeRange === '7天' ? 10080
-      : 60
+      : activeTimeRange === '30天' ? 43200
+      : 15
 
     // Generate 6 evenly spaced time ticks ending at current nowTick
     const times = [5, 4, 3, 2, 1, 0].map((step) => {
       const t = new Date(nowTick - (step * (rangeMinutes / 5)) * 60 * 1000)
+      if (rangeMinutes >= 10080) {
+        return `${t.getMonth() + 1}/${t.getDate()}`
+      }
       if (rangeMinutes >= 1440) {
         return `${t.getMonth() + 1}/${t.getDate()} ${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}`
       }
@@ -1073,12 +1100,12 @@ export function NodeDetailPage({
         {/* 时间切换条 */}
         <div className="komari-time-tabs-row">
           <div className="komari-time-tabs">
-            {['实时', '4小时', '1天', '7天', '自定义'].map((tab) => (
+            {['实时', '4小时', '1天', '7天', '30天'].map((tab) => (
               <button
                 key={tab}
                 type="button"
                 className={`komari-time-tab ${activeTimeRange === tab ? 'active' : ''}`}
-                onClick={() => setActiveTimeRange(tab)}
+                onClick={() => handleTimeRangeChange(tab)}
               >
                 {tab}
               </button>
@@ -1189,12 +1216,12 @@ export function NodeDetailPage({
       <div className="komari-ping-section">
         <div className="komari-ping-toolbar">
           <div className="komari-time-tabs">
-            {['1小时', '6小时', '12小时', '1天', '2天', '自定义'].map((tab) => (
+            {['1小时', '6小时', '12小时', '1天'].map((tab) => (
               <button
                 key={tab}
                 type="button"
                 className={`komari-time-tab ${activePingRange === tab ? 'active' : ''}`}
-                onClick={() => setActivePingRange(tab)}
+                onClick={() => handlePingRangeChange(tab)}
               >
                 {tab}
               </button>

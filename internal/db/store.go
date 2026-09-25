@@ -1311,7 +1311,40 @@ func (s *Store) GetResourceLatest(ctx context.Context, nodeID string) (time.Time
 }
 
 func (s *Store) GetResourceHistory(ctx context.Context, nodeID string, from, to time.Time, limit int) ([]ResourceHistoryRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT reported_at, recorded_at, payload FROM resource_history WHERE node_id = ? AND reported_at >= ? AND reported_at <= ? ORDER BY reported_at DESC, id DESC LIMIT ?`, nodeID, unixNano(from), unixNano(to), limit)
+	if limit <= 0 {
+		limit = 100
+	}
+	fromNano := unixNano(from)
+	toNano := unixNano(to)
+	span := toNano - fromNano
+
+	var rows *sql.Rows
+	var err error
+
+	// If time window is wider than 30 minutes, compute downsampling bucket size
+	bucketSize := span / int64(limit)
+	if bucketSize > int64(15*time.Second) {
+		query := `
+SELECT reported_at, recorded_at, payload
+FROM (
+    SELECT reported_at, recorded_at, payload,
+           ROW_NUMBER() OVER (PARTITION BY (reported_at / ?) ORDER BY reported_at ASC) as rn
+    FROM resource_history
+    WHERE node_id = ? AND reported_at >= ? AND reported_at <= ?
+)
+WHERE rn = 1
+ORDER BY reported_at ASC
+LIMIT ?`
+		rows, err = s.db.QueryContext(ctx, query, bucketSize, nodeID, fromNano, toNano, limit)
+	} else {
+		query := `
+SELECT reported_at, recorded_at, payload
+FROM resource_history
+WHERE node_id = ? AND reported_at >= ? AND reported_at <= ?
+ORDER BY reported_at ASC
+LIMIT ?`
+		rows, err = s.db.QueryContext(ctx, query, nodeID, fromNano, toNano, limit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("query resource history: %w", err)
 	}

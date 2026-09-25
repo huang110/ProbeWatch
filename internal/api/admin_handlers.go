@@ -251,6 +251,50 @@ func parseHistoryWindow(r *http.Request, now time.Time) (time.Time, time.Time, i
 		limit = n
 	}
 	from, to := now.Add(-24*time.Hour), now
+	if v := q.Get("range"); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "realtime", "live", "15m", "15min":
+			from = now.Add(-15 * time.Minute)
+			if q.Get("limit") == "" {
+				limit = 60
+			}
+		case "1h":
+			from = now.Add(-1 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 60
+			}
+		case "4h":
+			from = now.Add(-4 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 80
+			}
+		case "6h":
+			from = now.Add(-6 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 80
+			}
+		case "12h":
+			from = now.Add(-12 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 90
+			}
+		case "1d", "24h":
+			from = now.Add(-24 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 100
+			}
+		case "7d":
+			from = now.Add(-7 * 24 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 120
+			}
+		case "30d":
+			from = now.Add(-30 * 24 * time.Hour)
+			if q.Get("limit") == "" {
+				limit = 150
+			}
+		}
+	}
 	var e error
 	if v := q.Get("from"); v != "" {
 		from, e = time.Parse(time.RFC3339, v)

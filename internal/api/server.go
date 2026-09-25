@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/api/public/status", s.publicStatus)
+	mux.HandleFunc("/api/public/nodes/", s.publicNodeRoute)
 	mux.HandleFunc("/auth/github", s.githubStart)
 	mux.HandleFunc("/auth/github/callback", s.githubCallback)
 	mux.HandleFunc("/auth/login", s.localLogin)

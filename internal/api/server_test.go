@@ -42,6 +42,7 @@ func TestAuthenticationEndpointsRateLimitAttempts(t *testing.T) {
 
 	totpRequest := func() *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/auth/totp/verify", strings.NewReader(`{"code":"000000"}`))
+		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Origin", "http://127.0.0.1:8080")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
