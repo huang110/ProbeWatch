@@ -16,6 +16,7 @@ import { MonitoringView } from './components/MonitoringView.jsx'
 import { TrafficReportView } from './components/TrafficReportView.jsx'
 import { AlertCenterView } from './components/AlertCenterView.jsx'
 import { LogsView } from './components/LogsView.jsx'
+import { AICopilotView } from './components/AICopilotView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
   GlobeHemisphereWest,
@@ -28,11 +29,13 @@ import {
   Coins,
   ChartBar,
   Scroll,
+  Sparkle,
 } from '@phosphor-icons/react'
 
 const navItems = [
   { id: 'overview', label: '仪表盘', icon: SquaresFour },
   { id: 'servers', label: '服务器管理', icon: GlobeHemisphereWest },
+  { id: 'ai-copilot', label: 'AI 诊断 & MCP', icon: Sparkle },
   { id: 'billing', label: '成本中心', icon: Coins },
   {
     id: 'monitoring',
@@ -69,6 +72,7 @@ const pageTitleFor = (page) =>
         dashboard: '仪表盘',
         servers: '服务器管理',
         nodes: '服务器管理',
+        'ai-copilot': 'AI 智能诊断 & MCP',
         billing: '成本中心',
         monitoring: '延迟监测',
         latency: '延迟监测',
@@ -187,6 +191,16 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
     </div>
     <div className="top-actions">
       <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
+      <button
+        type="button"
+        className="button button-quiet btn-sm top-ai-btn"
+        onClick={() => onNavigate('ai-copilot')}
+        title="AI 智能诊断与全站健康体检"
+        style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+      >
+        <Sparkle size={15} weight="fill" style={{ color: '#a855f7' }} />
+        <span>AI 诊断</span>
+      </button>
       <button type="button" className="button button-quiet btn-sm top-guest-btn" onClick={onSwitchToGuest} title="切换至访客视角的只读监控大屏">
         <Eye size={15} />
         <span>游客模式</span>
@@ -1162,6 +1176,13 @@ export function App() {
             rates={rates}
             lossRates={lossRates}
             onSelectNode={setSelectedNode}
+          />
+        ) : activeNav === 'ai-copilot' ? (
+          <AICopilotView
+            nodes={data}
+            rates={rates}
+            lossRates={lossRates}
+            onNavigate={navigate}
           />
         ) : activeNav === 'billing' ? (
           <BillingCenter nodes={data} />

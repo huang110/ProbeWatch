@@ -322,4 +322,70 @@ export async function fetchAgentUpdateCheck() {
   return await res.json()
 }
 
+export async function fetchAIDiagnosis() {
+  const res = await fetch('/api/ai/diagnose', { credentials: 'same-origin' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to fetch AI diagnosis')
+  }
+  return await res.json()
+}
+
+export async function sendAIChatPrompt(prompt) {
+  const res = await fetch('/api/ai/chat', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to send prompt to AI Copilot')
+  }
+  return await res.json()
+}
+
+export async function fetchAISettings() {
+  const res = await fetch('/api/ai/settings', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch AI settings')
+  return await res.json()
+}
+
+export async function saveAISettings(settings) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/ai/settings', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to save AI settings')
+  }
+  return await res.json()
+}
+
+export async function regenerateMCPToken() {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/ai/mcp/token', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to regenerate MCP token')
+  }
+  return await res.json()
+}
+
+export async function fetchMCPConfig() {
+  const res = await fetch('/api/mcp/config', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch MCP config')
+  return await res.json()
+}
+
+
 

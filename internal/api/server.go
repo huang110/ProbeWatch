@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/frontend"
+	"github.com/probewatch/probewatch/internal/ai"
 	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
@@ -18,6 +19,7 @@ import (
 type Server struct {
 	cfg           config.Config
 	service       *auth.Service
+	aiService     *ai.AIService
 	notifier      *notify.Notifier
 	agentLimiter  *rateLimiter
 	agentIPLimiter *rateLimiter
@@ -32,12 +34,15 @@ type Server struct {
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
 	n := notify.NewNotifier(cfg)
+	var aiSvc *ai.AIService
 	if service != nil && service.Store() != nil {
 		n.SetStore(service.Store())
+		aiSvc = ai.NewAIService(service.Store(), &cfg)
 	}
 	return &Server{
 		cfg:           cfg,
 		service:       service,
+		aiService:     aiSvc,
 		notifier:      n,
 		agentLimiter:  newRateLimiter(120, time.Minute, 10000),
 		agentIPLimiter: newRateLimiter(240, time.Minute, 10000),
@@ -50,6 +55,10 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 
 func (s *Server) SetNotifier(n *notify.Notifier) {
 	s.notifier = n
+}
+
+func (s *Server) SetAIService(svc *ai.AIService) {
+	s.aiService = svc
 }
 
 func (s *Server) agentNodeTokenTTL() time.Duration {
@@ -118,6 +127,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/webauthn/credentials/", middleware.RequireCSRF(http.HandlerFunc(s.webauthnCredentialsRoute)))
 	mux.HandleFunc("/api/public/version", s.publicVersion)
 
+	// AI Copilot & Diagnostics endpoints
+	mux.Handle("/api/ai/diagnose", middleware.RequireAuth(http.HandlerFunc(s.aiDiagnose)))
+	mux.Handle("/api/ai/chat", middleware.RequireAuth(http.HandlerFunc(s.aiChat)))
+	mux.Handle("/api/ai/settings", middleware.RequireAuth(http.HandlerFunc(s.aiSettingsRoute)))
+	mux.Handle("/api/ai/mcp/token", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.aiMCPTokenRegenerate))))
+	mux.Handle("/api/mcp/config", middleware.RequireAuth(http.HandlerFunc(s.mcpConfig)))
+
+	// MCP (Model Context Protocol) endpoints
+	mux.HandleFunc("/api/mcp", s.mcpHandler)
+	mux.HandleFunc("/mcp", s.mcpHandler)
+
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -137,7 +157,7 @@ func (s *Server) Handler() http.Handler {
 	if err == nil {
 		fileServer := http.FileServer(http.FS(distFS))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") || r.URL.Path == "/healthz" {
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") || strings.HasPrefix(r.URL.Path, "/mcp") || r.URL.Path == "/healthz" {
 				http.NotFound(w, r)
 				return
 			}
