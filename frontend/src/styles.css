@@ -9511,3 +9511,380 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
+
+/* ==========================================================================
+   流量校准弹窗 (Traffic Calibration Modal) 匹配最新设计规范
+   ========================================================================== */
+
+.traffic-cal-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.traffic-cal-modal-card {
+  width: 580px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+  padding: 24px 28px;
+  animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  color: #1e293b;
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .traffic-cal-modal-card,
+:root:not([data-theme="light"]) .traffic-cal-modal-card {
+  background: #18181b;
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.traffic-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.traffic-cal-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+[data-theme="dark"] .traffic-cal-title,
+:root:not([data-theme="light"]) .traffic-cal-title {
+  color: #f8fafc;
+}
+
+.traffic-cal-subtitle {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+[data-theme="dark"] .traffic-cal-subtitle,
+:root:not([data-theme="light"]) .traffic-cal-subtitle {
+  color: #94a3b8;
+}
+
+.traffic-cal-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.traffic-cal-close-btn:hover {
+  color: #334155;
+}
+
+[data-theme="dark"] .traffic-cal-close-btn:hover,
+:root:not([data-theme="light"]) .traffic-cal-close-btn:hover {
+  color: #f1f5f9;
+}
+
+.traffic-cal-cycle-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+
+[data-theme="dark"] .traffic-cal-cycle-card,
+:root:not([data-theme="light"]) .traffic-cal-cycle-card {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+
+.traffic-cal-cycle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.traffic-cal-cycle-badge {
+  background: #e0f2fe;
+  color: #0284c7;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .traffic-cal-cycle-badge,
+:root:not([data-theme="light"]) .traffic-cal-cycle-badge {
+  background: rgba(2, 132, 199, 0.25);
+  color: #38bdf8;
+}
+
+.traffic-cal-cycle-tz {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .traffic-cal-cycle-tz,
+:root:not([data-theme="light"]) .traffic-cal-cycle-tz {
+  color: #a1a1aa;
+}
+
+.traffic-cal-cycle-range {
+  text-align: right;
+  font-size: 13.5px;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace, sans-serif;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .traffic-cal-cycle-range,
+:root:not([data-theme="light"]) .traffic-cal-cycle-range {
+  color: #e4e4e7;
+}
+
+.traffic-cal-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.traffic-cal-compare-col {
+  border-left: 2px solid #0f172a;
+  padding-left: 12px;
+}
+
+[data-theme="dark"] .traffic-cal-compare-col,
+:root:not([data-theme="light"]) .traffic-cal-compare-col {
+  border-left-color: #38bdf8;
+}
+
+.traffic-cal-compare-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 6px;
+}
+
+[data-theme="dark"] .traffic-cal-compare-title,
+:root:not([data-theme="light"]) .traffic-cal-compare-title {
+  color: #f1f5f9;
+}
+
+.traffic-cal-compare-item {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace, sans-serif;
+}
+
+[data-theme="dark"] .traffic-cal-compare-item,
+:root:not([data-theme="light"]) .traffic-cal-compare-item {
+  color: #94a3b8;
+}
+
+.traffic-cal-inputs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.traffic-cal-input-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+[data-theme="dark"] .traffic-cal-input-label,
+:root:not([data-theme="light"]) .traffic-cal-input-label {
+  color: #f1f5f9;
+}
+
+.traffic-cal-input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1e293b;
+  background: #ffffff;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+[data-theme="dark"] .traffic-cal-input,
+:root:not([data-theme="light"]) .traffic-cal-input {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #f1f5f9;
+}
+
+.traffic-cal-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.traffic-cal-tip-box {
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+[data-theme="dark"] .traffic-cal-tip-box,
+:root:not([data-theme="light"]) .traffic-cal-tip-box {
+  background: rgba(2, 132, 199, 0.1);
+  border-color: rgba(2, 132, 199, 0.25);
+}
+
+.traffic-cal-tip-icon {
+  color: #0284c7;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.traffic-cal-tip-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #0369a1;
+}
+
+[data-theme="dark"] .traffic-cal-tip-text,
+:root:not([data-theme="light"]) .traffic-cal-tip-text {
+  color: #7dd3fc;
+}
+
+.traffic-cal-records-section {
+  margin-bottom: 22px;
+}
+
+.traffic-cal-records-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+[data-theme="dark"] .traffic-cal-records-title,
+:root:not([data-theme="light"]) .traffic-cal-records-title {
+  color: #f1f5f9;
+}
+
+.traffic-cal-records-empty {
+  font-size: 13px;
+  color: #64748b;
+}
+
+[data-theme="dark"] .traffic-cal-records-empty,
+:root:not([data-theme="light"]) .traffic-cal-records-empty {
+  color: #a1a1aa;
+}
+
+.traffic-cal-records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 110px;
+  overflow-y: auto;
+}
+
+.traffic-cal-record-item {
+  font-size: 12.5px;
+  color: #475569;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+[data-theme="dark"] .traffic-cal-record-item,
+:root:not([data-theme="light"]) .traffic-cal-record-item {
+  color: #94a3b8;
+}
+
+.traffic-cal-record-time {
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace, sans-serif;
+}
+
+.traffic-cal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.traffic-cal-btn-cancel {
+  padding: 8px 22px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.traffic-cal-btn-cancel:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+[data-theme="dark"] .traffic-cal-btn-cancel,
+:root:not([data-theme="light"]) .traffic-cal-btn-cancel {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #e4e4e7;
+}
+
+[data-theme="dark"] .traffic-cal-btn-cancel:hover,
+:root:not([data-theme="light"]) .traffic-cal-btn-cancel:hover {
+  background: #3f3f46;
+}
+
+.traffic-cal-btn-save {
+  padding: 8px 22px;
+  border-radius: 6px;
+  border: none;
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.traffic-cal-btn-save:hover {
+  background: #0369a1;
+}

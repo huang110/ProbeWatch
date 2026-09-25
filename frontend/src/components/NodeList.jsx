@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowsClockwise, CalendarBlank, Coins, Cpu, Globe, HardDrive, HardDrives, Lightning, Memory, PencilSimple, Pulse, Rows, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
+import { ArrowDown, ArrowUp, ArrowsClockwise, CalendarBlank, Coins, Cpu, Globe, HardDrive, HardDrives, Lightning, Memory, PencilSimple, Pulse, Rows, SlidersHorizontal, Sparkle, SquaresFour, Timer } from '@phosphor-icons/react'
 import { dash, formatBytes, formatLossPercent, formatPercent, formatRate, relativeHeartbeat, safeText, formatLoad, numeric } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { ProgressBar, EmptyState, StatusDot, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
+import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 
 export const getRegionalGroup = (node) => {
   const region = (node.region || '').toLowerCase()
@@ -59,6 +60,7 @@ export function NodeTable({
 
   const [billingTargetNode, setBillingTargetNode] = useState(null)
   const [editTargetNode, setEditTargetNode] = useState(null)
+  const [calibrateTargetNode, setCalibrateTargetNode] = useState(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   useEffect(() => {
@@ -315,7 +317,14 @@ export function NodeTable({
                     </div>
                   </div>
 
-                  <div className="vps-tri-col vps-totals-col">
+                  <div
+                    className="vps-tri-col vps-totals-col cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCalibrateTargetNode(node)
+                    }}
+                    title="点击校准当前计费周期上传与下载流量"
+                  >
                     <div className="vps-total-line mono">
                       <span className="vps-arrow-icon">↑</span>
                       <span>{totalTxText}</span>
@@ -567,6 +576,17 @@ export function NodeTable({
                       >
                         <Sparkle size={13} /> 账单
                       </button>
+                      <button
+                        type="button"
+                        className="button button-quiet btn-sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setCalibrateTargetNode(node)
+                        }}
+                        title="校准上传与下载流量"
+                      >
+                        <SlidersHorizontal size={13} /> 校准
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -641,6 +661,17 @@ export function NodeTable({
           onSaved={() => {
             setRefreshTrigger((p) => p + 1)
             window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
+          }}
+        />
+      )}
+
+      {/* 流量校准弹窗 */}
+      {calibrateTargetNode && (
+        <TrafficCalibrationModal
+          node={calibrateTargetNode}
+          onClose={() => setCalibrateTargetNode(null)}
+          onSaveSuccess={() => {
+            setRefreshTrigger((p) => p + 1)
           }}
         />
       )}

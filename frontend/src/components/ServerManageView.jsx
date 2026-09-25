@@ -628,7 +628,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                           <button
                             type="button"
                             className="icon-action-btn"
-                            title="流量校准 (反算 Offset 偏移量)"
+                            title="流量校准"
                             onClick={() => setCalibratingNode(node)}
                           >
                             <SlidersHorizontal size={15} />
