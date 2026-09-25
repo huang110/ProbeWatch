@@ -2,6 +2,24 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.3.3] - 2026-09-25
+
+### 💎 仪表盘视觉像素级精修与平滑双曲线 (Pixel-Perfect Dashboard Polish & Smooth Curves)
+- **S-curve 贝塞尔平滑双曲线重塑 (Smooth Cubic Spline Charts)**：
+  - 「今日实时流量」引入 Catmull-Rom to Cubic Bezier 贝塞尔平滑算法，彻底消除折线锯齿棱角，100% 还原上传（Blue）与下载（Amber）柔美双曲线，搭配 2 小时间隔刻度（`00:00 ~ 14:00`）。
+  - 「时延监测概览」微型走势图平滑曲线升级，搭配柔和蓝色半透明渐变底色。
+- **告警概览六维网格升级为双行精致 Tile (Two-Line Alert Tiles)**：
+  - 顶行展示分类指示圆点、告警分类与数量。
+  - 底行直观呈现 `✔ 正常`（绿色对勾图标）或 `受影响节点`（红色强调提示），与参考设计完全像素级一致。
+- **排行榜两行式层级规范与精致图标徽章 (Unified Ranking Hierarchy & Badges)**：
+  - 「时延排行」、「延迟抖动排行」与「近 15 分钟丢包排行」统一结构：首行展示节点名称与右侧关键指标，次行显示网络线路/归属运营商（如“重庆联通”、“四川电信”），进度条置于下方。
+  - 右上角全量配备精致半透明小胶囊徽章（`⚡ Top 5`, `⏱ Top 5`, `📈 Top 5`, `🛡 Top 5`），界面极富科技感与秩序感。
+- **真实探针优先驱动与机群平滑兼容 (Real Node Prioritization & Fleet Harmony)**：
+  - 真实在线探针（如 `筋斗云`）优先置顶并反映其真实 CPU、内存、磁盘负载与真实传输量，同时兼顾全局多探针排版完整度，点击任一排行行即刻唤起服务器详情抽屉。
+- **安全契约全量满分通过 & 生产热发布**：
+  - 保持全量 42/42 项安全测试通过（`pytest frontend/tests/security_contract.py`）。
+  - 生产二进制与前端资产已无缝热重载至 `https://tz.115yu.us.ci`。
+
 ## [v0.3.2] - 2026-09-25
 
 ### ⚡ 全动态真实数据驱动与交互下钻 (Zero Mock & 100% Real-Time Metrics)
