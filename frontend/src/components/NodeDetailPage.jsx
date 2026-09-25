@@ -254,7 +254,11 @@ export function NodeDetailPage({
   const totalTraffic = (rawTx + rawRx) || 72.2 * 1024 * 1024 * 1024
 
   const cpuPercent = numeric(node.cpu) || 0.0
-  const cpuModel = resource.cpu_name || resource.cpu_model || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)'
+  const cpuModel = resource.cpu_name || resource.cpu_model || node.cpuModel || customMeta.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)'
+  const cleanedCpuModel = (cpuModel || '')
+    .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
+    .trim()
+  const cpuBenchmarkUrl = `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
   const publicIp = resource.ip || node.hostname || '103.159.207.11'
   const cores = resource.cpu_cores || 1
   const arch = node.arch || resource.arch || 'kvm'
@@ -475,7 +479,15 @@ export function NodeDetailPage({
         <div className="komari-info-card">
           <div className="komari-info-header">
             <h3>硬件信息</h3>
-            <span className="komari-bench-link mono">CPU Mark 排行 ↗</span>
+            <a
+              href={cpuBenchmarkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="komari-bench-link mono"
+              title={`在 PassMark 查询 ${cleanedCpuModel || cpuModel} 跑分天梯排行`}
+            >
+              CPU Mark 排行 ↗
+            </a>
           </div>
           <div className="komari-info-rows">
             <div className="komari-info-row">

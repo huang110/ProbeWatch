@@ -2,6 +2,16 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.4.1] - 2026-09-25
+
+### ⚡ CPU Mark 排行天梯一键跳转 (PassMark CPU Benchmark Integration)
+- **动态 PassMark 跑分外链跳转 (Dynamic PassMark Benchmark Link)**：
+  - 将服务器详情页（`NodeDetailPage`）硬件信息卡片中的 `CPU Mark 排行 ↗` 由静态文本转换为交互外链 `<a>` 标签。
+  - 自动提取当前节点的 CPU 具体型号（如 `Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz`），智能剔除尾随的虚拟机/虚拟核心标识（如 `(1 vCPU)`、`1核` 等），动态拼接生成 PassMark 官方查询链接：`https://www.cpubenchmark.net/cpu_lookup.php?cpu=<CPU型号>`。
+  - 采用 `target="_blank"` 和 `rel="noopener noreferrer"` 新标签页安全打开，并添加悬浮高亮、下划线及暗/浅色主题适配微动效。
+- **生产构建已就绪 & 服务平滑热更新**：
+  - 前端静态构建已更新，嵌入主控二进制并在生产服务器 `筋斗云` 成功热重启与在线验证。
+
 ## [v0.4.0] - 2026-09-25
 
 ### 🚀 游客大屏模式节点下钻与极客详情无缝交互 (Guest Mode Node Detail Drilldown & Komari Telemetry)
