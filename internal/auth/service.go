@@ -267,28 +267,52 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) AuthenticateLocalPassword(w http.ResponseWriter, r *http.Request, password string) error {
+	_, err := s.AuthenticateUserCredentials(w, r, "admin", password)
+	return err
+}
+
+func (s *Service) AuthenticateUserCredentials(w http.ResponseWriter, r *http.Request, username, password string) (db.AdminUser, error) {
+	trimmedUsername := strings.TrimSpace(username)
+	if trimmedUsername == "" {
+		trimmedUsername = "admin"
+	}
+
+	// 1. Root admin fallback using AdminPassword
 	trimmedAdminPassword := strings.TrimSpace(s.cfg.AdminPassword)
-	if trimmedAdminPassword == "" {
-		return errors.New("local password login is not configured")
+	if trimmedUsername == "admin" && trimmedAdminPassword != "" && subtle.ConstantTimeCompare([]byte(password), []byte(trimmedAdminPassword)) == 1 {
+		admin, err := s.Store().UpsertAdminUser(r.Context(), "local", "admin", "admin", time.Now().UTC())
+		if err != nil {
+			logInternalError("upsert local admin user", err)
+			return db.AdminUser{}, err
+		}
+		if err := s.completeLoginForUser(w, r, admin); err != nil {
+			return db.AdminUser{}, err
+		}
+		return admin, nil
 	}
-	if subtle.ConstantTimeCompare([]byte(password), []byte(trimmedAdminPassword)) != 1 {
-		return errors.New("invalid credentials")
-	}
-	admin, err := s.Store().UpsertAdminUser(r.Context(), "local", "admin", "admin", time.Now().UTC())
+
+	// 2. Database user lookup (for individual team members)
+	user, err := s.Store().AuthenticateLocalUser(r.Context(), trimmedUsername, password)
 	if err != nil {
-		logInternalError("upsert local admin user", err)
-		return err
+		return db.AdminUser{}, err
 	}
-	totpSecret, totpEnabled, err := s.Store().GetAdminUserTOTP(r.Context(), admin.ID)
+	if err := s.completeLoginForUser(w, r, user); err != nil {
+		return db.AdminUser{}, err
+	}
+	return user, nil
+}
+
+func (s *Service) completeLoginForUser(w http.ResponseWriter, r *http.Request, user db.AdminUser) error {
+	totpSecret, totpEnabled, err := s.Store().GetAdminUserTOTP(r.Context(), user.ID)
 	if err != nil {
 		logInternalError("read admin totp state", err)
 		return err
 	}
 	if totpEnabled && len(totpSecret) > 0 {
-		s.startTOTPPendingLogin(w, r, admin.ID)
+		s.startTOTPPendingLogin(w, r, user.ID)
 		return nil
 	}
-	sessionValue, err := s.createSession(r.Context(), admin.ID, time.Now().UTC())
+	sessionValue, err := s.createSession(r.Context(), user.ID, time.Now().UTC())
 	if err != nil {
 		logInternalError("create session", err)
 		return err

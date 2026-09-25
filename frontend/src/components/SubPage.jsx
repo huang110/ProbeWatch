@@ -3,6 +3,7 @@ import { MediaMatrix } from './MediaMatrix.jsx'
 import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
 import { PasskeySettingsCard } from './PasskeySettingsCard.jsx'
 import { BackupManagementCard } from './BackupManagementCard.jsx'
+import { UserManagementCard } from './UserManagementCard.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -15,6 +16,7 @@ import { Pulse } from '@phosphor-icons/react'
 
 export function SubPage({
   page,
+  currentUser,
   data = [],
   alerts = [],
   onAck,
@@ -46,7 +48,9 @@ export function SubPage({
     logs: ['系统日志', '系统运行、管理操作行为、网络事件与安全拦截全量日志 · 本地时区显示 · 支持详情展开。'],
     media: ['流媒体矩阵', '全球主流流媒体与 AI 服务（Netflix, YouTube, OpenAI 等）解锁能力矩阵。'],
     targets: ['检测目标', '管理全部检测目标：新建、启停或删除探测项。'],
-    settings: ['系统设置', '管理控制台安全选项、外观主题与全局采样时序时间。'],
+    users: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
+    team: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
+    settings: ['系统设置', '管理控制台安全选项、团队协作与权限、外观主题与备份灾备中心。'],
   }
 
   const [title, description] = pages[page] || pages.dashboard
@@ -108,6 +112,7 @@ export function SubPage({
         <TargetManage />
       ) : page === 'settings' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <UserManagementCard currentUser={currentUser} nodes={data} />
           <PasskeySettingsCard />
           <TOTPSettingsCard
             interval={refreshInterval}
@@ -117,6 +122,8 @@ export function SubPage({
           />
           <BackupManagementCard />
         </div>
+      ) : page === 'users' || page === 'team' ? (
+        <UserManagementCard currentUser={currentUser} nodes={data} />
       ) : page === 'backups' ? (
         <BackupManagementCard />
       ) : (

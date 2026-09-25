@@ -542,8 +542,12 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
+	user, hasUser := UserFromContext(r.Context())
 	response := make([]nodeResponse, 0, len(nodes))
 	for _, node := range nodes {
+		if hasUser && !user.CanAccessNode(node.UUID) {
+			continue
+		}
 		response = append(response, s.nodeSummary(r.Context(), node))
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -708,6 +712,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 503, "service unavailable")
 		return
 	}
+	user, hasUser := UserFromContext(r.Context())
+	if hasUser && !user.IsAdmin() && user.AllowedNodes != "*" && user.AllowedNodes != "" {
+		filtered := make([]db.Node, 0, len(nodes))
+		for _, n := range nodes {
+			if user.CanAccessNode(n.UUID) {
+				filtered = append(filtered, n)
+			}
+		}
+		nodes = filtered
+	}
 	nc := map[string]int{"total": len(nodes), "online": 0, "attention": 0, "offline": 0, "resource_reporting": 0}
 	checksTotal, checksSuccess, latencyTotal, latencyCount := 0, 0, int64(0), 0
 	resources := map[string]any{"network_rx_bytes": uint64(0), "network_tx_bytes": uint64(0), "network_rx_bytes_delta": uint64(0), "network_tx_bytes_delta": uint64(0), "network_history": []any{}, "cpu_percent": nil, "memory_used_bytes": uint64(0), "memory_total_bytes": uint64(0), "filesystem_used_bytes": uint64(0), "filesystem_total_bytes": uint64(0)}
@@ -852,6 +866,12 @@ func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid st
 		writeJSONError(w, http.StatusNotFound, "node not found")
 		return
 	}
+	if user, hasUser := UserFromContext(r.Context()); hasUser {
+		if !user.CanAccessNode(uuid) {
+			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+			return
+		}
+	}
 	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
@@ -923,6 +943,12 @@ func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 	if !security.IsRFC4122UUID(parts[2]) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
 		return
+	}
+	if user, hasUser := UserFromContext(r.Context()); hasUser {
+		if !user.CanAccessNode(parts[2]) {
+			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+			return
+		}
 	}
 	node, err := s.service.Store().GetNodeByUUID(r.Context(), parts[2])
 	if errors.Is(err, sql.ErrNoRows) {

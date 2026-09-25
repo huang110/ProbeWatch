@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -131,6 +132,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/system/backups", middleware.RequireAuth(http.HandlerFunc(s.backupRoute)))
 	mux.Handle("/api/system/backups/", middleware.RequireAuth(http.HandlerFunc(s.backupRoute)))
+	mux.Handle("/api/users", middleware.RequireAuth(http.HandlerFunc(s.usersRoute)))
+	mux.Handle("/api/users/", middleware.RequireAuth(http.HandlerFunc(s.usersRoute)))
 	mux.HandleFunc("/api/agent/v1/register", s.registerAgent)
 	mux.HandleFunc("/api/agent/v1/config", s.agentConfig)
 	mux.HandleFunc("/api/agent/v1/report", s.reportAgent)
@@ -305,10 +308,16 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"id":       user.ProviderUserID,
-		"provider": user.Provider,
-		"login":    user.Login,
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id":            user.ProviderUserID,
+		"user_id":       user.ID,
+		"provider":      user.Provider,
+		"login":         user.Login,
+		"display_name":  user.DisplayName,
+		"role":          user.Role,
+		"allowed_nodes": user.AllowedNodes,
+		"can_write":     user.CanWrite(),
+		"is_admin":      user.IsAdmin(),
 	})
 }
 
@@ -359,6 +368,7 @@ func securityHeaders(next http.Handler, cfg config.Config) http.Handler {
 }
 
 type localLoginRequest struct {
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
@@ -376,17 +386,26 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeRequestError(w, err)
 		return
 	}
-	if err := s.service.AuthenticateLocalPassword(w, r, req.Password); err != nil {
+	user, err := s.service.AuthenticateUserCredentials(w, r, req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, db.ErrAccountDisabled) {
+			writeJSONError(w, http.StatusForbidden, "account is disabled")
+			return
+		}
 		writeJSONError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
-		"user": map[string]string{
-			"id":       "admin",
-			"provider": "local",
-			"login":    "admin",
+		"user": map[string]any{
+			"id":           user.ID,
+			"provider":     user.Provider,
+			"login":        user.Login,
+			"display_name": user.DisplayName,
+			"role":         user.Role,
+			"can_write":    user.CanWrite(),
+			"is_admin":     user.IsAdmin(),
 		},
 	})
 }

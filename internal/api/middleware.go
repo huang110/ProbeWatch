@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -24,24 +25,81 @@ func NewMiddleware(service *auth.Service, cfg config.Config) *Middleware {
 	return &Middleware{service: service, cfg: cfg}
 }
 
+type userCtxKey struct{}
+
+var currentAdminUserKey = userCtxKey{}
+
+// UserFromContext retrieves the authenticated user from the request context.
+func UserFromContext(ctx context.Context) (db.AdminUser, bool) {
+	if ctx == nil {
+		return db.AdminUser{}, false
+	}
+	u, ok := ctx.Value(currentAdminUserKey).(db.AdminUser)
+	return u, ok
+}
+
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := m.service.AuthenticateWithError(r, time.Now().UTC()); err != nil {
+		user, err := m.service.CurrentUser(r, time.Now().UTC())
+		if err != nil {
 			writeAuthenticationError(w, err)
 			return
 		}
-		next.ServeHTTP(w, r)
+		if user.Disabled {
+			writeJSONError(w, http.StatusForbidden, "user account is disabled")
+			return
+		}
+		ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := UserFromContext(r.Context())
+			if !ok {
+				var err error
+				user, err = m.service.CurrentUser(r, time.Now().UTC())
+				if err != nil {
+					writeAuthenticationError(w, err)
+					return
+				}
+			}
+			if user.Disabled {
+				writeJSONError(w, http.StatusForbidden, "user account is disabled")
+				return
+			}
+			for _, role := range roles {
+				if user.Role == role {
+					ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			writeJSONError(w, http.StatusForbidden, "insufficient role permissions")
+		})
+	}
 }
 
 func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := m.service.AuthenticateWithError(r, time.Now().UTC()); err != nil {
+		user, err := m.service.CurrentUser(r, time.Now().UTC())
+		if err != nil {
 			writeAuthenticationError(w, err)
 			return
 		}
+		if user.Disabled {
+			writeJSONError(w, http.StatusForbidden, "user account is disabled")
+			return
+		}
+		ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
 		if !isWriteMethod(r.Method) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		if !user.CanWrite() {
+			writeJSONError(w, http.StatusForbidden, "viewer role is read-only")
 			return
 		}
 		if m.cfg.MaxRequestBody > 0 {

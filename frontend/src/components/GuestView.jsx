@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
@@ -50,6 +50,7 @@ function buildGuestNode(name, allCustomMeta, meta) {
 export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
+  const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [passkeyLoading, setPasskeyLoading] = useState(false)
@@ -108,10 +109,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          username: (username || '').trim() || 'admin',
+          password,
+        }),
       })
       if (!res.ok) {
-        setLoginError('密码错误或未配置本地管理口令')
+        const data = await res.json().catch(() => ({}))
+        setLoginError(data.error || '用户名或密码错误，或未配置管理口令')
         setLoginLoading(false)
         return
       }
@@ -844,15 +849,30 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             )}
 
             <form onSubmit={handlePasswordLogin}>
+              <div className="input-group" style={{ marginBottom: '12px' }}>
+                <label htmlFor="login-username">登录账号</label>
+                <div className="input-wrapper">
+                  <User size={18} className="input-icon" />
+                  <input
+                    id="login-username"
+                    type="text"
+                    className="modal-input"
+                    placeholder="默认管理员 admin 或团队账号"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                </div>
+              </div>
+
               <div className="input-group">
-                <label htmlFor="admin-pwd">管理员口令</label>
+                <label htmlFor="admin-pwd">登录口令 / 密码</label>
                 <div className="input-wrapper">
                   <Key size={18} className="input-icon" />
                   <input
                     id="admin-pwd"
                     type="password"
                     className="modal-input"
-                    placeholder="请输入 PROBEWATCH_ADMIN_PASSWORD"
+                    placeholder="请输入密码或 PROBEWATCH_ADMIN_PASSWORD"
                     autoFocus
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

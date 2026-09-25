@@ -195,10 +195,16 @@ type AgentReportInput struct {
 }
 
 type AdminUser struct {
-	ID             string
-	Provider       string
-	ProviderUserID string
-	Login          string
+	ID             string    `json:"id"`
+	Provider       string    `json:"provider"`
+	ProviderUserID string    `json:"provider_user_id"`
+	Login          string    `json:"login"`
+	Role           string    `json:"role"`
+	DisplayName    string    `json:"display_name"`
+	AllowedNodes   string    `json:"allowed_nodes"`
+	Disabled       bool      `json:"disabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Session struct {
@@ -398,30 +404,59 @@ func (s *Store) UpsertAdminUser(ctx context.Context, provider, providerUserID, l
 	if err != nil {
 		return AdminUser{}, err
 	}
+	nowNano := unixNano(now)
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO admin_users (id, provider, provider_user_id, login, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(provider, provider_user_id) DO UPDATE SET login = excluded.login, updated_at = excluded.updated_at`,
-		id, provider, providerUserID, login, unixNano(now), unixNano(now))
+		id, provider, providerUserID, login, nowNano, nowNano)
 	if err != nil {
 		return AdminUser{}, fmt.Errorf("upsert admin user: %w", err)
 	}
 	var user AdminUser
-	if err := s.db.QueryRowContext(ctx, `SELECT id, provider, provider_user_id, login FROM admin_users WHERE provider = ? AND provider_user_id = ?`, provider, providerUserID).Scan(&user.ID, &user.Provider, &user.ProviderUserID, &user.Login); err != nil {
+	var disabledInt int
+	var createdAtNano, updatedAtNano int64
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT id, provider, provider_user_id, login,
+		       COALESCE(role, 'admin'), COALESCE(display_name, ''),
+		       COALESCE(allowed_nodes, '*'), COALESCE(disabled, 0),
+		       created_at, updated_at
+		FROM admin_users WHERE provider = ? AND provider_user_id = ?`, provider, providerUserID).Scan(
+		&user.ID, &user.Provider, &user.ProviderUserID, &user.Login,
+		&user.Role, &user.DisplayName, &user.AllowedNodes, &disabledInt,
+		&createdAtNano, &updatedAtNano,
+	); err != nil {
 		return AdminUser{}, fmt.Errorf("read admin user: %w", err)
 	}
+	user.Disabled = disabledInt != 0
+	user.CreatedAt = time.Unix(0, createdAtNano).UTC()
+	user.UpdatedAt = time.Unix(0, updatedAtNano).UTC()
 	return user, nil
 }
 
 func (s *Store) GetAdminUser(ctx context.Context, adminUserID string) (AdminUser, error) {
 	var user AdminUser
-	err := s.db.QueryRowContext(ctx, `SELECT id, provider, provider_user_id, login FROM admin_users WHERE id = ?`, adminUserID).Scan(&user.ID, &user.Provider, &user.ProviderUserID, &user.Login)
+	var disabledInt int
+	var createdAtNano, updatedAtNano int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, provider, provider_user_id, login,
+		       COALESCE(role, 'admin'), COALESCE(display_name, ''),
+		       COALESCE(allowed_nodes, '*'), COALESCE(disabled, 0),
+		       created_at, updated_at
+		FROM admin_users WHERE id = ?`, adminUserID).Scan(
+		&user.ID, &user.Provider, &user.ProviderUserID, &user.Login,
+		&user.Role, &user.DisplayName, &user.AllowedNodes, &disabledInt,
+		&createdAtNano, &updatedAtNano,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AdminUser{}, sql.ErrNoRows
 	}
 	if err != nil {
 		return AdminUser{}, fmt.Errorf("get admin user: %w", err)
 	}
+	user.Disabled = disabledInt != 0
+	user.CreatedAt = time.Unix(0, createdAtNano).UTC()
+	user.UpdatedAt = time.Unix(0, updatedAtNano).UTC()
 	return user, nil
 }
 

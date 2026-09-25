@@ -489,6 +489,55 @@ export async function execTerminalCommand({ nodeId, command, timeoutSec = 30 }) 
   return await res.json()
 }
 
+export async function fetchUsers() {
+  const res = await fetch('/api/users', { credentials: 'same-origin' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to fetch users')
+  }
+  return await res.json()
+}
 
+export async function createUser(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create user')
+  }
+  return await res.json()
+}
 
+export async function updateUser(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/users/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update user')
+  }
+  return await res.json()
+}
 
+export async function deleteUser(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/users/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete user')
+  }
+  return await res.json()
+}

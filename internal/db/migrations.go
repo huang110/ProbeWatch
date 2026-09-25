@@ -368,6 +368,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureDefaultAlertRules(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureUserRBAC(ctx, db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -708,6 +711,54 @@ func ensureDefaultAlertRules(ctx context.Context, db *sql.DB) error {
 		`, r.id, r.name, r.metric, r.op, r.threshold, r.severity, now, now)
 		if err != nil {
 			return fmt.Errorf("seed alert rule %s: %w", r.id, err)
+		}
+	}
+	return nil
+}
+
+// ensureUserRBAC idempotently ensures the role, display_name, allowed_nodes,
+// password_hash, and disabled columns exist on admin_users.
+func ensureUserRBAC(ctx context.Context, db *sql.DB) error {
+	columns := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(admin_users)`)
+	if err != nil {
+		return fmt.Errorf("inspect admin_users schema: %w", err)
+	}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan admin_users schema: %w", err)
+		}
+		columns[strings.ToLower(name)] = true
+	}
+	_ = rows.Close()
+
+	if !columns["role"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`); err != nil {
+			return fmt.Errorf("add admin_users role: %w", err)
+		}
+	}
+	if !columns["password_hash"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add admin_users password_hash: %w", err)
+		}
+	}
+	if !columns["display_name"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add admin_users display_name: %w", err)
+		}
+	}
+	if !columns["allowed_nodes"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN allowed_nodes TEXT NOT NULL DEFAULT '*'`); err != nil {
+			return fmt.Errorf("add admin_users allowed_nodes: %w", err)
+		}
+	}
+	if !columns["disabled"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE admin_users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add admin_users disabled: %w", err)
 		}
 	}
 	return nil

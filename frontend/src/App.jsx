@@ -222,8 +222,11 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
         <SignOut size={15} />
         <span>退出</span>
       </button>
-      <div className="profile-avatar profile-avatar-top" title={`当前登录: ${me?.login || 'Admin'}`}>
-        {me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}
+      {me?.role === 'viewer' && (
+        <span className="badge badge-gray" style={{ fontSize: '11px', padding: '3px 8px' }}>只读模式</span>
+      )}
+      <div className="profile-avatar profile-avatar-top" title={`当前登录: ${me?.display_name || me?.login || 'Admin'} (${me?.role || 'admin'})`}>
+        {me ? String(me.display_name || me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}
       </div>
     </div>
   </header>
@@ -345,10 +348,10 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
       <div className="sidebar-footer">
         <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.3.0</span></div>
         <div className="profile-row">
-          <div className="profile-avatar">{me ? String(me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
+          <div className="profile-avatar">{me ? String(me.display_name || me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
-            <strong>{me?.login || me?.name || '未登录'}</strong>
-            <span>{me?.provider === 'local' ? '本地管理员' : me ? 'GitHub 会话' : '未认证'}</span>
+            <strong>{me?.display_name || me?.login || me?.name || '未登录'}</strong>
+            <span>{me?.role === 'admin' ? '超级管理员' : me?.role === 'operator' ? '运维操作员' : me?.role === 'viewer' ? '只读观察员' : me?.provider === 'local' ? '本地管理员' : me ? 'GitHub 会话' : '未认证'}</span>
           </div>
           <button
             type="button"
@@ -1235,6 +1238,7 @@ export function App() {
         ) : (
           <SubPage
             page={activeNav}
+            currentUser={me}
             data={data}
             alerts={alerts}
             onAck={ackAlert}
