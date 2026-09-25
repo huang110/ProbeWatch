@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   DotsSixVertical,
   DownloadSimple,
@@ -66,6 +66,19 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
   const [currentPage, setCurrentPage] = useState(1)
 
   const billingData = useMemo(() => getStoredBillingData(), [refreshTrigger])
+
+  // ESC to close any open modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (resetTokenNode) setResetTokenNode(null)
+        if (deletingNode) setDeletingNode(null)
+        if (showBatchModal) setShowBatchModal(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [resetTokenNode, deletingNode, showBatchModal])
 
   // Extract distinct regions & groups
   const distinctRegions = useMemo(() => {
@@ -837,7 +850,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
 
       {/* 平滑重置 Token 弹窗 */}
       {resetTokenNode && (
-        <div className="modal-backdrop" onClick={() => setResetTokenNode(null)}>
+        <div className="modal-backdrop" onClick={() => setResetTokenNode(null)} role="dialog" aria-modal="true">
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title-wrap">
@@ -859,7 +872,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
               </button>
             </div>
 
-            <div className="modal-body space-y-3 text-xs">
+            <div className="modal-body space-y-3">
               <p className="text-muted leading-relaxed">
                 重置连接凭据不会删除历史监测数据和管理配置。请在重置后复制新的部署指令并在目标机器执行，无需卸载重装。
               </p>
@@ -870,11 +883,22 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                   <span>Token 已平滑重置并进入 24 小时过渡期！</span>
                 </div>
               ) : (
-                <div className="bg-subtle p-3 rounded-lg text-muted">
-                  节点 UUID:{' '}
-                  <span className="mono font-bold text-foreground">
-                    {resetTokenNode.uuid || resetTokenNode.id}
-                  </span>
+                <div className="bg-subtle p-3 rounded-lg text-muted flex items-center justify-between">
+                  <div>
+                    节点 UUID:{' '}
+                    <span className="mono font-bold text-foreground">
+                      {resetTokenNode.uuid || resetTokenNode.id}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-quiet btn-sm"
+                    onClick={() => handleCopyCommand(resetTokenNode.uuid || resetTokenNode.id, 'uuid')}
+                    title="复制 UUID"
+                  >
+                    <Copy size={13} />
+                    <span>{copyToast === 'uuid' ? '已复制' : '复制'}</span>
+                  </button>
                 </div>
               )}
             </div>

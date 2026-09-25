@@ -9888,3 +9888,262 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .traffic-cal-btn-save:hover {
   background: #0369a1;
 }
+
+/* ==========================================================================
+   通用标准模态弹窗系统 (Global Modal System)
+   ========================================================================== */
+
+.modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(4px) !important;
+  z-index: 1050 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 20px !important;
+  animation: fade-in 160ms ease !important;
+}
+
+.modal-card {
+  width: 540px !important;
+  max-width: 95vw !important;
+  max-height: 90vh !important;
+  overflow-y: auto !important;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  padding: 24px 28px !important;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.35) !important;
+  animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  color: #1e293b !important;
+  box-sizing: border-box !important;
+}
+
+[data-theme="dark"] .modal-card,
+:root:not([data-theme="light"]) .modal-card {
+  background: #18181b !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #f1f5f9 !important;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.7) !important;
+}
+
+.modal-card.modal-lg {
+  width: 680px !important;
+}
+
+.modal-card.modal-sm {
+  width: 440px !important;
+}
+
+.modal-card .modal-header {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  margin-bottom: 16px !important;
+  padding-bottom: 0 !important;
+  border-bottom: none !important;
+}
+
+.modal-title-wrap {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+}
+
+.modal-icon-badge {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 8px !important;
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #f59e0b !important;
+  flex-shrink: 0 !important;
+  margin-top: 2px !important;
+}
+
+.modal-icon-badge.text-amber {
+  background: rgba(245, 158, 11, 0.12) !important;
+  color: #f59e0b !important;
+}
+
+.modal-icon-badge.text-rose {
+  background: rgba(244, 63, 94, 0.12) !important;
+  color: #f43f5e !important;
+}
+
+.modal-icon-badge.text-mint {
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #10b981 !important;
+}
+
+.modal-icon-badge.text-blue {
+  background: rgba(2, 132, 199, 0.12) !important;
+  color: #0284c7 !important;
+}
+
+.modal-title-wrap h3,
+.modal-card .modal-title {
+  margin: 0 !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  line-height: 1.4 !important;
+}
+
+[data-theme="dark"] .modal-title-wrap h3,
+[data-theme="dark"] .modal-card .modal-title,
+:root:not([data-theme="light"]) .modal-title-wrap h3,
+:root:not([data-theme="light"]) .modal-card .modal-title {
+  color: #f8fafc !important;
+}
+
+.modal-subtitle {
+  margin: 4px 0 0 !important;
+  font-size: 13.5px !important;
+  color: #64748b !important;
+  line-height: 1.5 !important;
+}
+
+[data-theme="dark"] .modal-subtitle,
+:root:not([data-theme="light"]) .modal-subtitle {
+  color: #94a3b8 !important;
+}
+
+.modal-card .icon-button {
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  color: #94a3b8 !important;
+  padding: 4px !important;
+  border-radius: 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: color 0.15s !important;
+}
+
+.modal-card .icon-button:hover {
+  color: #334155 !important;
+}
+
+[data-theme="dark"] .modal-card .icon-button:hover,
+:root:not([data-theme="light"]) .modal-card .icon-button:hover {
+  color: #f1f5f9 !important;
+}
+
+.modal-card .modal-body {
+  margin-bottom: 20px !important;
+}
+
+.modal-card .modal-body p {
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  color: #64748b !important;
+  margin: 0 0 14px !important;
+}
+
+[data-theme="dark"] .modal-card .modal-body p,
+:root:not([data-theme="light"]) .modal-card .modal-body p {
+  color: #94a3b8 !important;
+}
+
+.modal-card .bg-subtle {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  padding: 12px 14px !important;
+  font-size: 13px !important;
+  color: #475569 !important;
+}
+
+[data-theme="dark"] .modal-card .bg-subtle,
+:root:not([data-theme="light"]) .modal-card .bg-subtle {
+  background: #27272a !important;
+  border-color: #3f3f46 !important;
+  color: #a1a1aa !important;
+}
+
+.modal-card .bg-subtle .text-foreground {
+  color: #0f172a !important;
+}
+
+[data-theme="dark"] .modal-card .bg-subtle .text-foreground,
+:root:not([data-theme="light"]) .modal-card .bg-subtle .text-foreground {
+  color: #f8fafc !important;
+}
+
+.modal-card .modal-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 12px !important;
+  margin-top: 20px !important;
+  padding-top: 16px !important;
+  border-top: 1px solid #f1f5f9 !important;
+}
+
+[data-theme="dark"] .modal-card .modal-actions,
+:root:not([data-theme="light"]) .modal-card .modal-actions {
+  border-top-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.modal-card .modal-actions .button {
+  width: auto !important;
+  height: 38px !important;
+  padding: 0 20px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+}
+
+.modal-card .modal-actions .button-quiet {
+  background: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  color: #374151 !important;
+  transition: background 0.15s, border-color 0.15s !important;
+}
+
+.modal-card .modal-actions .button-quiet:hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] .modal-card .modal-actions .button-quiet,
+:root:not([data-theme="light"]) .modal-card .modal-actions .button-quiet {
+  background: #27272a !important;
+  border-color: #3f3f46 !important;
+  color: #e4e4e7 !important;
+}
+
+[data-theme="dark"] .modal-card .modal-actions .button-quiet:hover,
+:root:not([data-theme="light"]) .modal-card .modal-actions .button-quiet:hover {
+  background: #3f3f46 !important;
+}
+
+.modal-card .modal-actions .button-primary {
+  background: #0284c7 !important;
+  border: none !important;
+  color: #ffffff !important;
+  transition: background 0.15s !important;
+}
+
+.modal-card .modal-actions .button-primary:hover {
+  background: #0369a1 !important;
+}
+
+.modal-card .modal-actions .button-danger {
+  background: #e11d48 !important;
+  border: none !important;
+  color: #ffffff !important;
+}
+
+.modal-card .modal-actions .button-danger:hover {
+  background: #be123c !important;
+}
