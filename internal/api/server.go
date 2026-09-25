@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/probewatch/probewatch/frontend"
 	"github.com/probewatch/probewatch/internal/ai"
 	"github.com/probewatch/probewatch/internal/auth"
+	"github.com/probewatch/probewatch/internal/backup"
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/deploy"
@@ -30,6 +32,7 @@ type Server struct {
 	loginLimiter  *rateLimiter
 	totpLimiter   *rateLimiter
 	terminalManager *terminal.Manager
+	backupScheduler *backup.Scheduler
 	publicCacheMu sync.RWMutex
 	publicCacheAt time.Time
 	publicCache    publicStatusResponse
@@ -38,9 +41,15 @@ type Server struct {
 func NewServer(cfg config.Config, service *auth.Service) *Server {
 	n := notify.NewNotifier(cfg)
 	var aiSvc *ai.AIService
+	var backupSched *backup.Scheduler
 	if service != nil && service.Store() != nil {
 		n.SetStore(service.Store())
 		aiSvc = ai.NewAIService(service.Store(), &cfg)
+		bDir := filepath.Join(filepath.Dir(cfg.DatabasePath), "backups")
+		if cfg.DatabasePath == "" {
+			bDir = filepath.Join("data", "backups")
+		}
+		backupSched = backup.NewScheduler(service.Store(), bDir)
 	}
 	return &Server{
 		cfg:           cfg,
@@ -54,6 +63,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
 		terminalManager: terminal.NewManager(),
+		backupScheduler: backupSched,
 	}
 }
 
@@ -63,6 +73,14 @@ func (s *Server) SetNotifier(n *notify.Notifier) {
 
 func (s *Server) SetAIService(svc *ai.AIService) {
 	s.aiService = svc
+}
+
+func (s *Server) BackupScheduler() *backup.Scheduler {
+	return s.backupScheduler
+}
+
+func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
+	s.backupScheduler = sched
 }
 
 func (s *Server) agentNodeTokenTTL() time.Duration {

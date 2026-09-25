@@ -69,6 +69,9 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	go notify.RunAlertDispatcher(cleanupCtx, store, notifier)
 	serverInstance := api.NewServer(cfg, service)
 	serverInstance.SetNotifier(notifier)
+	if serverInstance.BackupScheduler() != nil {
+		go serverInstance.BackupScheduler().Start(cleanupCtx)
+	}
 	handler := serverInstance.Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {

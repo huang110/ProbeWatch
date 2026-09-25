@@ -268,6 +268,87 @@ export async function uploadBackupFile(file) {
   return await res.json()
 }
 
+export async function fetchBackupConfig() {
+  const res = await fetch('/api/system/backups/config', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch backup config')
+  return await res.json()
+}
+
+export async function saveBackupConfig(config) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/system/backups/config', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to save backup config')
+  }
+  return await res.json()
+}
+
+export async function testS3Backup(s3Config) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/system/backups/test-s3', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(s3Config),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to test S3 connection')
+  }
+  return await res.json()
+}
+
+export async function testWebDAVBackup(webdavConfig) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/system/backups/test-webdav', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(webdavConfig),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to test WebDAV connection')
+  }
+  return await res.json()
+}
+
+export async function exportBackupNow() {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/system/backups/export-now', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to export backup now')
+  }
+  return await res.json()
+}
+
+export async function verifyBackup(filename) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/system/backups/${encodeURIComponent(filename)}/verify`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to verify backup integrity')
+  }
+  return await res.json()
+}
+
 export async function fetchNodeBilling(uuid) {
   const res = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/billing`, { credentials: 'same-origin' })
   if (!res.ok) throw new Error('Failed to fetch billing info')
