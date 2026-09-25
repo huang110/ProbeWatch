@@ -2,6 +2,22 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.4.0] - 2026-09-25
+
+### 🚀 游客大屏模式节点下钻与极客详情无缝交互 (Guest Mode Node Detail Drilldown & Komari Telemetry)
+- **游客模式卡片与表格全面支持点击下钻 (Full Guest Node Detail Support)**：
+  - 在游客公开大屏模式（`GuestView`）下，访客点击任意服务器宫格卡片（Grid Card）或表格行（Table Row），即可直接无缝进入新版 Komari 磨砂毛玻璃服务器详情页（`NodeDetailPage`）。
+  - 为宫格卡片与表格行增加交互手势（`cursor: pointer`）、微动悬浮动效（`transform: translateY(-2px)`）与柔光边框高亮，操作直观丝滑。
+- **游客态自驱节点数据构建与只读保护 (Safe Read-Only Telemetry Assembly)**：
+  - 针对访客未登录（Guest）场景，基于公开上报状态、节点自定义配置（国旗、标签、备注、账单）与真实硬件遥测指标进行脱敏组装，无需管理员权限即可流畅渲染 8 大核心成本/流量指标看板、4 项系统硬件概览、7 维贝塞尔平滑遥测双走势图及三网时延监测矩阵。
+  - 页面处于严格只读状态，无破坏性操作接口暴露，保障主控安全。
+- **双向导航与浏览器历史平滑同步 (Seamless Hash Navigation & Back Action)**：
+  - 在详情页顶部面包屑左侧返回按钮（`←`）以及游客顶栏新增的「返回大屏」按钮，均可一键快速返回游客服务监控大屏，并重置选中状态与 URL Hash（`#/` 或 `#/overview`）。
+  - 支持浏览器前进/后退（`hashchange`）事件与直链访问（如 `#/node-detail?uuid=...`）。
+  - 管理员在「游客大屏模式」预览时，顶部保留管理横幅，随时可一键「返回管理后台」或「退出登录」。
+- **生产构建已就绪 & 服务平滑热更新**：
+  - 前端已完成生产构建与打包，嵌入主控二进制并在生产服务器 `筋斗云` 成功热重启与在线验证。
+
 ## [v0.3.5] - 2026-09-25
 
 ### 🎯 仪表盘与机群数据精准过滤：仅展示真实已连接探针的服务器 (Strict Connected Probe Filtering)

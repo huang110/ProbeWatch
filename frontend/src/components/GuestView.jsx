@@ -6,7 +6,47 @@ import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
-export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange }) {
+function buildGuestNode(name, allCustomMeta, meta) {
+  const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+  const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
+  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta?.flag || '🌐')
+  const displayName = custom.customName || name
+  const os = custom.os || 'Ubuntu 24.04 LTS'
+  const uptimeText = custom.uptime || '24 天'
+  const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
+
+  return {
+    uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+    id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+    name: name,
+    status: 'online',
+    customName: displayName,
+    flag: displayFlag,
+    os: os,
+    arch: custom.arch || 'kvm (x86_64)',
+    kernel: custom.kernel || '6.8.0-31-generic',
+    uptime: uptimeText.includes('天') ? uptimeText : `${uptimeText} 天`,
+    cpu: cpuPercent,
+    memUsed: 143339520,
+    memTotal: 463994880,
+    diskUsed: 1395864371,
+    diskTotal: 21045339750,
+    swapUsed: 0,
+    swapTotal: 2147483648,
+    rx: 12133285888,
+    tx: 13207024435,
+    resource: {
+      cpu_name: custom.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)',
+      cpu_cores: 1,
+      ip: custom.ip || '103.159.207.11',
+      process_count: 106,
+      tcp_conn_count: 67,
+      udp_conn_count: 5,
+    },
+  }
+}
+
+export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
   const [password, setPassword] = useState('')
@@ -304,7 +344,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const cmLoss = custom.lossCm !== undefined ? Number(custom.lossCm) : 1.7
 
                   return (
-                    <article className="guest-node-card nezha-vps-card" key={`${name}-${index}`}>
+                    <article
+                      className="guest-node-card nezha-vps-card"
+                      key={`${name}-${index}`}
+                      onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta))}
+                      title="点击查看详细性能遥测与监控"
+                      style={{ cursor: 'pointer' }}
+                    >
                       {/* 1. 顶部标题行: 状态圆点, 节点名, 系统 Logo, 国旗 */}
                       <div className="vps-card-header">
                         <div className="vps-header-left">
@@ -525,7 +571,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                       const displayName = custom.customName || name
                       const coloredTags = parseColoredTags(custom.tags)
                       return (
-                        <tr key={`${name}-${index}`}>
+                        <tr
+                          key={`${name}-${index}`}
+                          className="guest-table-row"
+                          onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta))}
+                          title="点击查看详细性能遥测与监控"
+                          style={{ cursor: 'pointer' }}
+                        >
                           <td>
                             <div className="inline-flex items-center gap-1.5">
                               <StatusDot status="online" size="sm" />

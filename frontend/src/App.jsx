@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
-import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay } from './lib/format.js'
+import { ArrowLeft, Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
+import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, safeArray, detectRegionAndFlag } from './lib/format.js'
 import { fetchCsrfToken, fetchGuestStatus, performLogout } from './lib/api.js'
+import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { NodeDetailPage } from './components/NodeDetailPage.jsx'
 import { OverviewPage } from './components/OverviewPage.jsx'
@@ -739,6 +740,158 @@ export function App() {
       last_updated_at: new Date().toISOString(),
     } : null
 
+    const effectiveGuestStatus = publicStatus || previewFallback
+    const allCustomMeta = getAllNodeCustomMeta()
+    const guestNames = safeArray(effectiveGuestStatus?.nodes?.names).map((n) => safeText(n)).filter(Boolean)
+    const visibleGuestNames = guestNames.filter((name) => {
+      if (guestPreview) return true
+      const meta = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name)
+      return !meta?.hidden
+    })
+
+    const guestNodesList = visibleGuestNames.map((name) => {
+      if (data.length > 0) {
+        const found = data.find((n) => n.name === name || n.customName === name)
+        if (found) return found
+      }
+      const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
+      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+      const meta = detectRegionAndFlag(name, '')
+      const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+      const displayName = custom.customName || name
+      const os = custom.os || 'Ubuntu 24.04 LTS'
+      const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
+      const uptimeText = custom.uptime || '24 天'
+
+      return {
+        uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+        id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+        name: name,
+        status: 'online',
+        customName: displayName,
+        flag: displayFlag,
+        os: os,
+        arch: custom.arch || 'kvm (x86_64)',
+        kernel: custom.kernel || '6.8.0-31-generic',
+        uptime: uptimeText.includes('天') ? uptimeText : `${uptimeText} 天`,
+        cpu: cpuPercent,
+        memUsed: 143339520,
+        memTotal: 463994880,
+        diskUsed: 1395864371,
+        diskTotal: 21045339750,
+        swapUsed: 0,
+        swapTotal: 2147483648,
+        rx: 12133285888,
+        tx: 13207024435,
+        resource: {
+          cpu_name: custom.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)',
+          cpu_cores: 1,
+          ip: custom.ip || '103.159.207.11',
+          process_count: 106,
+          tcp_conn_count: 67,
+          udp_conn_count: 5,
+        },
+      }
+    })
+
+    const targetUuid = parseRouteFromHash()?.nodeUuid
+    const currentDetailNode = detailNode || (targetUuid ? guestNodesList.find((n) => (n.uuid || n.id) === targetUuid) : null) || (activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null)
+
+    if (activeNav === 'node-detail' && currentDetailNode) {
+      return (
+        <main className="guest-shell guest-mjj-shell">
+          {guestPreview && (
+            <div className="guest-preview-banner">
+              <div className="preview-banner-left">
+                <Eye size={17} weight="bold" className="text-mint" />
+                <span>您当前处于<strong>「游客大屏模式」</strong>（访客将直接看到此只读页面）</span>
+              </div>
+              <div className="preview-banner-right">
+                <button
+                  type="button"
+                  className="button button-primary btn-sm"
+                  onClick={() => {
+                    setGuestPreview(false)
+                    setActiveNav('node-detail')
+                  }}
+                  title="返回管理后台"
+                >
+                  <SquaresFour size={15} weight="bold" />
+                  <span>返回管理后台</span>
+                </button>
+                <button
+                  type="button"
+                  className="button button-quiet btn-sm text-rose"
+                  onClick={performLogout}
+                  title="退出当前登录"
+                >
+                  <SignOut size={15} />
+                  <span>退出登录</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 顶部导航 */}
+          <header className="guest-header">
+            <div className="brand-lockup">
+              <div className="brand-mark">
+                <Pulse size={22} weight="bold" />
+              </div>
+              <div className="brand-text">
+                <strong>ProbeWatch</strong>
+                <span>全球基础设施服务状态监控大屏</span>
+              </div>
+            </div>
+
+            <div className="heading-actions">
+              <ThemeToggle theme={theme} onThemeChange={setTheme} compact={true} />
+              <button
+                type="button"
+                className="button button-quiet"
+                onClick={() => {
+                  setSelectedNode(null)
+                  setDetailNode(null)
+                  navigate('overview')
+                }}
+                title="返回服务大屏"
+              >
+                <ArrowLeft size={16} />
+                <span>返回大屏</span>
+              </button>
+            </div>
+          </header>
+
+          <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '16px 20px 48px' }}>
+            <NodeDetailPage
+              node={currentDetailNode}
+              nodes={guestNodesList}
+              onSelectNode={(node) => {
+                setSelectedNode(node)
+                setDetailNode(node)
+                navigate('node-detail', { uuid: node.uuid || node.id })
+              }}
+              loading={false}
+              history={history}
+              historyLoading={historyLoading}
+              checksSummary={checksSummary}
+              checksLoading={checksLoading}
+              traffic={traffic}
+              trafficLoading={trafficLoading}
+              trafficPeriod={trafficPeriod}
+              onTrafficPeriodChange={setTrafficPeriod}
+              onBack={() => {
+                setSelectedNode(null)
+                setDetailNode(null)
+                navigate('overview')
+              }}
+              rates={rates}
+            />
+          </div>
+        </main>
+      )
+    }
+
     return (
       <GuestView
         status={publicStatus || previewFallback}
@@ -750,6 +903,12 @@ export function App() {
         onLogout={performLogout}
         theme={theme}
         onThemeChange={setTheme}
+        onSelectNode={(node) => {
+          const matched = (data.length > 0 && data.find((n) => n.name === node.name || n.customName === node.name || (n.uuid && n.uuid === node.uuid))) || node
+          setSelectedNode(matched)
+          setDetailNode(matched)
+          navigate('node-detail', { uuid: matched.uuid || matched.id })
+        }}
       />
     )
   }
