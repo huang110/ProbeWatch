@@ -203,3 +203,46 @@ export async function uploadBackupFile(file) {
   return await res.json()
 }
 
+export async function fetchNodeBilling(uuid) {
+  const res = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/billing`, { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch billing info')
+  return await res.json()
+}
+
+export async function saveNodeBilling(uuid, settings) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/billing`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to save billing settings')
+  }
+  return await res.json()
+}
+
+export async function resetNodeBilling(uuid) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/billing/reset`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: '{}',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to reset billing cycle')
+  }
+  return await res.json()
+}
+
+export async function fetchPublicNodeBilling(uuid) {
+  const res = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/billing`, { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch public billing info')
+  return await res.json()
+}
+
+

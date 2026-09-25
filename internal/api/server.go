@@ -108,7 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/agent/v1/media-result", s.mediaResultAgent)
 
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -179,24 +179,51 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		trimmed := strings.Trim(r.URL.Path, "/")
-		parts := strings.Split(trimmed, "/")
-		if len(parts) >= 3 && parts[0] == "api" && parts[1] == "nodes" {
+	trimmed := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "nodes" {
+		uuid := parts[2]
+		if len(parts) == 4 && parts[3] == "billing" {
+			if r.Method == http.MethodGet {
+				s.getNodeBilling(w, r, uuid)
+				return
+			}
+			if r.Method == http.MethodPut || r.Method == http.MethodPost {
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.putNodeBilling(w, r, uuid)
+				})).ServeHTTP(w, r)
+				return
+			}
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if len(parts) == 5 && parts[3] == "billing" && parts[4] == "reset" {
+			if r.Method == http.MethodPost {
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.resetNodeBilling(w, r, uuid)
+				})).ServeHTTP(w, r)
+				return
+			}
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if r.Method == http.MethodGet {
 			if len(parts) == 5 && parts[3] == "checks" && parts[4] == "summary" {
-				s.nodeChecksSummary(w, r, parts[2])
+				s.nodeChecksSummary(w, r, uuid)
 				return
 			}
 			if len(parts) == 4 && parts[3] == "traffic" {
-				s.nodeTraffic(w, r, parts[2])
+				s.nodeTraffic(w, r, uuid)
 				return
 			}
 		}
+	}
+	if r.Method == http.MethodGet {
 		if strings.HasSuffix(trimmed, "/mtr/history") || strings.HasSuffix(trimmed, "/media/history") || strings.HasSuffix(trimmed, "/resource/history") || strings.HasSuffix(trimmed, "/network/history") || strings.HasSuffix(trimmed, "/mtr") || strings.HasSuffix(trimmed, "/media") || strings.HasSuffix(trimmed, "/resource") || strings.HasSuffix(trimmed, "/network") {
 			s.nodeRead(w, r)
 			return
 		}
-		if parts := strings.Split(trimmed, "/"); len(parts) == 3 && parts[0] == "api" && parts[1] == "nodes" {
+		if len(parts) == 3 && parts[0] == "api" && parts[1] == "nodes" {
 			s.nodeSummaryRead(w, r, parts[2])
 			return
 		}

@@ -26,6 +26,8 @@ import {
   LinuxLogo,
   FilmStrip,
   CircleNotch,
+  FlowArrow,
+  Lightning,
 } from '@phosphor-icons/react'
 import {
   formatBytes,
@@ -42,6 +44,7 @@ import {
   parseColoredTags,
 } from '../lib/billing.js'
 import { DistroIcon } from './Common.jsx'
+import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -283,6 +286,7 @@ export function NodeDetailPage({
   const [selectedTargets, setSelectedTargets] = useState({})
   const [smoothPeaks, setSmoothPeaks] = useState(true)
   const [targetInfoModal, setTargetInfoModal] = useState(null)
+  const [showTrafficModal, setShowTrafficModal] = useState(false)
   const [hoverData, setHoverData] = useState(null)
   const [visitorIp, setVisitorIp] = useState('')
 
@@ -388,6 +392,12 @@ export function NodeDetailPage({
     ? `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
     : 'https://www.cpubenchmark.net/cpu_lookup.php'
   const publicIp = resource.ip || node?.hostname || customMeta.ip || '—'
+  const nodeIPv4 = node?.ipv4 || resource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
+  const nodeIPv6 = node?.ipv6 || resource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
+  const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
+  const interfaces = Array.isArray(node?.interfaces) && node.interfaces.length > 0
+    ? node.interfaces
+    : (Array.isArray(resource.interfaces) ? resource.interfaces : [])
   const cores = resource.cpu_cores || 1
   const arch = node?.arch || resource.arch || customMeta.arch || 'kvm'
   const os = node?.os || resource.os || customMeta.os || 'Linux'
@@ -1138,16 +1148,47 @@ export function NodeDetailPage({
 
         {/* 卡片 4: 网络信息 */}
         <div className="komari-info-card">
-          <div className="komari-info-header">
-            <h3>网络信息</h3>
+          <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <WifiHigh size={16} className="text-mint" />
+              <h3 style={{ margin: 0 }}>网络信息与双栈架构</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-quiet btn-sm"
+              onClick={() => setShowTrafficModal(true)}
+              style={{ fontSize: '11px', padding: '2px 8px', height: '24px' }}
+              title="配置流量配额、重置日与独立网卡"
+            >
+              <Lightning size={13} className="text-mint" />
+              <span>流量与重置</span>
+            </button>
           </div>
           <div className="komari-info-rows">
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <WifiHigh size={14} /> 总流量 [IPv4]
+                <ShareNetwork size={14} /> 网络栈与公网 IP
+              </span>
+              <span className="komari-info-val inline-flex items-center gap-2 flex-wrap">
+                {hasDualStack ? (
+                  <span className="badge badge-mint text-xs">IPv4 / IPv6 双栈</span>
+                ) : nodeIPv4 ? (
+                  <span className="badge badge-neutral text-xs">IPv4 单栈</span>
+                ) : nodeIPv6 ? (
+                  <span className="badge badge-neutral text-xs">IPv6 单栈</span>
+                ) : (
+                  <span className="text-muted text-xs mono">—</span>
+                )}
+                {nodeIPv4 && <span className="mono text-xs text-primary" title={`IPv4: ${nodeIPv4}`}>{nodeIPv4}</span>}
+                {nodeIPv6 && <span className="mono text-xs text-muted" title={`IPv6: ${nodeIPv6}`}>{nodeIPv6.length > 20 ? `${nodeIPv6.slice(0, 18)}…` : nodeIPv6}</span>}
+              </span>
+            </div>
+            <div className="komari-info-row">
+              <span className="komari-info-label">
+                <WifiHigh size={14} /> 双向累计流量
               </span>
               <span className="komari-info-val mono">
-                {formatBytes(rawTx)} / {formatBytes(rawRx)} <span className="text-muted">(配额 {trafficQuotaText})</span>
+                {formatBytes(rawTx)} (出) / {formatBytes(rawRx)} (入) <span className="text-muted">(配额 {trafficQuotaText})</span>
               </span>
             </div>
             <div className="komari-info-row">
@@ -1169,6 +1210,61 @@ export function NodeDetailPage({
           </div>
         </div>
       </div>
+
+      {/* 物理与虚拟网卡矩阵 (Per-NIC Metrics) */}
+      {interfaces.length > 0 && (
+        <div className="komari-info-card" style={{ marginBottom: '16px' }}>
+          <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FlowArrow size={16} className="text-mint" />
+              <h3 style={{ margin: 0 }}>网络适配器与独立网卡监控 ({interfaces.length})</h3>
+            </div>
+            <span className="mono text-xs text-muted">独立硬件 Rx/Tx 遥测吞吐</span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }} className="mono">
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: 'var(--text-muted, #94a3b8)', textAlign: 'left' }}>
+                  <th style={{ padding: '8px 12px' }}>网卡接口</th>
+                  <th style={{ padding: '8px 12px' }}>绑定的 IP 地址</th>
+                  <th style={{ padding: '8px 12px' }}>累计入站 (Rx)</th>
+                  <th style={{ padding: '8px 12px' }}>累计出站 (Tx)</th>
+                  <th style={{ padding: '8px 12px' }}>数据包吞吐 (Rx/Tx)</th>
+                  <th style={{ padding: '8px 12px' }}>错误计数</th>
+                </tr>
+              </thead>
+              <tbody>
+                {interfaces.map((iface) => (
+                  <tr key={iface.name} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                    <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--primary, #0284c7)' }}>
+                      {iface.name}
+                    </td>
+                    <td style={{ padding: '8px 12px', color: 'var(--text-secondary, #cbd5e1)' }}>
+                      {iface.ipv4 || iface.ipv6 ? (
+                        <span>{iface.ipv4 ? `${iface.ipv4} ` : ''}{iface.ipv6 ? `[${iface.ipv6}]` : ''}</span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 12px', color: 'var(--mint, #10b981)' }}>
+                      {formatBytes(iface.rx_bytes || 0)}
+                    </td>
+                    <td style={{ padding: '8px 12px', color: 'var(--blue, #38bdf8)' }}>
+                      {formatBytes(iface.tx_bytes || 0)}
+                    </td>
+                    <td style={{ padding: '8px 12px', color: 'var(--text-muted, #94a3b8)' }}>
+                      {Number(iface.rx_packets || 0).toLocaleString()} / {Number(iface.tx_packets || 0).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '8px 12px', color: (iface.rx_errors || iface.tx_errors) ? 'var(--danger, #ef4444)' : 'var(--text-muted, #94a3b8)' }}>
+                      {(iface.rx_errors || 0) + (iface.tx_errors || 0)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 全球流媒体与 AI 服务解锁能力卡片 */}
       <div className="komari-info-card komari-media-card" style={{ marginBottom: '16px' }}>
@@ -1689,6 +1785,17 @@ export function NodeDetailPage({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 流量统计与计费周期重置弹窗 */}
+      {showTrafficModal && (
+        <TrafficCalibrationModal
+          node={node}
+          onClose={() => setShowTrafficModal(false)}
+          onSaveSuccess={() => {
+            window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
+          }}
+        />
       )}
 
       {/* 7. 页脚署名 */}

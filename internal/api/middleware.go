@@ -135,7 +135,7 @@ func (b *bufferedResponse) commit(w http.ResponseWriter) {
 }
 
 func isWriteMethod(method string) bool {
-	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodDelete
+	return method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
 }
 
 func isJSONContentType(value string) bool {

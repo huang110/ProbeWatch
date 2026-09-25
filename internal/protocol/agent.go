@@ -99,30 +99,46 @@ type MediaResultEnvelope struct {
 	Result     MediaResult `json:"result"`
 }
 
+// InterfaceStat represents one network interface's traffic counters and addresses.
+type InterfaceStat struct {
+	Name      string `json:"name"`
+	RxBytes   uint64 `json:"rx_bytes"`
+	TxBytes   uint64 `json:"tx_bytes"`
+	RxPackets uint64 `json:"rx_packets,omitempty"`
+	TxPackets uint64 `json:"tx_packets,omitempty"`
+	RxErrors  uint64 `json:"rx_errors,omitempty"`
+	TxErrors  uint64 `json:"tx_errors,omitempty"`
+	IPv4      string `json:"ipv4,omitempty"`
+	IPv6      string `json:"ipv6,omitempty"`
+}
+
 // ResourceSnapshot contains the bounded resource and identity data an agent reports.
 type ResourceSnapshot struct {
-	CPUPercent           float64 `json:"cpu_percent,omitempty"`
-	Load1                float64 `json:"load1,omitempty"`
-	Load5                float64 `json:"load5,omitempty"`
-	Load15               float64 `json:"load15,omitempty"`
-	MemoryTotalBytes     uint64  `json:"memory_total_bytes,omitempty"`
-	MemoryUsedBytes      uint64  `json:"memory_used_bytes,omitempty"`
-	MemoryAvailableBytes uint64  `json:"memory_available_bytes,omitempty"`
-	SwapTotalBytes       uint64  `json:"swap_total_bytes,omitempty"`
-	SwapUsedBytes        uint64  `json:"swap_used_bytes,omitempty"`
-	FilesystemTotalBytes uint64  `json:"filesystem_total_bytes,omitempty"`
-	FilesystemUsedBytes  uint64  `json:"filesystem_used_bytes,omitempty"`
-	NetworkRxBytes       uint64  `json:"network_rx_bytes,omitempty"`
-	NetworkTxBytes       uint64  `json:"network_tx_bytes,omitempty"`
-	TCPConnCount         uint64  `json:"tcp_conn_count,omitempty"`
-	UDPConnCount         uint64  `json:"udp_conn_count,omitempty"`
-	ProcessCount         uint64  `json:"process_count,omitempty"`
-	OS                   string  `json:"os,omitempty"`
-	Kernel               string  `json:"kernel,omitempty"`
-	Arch                 string  `json:"arch,omitempty"`
-	Hostname             string  `json:"hostname,omitempty"`
-	AgentVersion         string  `json:"agent_version,omitempty"`
-	StartedAt            int64   `json:"started_at,omitempty"`
+	CPUPercent           float64         `json:"cpu_percent,omitempty"`
+	Load1                float64         `json:"load1,omitempty"`
+	Load5                float64         `json:"load5,omitempty"`
+	Load15               float64         `json:"load15,omitempty"`
+	MemoryTotalBytes     uint64          `json:"memory_total_bytes,omitempty"`
+	MemoryUsedBytes      uint64          `json:"memory_used_bytes,omitempty"`
+	MemoryAvailableBytes uint64          `json:"memory_available_bytes,omitempty"`
+	SwapTotalBytes       uint64          `json:"swap_total_bytes,omitempty"`
+	SwapUsedBytes        uint64          `json:"swap_used_bytes,omitempty"`
+	FilesystemTotalBytes uint64          `json:"filesystem_total_bytes,omitempty"`
+	FilesystemUsedBytes  uint64          `json:"filesystem_used_bytes,omitempty"`
+	NetworkRxBytes       uint64          `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes       uint64          `json:"network_tx_bytes,omitempty"`
+	TCPConnCount         uint64          `json:"tcp_conn_count,omitempty"`
+	UDPConnCount         uint64          `json:"udp_conn_count,omitempty"`
+	ProcessCount         uint64          `json:"process_count,omitempty"`
+	OS                   string          `json:"os,omitempty"`
+	Kernel               string          `json:"kernel,omitempty"`
+	Arch                 string          `json:"arch,omitempty"`
+	Hostname             string          `json:"hostname,omitempty"`
+	AgentVersion         string          `json:"agent_version,omitempty"`
+	StartedAt            int64           `json:"started_at,omitempty"`
+	Interfaces           []InterfaceStat `json:"interfaces,omitempty"`
+	IPv4                 string          `json:"ipv4,omitempty"`
+	IPv6                 string          `json:"ipv6,omitempty"`
 }
 
 // CheckTask is the only task shape an agent accepts from the control plane.
@@ -386,6 +402,26 @@ func (r ResourceSnapshot) Validate() error {
 	}
 	if r.StartedAt < 0 {
 		return errors.New("started_at must not be negative")
+	}
+	if err := validateString("ipv4", r.IPv4, maxHostLength, false); err != nil {
+		return err
+	}
+	if err := validateString("ipv6", r.IPv6, maxHostLength, false); err != nil {
+		return err
+	}
+	if len(r.Interfaces) > 64 {
+		return errors.New("interfaces count exceeds 64")
+	}
+	for i, iface := range r.Interfaces {
+		if err := validateString(fmt.Sprintf("interfaces[%d].name", i), iface.Name, 32, true); err != nil {
+			return err
+		}
+		if err := validateString(fmt.Sprintf("interfaces[%d].ipv4", i), iface.IPv4, maxHostLength, false); err != nil {
+			return err
+		}
+		if err := validateString(fmt.Sprintf("interfaces[%d].ipv6", i), iface.IPv6, maxHostLength, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }

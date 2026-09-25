@@ -272,6 +272,26 @@ CREATE TABLE IF NOT EXISTS system_settings (
     value TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS node_billing_settings (
+    node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+    reset_day INTEGER NOT NULL DEFAULT 1,
+    reset_time TEXT NOT NULL DEFAULT '00:00:00',
+    traffic_quota_bytes INTEGER NOT NULL DEFAULT 0,
+    accounting_method TEXT NOT NULL DEFAULT 'total',
+    included_interfaces TEXT NOT NULL DEFAULT '*',
+    last_reset_at INTEGER NOT NULL DEFAULT 0,
+    last_reset_rx_bytes INTEGER NOT NULL DEFAULT 0,
+    last_reset_tx_bytes INTEGER NOT NULL DEFAULT 0,
+    bonus_quota_bytes INTEGER NOT NULL DEFAULT 0,
+    merchant TEXT NOT NULL DEFAULT '',
+    price REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    cycle TEXT NOT NULL DEFAULT 'month',
+    start_date TEXT NOT NULL DEFAULT '',
+    due_date TEXT NOT NULL DEFAULT '',
+    auto_renew INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL
+);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {

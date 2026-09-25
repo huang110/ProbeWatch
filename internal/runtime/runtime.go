@@ -63,6 +63,7 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	go runAuthCleanup(cleanupCtx, service)
 	go runLifecycleCleanup(cleanupCtx, store)
 	go runHistoryAggregation(cleanupCtx, store)
+	go runBillingCycleWatcher(cleanupCtx, store)
 	notifier := notify.NewNotifier(cfg)
 	go notify.RunAlertDispatcher(cleanupCtx, store, notifier)
 	serverInstance := api.NewServer(cfg, service)
@@ -160,6 +161,27 @@ func runHistoryAggregation(ctx context.Context, store *db.Store) {
 			return
 		case <-ticker.C:
 			aggregate()
+		}
+	}
+}
+
+func runBillingCycleWatcher(ctx context.Context, store *db.Store) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	check := func() {
+		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if _, err := store.CheckAndAutoResetBillingCycles(checkCtx, time.Now().UTC()); err != nil {
+			slog.Error("billing cycle auto-reset check failed", "error_class", fmt.Sprintf("%T", err), "error", err)
+		}
+	}
+	check()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check()
 		}
 	}
 }

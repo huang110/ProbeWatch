@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -56,6 +57,9 @@ func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnaps
 	}
 	if network, err := readNetworkCounters(); err == nil {
 		resource.NetworkRxBytes, resource.NetworkTxBytes = network.rx, network.tx
+		resource.Interfaces = network.interfaces
+		resource.IPv4 = network.primaryIPv4
+		resource.IPv6 = network.primaryIPv6
 	}
 	if tcp, udp, err := readSocketCounts(); err == nil {
 		resource.TCPConnCount = tcp
@@ -138,22 +142,72 @@ func parseMemInfo(data string) (memoryStats, error) {
 	return memoryStats{total: total, available: available, used: used, swapTotal: swapTotal, swapUsed: swapUsed}, nil
 }
 
-type networkStats struct{ rx, tx uint64 }
-
-func readNetworkCounters() (networkStats, error) {
-	data, err := os.ReadFile("/proc/net/dev")
-	if err != nil {
-		return networkStats{}, err
-	}
-	return parseNetworkCounters(string(data))
+type ifaceIPs struct {
+	ipv4 string
+	ipv6 string
 }
 
-func parseNetworkCounters(data string) (networkStats, error) {
-	var result networkStats
+func getInterfaceIPs() map[string]ifaceIPs {
+	ips := make(map[string]ifaceIPs)
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+	for _, ifi := range ifaces {
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		var v4, v6 string
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ipv4 := ip.To4(); ipv4 != nil && v4 == "" {
+				v4 = ipv4.String()
+			} else if ip.To16() != nil && v6 == "" {
+				if ip.IsGlobalUnicast() && !strings.HasPrefix(ip.String(), "fe80:") {
+					v6 = ip.String()
+				}
+			}
+		}
+		ips[ifi.Name] = ifaceIPs{ipv4: v4, ipv6: v6}
+	}
+	return ips
+}
+
+type networkFullStats struct {
+	rx, tx      uint64
+	interfaces  []protocol.InterfaceStat
+	primaryIPv4 string
+	primaryIPv6 string
+}
+
+func readNetworkCounters() (networkFullStats, error) {
+	data, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return networkFullStats{}, err
+	}
+	return parseNetworkFullCounters(string(data), getInterfaceIPs())
+}
+
+func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networkFullStats, error) {
+	var result networkFullStats
 	found := false
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(data, "\n") {
 		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "lo" {
+		if len(parts) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "lo" {
 			continue
 		}
 		fields := strings.Fields(parts[1])
@@ -165,14 +219,54 @@ func parseNetworkCounters(data string) (networkStats, error) {
 		if rxErr != nil || txErr != nil {
 			continue
 		}
+		var rxPackets, txPackets, rxErrors, txErrors uint64
+		if len(fields) >= 11 {
+			rxPackets, _ = strconv.ParseUint(fields[1], 10, 64)
+			rxErrors, _ = strconv.ParseUint(fields[2], 10, 64)
+			txPackets, _ = strconv.ParseUint(fields[9], 10, 64)
+			txErrors, _ = strconv.ParseUint(fields[10], 10, 64)
+		}
+
+		stat := protocol.InterfaceStat{
+			Name:      name,
+			RxBytes:   rx,
+			TxBytes:   tx,
+			RxPackets: rxPackets,
+			TxPackets: txPackets,
+			RxErrors:  rxErrors,
+			TxErrors:  txErrors,
+		}
+		if ipInfo, ok := ifaceIPs[name]; ok {
+			stat.IPv4 = ipInfo.ipv4
+			stat.IPv6 = ipInfo.ipv6
+		}
+
+		result.interfaces = append(result.interfaces, stat)
 		result.rx += rx
 		result.tx += tx
 		found = true
+
+		if result.primaryIPv4 == "" && stat.IPv4 != "" {
+			result.primaryIPv4 = stat.IPv4
+		}
+		if result.primaryIPv6 == "" && stat.IPv6 != "" {
+			result.primaryIPv6 = stat.IPv6
+		}
 	}
 	if !found {
-		return networkStats{}, fmt.Errorf("no network interfaces")
+		return networkFullStats{}, fmt.Errorf("no network interfaces")
 	}
 	return result, nil
+}
+
+type networkStats struct{ rx, tx uint64 }
+
+func parseNetworkCounters(data string) (networkStats, error) {
+	full, err := parseNetworkFullCounters(data, nil)
+	if err != nil {
+		return networkStats{}, err
+	}
+	return networkStats{rx: full.rx, tx: full.tx}, nil
 }
 
 type cpuStats struct {

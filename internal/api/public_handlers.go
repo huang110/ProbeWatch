@@ -224,5 +224,9 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeMediaLatest(w, r, node.ID)
 		return
 	}
+	if len(parts) == 5 && parts[4] == "billing" {
+		s.publicNodeBilling(w, r, uuid)
+		return
+	}
 	writeJSONError(w, http.StatusNotFound, "not found")
 }

@@ -35,6 +35,7 @@ import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColore
 import { ProgressBar, StatusDot } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
+import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 
 const POPULAR_MEDIA = [
   { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
@@ -144,6 +145,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   const [showBillingModal, setShowBillingModal] = useState(false)
   const [billingVersion, setBillingVersion] = useState(0)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showTrafficModal, setShowTrafficModal] = useState(false)
   const [metaVersion, setMetaVersion] = useState(0)
 
   // 扩展诊断数据状态：网络检测、MTR 路由、流媒体
@@ -226,6 +228,13 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   const coloredTags = parseColoredTags(customMeta.tags)
   const totalTransfer = (node.rx || 0) + (node.tx || 0)
   const isWindows = (node.os || '').toLowerCase().includes('windows')
+
+  const interfaces = Array.isArray(node.interfaces) && node.interfaces.length > 0
+    ? node.interfaces
+    : (Array.isArray(node.resource?.interfaces) ? node.resource.interfaces : [])
+  const ipv4 = node.ipv4 || node.resource?.ipv4
+  const ipv6 = node.ipv6 || node.resource?.ipv6
+  const isDualStack = Boolean(ipv4 && ipv6)
 
   // MTR 活跃报告解析
   const activeMtrReport = mtrData.length > 0 ? mtrData[0] : null
@@ -363,6 +372,23 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
               </div>
 
               <div className="spec-item">
+                <span className="spec-label">网络栈与 IP</span>
+                <div className="spec-value inline-flex items-center gap-1.5 flex-wrap">
+                  {isDualStack ? (
+                    <span className="badge badge-mint text-xs">IPv4 / IPv6 双栈</span>
+                  ) : ipv4 ? (
+                    <span className="badge badge-neutral text-xs">IPv4 单栈</span>
+                  ) : ipv6 ? (
+                    <span className="badge badge-neutral text-xs">IPv6 单栈</span>
+                  ) : (
+                    <span className="text-muted text-xs mono">—</span>
+                  )}
+                  {ipv4 && <span className="mono text-xs text-muted" title={`IPv4: ${ipv4}`}>{ipv4}</span>}
+                  {ipv6 && <span className="mono text-xs text-muted" title={`IPv6: ${ipv6}`}>{ipv6.length > 20 ? `${ipv6.slice(0, 18)}…` : ipv6}</span>}
+                </div>
+              </div>
+
+              <div className="spec-item">
                 <span className="spec-label">探针版本</span>
                 <div className="spec-value mono text-mint">
                   {node.agentVersion || node.version || 'ProbeWatch Agent v0.2.2'}
@@ -453,6 +479,39 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 </b>
               </div>
             </div>
+
+            {/* 多网卡独立监控 */}
+            {interfaces.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-glass">
+                <div className="text-xs font-medium text-secondary mb-2 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5">
+                    <FlowArrow size={14} className="text-mint" />
+                    <span>独立网络接口 ({interfaces.length})</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {interfaces.map((iface) => (
+                    <div
+                      key={iface.name}
+                      className="px-2.5 py-1.5 rounded bg-surface-elevation-1 border border-glass flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold mono text-primary">{iface.name}</span>
+                        {(iface.ipv4 || iface.ipv6) && (
+                          <span className="text-2xs mono text-muted bg-surface-elevation-2 px-1.5 py-0.5 rounded">
+                            {iface.ipv4 || iface.ipv6}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mono text-2xs text-secondary flex items-center gap-2">
+                        <span>v {formatBytes(iface.rx_bytes || 0)}</span>
+                        <span>^ {formatBytes(iface.tx_bytes || 0)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 4. MJJ 小鸡账单与剩余价值卡片 */}
@@ -462,14 +521,25 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <Coins size={15} className="text-amber" />
                 <span>小鸡账单与剩余价值 (MJJ 模式)</span>
               </div>
-              <button
-                type="button"
-                className="button button-quiet btn-sm"
-                onClick={() => setShowBillingModal(true)}
-              >
-                <Sparkle size={13} className="text-mint" />
-                <span>编辑账单</span>
-              </button>
+              <div className="inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="button button-quiet btn-sm"
+                  onClick={() => setShowTrafficModal(true)}
+                  title="配置流量配额、重置日与独立网卡"
+                >
+                  <Lightning size={13} className="text-blue" />
+                  <span>周期与流量</span>
+                </button>
+                <button
+                  type="button"
+                  className="button button-quiet btn-sm"
+                  onClick={() => setShowBillingModal(true)}
+                >
+                  <Sparkle size={13} className="text-mint" />
+                  <span>编辑账单</span>
+                </button>
+              </div>
             </div>
 
             <div className="drawer-billing-body">
@@ -839,6 +909,18 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
           onSaved={() => {
             setShowEditModal(false)
             setMetaVersion((v) => v + 1)
+            window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
+          }}
+        />
+      )}
+
+      {/* 流量统计与计费周期重置弹窗 */}
+      {showTrafficModal && (
+        <TrafficCalibrationModal
+          node={node}
+          onClose={() => setShowTrafficModal(false)}
+          onSaveSuccess={() => {
+            setBillingVersion((v) => v + 1)
             window.dispatchEvent(new CustomEvent('probewatch_custom_meta_updated'))
           }}
         />

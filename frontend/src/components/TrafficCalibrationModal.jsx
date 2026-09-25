@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { X, Info } from '@phosphor-icons/react'
+import { X, Info, ArrowClockwise, Check, WarningCircle } from '@phosphor-icons/react'
 import { numeric, safeText } from '../lib/format.js'
 import { getStoredBillingData, saveNodeBillingData, getNodeCustomMeta } from '../lib/billing.js'
+import { fetchNodeBilling, saveNodeBilling, resetNodeBilling } from '../lib/api.js'
 
 // Format bytes with 2 decimal places when >= MB/GB
 export const formatTrafficPrecise = (bytes) => {
@@ -58,12 +59,12 @@ export const parseTrafficString = (val, defaultUnit = 'GB') => {
   return Math.round(num * factor)
 }
 
-// Compute billing period string e.g. "2026年9月22日 00:00:00 - 2026年10月22日 00:00:00"
-export const computeBillingPeriod = (resetDay = 22) => {
+// Compute fallback billing period string
+export const computeBillingPeriod = (resetDay = 1) => {
   const now = new Date()
   const day = now.getDate()
   let startYear = now.getFullYear()
-  let startMonth = now.getMonth() // 0-indexed
+  let startMonth = now.getMonth()
   let endYear = startYear
   let endMonth = startMonth + 1
 
@@ -119,7 +120,52 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
 
   const [inputTxStr, setInputTxStr] = useState(() => formatTrafficPrecise(initTxBytes))
   const [inputRxStr, setInputRxStr] = useState(() => formatTrafficPrecise(initRxBytes))
+
+  // Backend Billing States
+  const [resetDay, setResetDay] = useState(nodeMeta?.resetDay ?? 1)
+  const [accountingMethod, setAccountingMethod] = useState('total')
+  const [trafficQuotaGB, setTrafficQuotaGB] = useState('1000')
+  const [bonusQuotaGB, setBonusQuotaGB] = useState('0')
+  const [includedInterfaces, setIncludedInterfaces] = useState('*')
+  const [merchant, setMerchant] = useState('')
+  const [serverCycleInfo, setServerCycleInfo] = useState(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isResetting, setIsResetting] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  // Available interfaces from node snapshot
+  const availableInterfaces = [
+    { name: '*', label: '全部网卡聚合 (*)' },
+    ...((node?.interfaces || node?.resource?.interfaces || []).map((iface) => ({
+      name: iface.name,
+      label: `${iface.name} (${iface.ipv4 || iface.ipv6 || '无IP'})`,
+    }))),
+  ]
+
+  // Load from backend on mount
+  useEffect(() => {
+    if (!nodeId) return
+    fetchNodeBilling(nodeId)
+      .then((data) => {
+        if (!data) return
+        setServerCycleInfo(data)
+        if (data.reset_day) setResetDay(data.reset_day)
+        if (data.accounting_method) setAccountingMethod(data.accounting_method)
+        if (data.traffic_quota_bytes !== undefined) {
+          setTrafficQuotaGB((Number(data.traffic_quota_bytes) / (1024 * 1024 * 1024)).toFixed(0))
+        }
+        if (data.bonus_quota_bytes !== undefined) {
+          setBonusQuotaGB((Number(data.bonus_quota_bytes) / (1024 * 1024 * 1024)).toFixed(0))
+        }
+        if (data.included_interfaces) setIncludedInterfaces(data.included_interfaces)
+        if (data.merchant) setMerchant(data.merchant)
+      })
+      .catch(() => {
+        // Fallback to local storage settings
+      })
+  }, [nodeId])
 
   // Computed values
   const parsedTxBytes = parseTrafficString(inputTxStr, 'GB')
@@ -129,42 +175,84 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
   const diffRxBytes = parsedRxBytes - rawRx
 
   const timezoneStr = nodeMeta?.timezone || 'Asia/Shanghai (UTC+8)'
-  const cyclePeriodStr = computeBillingPeriod(nodeMeta?.resetDay ?? 22)
+  const cyclePeriodStr = serverCycleInfo?.period_start && serverCycleInfo?.period_end
+    ? `${new Date(serverCycleInfo.period_start).toLocaleDateString('zh-CN')} - ${new Date(serverCycleInfo.period_end).toLocaleDateString('zh-CN')}`
+    : computeBillingPeriod(resetDay)
 
   const records = nodeBilling.calibrationRecords || []
 
   if (!node) return null
 
-  const handleSave = (e) => {
-    e.preventDefault()
-
-    const newRecord = {
-      id: Date.now(),
-      time: new Date().toLocaleString('zh-CN', { hour12: false }),
-      actualTxStr: formatTrafficPrecise(parsedTxBytes),
-      actualRxStr: formatTrafficPrecise(parsedRxBytes),
-      diffTxStr: formatDiff(diffTxBytes),
-      diffRxStr: formatDiff(diffRxBytes),
-      txOffset: diffTxBytes,
-      rxOffset: diffRxBytes,
-      createdAt: new Date().toISOString(),
+  // Handle immediate cycle reset
+  const handleResetCycle = async () => {
+    try {
+      setIsResetting(true)
+      setErrorMsg('')
+      const updatedInfo = await resetNodeBilling(nodeId)
+      setServerCycleInfo(updatedInfo)
+      setInputTxStr('0 B')
+      setInputRxStr('0 B')
+      setShowResetConfirm(false)
+      if (onSaveSuccess) onSaveSuccess(0)
+    } catch (err) {
+      setErrorMsg(err.message || '重置计费周期失败')
+    } finally {
+      setIsResetting(false)
     }
+  }
 
-    saveNodeBillingData(nodeId, {
-      txOffsetBytes: diffTxBytes,
-      rxOffsetBytes: diffRxBytes,
-      trafficOffsetBytes: diffTxBytes + diffRxBytes,
-      calibratedTxBytes: parsedTxBytes,
-      calibratedRxBytes: parsedRxBytes,
-      lastCalibratedAt: new Date().toISOString(),
-      calibrationRecords: [newRecord, ...records].slice(0, 10),
-    })
+  const handleSave = async (e) => {
+    e.preventDefault()
+    setIsSaving(true)
+    setErrorMsg('')
 
-    setSaveSuccess(true)
-    if (onSaveSuccess) onSaveSuccess(diffTxBytes + diffRxBytes)
-    setTimeout(() => {
-      onClose()
-    }, 250)
+    const quotaBytes = Math.round(Number(trafficQuotaGB || 0) * 1024 * 1024 * 1024)
+    const bonusBytes = Math.round(Number(bonusQuotaGB || 0) * 1024 * 1024 * 1024)
+
+    try {
+      // 1. Persist to backend database
+      await saveNodeBilling(nodeId, {
+        reset_day: Number(resetDay) || 1,
+        accounting_method: accountingMethod,
+        traffic_quota_bytes: quotaBytes,
+        bonus_quota_bytes: bonusBytes,
+        merchant: merchant.trim(),
+        included_interfaces: includedInterfaces.trim() || '*',
+      })
+
+      // 2. Persist local calibration offsets for seamless display
+      const newRecord = {
+        id: Date.now(),
+        time: new Date().toLocaleString('zh-CN', { hour12: false }),
+        actualTxStr: formatTrafficPrecise(parsedTxBytes),
+        actualRxStr: formatTrafficPrecise(parsedRxBytes),
+        diffTxStr: formatDiff(diffTxBytes),
+        diffRxStr: formatDiff(diffRxBytes),
+        txOffset: diffTxBytes,
+        rxOffset: diffRxBytes,
+        createdAt: new Date().toISOString(),
+      }
+
+      saveNodeBillingData(nodeId, {
+        txOffsetBytes: diffTxBytes,
+        rxOffsetBytes: diffRxBytes,
+        trafficOffsetBytes: diffTxBytes + diffRxBytes,
+        calibratedTxBytes: parsedTxBytes,
+        calibratedRxBytes: parsedRxBytes,
+        lastCalibratedAt: new Date().toISOString(),
+        calibrationRecords: [newRecord, ...records].slice(0, 10),
+      })
+
+      setSaveSuccess(true)
+      if (onSaveSuccess) onSaveSuccess(diffTxBytes + diffRxBytes)
+      setTimeout(() => {
+        onClose()
+      }, 350)
+    } catch (err) {
+      setErrorMsg(err.message || '保存设置失败')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -173,9 +261,9 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
         {/* Header */}
         <div className="traffic-cal-header">
           <div>
-            <h2 className="traffic-cal-title">流量校准</h2>
+            <h2 className="traffic-cal-title">流量统计与周期计费重置</h2>
             <p className="traffic-cal-subtitle">
-              将 <strong>{node.name}</strong> 当前计费周期的上传和下载用量校准为实际值。
+              配置 <strong>{node.name}</strong> 的计费重置日、配额口径、指定统计网卡与基线校准。
             </p>
           </div>
           <button type="button" className="traffic-cal-close-btn" onClick={onClose} aria-label="关闭">
@@ -183,40 +271,157 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
           </button>
         </div>
 
+        {errorMsg && (
+          <div className="alert-banner alert-banner-critical my-2">
+            <WarningCircle size={16} />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
         {/* 当前计费周期卡片 */}
         <div className="traffic-cal-cycle-card">
           <div className="traffic-cal-cycle-header">
-            <span className="traffic-cal-cycle-badge">当前计费周期</span>
+            <span className="traffic-cal-cycle-badge">当前周期</span>
             <span className="traffic-cal-cycle-tz">{timezoneStr}</span>
+            {serverCycleInfo?.days_until_reset !== undefined && (
+              <span className="text-xs text-mint font-medium ml-auto">
+                距重置还有 {serverCycleInfo.days_until_reset} 天
+              </span>
+            )}
           </div>
           <div className="traffic-cal-cycle-range">{cyclePeriodStr}</div>
-        </div>
-
-        {/* 原始统计 / 校准差额 / 校准后用量 */}
-        <div className="traffic-cal-compare-grid">
-          <div className="traffic-cal-compare-col">
-            <div className="traffic-cal-compare-title">原始统计</div>
-            <div className="traffic-cal-compare-item">上传: {formatTrafficPrecise(rawTx)}</div>
-            <div className="traffic-cal-compare-item">下载: {formatTrafficPrecise(rawRx)}</div>
-          </div>
-          <div className="traffic-cal-compare-col">
-            <div className="traffic-cal-compare-title">校准差额</div>
-            <div className="traffic-cal-compare-item">上传: {formatDiff(diffTxBytes)}</div>
-            <div className="traffic-cal-compare-item">下载: {formatDiff(diffRxBytes)}</div>
-          </div>
-          <div className="traffic-cal-compare-col">
-            <div className="traffic-cal-compare-title">校准后用量</div>
-            <div className="traffic-cal-compare-item">上传: {formatTrafficPrecise(parsedTxBytes)}</div>
-            <div className="traffic-cal-compare-item">下载: {formatTrafficPrecise(parsedRxBytes)}</div>
-          </div>
+          {serverCycleInfo?.cycle_used_bytes !== undefined && (
+            <div className="text-xs text-secondary mt-1 flex justify-between">
+              <span>周期已用流量 (服务端): <b className="mono text-mint">{formatTrafficPrecise(serverCycleInfo.cycle_used_bytes)}</b></span>
+              <span>配额总量: <b className="mono">{formatTrafficPrecise(serverCycleInfo.total_quota_bytes || 0)}</b></span>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSave}>
+          {/* 计费配置区域 */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="traffic-cal-input-label" htmlFor="billing-reset-day">
+                每月重置日 (1-31 日)
+              </label>
+              <input
+                id="billing-reset-day"
+                type="number"
+                min="1"
+                max="31"
+                className="traffic-cal-input"
+                value={resetDay}
+                onChange={(e) => setResetDay(Math.max(1, Math.min(31, parseInt(e.target.value) || 1)))}
+                required
+              />
+            </div>
+            <div>
+              <label className="traffic-cal-input-label" htmlFor="billing-accounting-method">
+                计费统计口径
+              </label>
+              <select
+                id="billing-accounting-method"
+                className="traffic-cal-input"
+                value={accountingMethod}
+                onChange={(e) => setAccountingMethod(e.target.value)}
+              >
+                <option value="total">双向流量取和 (Rx + Tx)</option>
+                <option value="max">单向流量取大 MAX(Rx, Tx)</option>
+                <option value="tx">仅计算出站上传 (Tx Only)</option>
+                <option value="rx">仅计算入站下载 (Rx Only)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="traffic-cal-input-label" htmlFor="billing-quota-gb">
+                流量配额 (GB)
+              </label>
+              <input
+                id="billing-quota-gb"
+                type="number"
+                min="0"
+                step="1"
+                className="traffic-cal-input"
+                value={trafficQuotaGB}
+                onChange={(e) => setTrafficQuotaGB(e.target.value)}
+                placeholder="1000"
+              />
+            </div>
+            <div>
+              <label className="traffic-cal-input-label" htmlFor="billing-bonus-gb">
+                赠送流量 (GB)
+              </label>
+              <input
+                id="billing-bonus-gb"
+                type="number"
+                min="0"
+                step="1"
+                className="traffic-cal-input"
+                value={bonusQuotaGB}
+                onChange={(e) => setBonusQuotaGB(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="traffic-cal-input-label" htmlFor="billing-interfaces">
+                统计网络适配器
+              </label>
+              <select
+                id="billing-interfaces"
+                className="traffic-cal-input"
+                value={includedInterfaces}
+                onChange={(e) => setIncludedInterfaces(e.target.value)}
+              >
+                {availableInterfaces.map((iface) => (
+                  <option key={iface.name} value={iface.name}>
+                    {iface.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <label className="traffic-cal-input-label" htmlFor="billing-merchant">
+              主机服务商 / 商家 (例如 DMIT, 搬瓦工, Hetzner, Oracle)
+            </label>
+            <input
+              id="billing-merchant"
+              type="text"
+              className="traffic-cal-input"
+              value={merchant}
+              onChange={(e) => setMerchant(e.target.value)}
+              placeholder="DMIT / BandwagonHost / Hetzner"
+            />
+          </div>
+
+          {/* 原始统计 / 校准差额 / 校准后用量 */}
+          <div className="traffic-cal-compare-grid">
+            <div className="traffic-cal-compare-col">
+              <div className="traffic-cal-compare-title">当前硬件统计</div>
+              <div className="traffic-cal-compare-item">上传: {formatTrafficPrecise(rawTx)}</div>
+              <div className="traffic-cal-compare-item">下载: {formatTrafficPrecise(rawRx)}</div>
+            </div>
+            <div className="traffic-cal-compare-col">
+              <div className="traffic-cal-compare-title">校准偏移差额</div>
+              <div className="traffic-cal-compare-item">上传: {formatDiff(diffTxBytes)}</div>
+              <div className="traffic-cal-compare-item">下载: {formatDiff(diffRxBytes)}</div>
+            </div>
+            <div className="traffic-cal-compare-col">
+              <div className="traffic-cal-compare-title">校准后用量</div>
+              <div className="traffic-cal-compare-item">上传: {formatTrafficPrecise(parsedTxBytes)}</div>
+              <div className="traffic-cal-compare-item">下载: {formatTrafficPrecise(parsedRxBytes)}</div>
+            </div>
+          </div>
+
           {/* 实际上传用量 & 实际下载用量 */}
           <div className="traffic-cal-inputs-grid">
             <div>
               <label className="traffic-cal-input-label" htmlFor="cal-upload-input">
-                实际上传用量
+                手动校准上传用量
               </label>
               <input
                 id="cal-upload-input"
@@ -230,7 +435,7 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
             </div>
             <div>
               <label className="traffic-cal-input-label" htmlFor="cal-download-input">
-                实际下载用量
+                手动校准下载用量
               </label>
               <input
                 id="cal-download-input"
@@ -248,8 +453,46 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
           <div className="traffic-cal-tip-box">
             <Info size={18} className="traffic-cal-tip-icon" />
             <div className="traffic-cal-tip-text">
-              保存后，仪表盘、流量告警、日报/周报/月报、公共接口和主题将统一使用校准后的数据。后续新增流量会继续累加，到下一个重置日时本周期校准值自动清 0。
+              设置已同步服务端 SQLite 数据库持久保存。服务端定时引擎将在重置日到达时自动为本节点归档并重置周期流量。亦可点击下方按钮立即手动重置。
             </div>
+          </div>
+
+          {/* 手动重置计费周期面板 */}
+          <div className="p-3 mb-3 rounded-lg border border-dashed border-red-500/30 bg-red-500/5 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-red-400">重置当前计费周期</div>
+              <div className="text-xs text-muted">
+                将当前网卡硬件计数器设置为本周期基线，周期已用流量即刻清零重新累加。
+              </div>
+            </div>
+            {showResetConfirm ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="button button-danger btn-sm"
+                  disabled={isResetting}
+                  onClick={handleResetCycle}
+                >
+                  {isResetting ? '正在重置...' : '确认重置'}
+                </button>
+                <button
+                  type="button"
+                  className="button button-quiet btn-sm"
+                  onClick={() => setShowResetConfirm(false)}
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button button-quiet btn-sm text-red-400 hover:text-red-300"
+                onClick={() => setShowResetConfirm(true)}
+              >
+                <ArrowClockwise size={14} className="mr-1" />
+                立即重置周期
+              </button>
+            )}
           </div>
 
           {/* 最近校准记录 */}
@@ -276,8 +519,17 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
             <button type="button" className="traffic-cal-btn-cancel" onClick={onClose}>
               取消
             </button>
-            <button type="submit" className="traffic-cal-btn-save">
-              {saveSuccess ? '已保存' : '保存校准'}
+            <button type="submit" className="traffic-cal-btn-save" disabled={isSaving}>
+              {saveSuccess ? (
+                <>
+                  <Check size={16} className="mr-1" />
+                  已保存
+                </>
+              ) : isSaving ? (
+                '正在保存...'
+              ) : (
+                '保存设置与校准'
+              )}
             </button>
           </div>
         </form>
