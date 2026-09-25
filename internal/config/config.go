@@ -41,6 +41,8 @@ type Config struct {
 	TelegramBotToken       string
 	TelegramChatID         string
 	WebhookURL             string
+	EnableRemoteTerminal   bool
+	EnableTerminal         bool
 }
 
 const DefaultDevelopmentTokenPepper = "development-only-probewatch-token-pepper"
@@ -116,6 +118,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AllowNonLoopbackListen, err = boolValue(lookup, "PROBEWATCH_ALLOW_NON_LOOPBACK_LISTEN", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", true)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", true)
 	if err != nil {
 		return Config{}, err
 	}

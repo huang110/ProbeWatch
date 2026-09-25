@@ -1,6 +1,6 @@
 #!/bin/sh
 # ==============================================================================
-# ProbeWatch Linux / OpenWrt / Alpine 一键安装与服务配置脚本 (v0.5.8)
+# ProbeWatch Linux / OpenWrt / Alpine 一键安装与服务配置脚本 (v0.5.9)
 # 支持环境:
 #   - Linux (systemd: Debian, Ubuntu, CentOS, Rocky, Arch, Fedora)
 #   - OpenWrt / iStoreOS / ImmortalWrt (procd: x86_64, aarch64, arm, mips, mipsle)

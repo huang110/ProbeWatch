@@ -15,6 +15,7 @@ import (
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/deploy"
 	"github.com/probewatch/probewatch/internal/notify"
+	"github.com/probewatch/probewatch/internal/terminal"
 )
 
 type Server struct {
@@ -28,6 +29,7 @@ type Server struct {
 	publicLimiter *rateLimiter
 	loginLimiter  *rateLimiter
 	totpLimiter   *rateLimiter
+	terminalManager *terminal.Manager
 	publicCacheMu sync.RWMutex
 	publicCacheAt time.Time
 	publicCache    publicStatusResponse
@@ -51,6 +53,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		publicLimiter: newRateLimiter(60, time.Minute, 10000),
 		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
+		terminalManager: terminal.NewManager(),
 	}
 }
 
@@ -140,6 +143,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/mcp", s.mcpHandler)
 
 	// Deployment script endpoints
+	
+	// Terminal & Remote Execution endpoints
+	mux.HandleFunc("/api/agent/v1/terminal/tunnel", s.agentTerminalTunnel)
+	mux.Handle("/api/admin/terminal/status", middleware.RequireAuth(http.HandlerFunc(s.terminalStatus)))
+	mux.Handle("/api/admin/terminal/exec", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.terminalExec))))
+	mux.HandleFunc("/api/admin/terminal/ws", s.terminalWS)
 	mux.HandleFunc("/deploy/install.sh", s.installScriptHandler)
 	mux.HandleFunc("/install.sh", s.installScriptHandler)
 

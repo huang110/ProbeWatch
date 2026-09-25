@@ -17,6 +17,7 @@ import { TrafficReportView } from './components/TrafficReportView.jsx'
 import { AlertCenterView } from './components/AlertCenterView.jsx'
 import { LogsView } from './components/LogsView.jsx'
 import { AICopilotView } from './components/AICopilotView.jsx'
+import TerminalView from './components/TerminalView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
   GlobeHemisphereWest,
@@ -30,11 +31,13 @@ import {
   ChartBar,
   Scroll,
   Sparkle,
+  Terminal,
 } from '@phosphor-icons/react'
 
 const navItems = [
   { id: 'overview', label: '仪表盘', icon: SquaresFour },
   { id: 'servers', label: '服务器管理', icon: GlobeHemisphereWest },
+  { id: 'terminal', label: '远程终端', icon: Terminal },
   { id: 'ai-copilot', label: 'AI 诊断 & MCP', icon: Sparkle },
   { id: 'billing', label: '成本中心', icon: Coins },
   {
@@ -72,6 +75,7 @@ const pageTitleFor = (page) =>
         dashboard: '仪表盘',
         servers: '服务器管理',
         nodes: '服务器管理',
+        terminal: '远程终端',
         'ai-copilot': 'AI 智能诊断 & MCP',
         billing: '成本中心',
         monitoring: '延迟监测',
@@ -1169,6 +1173,7 @@ export function App() {
             onTrafficPeriodChange={setTrafficPeriod}
             onBack={() => navigate('servers')}
             rates={rates}
+            onNavigate={navigate}
           />
         ) : activeNav === 'servers' || activeNav === 'nodes' ? (
           <ServerManageView
@@ -1177,6 +1182,8 @@ export function App() {
             lossRates={lossRates}
             onSelectNode={setSelectedNode}
           />
+        ) : activeNav === 'terminal' ? (
+          <TerminalView initialNodeId={selectedNode?.id || selectedNode?.uuid} />
         ) : activeNav === 'ai-copilot' ? (
           <AICopilotView
             nodes={data}

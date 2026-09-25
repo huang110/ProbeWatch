@@ -886,6 +886,16 @@ func (s *Store) ListNodes(ctx context.Context) ([]Node, error) {
 	return nodes, nil
 }
 
+// GetNodeByID returns an active node by its internal ID.
+func (s *Store) GetNodeByID(ctx context.Context, id string) (Node, error) {
+	var node Node
+	err := s.db.QueryRowContext(ctx, "SELECT id, uuid, name FROM nodes WHERE id = ? AND deleted_at IS NULL", id).Scan(&node.ID, &node.UUID, &node.Name)
+	if err != nil {
+		return Node{}, err
+	}
+	return node, nil
+}
+
 func (s *Store) GetNodeByUUID(ctx context.Context, uuid string) (Node, error) {
 	var node Node
 	err := s.db.QueryRowContext(ctx, `SELECT id, uuid, name FROM nodes WHERE uuid = ? AND deleted_at IS NULL`, uuid).Scan(&node.ID, &node.UUID, &node.Name)
@@ -2294,6 +2304,23 @@ func (s *Store) CleanupExpiredReplays(ctx context.Context, now time.Time) (int64
 		return 0, fmt.Errorf("commit replay cleanup: %w", err)
 	}
 	return deleted, nil
+}
+
+// RecordAudit inserts an audit event into audit_events.
+func (s *Store) RecordAudit(ctx context.Context, action, nodeID, actorID string, metadata []byte) error {
+	id, err := randomID()
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, "INSERT INTO audit_events (id, action, node_id, actor_id, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, action, nodeID, actorID, metadata, unixNano(time.Now()))
+	return err
+}
+
+// CountAuditEvents returns the count of audit events for an action and nodeID.
+func (s *Store) CountAuditEvents(ctx context.Context, action, nodeID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM audit_events WHERE action = ? AND node_id = ?", action, nodeID).Scan(&count)
+	return count, err
 }
 
 func insertAudit(ctx context.Context, tx *sql.Tx, action, nodeID, actorID string, now time.Time) error {

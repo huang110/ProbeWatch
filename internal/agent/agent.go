@@ -18,6 +18,7 @@ import (
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/monitor"
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/terminal"
 )
 
 const (
@@ -97,6 +98,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("initial config refresh: %w", err)
 	}
 	VerifyAndClearPendingUpgrade(r.cfg.AgentDataDir)
+
+	if r.cfg.EnableTerminal {
+		termClient := terminal.NewClient(r.cfg.AgentEndpoint, r.cfg.AgentNodeUUID, r.cfg.AgentNodeToken)
+		go termClient.Run(ctx)
+	}
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

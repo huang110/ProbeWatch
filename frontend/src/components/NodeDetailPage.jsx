@@ -28,6 +28,7 @@ import {
   CircleNotch,
   FlowArrow,
   Lightning,
+  Terminal,
 } from '@phosphor-icons/react'
 import {
   formatBytes,
@@ -259,6 +260,7 @@ export function NodeDetailPage({
   onTrafficPeriodChange,
   onBack,
   rates = {},
+  onNavigate,
 }) {
   const [copied, setCopied] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
@@ -899,6 +901,18 @@ export function NodeDetailPage({
         </div>
 
         <div className="komari-nav-right">
+          {/* 打开远程终端 */}
+          {onNavigate && (
+            <button
+              type="button"
+              className="komari-icon-btn text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+              onClick={() => onNavigate('terminal')}
+              title="打开该节点的远程终端与受控执行"
+            >
+              <Terminal size={16} />
+            </button>
+          )}
+
           {/* 收藏星标 */}
           <button
             type="button"

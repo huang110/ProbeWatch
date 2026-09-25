@@ -545,7 +545,7 @@ func mustNode(t *testing.T, store *db.Store, uuid string) db.Node {
 }
 
 func task4Config() config.Config {
-	return config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", MaxRequestBody: 1 << 20, AgentClockSkew: 5 * time.Minute}
+	return config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", MaxRequestBody: 1 << 20, AgentClockSkew: 5 * time.Minute, EnableRemoteTerminal: true, EnableTerminal: true}
 }
 
 func newTask4Auth(t *testing.T) (*auth.Service, *db.Store) {

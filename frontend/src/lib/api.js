@@ -387,5 +387,27 @@ export async function fetchMCPConfig() {
   return await res.json()
 }
 
+export async function fetchTerminalStatus() {
+  const res = await fetch('/api/admin/terminal/status', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch terminal status')
+  return await res.json()
+}
+
+export async function execTerminalCommand({ nodeId, command, timeoutSec = 30 }) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/admin/terminal/exec', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify({ node_id: nodeId, command, timeout_sec: timeoutSec }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to execute command')
+  }
+  return await res.json()
+}
+
+
 
 
