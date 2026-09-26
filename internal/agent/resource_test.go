@@ -3,6 +3,8 @@ package agent
 import (
 	"math"
 	"testing"
+
+	"github.com/probewatch/probewatch/internal/protocol"
 )
 
 func TestParseMemInfo(t *testing.T) {
@@ -68,10 +70,38 @@ func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
 }
 
 func TestCollectResourceKeepsStartedAt(t *testing.T) {
-	first := collectResourceWith(1234, nil, nil, nil)
-	second := collectResourceWith(1234, nil, nil, nil)
+	first := collectResourceWith(1234, nil, nil, nil, nil)
+	second := collectResourceWith(1234, nil, nil, nil, nil)
 	if first.StartedAt != 1234 || second.StartedAt != 1234 {
 		t.Fatalf("started_at = %d, %d", first.StartedAt, second.StartedAt)
+	}
+}
+
+type mockSocketCollector struct {
+	stats *protocol.SocketStats
+	ports []protocol.ListeningPort
+}
+
+func (m *mockSocketCollector) Collect() (*protocol.SocketStats, []protocol.ListeningPort, error) {
+	return m.stats, m.ports, nil
+}
+
+func TestCollectResourceWithSockets(t *testing.T) {
+	mock := &mockSocketCollector{
+		stats: &protocol.SocketStats{
+			TCPEstablished: 10,
+			TCPListen:      5,
+		},
+		ports: []protocol.ListeningPort{
+			{Proto: "tcp", Port: 80, BindIP: "0.0.0.0", Process: "nginx", PID: 123, IsPublic: true},
+		},
+	}
+	snap := collectResourceWith(1234, nil, nil, nil, mock)
+	if snap.SocketStats == nil || snap.SocketStats.TCPEstablished != 10 {
+		t.Fatalf("expected TCPEstablished = 10, got %v", snap.SocketStats)
+	}
+	if len(snap.ListeningPorts) != 1 || snap.ListeningPorts[0].Port != 80 {
+		t.Fatalf("expected 1 port with port 80, got %v", snap.ListeningPorts)
 	}
 }
 

@@ -760,5 +760,78 @@ func TestLogQueryRequestValidate(t *testing.T) {
 	}
 }
 
+func TestResourceSnapshotSocketStatsAndListeningPorts(t *testing.T) {
+	valid := ResourceSnapshot{
+		OS:       "linux",
+		Hostname: "test-node",
+		SocketStats: &SocketStats{
+			TCPEstablished: 24,
+			TCPTimeWait:    8,
+			TCPCloseWait:   1,
+			TCPListen:      12,
+			TCPTotal:       45,
+			UDPTotal:       6,
+		},
+		ListeningPorts: []ListeningPort{
+			{
+				Proto:    "tcp",
+				Port:     80,
+				BindIP:   "0.0.0.0",
+				Process:  "nginx",
+				PID:      1024,
+				IsPublic: true,
+			},
+			{
+				Proto:    "tcp",
+				Port:     8080,
+				BindIP:   "127.0.0.1",
+				Process:  "probewatch",
+				PID:      2048,
+				IsPublic: false,
+			},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid snapshot rejected: %v", err)
+	}
+
+	// Invalid port below minimum
+	invalidPortLow := valid
+	invalidPortLow.ListeningPorts = []ListeningPort{
+		{Proto: "tcp", Port: 0, BindIP: "0.0.0.0"},
+	}
+	if err := invalidPortLow.Validate(); err == nil {
+		t.Fatal("expected error on port 0")
+	}
+
+	// Invalid port above maximum
+	invalidPortHigh := valid
+	invalidPortHigh.ListeningPorts = []ListeningPort{
+		{Proto: "tcp", Port: 65536, BindIP: "0.0.0.0"},
+	}
+	if err := invalidPortHigh.Validate(); err == nil {
+		t.Fatal("expected error on port 65536")
+	}
+
+	// Invalid proto empty
+	invalidProto := valid
+	invalidProto.ListeningPorts = []ListeningPort{
+		{Proto: "", Port: 80, BindIP: "0.0.0.0"},
+	}
+	if err := invalidProto.Validate(); err == nil {
+		t.Fatal("expected error on empty proto")
+	}
+
+	// Oversized ports list
+	oversizedPorts := valid
+	oversizedPorts.ListeningPorts = make([]ListeningPort, 129)
+	for i := range oversizedPorts.ListeningPorts {
+		oversizedPorts.ListeningPorts[i] = ListeningPort{Proto: "tcp", Port: 80}
+	}
+	if err := oversizedPorts.Validate(); err == nil {
+		t.Fatal("expected error on > 128 listening ports")
+	}
+}
+
 
 

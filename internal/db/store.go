@@ -1922,11 +1922,12 @@ func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID 
 		Load15               float64              `json:"load15"`
 		MemoryTotalBytes     uint64               `json:"memory_total_bytes"`
 		MemoryUsedBytes      uint64               `json:"memory_used_bytes"`
-		FilesystemTotalBytes uint64               `json:"filesystem_total_bytes"`
-		FilesystemUsedBytes  uint64               `json:"filesystem_used_bytes"`
-		CPUTempC             float64              `json:"cpu_temp_c"`
-		Disks                []protocol.DiskStat  `json:"disks"`
-		Mounts               []protocol.MountStat `json:"mounts"`
+		FilesystemTotalBytes uint64                `json:"filesystem_total_bytes"`
+		FilesystemUsedBytes  uint64                `json:"filesystem_used_bytes"`
+		CPUTempC             float64               `json:"cpu_temp_c"`
+		Disks                []protocol.DiskStat   `json:"disks"`
+		Mounts               []protocol.MountStat  `json:"mounts"`
+		SocketStats          *protocol.SocketStats `json:"socket_stats"`
 	}
 	if err := json.Unmarshal(payload, &r); err != nil {
 		return err
@@ -1968,6 +1969,14 @@ func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID 
 			}
 		}
 		metrics["inodes_percent"] = maxInodePercent
+	}
+	if r.SocketStats != nil {
+		metrics["tcp_established"] = float64(r.SocketStats.TCPEstablished)
+		metrics["tcp_time_wait"] = float64(r.SocketStats.TCPTimeWait)
+		metrics["tcp_close_wait"] = float64(r.SocketStats.TCPCloseWait)
+		metrics["tcp_listen"] = float64(r.SocketStats.TCPListen)
+		metrics["tcp_total"] = float64(r.SocketStats.TCPTotal)
+		metrics["udp_total"] = float64(r.SocketStats.UDPTotal)
 	}
 
 	// Compute traffic_percent if billing settings are configured

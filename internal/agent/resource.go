@@ -16,10 +16,10 @@ import (
 )
 
 func collectResource() protocol.ResourceSnapshot {
-	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker())
+	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector())
 }
 
-func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker) protocol.ResourceSnapshot {
+func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
@@ -49,6 +49,14 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 	if disk != nil {
 		if diskStats := disk.Sample(); len(diskStats) > 0 {
 			resource.Disks = diskStats
+		}
+	}
+	if sock != nil {
+		if socketStats, ports, err := sock.Collect(); err == nil {
+			resource.SocketStats = socketStats
+			if len(ports) > 0 {
+				resource.ListeningPorts = ports
+			}
 		}
 	}
 	if runtime.GOOS != "linux" {

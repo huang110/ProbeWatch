@@ -216,6 +216,8 @@ export const normalizeNode = (node) => {
     sensors: Array.isArray(resource.sensors) ? resource.sensors : [],
     disks: Array.isArray(resource.disks) ? resource.disks : [],
     mounts: Array.isArray(resource.mounts) ? resource.mounts : [],
+    socketStats: safeObject(resource.socket_stats),
+    listeningPorts: Array.isArray(resource.listening_ports) ? resource.listening_ports : [],
     flag: meta.flag,
     region: meta.region,
     tag: meta.tag,

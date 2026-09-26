@@ -409,4 +409,67 @@ func TestEvaluateHardwareAlertRules(t *testing.T) {
 	}
 }
 
+func TestEvaluateResourceAlertTxSocketStats(t *testing.T) {
+	ctx := context.Background()
+	store := newTestAlertsStore(t)
+	defer store.Close()
+
+	nodeID := "node-sock-test"
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES (?, '550e8400-e29b-41d4-a716-446655440088', 'Socket Test Node', 'online', 1, 1)`, nodeID); err != nil {
+		t.Fatalf("insert test node: %v", err)
+	}
+	now := time.Now().UTC()
+
+	// Create rule for high established TCP connections
+	rule := AlertRule{
+		ID:              "rule-tcp-est",
+		Name:            "High Established TCP Sockets",
+		Metric:          "tcp_established",
+		Operator:        ">",
+		Threshold:       100,
+		DurationSeconds: 0,
+		Severity:        "warning",
+		NodeFilter:      "*",
+		Enabled:         true,
+	}
+	if err := store.CreateAlertRule(ctx, rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	// Normal payload
+	normalPayload := []byte(`{"socket_stats":{"tcp_established": 25, "tcp_time_wait": 10}}`)
+	tx1, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx1, nodeID, normalPayload, now); err != nil {
+		t.Fatalf("eval normal: %v", err)
+	}
+	_ = tx1.Commit()
+
+	openAlerts, _ := store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected 0 open alerts, got %d", len(openAlerts))
+	}
+
+	// Breach payload
+	breachPayload := []byte(`{"socket_stats":{"tcp_established": 145, "tcp_time_wait": 20}}`)
+	tx2, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx2, nodeID, breachPayload, now); err != nil {
+		t.Fatalf("eval breach: %v", err)
+	}
+	_ = tx2.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 1 {
+		t.Fatalf("expected 1 open alert, got %d", len(openAlerts))
+	}
+	if openAlerts[0].TargetID != "tcp_established" {
+		t.Fatalf("expected alert for tcp_established, got %s", openAlerts[0].TargetID)
+	}
+}
+
 

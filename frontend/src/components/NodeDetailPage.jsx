@@ -30,6 +30,11 @@ import {
   Terminal,
   Thermometer,
   Database,
+  Plug,
+  ArrowSquareOut,
+  MagnifyingGlass,
+  ShieldCheck,
+  ShieldWarning,
 } from '@phosphor-icons/react'
 import {
   formatBytes,
@@ -407,6 +412,44 @@ export function NodeDetailPage({
   const sensors = Array.isArray(resource.sensors) ? resource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
   const disks = Array.isArray(resource.disks) ? resource.disks : (Array.isArray(node?.disks) ? node.disks : [])
   const mounts = Array.isArray(resource.mounts) ? resource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
+  const socketStats = resource.socket_stats || node?.socketStats || node?.socket_stats || {}
+  const listeningPorts = Array.isArray(resource.listening_ports) ? resource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
+
+  const [portFilter, setPortFilter] = useState('all')
+  const [portSearch, setPortSearch] = useState('')
+
+  const filteredPorts = useMemo(() => {
+    let list = listeningPorts
+    if (portFilter === 'public') {
+      list = list.filter((p) => p.is_public)
+    } else if (portFilter === 'local') {
+      list = list.filter((p) => !p.is_public)
+    }
+    if (portSearch.trim()) {
+      const q = portSearch.trim().toLowerCase()
+      list = list.filter((p) =>
+        String(p.port).includes(q) ||
+        (p.proto && p.proto.toLowerCase().includes(q)) ||
+        (p.process && p.process.toLowerCase().includes(q)) ||
+        (p.bind_ip && p.bind_ip.toLowerCase().includes(q))
+      )
+    }
+    return list
+  }, [listeningPorts, portFilter, portSearch])
+
+  const tcpTotal = numeric(socketStats.tcp_total) || 0
+  const tcpEstablished = numeric(socketStats.tcp_established) || 0
+  const tcpListen = numeric(socketStats.tcp_listen) || 0
+  const tcpTimeWait = numeric(socketStats.tcp_time_wait) || 0
+  const tcpCloseWait = numeric(socketStats.tcp_close_wait) || 0
+  const udpTotal = numeric(socketStats.udp_total) || 0
+  const sumSockets = tcpEstablished + tcpListen + tcpTimeWait + tcpCloseWait + udpTotal || (tcpTotal + udpTotal) || 0
+
+  const estPct = sumSockets > 0 ? (tcpEstablished / sumSockets) * 100 : 0
+  const listenPct = sumSockets > 0 ? (tcpListen / sumSockets) * 100 : 0
+  const twPct = sumSockets > 0 ? (tcpTimeWait / sumSockets) * 100 : 0
+  const cwPct = sumSockets > 0 ? (tcpCloseWait / sumSockets) * 100 : 0
+  const udpPct = sumSockets > 0 ? (udpTotal / sumSockets) * 100 : 0
 
   const totalDiskReadRate = disks.reduce((sum, d) => sum + (numeric(d.read_bytes_per_sec) || 0), 0)
   const totalDiskWriteRate = disks.reduce((sum, d) => sum + (numeric(d.write_bytes_per_sec) || 0), 0)
@@ -1469,6 +1512,287 @@ export function NodeDetailPage({
           </div>
         </div>
       )}
+
+      {/* 网络套接字状态与本地服务监听端口 (Network Sockets & Open Ports) */}
+      <div className="komari-info-card" style={{ marginBottom: '16px' }}>
+        <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Plug size={16} className="text-cyan" />
+            <h3 style={{ margin: 0 }}>网络连接栈与服务监听端口全景透视</h3>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+              活跃通信 {socketStats.tcp_established ?? 0}
+            </span>
+            <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+              开放监听 {listeningPorts.length}
+            </span>
+            <span className="mono text-xs text-muted">内核 /proc/net 实时解析</span>
+          </div>
+        </div>
+
+        {/* 顶部：套接字状态细分分布条 */}
+        <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #cbd5e1)' }}>TCP/UDP 网络套接字状态分布</span>
+            <span className="mono text-xs text-muted">
+              总计 {(socketStats.tcp_total ?? 0) + (socketStats.udp_total ?? 0)} 套接字 (TCP {socketStats.tcp_total ?? 0} · UDP {socketStats.udp_total ?? 0})
+            </span>
+          </div>
+
+          {/* 分段进度条 */}
+          <div style={{ height: '8px', width: '100%', borderRadius: '9999px', background: 'rgba(255, 255, 255, 0.06)', display: 'flex', overflow: 'hidden', marginBottom: '10px' }}>
+            {estPct > 0 && <div title={`已建立通信 (ESTABLISHED): ${socketStats.tcp_established}`} style={{ width: `${estPct}%`, background: '#10b981', transition: 'width 0.3s' }} />}
+            {listenPct > 0 && <div title={`监听中 (LISTEN): ${socketStats.tcp_listen}`} style={{ width: `${listenPct}%`, background: '#06b6d4', transition: 'width 0.3s' }} />}
+            {twPct > 0 && <div title={`等待回收 (TIME_WAIT): ${socketStats.tcp_time_wait}`} style={{ width: `${twPct}%`, background: '#f59e0b', transition: 'width 0.3s' }} />}
+            {cwPct > 0 && <div title={`被动关闭 (CLOSE_WAIT): ${socketStats.tcp_close_wait}`} style={{ width: `${cwPct}%`, background: '#f43f5e', transition: 'width 0.3s' }} />}
+            {udpPct > 0 && <div title={`UDP 报文端点: ${socketStats.udp_total}`} style={{ width: `${udpPct}%`, background: '#a855f7', transition: 'width 0.3s' }} />}
+          </div>
+
+          {/* 图例项 */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '11px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#10b981' }} />
+              <span className="text-muted">已建立通信 (ESTABLISHED):</span>
+              <strong className="mono" style={{ color: '#10b981' }}>{socketStats.tcp_established ?? 0}</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#06b6d4' }} />
+              <span className="text-muted">服务监听 (LISTEN):</span>
+              <strong className="mono" style={{ color: '#06b6d4' }}>{socketStats.tcp_listen ?? 0}</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#f59e0b' }} />
+              <span className="text-muted">等待回收 (TIME_WAIT):</span>
+              <strong className="mono" style={{ color: '#f59e0b' }}>{socketStats.tcp_time_wait ?? 0}</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#f43f5e' }} />
+              <span className="text-muted">被动关闭 (CLOSE_WAIT):</span>
+              <strong className="mono" style={{ color: '#f43f5e' }}>{socketStats.tcp_close_wait ?? 0}</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#a855f7' }} />
+              <span className="text-muted">UDP 套接字:</span>
+              <strong className="mono" style={{ color: '#a855f7' }}>{socketStats.udp_total ?? 0}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* 下部：服务端口监听目录与搜索过滤 */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                className={`tab-chip ${portFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setPortFilter('all')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                全部端口 ({listeningPorts.length})
+              </button>
+              <button
+                type="button"
+                className={`tab-chip ${portFilter === 'public' ? 'active' : ''}`}
+                onClick={() => setPortFilter('public')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                仅公网暴露 ({listeningPorts.filter((p) => p.is_public).length})
+              </button>
+              <button
+                type="button"
+                className={`tab-chip ${portFilter === 'local' ? 'active' : ''}`}
+                onClick={() => setPortFilter('local')}
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+              >
+                回环/局域网 ({listeningPorts.filter((p) => !p.is_public).length})
+              </button>
+            </div>
+            <div style={{ position: 'relative', minWidth: '180px' }}>
+              <MagnifyingGlass size={13} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="搜索端口、协议、进程..."
+                value={portSearch}
+                onChange={(e) => setPortSearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '4px 8px 4px 26px',
+                  fontSize: '11px',
+                  borderRadius: '6px',
+                  background: 'var(--bg-subtle, rgba(255, 255, 255, 0.04))',
+                  border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.1))',
+                  color: 'var(--text-main, #f8fafc)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+          </div>
+
+          {filteredPorts.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '12px' }}>
+              未检索到符合条件的本地监听端口
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))', color: 'var(--text-muted)', fontSize: '11px' }}>
+                    <th style={{ padding: '8px 10px' }}>协议</th>
+                    <th style={{ padding: '8px 10px' }}>端口</th>
+                    <th style={{ padding: '8px 10px' }}>绑定地址</th>
+                    <th style={{ padding: '8px 10px' }}>安全暴露级别</th>
+                    <th style={{ padding: '8px 10px' }}>进程 / PID</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>快捷操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPorts.map((p, idx) => {
+                    const isTcp = p.proto.startsWith('tcp')
+                    const isWeb = [80, 443, 8080, 8443, 3000, 5000, 9000].includes(p.port)
+                    const protoColor = isTcp ? '#06b6d4' : '#a855f7'
+                    const copyAddr = `${p.bind_ip === '0.0.0.0' || p.bind_ip === '::' ? (nodeIPv4 || 'localhost') : p.bind_ip}:${p.port}`
+                    return (
+                      <tr
+                        key={idx}
+                        style={{
+                          borderBottom: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.04))',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <td style={{ padding: '8px 10px' }}>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: `${protoColor}20`,
+                              color: protoColor,
+                              border: `1px solid ${protoColor}40`,
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {p.proto}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          <span className="mono" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main, #f8fafc)' }}>
+                            :{p.port}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          <span className="mono" style={{ fontSize: '12px', color: 'var(--text-secondary, #cbd5e1)' }}>
+                            {p.bind_ip}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          {p.is_public ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '10px',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                background: 'rgba(245, 158, 11, 0.12)',
+                                color: '#f59e0b',
+                                border: '1px solid rgba(245, 158, 11, 0.25)',
+                              }}
+                            >
+                              <ShieldWarning size={12} />
+                              公网全向监听
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '10px',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                background: 'rgba(16, 185, 129, 0.1)',
+                                color: '#10b981',
+                                border: '1px solid rgba(16, 185, 129, 0.2)',
+                              }}
+                            >
+                              <ShieldCheck size={12} />
+                              本地回环 / 内网
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          {p.process && p.process !== '-' ? (
+                            <span className="mono" style={{ fontSize: '11px', color: 'var(--text-main, #e2e8f0)', background: 'rgba(255, 255, 255, 0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {p.process} {p.pid ? `(PID ${p.pid})` : ''}
+                            </span>
+                          ) : (
+                            <span className="mono text-muted" style={{ fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              type="button"
+                              title="复制连接地址"
+                              onClick={() => {
+                                if (navigator?.clipboard?.writeText) {
+                                  navigator.clipboard.writeText(copyAddr)
+                                }
+                              }}
+                              style={{
+                                padding: '3px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                color: 'var(--text-muted)',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                fontSize: '10px',
+                              }}
+                            >
+                              <Copy size={11} /> 复制
+                            </button>
+                            {isWeb && (
+                              <a
+                                href={`${p.port === 443 || p.port === 8443 ? 'https' : 'http'}://${nodeIPv4 || 'localhost'}:${p.port}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="打开 Web 端口"
+                                style={{
+                                  padding: '3px 6px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(2, 132, 199, 0.1)',
+                                  border: '1px solid rgba(2, 132, 199, 0.25)',
+                                  color: 'var(--primary, #0284c7)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '10px',
+                                  textDecoration: 'none',
+                                }}
+                              >
+                                <ArrowSquareOut size={11} /> 访问
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* 全球流媒体与 AI 服务解锁能力卡片 */}
       <div className="komari-info-card komari-media-card" style={{ marginBottom: '16px' }}>

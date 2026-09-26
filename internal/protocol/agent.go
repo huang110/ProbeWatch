@@ -254,6 +254,26 @@ type MountStat struct {
 	InodesPercent float64 `json:"inodes_percent,omitempty"` // inode used percentage
 }
 
+// SocketStats represents system-wide network socket connection counts by state.
+type SocketStats struct {
+	TCPEstablished int `json:"tcp_established"`
+	TCPTimeWait    int `json:"tcp_time_wait"`
+	TCPCloseWait   int `json:"tcp_close_wait"`
+	TCPListen      int `json:"tcp_listen"`
+	TCPTotal       int `json:"tcp_total"`
+	UDPTotal       int `json:"udp_total"`
+}
+
+// ListeningPort represents a discovered local listening network socket/port.
+type ListeningPort struct {
+	Proto    string `json:"proto"`     // "tcp", "tcp6", "udp", "udp6"
+	Port     int    `json:"port"`      // e.g. 22, 80, 443
+	BindIP   string `json:"bind_ip"`   // "0.0.0.0", "127.0.0.1", "::", etc.
+	Process  string `json:"process"`   // process name, e.g. "sshd", "probewatch"
+	PID      int    `json:"pid"`       // process ID
+	IsPublic bool   `json:"is_public"` // true if listening on 0.0.0.0 or :: or non-loopback
+}
+
 // ResourceSnapshot contains the bounded resource and identity data an agent reports.
 type ResourceSnapshot struct {
 	CPUPercent           float64         `json:"cpu_percent,omitempty"`
@@ -290,6 +310,9 @@ type ResourceSnapshot struct {
 	Sensors  []SensorInfo `json:"sensors,omitempty"`
 	Disks    []DiskStat   `json:"disks,omitempty"`
 	Mounts   []MountStat  `json:"mounts,omitempty"`
+	// Network Socket Diagnostics & Open Ports (v0.8.7)
+	SocketStats    *SocketStats    `json:"socket_stats,omitempty"`
+	ListeningPorts []ListeningPort `json:"listening_ports,omitempty"`
 }
 
 // CheckTask is the only task shape an agent accepts from the control plane.
@@ -733,6 +756,23 @@ func (r ResourceSnapshot) Validate() error {
 	}
 	if len(r.Mounts) > 64 {
 		return errors.New("mounts count exceeds 64")
+	}
+	if len(r.ListeningPorts) > 128 {
+		return errors.New("listening_ports count exceeds 128")
+	}
+	for i, lp := range r.ListeningPorts {
+		if err := validateString(fmt.Sprintf("listening_ports[%d].proto", i), lp.Proto, 16, true); err != nil {
+			return err
+		}
+		if lp.Port < 1 || lp.Port > 65535 {
+			return fmt.Errorf("listening_ports[%d].port must be between 1 and 65535", i)
+		}
+		if err := validateString(fmt.Sprintf("listening_ports[%d].bind_ip", i), lp.BindIP, maxHostLength, false); err != nil {
+			return err
+		}
+		if err := validateString(fmt.Sprintf("listening_ports[%d].process", i), lp.Process, 64, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
