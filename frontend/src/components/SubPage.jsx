@@ -150,19 +150,58 @@ export function SubPage({
       ) : page === 'targets' ? (
         <TargetManage />
       ) : page === 'settings' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <StatusPageAdminCard nodes={data} />
-          <UserManagementCard currentUser={currentUser} nodes={data} />
-          <TokenManagementCard currentUser={currentUser} nodes={data} />
-          <AuditLogView />
-          <PasskeySettingsCard />
-          <TOTPSettingsCard
-            interval={refreshInterval}
-            onIntervalChange={onIntervalChange}
-            theme={theme}
-            onThemeChange={onThemeChange}
-          />
-          <BackupManagementCard />
+        <div className="settings-layout">
+          <div className="settings-section-heading">
+            <span className="settings-section-kicker">PUBLIC STATUS</span>
+            <div>
+              <h2>状态页与事件</h2>
+              <p>管理公开状态页的品牌、监测组件与服务事件。</p>
+            </div>
+          </div>
+          <div className="settings-grid settings-grid-wide">
+            <div className="settings-card-span"><StatusPageAdminCard nodes={data} /></div>
+          </div>
+
+          <div className="settings-section-heading">
+            <span className="settings-section-kicker">ACCESS CONTROL</span>
+            <div>
+              <h2>团队与开发者访问</h2>
+              <p>集中管理团队成员、角色权限与 API 自动化访问凭证。</p>
+            </div>
+          </div>
+          <div className="settings-grid">
+            <UserManagementCard currentUser={currentUser} nodes={data} />
+            <TokenManagementCard currentUser={currentUser} nodes={data} />
+          </div>
+
+          <div className="settings-section-heading">
+            <span className="settings-section-kicker">SECURITY</span>
+            <div>
+              <h2>账号安全与偏好</h2>
+              <p>配置 Passkey、TOTP、轮询周期和控制台主题。</p>
+            </div>
+          </div>
+          <div className="settings-grid">
+            <PasskeySettingsCard />
+            <TOTPSettingsCard
+              interval={refreshInterval}
+              onIntervalChange={onIntervalChange}
+              theme={theme}
+              onThemeChange={onThemeChange}
+            />
+          </div>
+
+          <div className="settings-section-heading">
+            <span className="settings-section-kicker">DATA & AUDIT</span>
+            <div>
+              <h2>数据备份与安全审计</h2>
+              <p>查看管理操作流水，执行本地快照和异地备份。</p>
+            </div>
+          </div>
+          <div className="settings-grid settings-grid-wide">
+            <AuditLogView />
+            <div className="settings-card-span"><BackupManagementCard /></div>
+          </div>
         </div>
       ) : page === 'status-admin' || page === 'incidents' ? (
         <StatusPageAdminCard nodes={data} />
