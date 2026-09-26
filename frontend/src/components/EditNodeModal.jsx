@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CaretDown, Check, Info, X } from '@phosphor-icons/react'
 import { getNodeCustomMeta, saveNodeCustomMeta } from '../lib/billing.js'
+import { updateNode } from '../lib/api.js'
 import { safeText } from '../lib/format.js'
 
 const TIMEZONES = [
@@ -73,6 +74,12 @@ export function EditNodeModal({ node, onClose, onSaved }) {
     }
 
     saveNodeCustomMeta(nodeId, payload)
+    updateNode(nodeId, {
+      name: payload.customName,
+      tags: payload.tags,
+    }).catch((err) => {
+      console.warn('Sync node metadata to backend skipped or failed:', err)
+    })
     setSaveSuccess(true)
     setTimeout(() => {
       if (onSaved) onSaved(payload)

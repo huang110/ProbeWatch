@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
@@ -27,6 +28,8 @@ type agentTargetPayload struct {
 	Keyword         string                `json:"keyword,omitempty"`
 	Nameserver      string                `json:"nameserver,omitempty"`
 	CheckTLS        bool                  `json:"check_tls,omitempty"`
+	NodeTags        []string              `json:"node_tags,omitempty"`
+	NodeIDs         []string              `json:"node_ids,omitempty"`
 }
 
 // agentConfig serves the agent's read-only check configuration. It exposes only
@@ -36,7 +39,8 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if _, _, _, ok := s.authenticateAgentRequest(w, r); !ok {
+	node, _, _, ok := s.authenticateAgentRequest(w, r)
+	if !ok {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -51,10 +55,13 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			if !target.Enabled {
 				continue
 			}
-			task, err := targetToCheckTask(target)
+			task, matches, err := targetToCheckTaskForNode(target, node)
 			if err != nil {
 				writeJSONError(w, http.StatusServiceUnavailable, "configuration unavailable")
 				return
+			}
+			if !matches {
+				continue
 			}
 			tasks = append(tasks, task)
 		}
@@ -66,11 +73,75 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func targetToCheckTaskForNode(target db.TargetRecord, node db.Node) (protocol.CheckTask, bool, error) {
+	var config agentTargetPayload
+	if err := json.Unmarshal(target.Payload, &config); err != nil {
+		return protocol.CheckTask{}, false, err
+	}
+	if !nodeMatchesTarget(node, config) {
+		return protocol.CheckTask{}, false, nil
+	}
+	task, err := payloadToCheckTask(target, config)
+	return task, true, err
+}
+
+func nodeMatchesTarget(node db.Node, config agentTargetPayload) bool {
+	hasTags := len(config.NodeTags) > 0
+	hasIDs := len(config.NodeIDs) > 0
+	if !hasTags && !hasIDs {
+		return true
+	}
+	if hasIDs {
+		for _, id := range config.NodeIDs {
+			id = strings.TrimSpace(id)
+			if id != "" && (strings.EqualFold(id, node.ID) || strings.EqualFold(id, node.UUID)) {
+				return true
+			}
+		}
+	}
+	if hasTags {
+		nodeTags := parseNodeTags(node.Tags)
+		for _, reqTag := range config.NodeTags {
+			reqTag = strings.TrimSpace(reqTag)
+			if reqTag == "" {
+				continue
+			}
+			for _, nt := range nodeTags {
+				if strings.EqualFold(nt, reqTag) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func parseNodeTags(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' '
+	})
+	tags := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
+}
+
 func targetToCheckTask(target db.TargetRecord) (protocol.CheckTask, error) {
 	var config agentTargetPayload
 	if err := json.Unmarshal(target.Payload, &config); err != nil {
 		return protocol.CheckTask{}, err
 	}
+	return payloadToCheckTask(target, config)
+}
+
+func payloadToCheckTask(target db.TargetRecord, config agentTargetPayload) (protocol.CheckTask, error) {
 	host := target.Host
 	if host == "" {
 		host = config.Host

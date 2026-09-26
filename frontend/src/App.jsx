@@ -19,6 +19,7 @@ import { AlertCenterView } from './components/AlertCenterView.jsx'
 import { LogsView } from './components/LogsView.jsx'
 import { AICopilotView } from './components/AICopilotView.jsx'
 import { CertificatesAndDNSView } from './components/CertificatesAndDNSView.jsx'
+import { MeshMatrixView } from './components/MeshMatrixView.jsx'
 import TerminalView from './components/TerminalView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
@@ -50,6 +51,7 @@ const navItems = [
       { id: 'latency', label: '延迟监测' },
       { id: 'route', label: '回程线路监测' },
       { id: 'certificates', label: '证书与 DNS 巡检' },
+      { id: 'mesh', label: '全球互联矩阵' },
     ],
   },
   { id: 'traffic', label: '流量与报告', icon: ChartBar },
@@ -108,6 +110,9 @@ const pageTitleFor = (page) =>
         ssl: '证书巡检',
         dns: 'DNS 解析矩阵',
         'dns-matrix': 'DNS 解析矩阵',
+        mesh: '全球互联延迟网格',
+        matrix: '全球互联延迟网格',
+        'mesh-matrix': '全球互联延迟网格',
       }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
@@ -161,6 +166,9 @@ const VALID_NAV_PAGES = [
   'ssl',
   'dns',
   'dns-matrix',
+  'mesh',
+  'matrix',
+  'mesh-matrix',
   'node-detail',
 ]
 
@@ -1233,6 +1241,8 @@ export function App() {
           <CertificatesAndDNSView initialTab="certificates" />
         ) : activeNav === 'dns' || activeNav === 'dns-matrix' ? (
           <CertificatesAndDNSView initialTab="dns" />
+        ) : activeNav === 'mesh' || activeNav === 'matrix' || activeNav === 'mesh-matrix' ? (
+          <MeshMatrixView />
         ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (
           <MonitoringView
             nodes={data}

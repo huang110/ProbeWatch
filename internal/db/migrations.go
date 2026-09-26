@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     uuid TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
     deleted_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -518,6 +519,11 @@ func ensureNodesSchema(ctx context.Context, db *sql.DB) error {
 	if !columns["deleted_at"] {
 		if _, err := db.ExecContext(ctx, `ALTER TABLE nodes ADD COLUMN deleted_at INTEGER`); err != nil {
 			return fmt.Errorf("add nodes deleted_at column: %w", err)
+		}
+	}
+	if !columns["tags"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE nodes ADD COLUMN tags TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add nodes tags column: %w", err)
 		}
 	}
 

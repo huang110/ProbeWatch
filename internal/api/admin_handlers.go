@@ -501,6 +501,7 @@ type nodeResponse struct {
 	ID             string          `json:"id"`
 	UUID           string          `json:"uuid"`
 	Name           string          `json:"name"`
+	Tags           string          `json:"tags"`
 	Status         string          `json:"status"`
 	LastReportedAt *time.Time      `json:"last_reported_at,omitempty"`
 	Resource       json.RawMessage `json:"resource,omitempty"`
@@ -554,7 +555,7 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) nodeSummary(ctx context.Context, node db.Node) nodeResponse {
-	response := nodeResponse{ID: node.ID, UUID: node.UUID, Name: node.Name, Status: "offline"}
+	response := nodeResponse{ID: node.ID, UUID: node.UUID, Name: node.Name, Tags: node.Tags, Status: "offline"}
 	reportedAt, payload, err := s.service.Store().GetResourceLatest(ctx, node.ID)
 	if err != nil {
 		return response

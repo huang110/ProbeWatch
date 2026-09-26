@@ -744,4 +744,30 @@ export async function fetchDNSMatrix(signal) {
   return await res.json()
 }
 
+export async function fetchMeshMatrix(signal) {
+  const res = await fetch('/api/mesh-matrix', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/mesh-matrix', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch mesh matrix')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function updateNode(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update node')
+  }
+  return await res.json()
+}
+
+
 

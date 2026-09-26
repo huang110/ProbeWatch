@@ -32,6 +32,8 @@ type targetRequest struct {
 	Keyword         *string                `json:"keyword"`
 	Nameserver      *string                `json:"nameserver"`
 	CheckTLS        *bool                  `json:"check_tls"`
+	NodeTags        *[]string              `json:"node_tags"`
+	NodeIDs         *[]string              `json:"node_ids"`
 }
 
 type targetResponse struct {
@@ -51,6 +53,8 @@ type targetResponse struct {
 	Keyword         string                `json:"keyword,omitempty"`
 	Nameserver      string                `json:"nameserver,omitempty"`
 	CheckTLS        bool                  `json:"check_tls,omitempty"`
+	NodeTags        []string              `json:"node_tags,omitempty"`
+	NodeIDs         []string              `json:"node_ids,omitempty"`
 }
 
 type targetPayload struct {
@@ -66,6 +70,8 @@ type targetPayload struct {
 	Keyword         string                `json:"keyword,omitempty"`
 	Nameserver      string                `json:"nameserver,omitempty"`
 	CheckTLS        bool                  `json:"check_tls,omitempty"`
+	NodeTags        []string              `json:"node_tags,omitempty"`
+	NodeIDs         []string              `json:"node_ids,omitempty"`
 }
 
 func (s *Server) targetCollection(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +222,7 @@ func decodeTargetRequest(w http.ResponseWriter, r *http.Request, limit int64, de
 		"expected_status": {}, "dns_type": {}, "timeout_ms": {}, "max_hops": {},
 		"interval_seconds": {}, "enabled": {}, "region_rules": {},
 		"keyword": {}, "nameserver": {}, "check_tls": {},
+		"node_tags": {}, "node_ids": {},
 	}
 	for name, value := range fields {
 		if _, ok := allowed[name]; !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
@@ -291,6 +298,12 @@ func (r targetRequest) definition(existing *db.TargetRecord) (db.TargetDefinitio
 	}
 	if r.CheckTLS != nil {
 		config.CheckTLS = *r.CheckTLS
+	}
+	if r.NodeTags != nil {
+		config.NodeTags = *r.NodeTags
+	}
+	if r.NodeIDs != nil {
+		config.NodeIDs = *r.NodeIDs
 	}
 	enabled := true
 	if existing != nil {
@@ -425,6 +438,8 @@ func targetToResponse(target db.TargetRecord) (targetResponse, error) {
 		Keyword:         config.Keyword,
 		Nameserver:      config.Nameserver,
 		CheckTLS:        config.CheckTLS,
+		NodeTags:        config.NodeTags,
+		NodeIDs:         config.NodeIDs,
 	}, nil
 }
 

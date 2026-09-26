@@ -8,6 +8,7 @@ import { TokenManagementCard } from './TokenManagementCard.jsx'
 import { AuditLogView } from './AuditLogView.jsx'
 import { StatusPageAdminCard } from './StatusPageAdminCard.jsx'
 import { CertificatesAndDNSView } from './CertificatesAndDNSView.jsx'
+import { MeshMatrixView } from './MeshMatrixView.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -63,6 +64,9 @@ export function SubPage({
     ssl: ['SSL/TLS 证书生命周期巡检', '自动追踪 HTTPS/TLS 证书到期倒计时、颁发机构、SANs 别名与跨地域多节点告警。'],
     dns: ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
     'dns-matrix': ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
+    mesh: ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
+    matrix: ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
+    'mesh-matrix': ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
     settings: ['系统设置', '管理控制台安全选项、状态页与事件发布、团队协作与权限、API 密钥与自动化灾备中心。'],
   }
 
@@ -111,6 +115,8 @@ export function SubPage({
         <CertificatesAndDNSView initialTab="certificates" />
       ) : page === 'dns' || page === 'dns-matrix' ? (
         <CertificatesAndDNSView initialTab="dns" />
+      ) : page === 'mesh' || page === 'matrix' || page === 'mesh-matrix' ? (
+        <MeshMatrixView />
       ) : page === 'network' ? (
         <TargetManage readOnly kinds={['tcp', 'http', 'https', 'dns']} title="网络检测目标" />
       ) : page === 'mtr' ? (

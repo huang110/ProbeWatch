@@ -143,6 +143,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/public/certificates", s.certificatesHandler)
 	mux.Handle("/api/dns-matrix", middleware.RequireAuth(http.HandlerFunc(s.dnsMatrixHandler)))
 	mux.HandleFunc("/api/public/dns-matrix", s.dnsMatrixHandler)
+	mux.Handle("/api/mesh-matrix", middleware.RequireAuth(http.HandlerFunc(s.meshMatrixHandler)))
+	mux.HandleFunc("/api/public/mesh-matrix", s.meshMatrixHandler)
 	mux.HandleFunc("/api/admin/status-page", s.adminStatusPageRoute)
 	mux.HandleFunc("/api/admin/incidents", s.adminIncidentsRoute)
 	mux.HandleFunc("/api/admin/incidents/", s.adminIncidentsRoute)
@@ -297,6 +299,12 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				s.nodeTraffic(w, r, uuid)
 				return
 			}
+		}
+		if r.Method == http.MethodPatch && len(parts) == 3 {
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.patchNode(w, r, uuid)
+			})).ServeHTTP(w, r)
+			return
 		}
 	}
 	if r.Method == http.MethodGet {

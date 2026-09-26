@@ -35,6 +35,7 @@ var (
 	ErrSessionExpired                    = errors.New("session expired")
 	ErrSessionPolicyChanged              = errors.New("session authorization policy changed")
 	ErrNodeUUIDConflict                  = errors.New("node UUID already exists")
+	ErrNodeNotFound                      = errors.New("node not found")
 	ErrTargetNotFound                    = errors.New("target not found")
 	ErrTargetDisabled                    = errors.New("target is disabled")
 	ErrTargetKindMismatch                = errors.New("target kind mismatch")
@@ -112,9 +113,10 @@ type NodeInput struct {
 }
 
 type Node struct {
-	ID   string
-	UUID string
-	Name string
+	ID   string `json:"id"`
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+	Tags string `json:"tags"`
 }
 
 type LatestResult struct {
@@ -902,7 +904,7 @@ func (s *Store) RegisterNodeWithTTL(ctx context.Context, registrationToken strin
 
 // ListNodes returns active nodes without token material or token metadata.
 func (s *Store) ListNodes(ctx context.Context) ([]Node, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, uuid, name FROM nodes WHERE deleted_at IS NULL ORDER BY created_at, id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, uuid, name, COALESCE(tags, '') FROM nodes WHERE deleted_at IS NULL ORDER BY created_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list nodes: %w", err)
 	}
@@ -910,7 +912,7 @@ func (s *Store) ListNodes(ctx context.Context) ([]Node, error) {
 	nodes := make([]Node, 0)
 	for rows.Next() {
 		var node Node
-		if err := rows.Scan(&node.ID, &node.UUID, &node.Name); err != nil {
+		if err := rows.Scan(&node.ID, &node.UUID, &node.Name, &node.Tags); err != nil {
 			return nil, fmt.Errorf("scan node: %w", err)
 		}
 		nodes = append(nodes, node)
@@ -924,7 +926,7 @@ func (s *Store) ListNodes(ctx context.Context) ([]Node, error) {
 // GetNodeByID returns an active node by its internal ID.
 func (s *Store) GetNodeByID(ctx context.Context, id string) (Node, error) {
 	var node Node
-	err := s.db.QueryRowContext(ctx, "SELECT id, uuid, name FROM nodes WHERE id = ? AND deleted_at IS NULL", id).Scan(&node.ID, &node.UUID, &node.Name)
+	err := s.db.QueryRowContext(ctx, "SELECT id, uuid, name, COALESCE(tags, '') FROM nodes WHERE id = ? AND deleted_at IS NULL", id).Scan(&node.ID, &node.UUID, &node.Name, &node.Tags)
 	if err != nil {
 		return Node{}, err
 	}
@@ -933,11 +935,29 @@ func (s *Store) GetNodeByID(ctx context.Context, id string) (Node, error) {
 
 func (s *Store) GetNodeByUUID(ctx context.Context, uuid string) (Node, error) {
 	var node Node
-	err := s.db.QueryRowContext(ctx, `SELECT id, uuid, name FROM nodes WHERE uuid = ? AND deleted_at IS NULL`, uuid).Scan(&node.ID, &node.UUID, &node.Name)
+	err := s.db.QueryRowContext(ctx, `SELECT id, uuid, name, COALESCE(tags, '') FROM nodes WHERE uuid = ? AND deleted_at IS NULL`, uuid).Scan(&node.ID, &node.UUID, &node.Name, &node.Tags)
 	if err != nil {
 		return Node{}, err
 	}
 	return node, nil
+}
+
+// UpdateNode updates the name and tags of an active node.
+func (s *Store) UpdateNode(ctx context.Context, id, name, tags string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.ExecContext(ctx, `UPDATE nodes SET name = ?, tags = ?, updated_at = ? WHERE (id = ? OR uuid = ?) AND deleted_at IS NULL`, name, tags, unixNano(time.Now().UTC()), id, id)
+	if err != nil {
+		return fmt.Errorf("update node: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check affected rows: %w", err)
+	}
+	if affected == 0 {
+		return ErrNodeNotFound
+	}
+	return nil
 }
 
 func (s *Store) CreateNetworkTarget(ctx context.Context, input ResultTargetInput, now time.Time) error {
@@ -2163,7 +2183,7 @@ func (s *Store) AuthenticateNodeToken(ctx context.Context, plaintext string, now
 	var deletedAt sql.NullInt64
 	var revokedAt sql.NullInt64
 	var expiresAt int64
-	err := s.db.QueryRowContext(ctx, `SELECT n.id, n.uuid, n.name, t.token_digest, n.deleted_at, t.revoked_at, t.expires_at FROM node_tokens t JOIN nodes n ON n.id = t.node_id WHERE t.token_digest = ? ORDER BY t.created_at DESC LIMIT 1`, security.Digest(s.pepper, plaintext)).Scan(&node.ID, &node.UUID, &node.Name, &storedDigest, &deletedAt, &revokedAt, &expiresAt)
+	err := s.db.QueryRowContext(ctx, `SELECT n.id, n.uuid, n.name, COALESCE(n.tags, ''), t.token_digest, n.deleted_at, t.revoked_at, t.expires_at FROM node_tokens t JOIN nodes n ON n.id = t.node_id WHERE t.token_digest = ? ORDER BY t.created_at DESC LIMIT 1`, security.Digest(s.pepper, plaintext)).Scan(&node.ID, &node.UUID, &node.Name, &node.Tags, &storedDigest, &deletedAt, &revokedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, ErrTokenInvalid
 	}
