@@ -23,6 +23,7 @@ import { MeshMatrixView } from './components/MeshMatrixView.jsx'
 import { SpeedtestBenchmarkView } from './components/SpeedtestBenchmarkView.jsx'
 import SyntheticProbingView from './components/SyntheticProbingView.jsx'
 import TerminalView from './components/TerminalView.jsx'
+import { ContainerProcessView } from './components/ContainerProcessView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
   GlobeHemisphereWest,
