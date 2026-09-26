@@ -268,7 +268,7 @@ export function EditNodeModal({ node, onClose, onSaved }) {
                   </div>
                 </div>
                 <span className="edit-hint-text">
-                  0 表示关闭；1-31 为每月重置日。流量重置时间按厂商账单填写，Lite 会换算到北京时间才重置。存量数据为北京时间 0:00。保存后同步到 Agent。
+                  0 表示关闭；1-31 为每月重置日。流量重置时间按厂商账单填写，ProbeWatch 会换算到北京时间后重置。存量数据为北京时间 0:00。保存后同步到 Agent。
                 </span>
               </div>
 

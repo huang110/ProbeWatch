@@ -86,7 +86,7 @@ export function SubPage({
     <section className="subpage">
       <div className="subpage-heading">
         <div>
-          <div className="eyebrow">Lite 架构管理中心</div>
+          <div className="eyebrow">ProbeWatch 运维控制台</div>
           <h1>
             {title}
             <span className="heading-period">。</span>

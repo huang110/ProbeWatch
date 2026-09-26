@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, safeArray, detectRegionAndFlag } from './lib/format.js'
-import { fetchCsrfToken, fetchGuestStatus, performLogout } from './lib/api.js'
+import { fetchCsrfToken, fetchGuestStatus, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { NodeDetailPage } from './components/NodeDetailPage.jsx'
@@ -134,7 +134,7 @@ function getSavedTheme() {
       if (val === 'light' || val === 'dark' || val === 'system') return val
     }
   } catch {}
-  return 'system'
+  return 'light'
 }
 
 function saveTheme(val) {
@@ -279,7 +279,7 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
   </header>
 }
 
-function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleCollapse, mobileOpen, onCloseMobile, onSwitchToGuest, onLogout }) {
+function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, onToggleCollapse, mobileOpen, onCloseMobile, onSwitchToGuest, onLogout }) {
   const [openMenus, setOpenMenus] = useState(() => {
     const initial = { monitoring: false, notifications: false }
     if (activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr') {
@@ -312,12 +312,12 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
   return <>
     <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''} ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="侧边栏">
       <div className="sidebar-head">
-        <div className="brand-lockup"><div className="brand-mark"><Pulse size={21} weight="bold" /></div><div className="brand-text"><strong>ProbeWatch</strong><span>纯监控控制台</span></div></div>
+        <div className="brand-lockup"><div className="brand-mark"><Pulse size={21} weight="bold" /></div><div className="brand-text"><strong>ProbeWatch</strong><span>运维监控控制台</span></div></div>
         <button className="icon-button collapse-toggle" aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'} onClick={onToggleCollapse}>{collapsed ? <CaretLineRight size={16} /> : <CaretLineLeft size={16} />}</button>
       </div>
       <div className="workspace-switcher"><div className="workspace-avatar">P</div><div className="workspace-text"><span>工作区</span><strong>{me?.login || me?.name || 'ProbeWatch'}</strong></div></div>
       <nav className="side-nav" aria-label="主导航">
-        <span className="nav-section-label">Lite 核心管理</span>
+        <span className="nav-section-label">核心管理</span>
         {navItems.map((item) => {
           const Icon = item.icon
           if (item.children) {
@@ -394,7 +394,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
         <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.8.7</span></div>
+        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">{apiVersion ? `v${apiVersion}` : '—'}</span></div>
         <div className="profile-row">
           <div className="profile-avatar">{me ? String(me.display_name || me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
@@ -444,6 +444,7 @@ export function App() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
   const [apiState, setApiState] = useState({ kind: 'loading', message: '正在加载 API 数据…' })
+  const [apiVersion, setApiVersion] = useState('')
   const [me, setMe] = useState(null)
   const [publicStatus, setPublicStatus] = useState(null)
   const [guestPreview, setGuestPreview] = useState(false)
@@ -457,6 +458,20 @@ export function App() {
   const coreRequestRef = useRef(0)
   const overviewAbortRef = useRef(null)
   const counterRef = useRef(new Map())
+
+  useEffect(() => {
+    let active = true
+    fetchPublicVersion()
+      .then((version) => {
+        if (!active) return
+        const serverVersion = typeof version?.server_version === 'string' ? version.server_version.trim() : ''
+        setApiVersion(serverVersion)
+      })
+      .catch(() => {
+        if (active) setApiVersion('')
+      })
+    return () => { active = false }
+  }, [])
 
   // 同步主题至 documentElement 属性与移动端 meta 状态栏
   useEffect(() => {
@@ -1170,6 +1185,7 @@ export function App() {
       onNavigate={navigate}
       me={me}
       apiState={apiState}
+      apiVersion={apiVersion}
       collapsed={sidebarCollapsed}
       onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
       mobileOpen={mobileNavOpen}

@@ -71,6 +71,20 @@
 .dashboard-lite-container .dash-row-grid-4 { gap: 10px !important; }
 .dashboard-lite-container .dash-row-grid-2 { gap: 10px !important; }
 .dashboard-lite-container .dash-row-grid-3 { gap: 10px !important; }
+
+/* 深色主题下，仪表盘也使用同一套暗色设计令牌 */
+[data-theme="dark"] .dashboard-lite-container,
+:root:not([data-theme="light"]) .dashboard-lite-container {
+  --dash-bg: #08090a;
+  --dash-card: #0e1012;
+  --dash-border: rgba(255,255,255,.08);
+  --dash-text: #f7f8f8;
+  --dash-muted: #8a8f98;
+}
+[data-theme="dark"] .dashboard-lite-container .bg-subtle,
+:root:not([data-theme="light"]) .dashboard-lite-container .bg-subtle { background: rgba(255,255,255,.06); }
+[data-theme="dark"] .dashboard-lite-container .badge-quiet,
+:root:not([data-theme="light"]) .dashboard-lite-container .badge-quiet { background: var(--blue-dim); color: #9da6ff; }
 .dashboard-lite-container .panel.p-4 { padding: 14px 16px; }
 .dashboard-lite-container .panel h3 { font-size: 13px; letter-spacing: 0; }
 .dashboard-lite-container .panel p { color: var(--dash-muted); }
@@ -809,6 +823,118 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   /* 电脑端表格 → 手机端卡片 */
   .node-table-wrap { display: none; }
   .node-card-list { display: block; }
+}
+
+/* ==========================================================================
+   ProbeWatch 统一运营控制台基线
+   参考仪表盘的浅色信息层级，统一所有子页面的间距、卡片和控件。
+   ========================================================================== */
+[data-theme="light"] {
+  --bg-base: #f5f7fa;
+  --bg-panel: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-inset: #f8fafc;
+  --card-bg: #ffffff;
+  --border: #e5eaf0;
+  --border-strong: #d7e0e9;
+  --text-1: #17212b;
+  --text-2: #5f7182;
+  --text-3: #8a9aaa;
+  --blue: #1687e8;
+  --blue-dim: #eaf5ff;
+  --mint: #2ca36b;
+  --mint-dim: #eaf8f0;
+  --amber: #ed7100;
+  --amber-dim: #fff3e8;
+  --rose: #dc4b62;
+  --rose-dim: #fff0f2;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-card: 0 1px 2px rgba(25, 45, 70, .035);
+  --shadow-pop: 0 18px 42px rgba(25, 45, 70, .14), 0 0 0 1px var(--border);
+}
+
+[data-theme="light"] body { background: var(--bg-base); color: var(--text-1); }
+[data-theme="light"] .app-shell { background: var(--bg-base); }
+[data-theme="light"] .sidebar { background: #fff; border-right-color: #e8edf2; box-shadow: 1px 0 0 rgba(25,45,70,.015); }
+[data-theme="light"] .sidebar-head { padding-bottom: 18px; }
+[data-theme="light"] .brand-mark { background: #1687e8; box-shadow: 0 5px 12px rgba(22,135,232,.2); }
+[data-theme="light"] .brand-text strong,
+[data-theme="light"] .workspace-text strong,
+[data-theme="light"] .profile-text strong { color: #17212b; }
+[data-theme="light"] .workspace-switcher { background: #f8fafc; border-color: #e5eaf0; }
+[data-theme="light"] .nav-section-label { color: #98a6b4; letter-spacing: .08em; }
+[data-theme="light"] .nav-item { color: #687989; min-height: 34px; border-radius: 7px; }
+[data-theme="light"] .nav-item:hover { color: #17212b; background: #f5f8fb; }
+[data-theme="light"] .nav-item-active { color: #1379d1; background: #eaf5ff; box-shadow: inset 2px 0 #1687e8; }
+[data-theme="light"] .nav-item-active:hover { background: #e5f2ff; }
+[data-theme="light"] .nav-sub-item { color: #8291a0; }
+[data-theme="light"] .nav-sub-item-active { color: #1687e8; background: #f1f7fd; }
+[data-theme="light"] .sidebar-footer { border-top-color: #edf1f5; }
+[data-theme="light"] .topbar { min-height: 56px; padding: 0 32px; background: rgba(255,255,255,.94); border-bottom-color: #e8edf2; }
+[data-theme="light"] .topbar-clock,
+[data-theme="light"] .refresh-controls,
+[data-theme="light"] .theme-switcher-compact { background: #f8fafc; border-color: #e3e9ef; }
+[data-theme="light"] .breadcrumb { color: #91a0ae; }
+[data-theme="light"] .breadcrumb strong { color: #334454; }
+[data-theme="light"] .content-wrap { max-width: 1380px; padding: 28px 32px 30px; }
+[data-theme="light"] .content-footer { color: #94a3b1; margin-top: 28px; }
+
+[data-theme="light"] .page-heading,
+[data-theme="light"] .subpage-heading { margin-bottom: 22px; }
+[data-theme="light"] .eyebrow { color: #8b9baa; font-size: 10px; letter-spacing: .1em; }
+[data-theme="light"] h1 { color: #17212b; font-size: clamp(24px, 2.4vw, 30px); font-weight: 700; letter-spacing: -.035em; }
+[data-theme="light"] .page-heading p,
+[data-theme="light"] .subpage-heading p { color: #81909f; line-height: 1.65; }
+[data-theme="light"] .panel,
+[data-theme="light"] .stat-card { border-color: #e5eaf0; background: #fff; box-shadow: 0 1px 2px rgba(25,45,70,.035); }
+[data-theme="light"] .panel:hover { border-color: #d8e2eb; }
+[data-theme="light"] .panel-header h2,
+[data-theme="light"] .panel-header h3 { color: #17212b; }
+[data-theme="light"] .panel-header p,
+[data-theme="light"] .stat-label { color: #8493a1; }
+[data-theme="light"] .stat-value { color: #17212b; }
+[data-theme="light"] .table-scroll,
+[data-theme="light"] .lite-table-panel { border-color: #e5eaf0; }
+[data-theme="light"] .node-table th,
+[data-theme="light"] .lite-server-table th,
+[data-theme="light"] .target-table th { color: #8998a7; background: #fbfcfd; border-bottom-color: #e5eaf0; }
+[data-theme="light"] .node-table td,
+[data-theme="light"] .lite-server-table td,
+[data-theme="light"] .target-table td { color: #536576; border-top-color: #edf1f4; }
+[data-theme="light"] .node-row:hover,
+[data-theme="light"] .lite-row:hover { background: #f8fbfe; box-shadow: inset 2px 0 #1687e8; }
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea,
+[data-theme="light"] .field-input,
+[data-theme="light"] .field-select,
+[data-theme="light"] .field-textarea,
+[data-theme="light"] .search-field { color: #263746; background: #fff; border-color: #dce5ec; }
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder { color: #a4b0bb; }
+[data-theme="light"] .button-quiet,
+[data-theme="light"] .icon-button { color: #5e7182; background: #fff; border-color: #dce5ec; }
+[data-theme="light"] .button-quiet:hover,
+[data-theme="light"] .icon-button:hover { color: #1687e8; background: #f3f8fd; border-color: #bdd9ef; }
+[data-theme="light"] .button-primary { background: #1687e8; border-color: #1687e8; box-shadow: 0 2px 5px rgba(22,135,232,.2); }
+[data-theme="light"] .button-primary:hover { background: #0878d4; }
+[data-theme="light"] .badge-quiet { color: #1687e8; background: #eaf5ff; }
+[data-theme="light"] .placeholder-panel { background: #fff; }
+
+/* 仪表盘与子页使用同一列宽和节奏 */
+.dashboard-lite-container,
+.subpage { width: 100%; max-width: 1280px; margin: 0 auto; }
+.dashboard-lite-container { padding-top: 0; }
+.dashboard-lite-container .panel { border-radius: 8px; }
+.dashboard-lite-container .dash-row-grid-4 { gap: 10px !important; }
+.dashboard-lite-container .dash-row-grid-2 { gap: 10px !important; }
+.dashboard-lite-container .dash-row-grid-3 { gap: 10px !important; }
+
+@media (max-width: 900px) {
+  [data-theme="light"] .topbar { padding: 0 16px; }
+  [data-theme="light"] .content-wrap { padding: 22px 16px 24px; }
 }
 @media (max-width: 500px) {
   h1 { font-size: 26px; }
@@ -11111,4 +11237,3 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
     grid-template-columns: repeat(2, 1fr);
   }
 }
-

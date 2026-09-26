@@ -203,6 +203,32 @@ export function AlertCenterView({
     }
   }
 
+  const loadSilencesData = async () => {
+    setLoadingSilences(true)
+    try {
+      const data = await fetchAlertSilences()
+      setSilences(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load alert silences:', e)
+      setSilences([])
+    } finally {
+      setLoadingSilences(false)
+    }
+  }
+
+  const loadFlappingData = async () => {
+    setLoadingFlapping(true)
+    try {
+      const data = await fetchFlappingAlerts()
+      setFlappingAlerts(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load flapping alerts:', e)
+      setFlappingAlerts([])
+    } finally {
+      setLoadingFlapping(false)
+    }
+  }
+
   useEffect(() => {
     loadChannelsAndSettings()
     loadRulesData()
@@ -764,7 +790,7 @@ export function AlertCenterView({
           <div className="lite-card-box">
             <div className="lite-card-meta">
               <span className="lite-card-title">消息通知模板</span>
-              <span className="lite-card-desc">Lite 将按照消息通知模板发送通知</span>
+              <span className="lite-card-desc">ProbeWatch 将按照消息通知模板发送通知</span>
             </div>
             <textarea
               className="lite-code-editor"

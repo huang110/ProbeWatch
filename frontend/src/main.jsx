@@ -5,7 +5,7 @@ import './styles.css'
 // 优先在模块加载阶段初始化主题，彻底杜绝白屏/黑屏闪烁
 try {
   const match = document.cookie.match(/(?:^|; )pb_theme=([^;]*)/)
-  const saved = match ? decodeURIComponent(match[1]) : 'system'
+  const saved = match ? decodeURIComponent(match[1]) : 'light'
   let resolved = saved
   if (saved === 'system') {
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches

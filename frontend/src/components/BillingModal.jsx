@@ -177,7 +177,7 @@ export function BillingModal({ node, onClose, onSaved }) {
                 <div className="edit-hide-text">
                   <strong className="edit-label">自动续费</strong>
                   <span className="edit-hint-text">
-                    如果服务器过期且当前在线，Lite 将自动将到期时间设置为下个自然月（年）
+                    如果服务器过期且当前在线，ProbeWatch 将自动将到期时间设置为下个自然月（年）
                   </span>
                 </div>
                 <button
