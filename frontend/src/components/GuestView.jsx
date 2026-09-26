@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowClockwise, Broadcast, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
-import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
+import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatLatency, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
@@ -200,7 +200,12 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const online = numeric(nodes.online)
   const total = numeric(nodes.total)
   const successRate = numeric(checks.success_rate)
-  const avgLatency = numeric(checks.avg_latency_ms)
+  const liveLatencies = safeArray(nodes.telemetry)
+    .map((item) => numeric(item?.latency_ms))
+    .filter((value) => value !== null)
+  const avgLatency = numeric(checks.avg_latency_ms) ?? (liveLatencies.length > 0
+    ? liveLatencies.reduce((sum, value) => sum + value, 0) / liveLatencies.length
+    : null)
   const allCustomMeta = getAllNodeCustomMeta()
   const rawNames = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
   const names = rawNames.filter((name) => {
@@ -383,7 +388,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><Timer size={18} /><span>平均检测延迟</span></div>
             <div className="stat-main mono">
-              {avgLatency !== null ? `${avgLatency} ms` : '—'}
+              {formatLatency(avgLatency)}
             </div>
             <div className="stat-sub">
               {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : '跨洋/较高') : '三网平均'}
@@ -534,17 +539,28 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const costText = custom.costText || '账单未配置'
                   const remainDays = custom.remainingDays ?? null
                   const checks = safeArray(telemetry.checks)
-                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle))) || {}
-                  const cuCheck = checkFor('telecom', 'cu')
-                  const ctCheck = checkFor('unicom', 'ct')
-                  const cmCheck = checkFor('mobile', 'cm')
-                  const firstCheck = checks[0] || {}
-                  const cuLatency = numeric(cuCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
-                  const ctLatency = numeric(ctCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
-                  const cmLatency = numeric(cmCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
-                  const cuLoss = numeric(cuCheck.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
-                  const ctLoss = numeric(ctCheck.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
-                  const cmLoss = numeric(cmCheck.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
+                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle))) || null
+                  const hasIspChecks = checks.some((check) => /telecom|unicom|mobile|\bcu\b|\bct\b|\bcm\b/i.test(String(check.kind || '')))
+                  const groupedChecks = ['dns', 'https', 'tcp'].map((kind) => {
+                    const matching = checks.filter((check) => String(check.kind || '').toLowerCase() === kind)
+                    if (matching.length === 0) return null
+                    const latencies = matching.map((check) => numeric(check.latency_ms)).filter((value) => value !== null)
+                    const losses = matching.map((check) => numeric(check.loss_rate)).filter((value) => value !== null)
+                    return {
+                      latency_ms: latencies.length ? latencies.reduce((sum, value) => sum + value, 0) / latencies.length : null,
+                      loss_rate: losses.length ? losses.reduce((sum, value) => sum + value, 0) / losses.length : null,
+                    }
+                  })
+                  const cuCheck = checkFor('telecom', 'cu') || (!hasIspChecks ? groupedChecks[2] : null)
+                  const ctCheck = checkFor('unicom', 'ct') || (!hasIspChecks ? groupedChecks[1] : null)
+                  const cmCheck = checkFor('mobile', 'cm') || (!hasIspChecks ? groupedChecks[0] : null)
+                  const cuLatency = numeric(cuCheck?.latency_ms)
+                  const ctLatency = numeric(ctCheck?.latency_ms)
+                  const cmLatency = numeric(cmCheck?.latency_ms)
+                  const cuLoss = numeric(cuCheck?.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
+                  const ctLoss = numeric(ctCheck?.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
+                  const cmLoss = numeric(cmCheck?.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
+                  const checkLabels = hasIspChecks ? ['联通', '电信', '移动'] : ['TCP', 'HTTPS', 'DNS']
 
                   return (
                     <article
@@ -668,16 +684,16 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-isp-col">
                           <div className="vps-isp-col-header">
                             <span className="vps-isp-col-title">延迟</span>
-                            <span className="vps-isp-col-sub">三网</span>
+                            <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '探测类型'}</span>
                           </div>
 
                           <div className="vps-isp-track-item">
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot unicom-red" />
-                                <span>联通</span>
+                                <span>{checkLabels[0]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{cuLatency !== null ? `${cuLatency} ms` : '—'}</span>
+                              <span className="vps-isp-val mono">{formatLatency(cuLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(cuLatency || 0)} />
                           </div>
@@ -686,9 +702,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot telecom-blue" />
-                                <span>电信</span>
+                                <span>{checkLabels[1]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{ctLatency !== null ? `${ctLatency} ms` : '—'}</span>
+                              <span className="vps-isp-val mono">{formatLatency(ctLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(ctLatency || 0)} />
                           </div>
@@ -697,9 +713,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot mobile-green" />
-                                <span>移动</span>
+                                <span>{checkLabels[2]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{cmLatency !== null ? `${cmLatency} ms` : '—'}</span>
+                              <span className="vps-isp-val mono">{formatLatency(cmLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(cmLatency || 0)} />
                           </div>
@@ -709,14 +725,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-isp-col">
                           <div className="vps-isp-col-header">
                             <span className="vps-isp-col-title">丢包</span>
-                            <span className="vps-isp-col-sub">三网</span>
+                            <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '探测类型'}</span>
                           </div>
 
                           <div className="vps-isp-track-item">
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot unicom-red" />
-                                <span>联通</span>
+                                <span>{checkLabels[0]}</span>
                               </span>
                               <span className="vps-isp-val mono">{cuLoss !== null ? `${cuLoss.toFixed(1)}%` : '—'}</span>
                             </div>
@@ -727,7 +743,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot telecom-blue" />
-                                <span>电信</span>
+                                <span>{checkLabels[1]}</span>
                               </span>
                               <span className="vps-isp-val mono">{ctLoss !== null ? `${ctLoss.toFixed(1)}%` : '—'}</span>
                             </div>
@@ -738,7 +754,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                             <div className="vps-isp-track-header">
                               <span className="vps-isp-tag">
                                 <span className="vps-isp-dot mobile-green" />
-                                <span>移动</span>
+                                <span>{checkLabels[2]}</span>
                               </span>
                               <span className="vps-isp-val mono">{cmLoss !== null ? `${cmLoss.toFixed(1)}%` : '—'}</span>
                             </div>
@@ -816,7 +832,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                             </div>
                           </td>
                           <td className="mono text-mint">
-                            {avgLatency !== null ? `${avgLatency} ms` : '—'}
+                            {formatLatency(avgLatency)}
                           </td>
                           <td>
                             <span className="os-badge">Linux · x86_64</span>

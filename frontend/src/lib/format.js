@@ -47,6 +47,13 @@ export const formatNumber = (value) => {
   return n === null ? '—' : Number.isInteger(n) ? String(n) : n.toFixed(1)
 }
 
+export const formatLatency = (value) => {
+  const n = numeric(value)
+  if (n === null) return '—'
+  const rounded = Math.round(n * 10) / 10
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} ms`
+}
+
 export const statusLabel = (status) => status === 'online' ? '在线' : status === 'attention' ? '需关注' : status === 'offline' ? '离线' : '未知'
 
 export const nodeColor = (id = '') => {

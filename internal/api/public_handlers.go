@@ -123,6 +123,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	from := now.Add(-24 * time.Hour)
 	limit := 100
 	checksTotal, checksSuccess, latencyTotal, latencyCount := 0, 0, int64(0), 0
+	telemetryLatencyTotal, telemetryLatencyCount := 0.0, 0
 	seenChecks := make(map[string]struct{})
 	var lastUpdated time.Time
 	for _, node := range nodes {
@@ -183,6 +184,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 			telemetry.LossRate = &loss
 		}
 		if latencyCount > 0 { avg := float64(latencyTotal) / float64(latencyCount); telemetry.LatencyMS = &avg }
+		if telemetry.LatencyMS != nil { telemetryLatencyTotal += *telemetry.LatencyMS; telemetryLatencyCount++ }
 		if !latestChecked.IsZero() { telemetry.LastCheckedAt = &latestChecked }
 		if summaries, e := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now); e == nil {
 			for _, summary := range summaries {
@@ -232,6 +234,10 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 			avg := float64(latencyTotal) / float64(latencyCount)
 			response.Checks.AvgLatencyMs = &avg
 		}
+	}
+	if response.Checks.AvgLatencyMs == nil && telemetryLatencyCount > 0 {
+		avg := telemetryLatencyTotal / float64(telemetryLatencyCount)
+		response.Checks.AvgLatencyMs = &avg
 	}
 	if !lastUpdated.IsZero() {
 		response.LastUpdatedAt = &lastUpdated
