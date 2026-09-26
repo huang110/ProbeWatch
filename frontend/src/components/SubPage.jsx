@@ -4,6 +4,8 @@ import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
 import { PasskeySettingsCard } from './PasskeySettingsCard.jsx'
 import { BackupManagementCard } from './BackupManagementCard.jsx'
 import { UserManagementCard } from './UserManagementCard.jsx'
+import { TokenManagementCard } from './TokenManagementCard.jsx'
+import { AuditLogView } from './AuditLogView.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -50,7 +52,10 @@ export function SubPage({
     targets: ['检测目标', '管理全部检测目标：新建、启停或删除探测项。'],
     users: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
     team: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
-    settings: ['系统设置', '管理控制台安全选项、团队协作与权限、外观主题与备份灾备中心。'],
+    tokens: ['API 密钥与开发者', 'Personal Access Tokens (PAT) 管理：长效访问令牌、调用作用域、有效期及自动化集成。'],
+    keys: ['API 密钥与开发者', 'Personal Access Tokens (PAT) 管理：长效访问令牌、调用作用域、有效期及自动化集成。'],
+    audit: ['安全审计中心', '管理操作与安全审计：记录用户登录、令牌签发、节点维护与云端灾备不可篡改流水。'],
+    settings: ['系统设置', '管理控制台安全选项、团队协作与权限、API 密钥、安全审计与自动化灾备中心。'],
   }
 
   const [title, description] = pages[page] || pages.dashboard
@@ -113,6 +118,8 @@ export function SubPage({
       ) : page === 'settings' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <UserManagementCard currentUser={currentUser} nodes={data} />
+          <TokenManagementCard currentUser={currentUser} nodes={data} />
+          <AuditLogView />
           <PasskeySettingsCard />
           <TOTPSettingsCard
             interval={refreshInterval}
@@ -124,6 +131,10 @@ export function SubPage({
         </div>
       ) : page === 'users' || page === 'team' ? (
         <UserManagementCard currentUser={currentUser} nodes={data} />
+      ) : page === 'tokens' || page === 'keys' ? (
+        <TokenManagementCard currentUser={currentUser} nodes={data} />
+      ) : page === 'audit' || page === 'audit-logs' ? (
+        <AuditLogView />
       ) : page === 'backups' ? (
         <BackupManagementCard />
       ) : (

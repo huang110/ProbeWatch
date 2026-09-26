@@ -492,7 +492,86 @@ func (s *Service) CleanupExpiredTOTPPendingStates(ctx context.Context, now time.
 	return s.Store().CleanupExpiredTOTPPendingStates(ctx, now)
 }
 
+// ExtractAPIToken extracts an API token from Authorization (Bearer pbw_pat_...) or X-API-Key header.
+func ExtractAPIToken(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			token := strings.TrimSpace(parts[1])
+			if strings.HasPrefix(token, db.APITokenPrefix) {
+				return token
+			}
+		}
+	}
+	if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
+		token := strings.TrimSpace(apiKey)
+		if strings.HasPrefix(token, db.APITokenPrefix) {
+			return token
+		}
+	}
+	return ""
+}
+
+// AuthenticateAPIToken validates a raw API token and returns the APIToken record and a synthesized AdminUser.
+func (s *Service) AuthenticateAPIToken(ctx context.Context, rawToken string, now time.Time) (*db.APIToken, *db.AdminUser, error) {
+	rawToken = strings.TrimSpace(rawToken)
+	if !strings.HasPrefix(rawToken, db.APITokenPrefix) {
+		return nil, nil, db.ErrAPITokenInvalid
+	}
+
+	tokenHash := db.HashAPIToken(rawToken)
+	tok, err := s.Store().GetAPITokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if tok.Disabled {
+		return nil, nil, db.ErrAPITokenDisabled
+	}
+
+	if tok.ExpiresAt != nil && tok.ExpiresAt.Before(now) {
+		return nil, nil, db.ErrAPITokenExpired
+	}
+
+	// Fetch creator user to ensure creator account is still active and not disabled
+	user, err := s.Store().GetAdminUser(ctx, tok.UserID)
+	if err == nil {
+		if user.Disabled {
+			return nil, nil, db.ErrAPITokenDisabled
+		}
+	}
+
+	caller := &db.AdminUser{
+		ID:             tok.UserID,
+		Provider:       "token",
+		ProviderUserID: tok.Name,
+		Login:          tok.Name,
+		Role:           tok.Role,
+		DisplayName:    tok.Name,
+		AllowedNodes:   tok.AllowedNodes,
+		Disabled:       false,
+	}
+
+	// Update last used timestamp asynchronously
+	go func(id string, t time.Time) {
+		_ = s.Store().UpdateAPITokenLastUsed(context.Background(), id, t)
+	}(tok.ID, now)
+
+	return tok, caller, nil
+}
+
 func (s *Service) CurrentUser(r *http.Request, now time.Time) (db.AdminUser, error) {
+	if rawToken := ExtractAPIToken(r); rawToken != "" {
+		_, caller, err := s.AuthenticateAPIToken(r.Context(), rawToken, now)
+		if err != nil {
+			return db.AdminUser{}, err
+		}
+		return *caller, nil
+	}
+
 	session, err := s.AuthenticateWithError(r, now)
 	if err != nil {
 		return db.AdminUser{}, err

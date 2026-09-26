@@ -26,8 +26,14 @@ func NewMiddleware(service *auth.Service, cfg config.Config) *Middleware {
 }
 
 type userCtxKey struct{}
+type tokenCtxKey struct{}
+type isTokenAuthCtxKey struct{}
 
-var currentAdminUserKey = userCtxKey{}
+var (
+	currentAdminUserKey = userCtxKey{}
+	currentAPITokenKey  = tokenCtxKey{}
+	isAPITokenKey       = isTokenAuthCtxKey{}
+)
 
 // UserFromContext retrieves the authenticated user from the request context.
 func UserFromContext(ctx context.Context) (db.AdminUser, bool) {
@@ -38,18 +44,69 @@ func UserFromContext(ctx context.Context) (db.AdminUser, bool) {
 	return u, ok
 }
 
+// TokenFromContext retrieves the authenticated API token from the request context.
+func TokenFromContext(ctx context.Context) (db.APIToken, bool) {
+	if ctx == nil {
+		return db.APIToken{}, false
+	}
+	t, ok := ctx.Value(currentAPITokenKey).(db.APIToken)
+	return t, ok
+}
+
+// IsTokenAuthFromContext returns whether the request was authenticated via an API token.
+func IsTokenAuthFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, ok := ctx.Value(isAPITokenKey).(bool)
+	return ok && v
+}
+
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := m.service.CurrentUser(r, time.Now().UTC())
-		if err != nil {
-			writeAuthenticationError(w, err)
-			return
+		rawToken := auth.ExtractAPIToken(r)
+		isToken := rawToken != ""
+
+		var user db.AdminUser
+		var tokenRecord *db.APIToken
+		var err error
+
+		if isToken {
+			var caller *db.AdminUser
+			tokenRecord, caller, err = m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+			if err != nil {
+				if errors.Is(err, db.ErrAPITokenDisabled) {
+					writeJSONError(w, http.StatusForbidden, "api token is disabled")
+					return
+				}
+				if errors.Is(err, db.ErrAPITokenExpired) {
+					writeJSONError(w, http.StatusUnauthorized, "api token has expired")
+					return
+				}
+				writeAuthenticationError(w, err)
+				return
+			}
+			user = *caller
+		} else {
+			user, err = m.service.CurrentUser(r, time.Now().UTC())
+			if err != nil {
+				writeAuthenticationError(w, err)
+				return
+			}
 		}
+
 		if user.Disabled {
 			writeJSONError(w, http.StatusForbidden, "user account is disabled")
 			return
 		}
+
 		ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
+		if isToken {
+			ctx = context.WithValue(ctx, isAPITokenKey, true)
+			if tokenRecord != nil {
+				ctx = context.WithValue(ctx, currentAPITokenKey, *tokenRecord)
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -82,12 +139,32 @@ func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handle
 	}
 }
 
+func (m *Middleware) RequireScope(requiredScope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if tok, ok := TokenFromContext(r.Context()); ok {
+				if !db.HasScope(tok.Scopes, requiredScope) {
+					writeJSONError(w, http.StatusForbidden, "token lacks required scope: "+requiredScope)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := m.service.CurrentUser(r, time.Now().UTC())
-		if err != nil {
-			writeAuthenticationError(w, err)
-			return
+		isToken := IsTokenAuthFromContext(r.Context()) || auth.ExtractAPIToken(r) != ""
+
+		user, ok := UserFromContext(r.Context())
+		if !ok {
+			var err error
+			user, err = m.service.CurrentUser(r, time.Now().UTC())
+			if err != nil {
+				writeAuthenticationError(w, err)
+				return
+			}
 		}
 		if user.Disabled {
 			writeJSONError(w, http.StatusForbidden, "user account is disabled")
@@ -118,6 +195,13 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusBadRequest, "content type must be application/json")
 			return
 		}
+
+		// API Token authentication skips browser CSRF check and same-origin requirement
+		if isToken {
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		if !sameOrigin(r, m.cfg.PublicBaseURL) {
 			writeJSONError(w, http.StatusForbidden, "same-origin request required")
 			return
@@ -147,8 +231,13 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 }
 
 func writeAuthenticationError(w http.ResponseWriter, err error) {
-	if errors.Is(err, db.ErrSessionNotFound) || errors.Is(err, db.ErrSessionExpired) || errors.Is(err, db.ErrSessionPolicyChanged) {
+	if errors.Is(err, db.ErrSessionNotFound) || errors.Is(err, db.ErrSessionExpired) || errors.Is(err, db.ErrSessionPolicyChanged) ||
+		errors.Is(err, db.ErrAPITokenNotFound) || errors.Is(err, db.ErrAPITokenInvalid) || errors.Is(err, db.ErrAPITokenExpired) {
 		writeJSONError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if errors.Is(err, db.ErrAPITokenDisabled) {
+		writeJSONError(w, http.StatusForbidden, "api token is disabled")
 		return
 	}
 	writeJSONError(w, http.StatusInternalServerError, "authentication unavailable")

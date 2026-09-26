@@ -541,3 +541,72 @@ export async function deleteUser(id) {
   }
   return await res.json()
 }
+
+export async function fetchTokens(mineOnly = false) {
+  const url = mineOnly ? '/api/tokens?mine=true' : '/api/tokens'
+  const res = await fetch(url, { credentials: 'same-origin' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to fetch tokens')
+  }
+  return await res.json()
+}
+
+export async function createToken(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/tokens', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create token')
+  }
+  return await res.json()
+}
+
+export async function updateToken(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/tokens/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update token')
+  }
+  return await res.json()
+}
+
+export async function deleteToken(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/tokens/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete token')
+  }
+  return await res.json()
+}
+
+export async function fetchAuditLogs({ limit = 50, offset = 0, action = '' } = {}) {
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', String(limit))
+  if (offset) params.set('offset', String(offset))
+  if (action) params.set('action', action)
+
+  const res = await fetch(`/api/audit-logs?${params.toString()}`, { credentials: 'same-origin' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to fetch audit logs')
+  }
+  return await res.json()
+}
+

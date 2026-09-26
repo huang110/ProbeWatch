@@ -329,6 +329,39 @@ CREATE TABLE IF NOT EXISTS webauthn_challenges (
     expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS webauthn_challenges_expiry_idx ON webauthn_challenges(expires_at);
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'operator',
+    scopes TEXT NOT NULL DEFAULT '*',
+    allowed_nodes TEXT NOT NULL DEFAULT '*',
+    expires_at INTEGER,
+    last_used_at INTEGER,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS api_tokens_hash_idx ON api_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS api_tokens_user_idx ON api_tokens(user_id);
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id TEXT NOT NULL,
+    actor_name TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    action TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    ip_address TEXT NOT NULL DEFAULT '',
+    status_code INTEGER NOT NULL DEFAULT 200,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS audit_logs_actor_idx ON audit_logs(actor_id);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -369,6 +402,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureUserRBAC(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureAPITokensAndAudit(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -763,3 +799,50 @@ func ensureUserRBAC(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// ensureAPITokensAndAudit idempotently creates the api_tokens and audit_logs tables and indexes.
+func ensureAPITokensAndAudit(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS api_tokens (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			token_prefix TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			user_id TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'operator',
+			scopes TEXT NOT NULL DEFAULT '*',
+			allowed_nodes TEXT NOT NULL DEFAULT '*',
+			expires_at INTEGER,
+			last_used_at INTEGER,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS api_tokens_hash_idx ON api_tokens(token_hash);`,
+		`CREATE INDEX IF NOT EXISTS api_tokens_user_idx ON api_tokens(user_id);`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			actor_id TEXT NOT NULL,
+			actor_name TEXT NOT NULL,
+			actor_type TEXT NOT NULL,
+			action TEXT NOT NULL,
+			resource_type TEXT NOT NULL,
+			resource_id TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT '',
+			ip_address TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL DEFAULT 200,
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action);`,
+		`CREATE INDEX IF NOT EXISTS audit_logs_actor_idx ON audit_logs(actor_id);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure api_tokens and audit_logs: %w", err)
+		}
+	}
+	return nil
+}
+

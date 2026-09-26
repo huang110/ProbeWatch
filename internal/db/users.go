@@ -79,6 +79,17 @@ func (u AdminUser) IsViewer() bool {
 	return u.Role == RoleViewer
 }
 
+// DisplayNameOrLogin returns the user's display name if non-empty, otherwise login or provider user ID.
+func (u AdminUser) DisplayNameOrLogin() string {
+	if strings.TrimSpace(u.DisplayName) != "" {
+		return u.DisplayName
+	}
+	if strings.TrimSpace(u.Login) != "" {
+		return u.Login
+	}
+	return u.ProviderUserID
+}
+
 // HashUserPassword generates a salted digest of the password using server pepper.
 func HashUserPassword(password string, pepper []byte) (string, error) {
 	salt := make([]byte, 16)
