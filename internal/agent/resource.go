@@ -16,10 +16,10 @@ import (
 )
 
 func collectResource() protocol.ResourceSnapshot {
-	return collectResourceWith(processStartTime(), newCPUTracker())
+	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker())
 }
 
-func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnapshot {
+func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
@@ -31,6 +31,25 @@ func collectResourceWith(startedAt int64, cpu cpuSampler) protocol.ResourceSnaps
 	}
 	if kernel, err := readFirstLine("/proc/sys/kernel/osrelease"); err == nil {
 		resource.Kernel = boundedIdentity(kernel)
+	}
+	if hw != nil {
+		model, mhz, cores := hw.CollectCPU()
+		resource.CPUModel = boundedIdentity(model)
+		resource.CPUMHz = mhz
+		resource.CPUCores = cores
+
+		sensors, bestTemp := hw.CollectSensors()
+		resource.Sensors = sensors
+		resource.CPUTempC = bestTemp
+
+		if mounts, err := hw.CollectMounts(); err == nil && len(mounts) > 0 {
+			resource.Mounts = mounts
+		}
+	}
+	if disk != nil {
+		if diskStats := disk.Sample(); len(diskStats) > 0 {
+			resource.Disks = diskStats
+		}
 	}
 	if runtime.GOOS != "linux" {
 		return resource

@@ -1916,14 +1916,17 @@ func evaluateMTRPathChangeAlertTx(ctx context.Context, tx *sql.Tx, nodeID string
 
 func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
 	var r struct {
-		CPUPercent           float64 `json:"cpu_percent"`
-		Load1                float64 `json:"load1"`
-		Load5                float64 `json:"load5"`
-		Load15               float64 `json:"load15"`
-		MemoryTotalBytes     uint64  `json:"memory_total_bytes"`
-		MemoryUsedBytes      uint64  `json:"memory_used_bytes"`
-		FilesystemTotalBytes uint64  `json:"filesystem_total_bytes"`
-		FilesystemUsedBytes  uint64  `json:"filesystem_used_bytes"`
+		CPUPercent           float64              `json:"cpu_percent"`
+		Load1                float64              `json:"load1"`
+		Load5                float64              `json:"load5"`
+		Load15               float64              `json:"load15"`
+		MemoryTotalBytes     uint64               `json:"memory_total_bytes"`
+		MemoryUsedBytes      uint64               `json:"memory_used_bytes"`
+		FilesystemTotalBytes uint64               `json:"filesystem_total_bytes"`
+		FilesystemUsedBytes  uint64               `json:"filesystem_used_bytes"`
+		CPUTempC             float64              `json:"cpu_temp_c"`
+		Disks                []protocol.DiskStat  `json:"disks"`
+		Mounts               []protocol.MountStat `json:"mounts"`
 	}
 	if err := json.Unmarshal(payload, &r); err != nil {
 		return err
@@ -1939,6 +1942,32 @@ func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID 
 	}
 	if r.FilesystemTotalBytes > 0 {
 		metrics["disk"] = float64(r.FilesystemUsedBytes) / float64(r.FilesystemTotalBytes) * 100.0
+	}
+	if r.CPUTempC > 0 {
+		metrics["cpu_temp"] = r.CPUTempC
+	}
+	if len(r.Disks) > 0 {
+		var maxIOWait float64
+		var maxDiskUtil float64
+		for _, d := range r.Disks {
+			if d.IOWaitMS > maxIOWait {
+				maxIOWait = d.IOWaitMS
+			}
+			if d.UtilPercent > maxDiskUtil {
+				maxDiskUtil = d.UtilPercent
+			}
+		}
+		metrics["disk_io_wait"] = maxIOWait
+		metrics["disk_util"] = maxDiskUtil
+	}
+	if len(r.Mounts) > 0 {
+		var maxInodePercent float64
+		for _, m := range r.Mounts {
+			if m.InodesPercent > maxInodePercent {
+				maxInodePercent = m.InodesPercent
+			}
+		}
+		metrics["inodes_percent"] = maxInodePercent
 	}
 
 	// Compute traffic_percent if billing settings are configured

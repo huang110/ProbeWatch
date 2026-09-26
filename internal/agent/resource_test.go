@@ -68,8 +68,8 @@ func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
 }
 
 func TestCollectResourceKeepsStartedAt(t *testing.T) {
-	first := collectResourceWith(1234, nil)
-	second := collectResourceWith(1234, nil)
+	first := collectResourceWith(1234, nil, nil, nil)
+	second := collectResourceWith(1234, nil, nil, nil)
 	if first.StartedAt != 1234 || second.StartedAt != 1234 {
 		t.Fatalf("started_at = %d, %d", first.StartedAt, second.StartedAt)
 	}

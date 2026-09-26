@@ -27,8 +27,9 @@ import {
   FilmStrip,
   CircleNotch,
   FlowArrow,
-  Lightning,
   Terminal,
+  Thermometer,
+  Database,
 } from '@phosphor-icons/react'
 import {
   formatBytes,
@@ -400,7 +401,20 @@ export function NodeDetailPage({
   const interfaces = Array.isArray(node?.interfaces) && node.interfaces.length > 0
     ? node.interfaces
     : (Array.isArray(resource.interfaces) ? resource.interfaces : [])
-  const cores = resource.cpu_cores || 1
+  const cores = resource.cpu_cores || node?.cpu_cores || 1
+  const cpuMhz = numeric(resource.cpu_mhz) || numeric(node?.cpu_mhz) || null
+  const cpuTempC = numeric(resource.cpu_temp_c) ?? numeric(node?.cpu_temp_c) ?? null
+  const sensors = Array.isArray(resource.sensors) ? resource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
+  const disks = Array.isArray(resource.disks) ? resource.disks : (Array.isArray(node?.disks) ? node.disks : [])
+  const mounts = Array.isArray(resource.mounts) ? resource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
+
+  const totalDiskReadRate = disks.reduce((sum, d) => sum + (numeric(d.read_bytes_per_sec) || 0), 0)
+  const totalDiskWriteRate = disks.reduce((sum, d) => sum + (numeric(d.write_bytes_per_sec) || 0), 0)
+  const totalReadIOPS = disks.reduce((sum, d) => sum + (numeric(d.read_iops) || 0), 0)
+  const totalWriteIOPS = disks.reduce((sum, d) => sum + (numeric(d.write_iops) || 0), 0)
+  const maxIOWait = disks.reduce((max, d) => Math.max(max, numeric(d.io_wait_ms) || 0), 0)
+  const maxDiskUtil = disks.reduce((max, d) => Math.max(max, numeric(d.util_percent) || 0), 0)
+
   const arch = node?.arch || resource.arch || customMeta.arch || 'kvm'
   const os = node?.os || resource.os || customMeta.os || 'Linux'
   const kernel = node?.kernel || resource.kernel || customMeta.kernel || '—'
@@ -496,6 +510,9 @@ export function NodeDetailPage({
     const liveConn = totalConnections
     const liveProc = processCount
     const liveGpu = gpuPercent
+    const liveTemp = cpuTempC !== null && cpuTempC > 0 ? cpuTempC : 0
+    const liveDiskRead = totalDiskReadRate
+    const liveDiskWrite = totalDiskWriteRate
 
     const hasHistory = Array.isArray(history) && history.length > 0
 
@@ -517,6 +534,9 @@ export function NodeDetailPage({
         return Math.max(1, Math.round(liveProc * (0.97 + 0.06 * Math.cos(idx * 0.4))))
       })
       const gpus = history.map((h) => Number(h.gpu ?? 0))
+      const temps = history.map((h) => Number(h.temp ?? (liveTemp > 0 ? liveTemp : 0)))
+      const diskReads = history.map((h) => Number(h.diskReadRate ?? 0))
+      const diskWrites = history.map((h) => Number(h.diskWriteRate ?? 0))
 
       // Ensure the latest point seamlessly connects to live current metrics
       if (cpus.length > 0) {
@@ -529,6 +549,9 @@ export function NodeDetailPage({
         conns[conns.length - 1] = liveConn
         procs[procs.length - 1] = liveProc
         gpus[gpus.length - 1] = liveGpu
+        temps[temps.length - 1] = liveTemp
+        diskReads[diskReads.length - 1] = liveDiskRead
+        diskWrites[diskWrites.length - 1] = liveDiskWrite
       }
 
       return {
@@ -541,6 +564,9 @@ export function NodeDetailPage({
         conns,
         procs,
         gpus,
+        temps,
+        diskReads,
+        diskWrites,
         times,
       }
     }
@@ -570,6 +596,15 @@ export function NodeDetailPage({
 
     const gpus = Array.from({ length: count }, () => liveGpu)
 
+    const temps = Array.from({ length: count }, (_, i) => Math.max(0, +(liveTemp * (0.98 + 0.04 * Math.sin(i * 0.6))).toFixed(1)))
+    temps[count - 1] = liveTemp
+
+    const diskReads = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDiskRead * (0.8 + 0.4 * Math.sin(i * 0.7)))))
+    diskReads[count - 1] = liveDiskRead
+
+    const diskWrites = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDiskWrite * (0.8 + 0.4 * Math.cos(i * 0.7)))))
+    diskWrites[count - 1] = liveDiskWrite
+
     return {
       cpus,
       mems,
@@ -580,6 +615,9 @@ export function NodeDetailPage({
       conns,
       procs,
       gpus,
+      temps,
+      diskReads,
+      diskWrites,
       times,
     }
   }, [
@@ -587,17 +625,20 @@ export function NodeDetailPage({
     activeTimeRange,
     nowTick,
     cpuPercent,
-    memUsed,
     memTotal,
-    swapUsed,
+    memUsed,
     swapTotal,
-    diskUsed,
+    swapUsed,
     diskTotal,
+    diskUsed,
     rate?.down,
     rate?.up,
     totalConnections,
     processCount,
     gpuPercent,
+    cpuTempC,
+    totalDiskReadRate,
+    totalDiskWriteRate,
   ])
 
   const pingRangeConfig = useMemo(() => {
@@ -1068,7 +1109,7 @@ export function NodeDetailPage({
               <span className="komari-info-label">
                 <Cpu size={14} /> CPU
               </span>
-              <span className="komari-info-val mono">{cpuModel}</span>
+              <span className="komari-info-val mono">{cpuModel}{cpuMhz ? ` (${cpuMhz} MHz)` : ''}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
@@ -1088,6 +1129,21 @@ export function NodeDetailPage({
               </span>
               <span className="komari-info-val mono">{arch}</span>
             </div>
+            {cpuTempC !== null && cpuTempC > 0 && (
+              <div className="komari-info-row">
+                <span className="komari-info-label">
+                  <Thermometer size={14} className={cpuTempC > 85 ? 'text-rose' : cpuTempC > 75 ? 'text-amber' : cpuTempC > 60 ? 'text-blue' : 'text-mint'} /> CPU 实时温度
+                </span>
+                <span className="komari-info-val mono" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontWeight: 700, color: cpuTempC > 85 ? '#ef4444' : cpuTempC > 75 ? '#f59e0b' : cpuTempC > 60 ? '#38bdf8' : '#10b981' }}>
+                    {cpuTempC.toFixed(1)} °C
+                  </span>
+                  <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: cpuTempC > 85 ? 'rgba(239, 68, 68, 0.15)' : cpuTempC > 75 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.12)', color: cpuTempC > 85 ? '#ef4444' : cpuTempC > 75 ? '#f59e0b' : '#10b981' }}>
+                    {cpuTempC > 85 ? '过热警告' : cpuTempC > 75 ? '温度偏高' : '运转良好'}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1157,6 +1213,19 @@ export function NodeDetailPage({
                 已用: {formatBytes(diskUsed)}
               </small>
             </div>
+            {disks.length > 0 && (
+              <div className="komari-storage-col">
+                <span className="komari-storage-label">
+                  <Database size={14} /> 磁盘 I/O
+                </span>
+                <strong className="komari-storage-val mono" style={{ fontSize: '13px' }}>
+                  {formatRate(totalDiskReadRate + totalDiskWriteRate)}
+                </strong>
+                <small className="komari-storage-sub mono text-muted">
+                  读 {formatRate(totalDiskReadRate)} · 写 {formatRate(totalDiskWriteRate)}
+                </small>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1276,6 +1345,127 @@ export function NodeDetailPage({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* 多挂载点文件系统与 Inode 存储诊断 (Multi-Mount Filesystems & Inodes) */}
+      {mounts.length > 0 && (
+        <div className="komari-info-card" style={{ marginBottom: '16px' }}>
+          <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <HardDrive size={16} className="text-mint" />
+              <h3 style={{ margin: 0 }}>多挂载点文件系统与 Inode 存储诊断 ({mounts.length})</h3>
+            </div>
+            <span className="mono text-xs text-muted">包含磁盘存储容量与 Inode 耗尽防范</span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }} className="mono">
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: 'var(--text-muted, #94a3b8)', textAlign: 'left' }}>
+                  <th style={{ padding: '8px 12px' }}>挂载路径</th>
+                  <th style={{ padding: '8px 12px' }}>存储设备</th>
+                  <th style={{ padding: '8px 12px' }}>类型</th>
+                  <th style={{ padding: '8px 12px', minWidth: '180px' }}>存储空间占用</th>
+                  <th style={{ padding: '8px 12px', minWidth: '160px' }}>Inode 节点占用</th>
+                  <th style={{ padding: '8px 12px' }}>可用剩余</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mounts.map((m) => {
+                  const usedPct = m.used_percent ?? 0
+                  const inodePct = m.inodes_percent ?? 0
+                  return (
+                    <tr key={m.mount_point} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                      <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--primary, #0284c7)' }}>
+                        {m.mount_point}
+                      </td>
+                      <td style={{ padding: '8px 12px', color: 'var(--text-secondary, #cbd5e1)' }}>
+                        {m.device}
+                      </td>
+                      <td style={{ padding: '8px 12px' }}>
+                        <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '3px', background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-muted, #94a3b8)' }}>
+                          {m.fs_type}
+                        </span>
+                      </td>
+                      <td style={{ padding: '8px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, usedPct)}%`, height: '100%', background: usedPct > 90 ? '#ef4444' : usedPct > 75 ? '#f59e0b' : '#10b981', borderRadius: '3px' }} />
+                          </div>
+                          <span style={{ fontSize: '11px', minWidth: '75px', textAlign: 'right', color: usedPct > 90 ? '#ef4444' : '#cbd5e1' }}>
+                            {formatBytes(m.used_bytes)} ({usedPct.toFixed(1)}%)
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, inodePct)}%`, height: '100%', background: inodePct > 90 ? '#ef4444' : inodePct > 80 ? '#f59e0b' : '#38bdf8', borderRadius: '3px' }} />
+                          </div>
+                          <span style={{ fontSize: '11px', minWidth: '70px', textAlign: 'right', color: inodePct > 85 ? '#ef4444' : 'var(--text-muted, #94a3b8)' }}>
+                            {inodePct.toFixed(1)}% {inodePct > 85 ? '⚠️ 告警' : ''}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px 12px', color: 'var(--mint, #10b981)' }}>
+                        {formatBytes(m.free_bytes)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 硬件温度传感器遥测明细 (Hardware Thermal Sensors) */}
+      {sensors.length > 0 && (
+        <div className="komari-info-card" style={{ marginBottom: '16px' }}>
+          <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Thermometer size={16} className="text-amber" />
+              <h3 style={{ margin: 0 }}>硬件温度传感器遥测明细 ({sensors.length})</h3>
+            </div>
+            <span className="mono text-xs text-muted">实时热区感应与临界保护</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px', paddingTop: '4px' }}>
+            {sensors.map((s, idx) => {
+              const isOverheat = s.temp_c > 85
+              const isWarm = s.temp_c > 75
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-subtle, rgba(255, 255, 255, 0.03))',
+                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #cbd5e1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.name}
+                    </span>
+                    <span className="mono" style={{ fontSize: '10px', color: 'var(--text-muted, #94a3b8)' }}>
+                      类型: {s.type}{s.critical_c ? ` · 临界 ${s.critical_c}°C` : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                    <span className="mono" style={{ fontSize: '13px', fontWeight: 700, color: isOverheat ? '#ef4444' : isWarm ? '#f59e0b' : '#10b981' }}>
+                      {s.temp_c.toFixed(1)} °C
+                    </span>
+                    <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: isOverheat ? 'rgba(239, 68, 68, 0.15)' : isWarm ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.12)', color: isOverheat ? '#ef4444' : isWarm ? '#f59e0b' : '#10b981' }}>
+                      {isOverheat ? '高温预警' : isWarm ? '偏高' : '运转健康'}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -1464,6 +1654,37 @@ export function NodeDetailPage({
             yMin="0"
             timeLabels={telemetrySeries.times}
           />
+
+          {/* 8. CPU 温度遥测 */}
+          {(cpuTempC > 0 || (telemetrySeries.temps && telemetrySeries.temps.some((t) => t > 0))) && (
+            <KomariChartCard
+              title="CPU 实时温度"
+              icon="🌡️"
+              badgeText={`${cpuTempC ? cpuTempC.toFixed(1) : (telemetrySeries.temps[telemetrySeries.temps.length - 1] || 0).toFixed(1)} °C`}
+              series={telemetrySeries.temps}
+              strokeColor="#f59e0b"
+              yMax={`${Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10)} °C`}
+              yMid={`${Math.round(Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10) / 2)} °C`}
+              yMin="0 °C"
+              timeLabels={telemetrySeries.times}
+            />
+          )}
+
+          {/* 9. 存储 I/O 读写带宽 */}
+          {(disks.length > 0 || (telemetrySeries.diskReads && telemetrySeries.diskReads.some((r) => r > 0))) && (
+            <KomariChartCard
+              title="磁盘 I/O 读写吞吐"
+              icon="💾"
+              badgeText={`读 ${formatRate(totalDiskReadRate)} · 写 ${formatRate(totalDiskWriteRate)}`}
+              series={telemetrySeries.diskReads}
+              strokeColor="#10b981"
+              dualSeries={{ data: telemetrySeries.diskWrites, color: '#38bdf8' }}
+              yMax={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))))}
+              yMid={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))) / 2)}
+              yMin="0 B/s"
+              timeLabels={telemetrySeries.times}
+            />
+          )}
         </div>
       </div>
 

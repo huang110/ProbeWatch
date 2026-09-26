@@ -393,7 +393,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
         <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.3.0</span></div>
+        <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">v0.8.6</span></div>
         <div className="profile-row">
           <div className="profile-avatar">{me ? String(me.display_name || me.login || me.name || 'P').slice(0, 2).toUpperCase() : '—'}</div>
           <div className="profile-text">
@@ -774,9 +774,21 @@ export function App() {
           }
         }
 
+        const cpuTemp = numeric(resource.cpu_temp_c) ?? null
+        const disks = Array.isArray(resource.disks) ? resource.disks : []
+        let diskReadRate = 0
+        let diskWriteRate = 0
+        disks.forEach((d) => {
+          diskReadRate += numeric(d.read_bytes_per_sec) || 0
+          diskWriteRate += numeric(d.write_bytes_per_sec) || 0
+        })
+
         return {
           time: timeIso,
           cpu: numeric(resource.cpu_percent) ?? 0,
+          temp: cpuTemp,
+          diskReadRate,
+          diskWriteRate,
           mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null,
           swap: swapUsed !== null && swapTotal !== null && swapTotal > 0 ? Math.round((swapUsed / swapTotal) * 1000) / 10 : 0,
           disk: diskUsed !== null && diskTotal !== null && diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 1000) / 10 : null,
@@ -1263,6 +1275,8 @@ export function App() {
           <SyntheticProbingView />
         ) : activeNav === 'speedtest' || activeNav === 'speed' ? (
           <SpeedtestBenchmarkView />
+        ) : activeNav === 'containers' || activeNav === 'processes' || activeNav === 'docker' ? (
+          <ContainerProcessView initialNodeId={selectedNode?.id || selectedNode?.uuid || ''} />
         ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (
           <MonitoringView
             nodes={data}

@@ -220,6 +220,40 @@ type InterfaceStat struct {
 	IPv6      string `json:"ipv6,omitempty"`
 }
 
+// SensorInfo represents one physical or virtual thermal hardware sensor reading.
+type SensorInfo struct {
+	Name      string  `json:"name"`                 // e.g. "coretemp Package id 0", "k10temp Tctl", "thermal_zone0"
+	Type      string  `json:"type"`                 // "cpu", "thermal_zone", "hwmon", "ambient"
+	TempC     float64 `json:"temp_c"`               // temperature in degrees Celsius
+	CriticalC float64 `json:"critical_c,omitempty"` // critical temperature threshold in Celsius
+}
+
+// DiskStat represents real-time I/O activity for a physical block device.
+type DiskStat struct {
+	Device           string  `json:"device"`              // e.g. "vda", "sda", "nvme0n1"
+	ReadBytesPerSec  uint64  `json:"read_bytes_per_sec"`  // bytes read per second
+	WriteBytesPerSec uint64  `json:"write_bytes_per_sec"` // bytes written per second
+	ReadIOPS         float64 `json:"read_iops"`           // read operations per second
+	WriteIOPS        float64 `json:"write_iops"`          // write operations per second
+	IOWaitMS         float64 `json:"io_wait_ms"`          // average I/O service/wait time in milliseconds
+	UtilPercent      float64 `json:"util_percent"`        // disk utilization percentage (0 - 100)
+}
+
+// MountStat represents space and inode utilization for a mounted filesystem.
+type MountStat struct {
+	MountPoint    string  `json:"mount_point"`              // e.g. "/", "/home", "/data"
+	Device        string  `json:"device"`                   // e.g. "/dev/vda2"
+	FSType        string  `json:"fs_type"`                  // e.g. "ext4", "xfs", "zfs", "btrfs"
+	TotalBytes    uint64  `json:"total_bytes"`              // total filesystem capacity in bytes
+	UsedBytes     uint64  `json:"used_bytes"`               // used capacity in bytes
+	FreeBytes     uint64  `json:"free_bytes"`               // available capacity in bytes
+	UsedPercent   float64 `json:"used_percent"`             // disk space used percentage
+	InodesTotal   uint64  `json:"inodes_total,omitempty"`   // total inodes
+	InodesUsed    uint64  `json:"inodes_used,omitempty"`    // used inodes
+	InodesFree    uint64  `json:"inodes_free,omitempty"`    // free inodes
+	InodesPercent float64 `json:"inodes_percent,omitempty"` // inode used percentage
+}
+
 // ResourceSnapshot contains the bounded resource and identity data an agent reports.
 type ResourceSnapshot struct {
 	CPUPercent           float64         `json:"cpu_percent,omitempty"`
@@ -247,6 +281,15 @@ type ResourceSnapshot struct {
 	Interfaces           []InterfaceStat `json:"interfaces,omitempty"`
 	IPv4                 string          `json:"ipv4,omitempty"`
 	IPv6                 string          `json:"ipv6,omitempty"`
+
+	// Hardware Sensing & Storage I/O Diagnostics (v0.8.6)
+	CPUTempC float64      `json:"cpu_temp_c,omitempty"`
+	CPUModel string       `json:"cpu_model,omitempty"`
+	CPUMHz   float64      `json:"cpu_mhz,omitempty"`
+	CPUCores int          `json:"cpu_cores,omitempty"`
+	Sensors  []SensorInfo `json:"sensors,omitempty"`
+	Disks    []DiskStat   `json:"disks,omitempty"`
+	Mounts   []MountStat  `json:"mounts,omitempty"`
 }
 
 // CheckTask is the only task shape an agent accepts from the control plane.
@@ -678,6 +721,18 @@ func (r ResourceSnapshot) Validate() error {
 		if err := validateString(fmt.Sprintf("interfaces[%d].ipv6", i), iface.IPv6, maxHostLength, false); err != nil {
 			return err
 		}
+	}
+	if err := validateString("cpu_model", r.CPUModel, 256, false); err != nil {
+		return err
+	}
+	if len(r.Sensors) > 128 {
+		return errors.New("sensors count exceeds 128")
+	}
+	if len(r.Disks) > 64 {
+		return errors.New("disks count exceeds 64")
+	}
+	if len(r.Mounts) > 64 {
+		return errors.New("mounts count exceeds 64")
 	}
 	return nil
 }

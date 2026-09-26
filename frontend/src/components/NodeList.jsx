@@ -259,7 +259,14 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">CPU</span>
-                      <span className="vps-res-val mono">{cpuPercent.toFixed(1)}%</span>
+                      <span className="vps-res-val mono">
+                        {cpuPercent.toFixed(1)}%
+                        {node.cpuTempC && node.cpuTempC > 0 ? (
+                          <small style={{ marginLeft: '4px', color: node.cpuTempC > 85 ? '#ef4444' : node.cpuTempC > 75 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>
+                            {node.cpuTempC.toFixed(0)}°
+                          </small>
+                        ) : null}
+                      </span>
                     </div>
                     <div className="vps-res-bar-wrap">
                       <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} />

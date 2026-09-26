@@ -318,3 +318,95 @@ func TestCompositeAlertRulesAndConsecutiveBreaches(t *testing.T) {
 	}
 }
 
+func TestEvaluateHardwareAlertRules(t *testing.T) {
+	ctx := context.Background()
+	store := newTestAlertsStore(t)
+	defer store.Close()
+
+	nodeID := "node-hw-1"
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES (?, '550e8400-e29b-41d4-a716-446655440099', 'Hardware Host', 'online', 1, 1)`, nodeID); err != nil {
+		t.Fatalf("insert test node: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM alert_rules"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create rule for CPU temperature > 80.0
+	tempRule := AlertRule{
+		ID:               "rule-temp-overheat",
+		Name:             "CPU Overheat Warning",
+		Metric:           "cpu_temp",
+		Operator:         ">",
+		Threshold:        80.0,
+		Severity:         "critical",
+		NodeFilter:       "*",
+		Enabled:          true,
+		ConsecutiveCount: 1,
+	}
+	if err := store.CreateAlertRule(ctx, tempRule); err != nil {
+		t.Fatalf("create temp rule: %v", err)
+	}
+
+	// Create rule for Disk IO wait > 40ms
+	ioRule := AlertRule{
+		ID:               "rule-disk-latency",
+		Name:             "High Disk IO Latency",
+		Metric:           "disk_io_wait",
+		Operator:         ">",
+		Threshold:        40.0,
+		Severity:         "warning",
+		NodeFilter:       "*",
+		Enabled:          true,
+		ConsecutiveCount: 1,
+	}
+	if err := store.CreateAlertRule(ctx, ioRule); err != nil {
+		t.Fatalf("create io rule: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// 1. Report normal hardware metrics
+	normalPayload := []byte(`{
+		"cpu_percent": 25.0,
+		"cpu_temp_c": 52.5,
+		"disks": [{"device": "vda", "io_wait_ms": 5.2, "util_percent": 12.0}],
+		"mounts": [{"mount_point": "/", "inodes_percent": 20.0}]
+	}`)
+	tx1, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx1, nodeID, normalPayload, now); err != nil {
+		t.Fatalf("eval normal: %v", err)
+	}
+	_ = tx1.Commit()
+
+	openAlerts, _ := store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected 0 open alerts on normal hardware, got %d", len(openAlerts))
+	}
+
+	// 2. Report overheating and high disk IO wait
+	now = now.Add(time.Minute)
+	breachPayload := []byte(`{
+		"cpu_percent": 88.0,
+		"cpu_temp_c": 86.4,
+		"disks": [{"device": "vda", "io_wait_ms": 68.5, "util_percent": 95.0}],
+		"mounts": [{"mount_point": "/", "inodes_percent": 30.0}]
+	}`)
+	tx2, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx2, nodeID, breachPayload, now); err != nil {
+		t.Fatalf("eval breach: %v", err)
+	}
+	_ = tx2.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 2 {
+		t.Fatalf("expected 2 open alerts (cpu_temp + disk_io_wait), got %d", len(openAlerts))
+	}
+}
+
+
