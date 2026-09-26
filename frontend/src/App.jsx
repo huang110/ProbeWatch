@@ -8,6 +8,7 @@ import { NodeDetailPage } from './components/NodeDetailPage.jsx'
 import { OverviewPage } from './components/OverviewPage.jsx'
 import { SubPage } from './components/SubPage.jsx'
 import { GuestView } from './components/GuestView.jsx'
+import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { BillingCenter } from './components/BillingCenter.jsx'
 import { DashboardView } from './components/DashboardView.jsx'
@@ -97,6 +98,10 @@ const pageTitleFor = (page) =>
         targets: '检测目标',
         settings: '系统设置',
         backups: '数据备份',
+        status: '公开状态页',
+        'status-page': '公开状态页',
+        'status-admin': '状态页管理',
+        incidents: '事件与维护通告',
       }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
@@ -142,6 +147,10 @@ const VALID_NAV_PAGES = [
   'targets',
   'settings',
   'backups',
+  'status',
+  'status-page',
+  'status-admin',
+  'incidents',
   'node-detail',
 ]
 
@@ -179,6 +188,9 @@ function getCookieNav() {
 }
 
 function getInitialNav() {
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/status')) {
+    return { page: 'status', nodeUuid: null }
+  }
   const fromHash = parseRouteFromHash()
   if (fromHash) return fromHash
   const fromCookie = getCookieNav()
@@ -339,6 +351,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, collapsed, onToggleColla
           )
         })}
         <span className="nav-section-label nav-section-spaced">拓展与配置</span>
+        <button type="button" title="公开服务状态页与 SLA" className={`nav-item ${activeNav === 'status' || activeNav === 'status-page' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('status')}><Broadcast size={18} /><span>公开状态页</span></button>
         <button type="button" title="流媒体矩阵" className={`nav-item ${activeNav === 'media' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('media')}><CloudArrowDown size={18} /><span>流媒体</span></button>
         <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
         <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('settings')}><Database size={18} /><span>系统设置</span></button>
@@ -1074,6 +1087,16 @@ export function App() {
       )
     }
 
+    if (activeNav === 'status' || activeNav === 'status-page') {
+      return (
+        <StatusPageView
+          theme={theme}
+          onThemeChange={setTheme}
+          onOpenLogin={() => setGuestPreview(true)}
+        />
+      )
+    }
+
     return (
       <GuestView
         status={publicStatus || previewFallback}
@@ -1235,6 +1258,12 @@ export function App() {
           />
         ) : activeNav === 'logs' ? (
           <LogsView />
+        ) : activeNav === 'status' || activeNav === 'status-page' ? (
+          <StatusPageView
+            theme={theme}
+            onThemeChange={setTheme}
+            onOpenLogin={() => navigate('overview')}
+          />
         ) : (
           <SubPage
             page={activeNav}

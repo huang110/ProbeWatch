@@ -362,6 +362,39 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS audit_logs_actor_idx ON audit_logs(actor_id);
+CREATE TABLE IF NOT EXISTS status_page_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    announcement TEXT NOT NULL DEFAULT '',
+    show_uptime_days INTEGER NOT NULL DEFAULT 90,
+    custom_css TEXT NOT NULL DEFAULT '',
+    components TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS incidents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    impact TEXT NOT NULL DEFAULT 'minor',
+    is_maintenance INTEGER NOT NULL DEFAULT 0,
+    scheduled_start_at INTEGER,
+    scheduled_end_at INTEGER,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS incidents_created_idx ON incidents(created_at DESC);
+CREATE INDEX IF NOT EXISTS incidents_status_idx ON incidents(status);
+CREATE TABLE IF NOT EXISTS incident_updates (
+    id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS incident_updates_incident_idx ON incident_updates(incident_id, created_at ASC);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -405,6 +438,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureAPITokensAndAudit(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureStatusPageTables(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -841,6 +877,52 @@ func ensureAPITokensAndAudit(ctx context.Context, db *sql.DB) error {
 	for _, q := range queries {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("ensure api_tokens and audit_logs: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureStatusPageTables idempotently creates the status_page_configs, incidents, and incident_updates tables.
+func ensureStatusPageTables(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS status_page_configs (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			announcement TEXT NOT NULL DEFAULT '',
+			show_uptime_days INTEGER NOT NULL DEFAULT 90,
+			custom_css TEXT NOT NULL DEFAULT '',
+			components TEXT NOT NULL DEFAULT '[]',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS incidents (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			status TEXT NOT NULL,
+			impact TEXT NOT NULL DEFAULT 'minor',
+			is_maintenance INTEGER NOT NULL DEFAULT 0,
+			scheduled_start_at INTEGER,
+			scheduled_end_at INTEGER,
+			created_at INTEGER NOT NULL,
+			resolved_at INTEGER,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS incidents_created_idx ON incidents(created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS incidents_status_idx ON incidents(status);`,
+		`CREATE TABLE IF NOT EXISTS incident_updates (
+			id TEXT PRIMARY KEY,
+			incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+			status TEXT NOT NULL,
+			message TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS incident_updates_incident_idx ON incident_updates(incident_id, created_at ASC);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure status page tables: %w", err)
 		}
 	}
 	return nil

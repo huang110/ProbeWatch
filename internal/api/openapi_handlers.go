@@ -331,6 +331,61 @@ func buildOpenAPISpec() map[string]interface{} {
 					},
 				},
 			},
+			"/api/public/status-page": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "获取公开服务状态页完整数据 (含 90 天 SLA 历史)",
+					"description": "无需认证，返回系统整体健康状态、活跃故障事件、计划维护通告与分组组件的 90 天可用率条形图数据。",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "状态页完整数据"},
+					},
+				},
+			},
+			"/api/public/incidents": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "查询历史服务事件通告归档",
+					"parameters": []map[string]interface{}{
+						{"name": "limit", "in": "query", "schema": map[string]interface{}{"type": "integer", "default": 20}},
+						{"name": "offset", "in": "query", "schema": map[string]interface{}{"type": "integer", "default": 0}},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "已解决历史事件列表"},
+					},
+				},
+			},
+			"/api/admin/status-page": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "获取状态页配置与组件拓扑",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "状态页配置"},
+					},
+				},
+				"put": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "更新状态页配置与组件映射 (管理员)",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "更新成功"},
+					},
+				},
+			},
+			"/api/admin/incidents": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "管理员列出所有事件与维护计划",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "事件列表"},
+					},
+				},
+				"post": map[string]interface{}{
+					"tags":        []string{"Status Page 公开服务状态页"},
+					"summary":     "发布新事件通告或计划维护",
+					"responses": map[string]interface{}{
+						"201": map[string]interface{}{"description": "事件创建成功"},
+					},
+				},
+			},
 		},
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{

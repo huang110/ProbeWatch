@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowClockwise, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowClockwise, Broadcast, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
@@ -272,6 +272,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
         <div className="heading-actions">
           <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
+          <a
+            href="/#/status"
+            className="button button-quiet"
+            title="查看 90 天服务可用率 SLA 与故障通告"
+          >
+            <Broadcast size={16} />
+            <span>90天 SLA 状态页</span>
+          </a>
           <button
             className="button button-quiet"
             onClick={handleRefreshClick}

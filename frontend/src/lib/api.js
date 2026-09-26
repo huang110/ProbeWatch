@@ -610,3 +610,118 @@ export async function fetchAuditLogs({ limit = 50, offset = 0, action = '' } = {
   return await res.json()
 }
 
+// Status Page & Incidents APIs
+export async function fetchPublicStatusPage(signal) {
+  const res = await fetch('/api/public/status-page', { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to fetch public status page')
+  return await res.json()
+}
+
+export async function fetchPublicIncidents({ limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', String(limit))
+  if (offset) params.set('offset', String(offset))
+
+  const res = await fetch(`/api/public/incidents?${params.toString()}`, { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch public incidents')
+  return await res.json()
+}
+
+export async function fetchAdminStatusPageConfig() {
+  const res = await fetch('/api/admin/status-page', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch status page config')
+  return await res.json()
+}
+
+export async function updateAdminStatusPageConfig(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/admin/status-page', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update status page config')
+  }
+  return await res.json()
+}
+
+export async function fetchAdminIncidents({ all = true, limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams()
+  if (all) params.set('all', 'true')
+  if (limit) params.set('limit', String(limit))
+  if (offset) params.set('offset', String(offset))
+
+  const res = await fetch(`/api/admin/incidents?${params.toString()}`, { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch incidents')
+  return await res.json()
+}
+
+export async function createAdminIncident(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/admin/incidents', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create incident')
+  }
+  return await res.json()
+}
+
+export async function getAdminIncident(id) {
+  const res = await fetch(`/api/admin/incidents/${encodeURIComponent(id)}`, { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to get incident')
+  return await res.json()
+}
+
+export async function updateAdminIncident(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/admin/incidents/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update incident')
+  }
+  return await res.json()
+}
+
+export async function addAdminIncidentUpdate(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/admin/incidents/${encodeURIComponent(id)}/updates`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to add incident update')
+  }
+  return await res.json()
+}
+
+export async function deleteAdminIncident(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/admin/incidents/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete incident')
+  }
+  return await res.json()
+}
+
+

@@ -6,6 +6,7 @@ import { BackupManagementCard } from './BackupManagementCard.jsx'
 import { UserManagementCard } from './UserManagementCard.jsx'
 import { TokenManagementCard } from './TokenManagementCard.jsx'
 import { AuditLogView } from './AuditLogView.jsx'
+import { StatusPageAdminCard } from './StatusPageAdminCard.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -55,7 +56,9 @@ export function SubPage({
     tokens: ['API 密钥与开发者', 'Personal Access Tokens (PAT) 管理：长效访问令牌、调用作用域、有效期及自动化集成。'],
     keys: ['API 密钥与开发者', 'Personal Access Tokens (PAT) 管理：长效访问令牌、调用作用域、有效期及自动化集成。'],
     audit: ['安全审计中心', '管理操作与安全审计：记录用户登录、令牌签发、节点维护与云端灾备不可篡改流水。'],
-    settings: ['系统设置', '管理控制台安全选项、团队协作与权限、API 密钥、安全审计与自动化灾备中心。'],
+    'status-admin': ['公开状态页与事件发布', '对外开放的服务可用率大屏、组件拓扑、90 天 SLA 历史心跳与故障/维护通告管理。'],
+    incidents: ['服务异常与维护通告', '发布、跟进与闭环面向公众的服务事件与计划停机维护窗口。'],
+    settings: ['系统设置', '管理控制台安全选项、状态页与事件发布、团队协作与权限、API 密钥与自动化灾备中心。'],
   }
 
   const [title, description] = pages[page] || pages.dashboard
@@ -117,6 +120,7 @@ export function SubPage({
         <TargetManage />
       ) : page === 'settings' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <StatusPageAdminCard nodes={data} />
           <UserManagementCard currentUser={currentUser} nodes={data} />
           <TokenManagementCard currentUser={currentUser} nodes={data} />
           <AuditLogView />
@@ -129,6 +133,8 @@ export function SubPage({
           />
           <BackupManagementCard />
         </div>
+      ) : page === 'status-admin' || page === 'incidents' ? (
+        <StatusPageAdminCard nodes={data} />
       ) : page === 'users' || page === 'team' ? (
         <UserManagementCard currentUser={currentUser} nodes={data} />
       ) : page === 'tokens' || page === 'keys' ? (
