@@ -1,48 +1,54 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowClockwise, Broadcast, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
-import { numeric, safeArray, safeObject, safeText, formatTimeOfDay, detectRegionAndFlag } from '../lib/format.js'
+import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
-function buildGuestNode(name, allCustomMeta, meta) {
+function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
   const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
   const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta?.flag || '🌐')
   const displayName = custom.customName || name
   const os = custom.os || 'Ubuntu 24.04 LTS'
-  const uptimeText = custom.uptime || '24 天'
-  const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
+  const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
+  const cpuPercent = numeric(telemetry.cpu_percent)
+  const memoryUsed = numeric(telemetry.memory_used_bytes)
+  const memoryTotal = numeric(telemetry.memory_total_bytes)
+  const diskUsed = numeric(telemetry.filesystem_used_bytes)
+  const diskTotal = numeric(telemetry.filesystem_total_bytes)
 
   return {
     uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
     id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
     name: name,
-    status: 'online',
+    status: telemetry.status || 'unknown',
+    lastReportedAt: telemetry.last_reported_at || null,
     customName: displayName,
     flag: displayFlag,
     os: os,
     arch: custom.arch || 'kvm (x86_64)',
     kernel: custom.kernel || '6.8.0-31-generic',
-    uptime: uptimeText.includes('天') ? uptimeText : `${uptimeText} 天`,
+    uptime: uptimeText,
+    startedAt: numeric(telemetry.started_at),
     cpu: cpuPercent,
-    memUsed: 143339520,
-    memTotal: 463994880,
-    diskUsed: 1395864371,
-    diskTotal: 21045339750,
+    memUsed: memoryUsed,
+    memTotal: memoryTotal,
+    diskUsed,
+    diskTotal,
     swapUsed: 0,
     swapTotal: 2147483648,
-    rx: 12133285888,
-    tx: 13207024435,
+    rx: numeric(telemetry.network_rx_bytes),
+    tx: numeric(telemetry.network_tx_bytes),
     resource: {
-      cpu_name: custom.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)',
+      cpu_name: custom.cpuModel || '—',
       cpu_cores: 1,
-      ip: custom.ip || '103.159.207.11',
-      process_count: 106,
-      tcp_conn_count: 67,
-      udp_conn_count: 5,
+      ip: '',
+      process_count: null,
+      tcp_conn_count: null,
+      udp_conn_count: null,
     },
   }
 }
@@ -60,6 +66,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('all')
   const [sortKey, setSortKey] = useState('default')
+  const [liveRates, setLiveRates] = useState({})
+  const telemetryRef = useRef(new Map())
 
   // 当外部未传入 status 或 status 节点列表为空时，自驱动从公开状态 API 同步
   useEffect(() => {
@@ -162,6 +170,32 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     : (internalStatus || status)
 
   const nodes = safeObject(effectiveStatus?.nodes)
+  const telemetryByName = useMemo(() => {
+    const map = new Map()
+    safeArray(nodes.telemetry).forEach((item) => {
+      const name = safeText(item?.name)
+      if (name) map.set(name, safeObject(item))
+    })
+    return map
+  }, [nodes.telemetry])
+
+  useEffect(() => {
+    const now = Date.now()
+    const next = {}
+    telemetryByName.forEach((item, name) => {
+      const rx = numeric(item.network_rx_bytes)
+      const tx = numeric(item.network_tx_bytes)
+      const previous = telemetryRef.current.get(name)
+      if (previous && rx !== null && tx !== null && now > previous.at) {
+        const seconds = (now - previous.at) / 1000
+        if (seconds >= 1 && seconds < 120 && rx >= previous.rx && tx >= previous.tx) {
+          next[name] = { down: (rx - previous.rx) / seconds, up: (tx - previous.tx) / seconds }
+        }
+      }
+      if (rx !== null && tx !== null) telemetryRef.current.set(name, { rx, tx, at: now })
+    })
+    setLiveRates(next)
+  }, [telemetryByName, effectiveStatus?.generated_at])
   const checks = safeObject(effectiveStatus?.checks)
   const online = numeric(nodes.online)
   const total = numeric(nodes.total)
@@ -367,7 +401,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><Pulse size={18} /><span>最近遥测同步</span></div>
             <div className="stat-main mono">{lastUpdated}</div>
-            <div className="stat-sub">30s 周期自驱上报</div>
+            <div className="stat-sub">5s 页面刷新 · 10s 探针上报</div>
           </div>
         </div>
       </section>
@@ -475,46 +509,55 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const displayName = custom.customName || name
                   const os = custom.os || 'Debian Linux'
 
-                  const uptimeText = custom.uptime || '24 天'
-                  const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '$5 / 月'
-
-                  const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
-                  const loadText = custom.load || '0.01, 0.01, 0.00'
-                  const memPercent = custom.memPercent !== undefined ? Number(custom.memPercent) : 30.9
-                  const memSub = custom.memSub || '136.7 MB / 442.5 MB'
-                  const diskPercent = custom.diskPercent !== undefined ? Number(custom.diskPercent) : 6.8
-                  const diskSub = custom.diskSub || '1.3 GB / 19.6 GB'
-                  const trafficPercent = custom.trafficPercent !== undefined ? Number(custom.trafficPercent) : 2.3
-                  const trafficSub = custom.trafficSub || '23.7 GB / 1.00 TB'
-
-                  const upRateText = custom.upRate || '458 B/s'
-                  const downRateText = custom.downRate || '272 B/s'
-                  const totalTxText = custom.totalTx || '12.3 GB'
-                  const totalRxText = custom.totalRx || '11.3 GB'
-                  const remainDays = custom.remainingDays || 135
-                  const costText = custom.costText || '$5'
-
-                  // ISP Latency & Packet Loss
-                  const cuLatency = custom.pingCu !== undefined ? Number(custom.pingCu) : 45
-                  const ctLatency = custom.pingCt !== undefined ? Number(custom.pingCt) : 191
-                  const cmLatency = custom.pingCm !== undefined ? Number(custom.pingCm) : 97
-
-                  const cuLoss = custom.lossCu !== undefined ? Number(custom.lossCu) : 0.0
-                  const ctLoss = custom.lossCt !== undefined ? Number(custom.lossCt) : 48.3
-                  const cmLoss = custom.lossCm !== undefined ? Number(custom.lossCm) : 1.7
+                  const telemetry = telemetryByName.get(name) || {}
+                  const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
+                  const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '账单未配置'
+                  const cpuPercent = numeric(telemetry.cpu_percent)
+                  const loadText = telemetry.load1 !== undefined ? `${Number(telemetry.load1).toFixed(2)} 1m` : '暂无实时数据'
+                  const memUsed = numeric(telemetry.memory_used_bytes)
+                  const memTotal = numeric(telemetry.memory_total_bytes)
+                  const memPercent = memUsed !== null && memTotal > 0 ? (memUsed / memTotal) * 100 : null
+                  const memSub = memUsed !== null && memTotal > 0 ? `${formatBytes(memUsed)} / ${formatBytes(memTotal)}` : '暂无实时数据'
+                  const diskUsed = numeric(telemetry.filesystem_used_bytes)
+                  const diskTotal = numeric(telemetry.filesystem_total_bytes)
+                  const diskPercent = diskUsed !== null && diskTotal > 0 ? (diskUsed / diskTotal) * 100 : null
+                  const diskSub = diskUsed !== null && diskTotal > 0 ? `${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}` : '暂无实时数据'
+                  const totalRx = numeric(telemetry.network_rx_bytes)
+                  const totalTx = numeric(telemetry.network_tx_bytes)
+                  const trafficPercent = null
+                  const trafficSub = totalRx !== null || totalTx !== null ? `↑ ${formatBytes(totalTx || 0)} · ↓ ${formatBytes(totalRx || 0)}` : '暂无实时数据'
+                  const nodeRate = liveRates[name] || {}
+                  const upRateText = nodeRate.up !== undefined ? formatRate(nodeRate.up) : '等待下一次采样'
+                  const downRateText = nodeRate.down !== undefined ? formatRate(nodeRate.down) : '等待下一次采样'
+                  const totalTxText = totalTx !== null ? formatBytes(totalTx) : '—'
+                  const totalRxText = totalRx !== null ? formatBytes(totalRx) : '—'
+                  const costText = custom.costText || '账单未配置'
+                  const remainDays = custom.remainingDays ?? null
+                  const checks = safeArray(telemetry.checks)
+                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle))) || {}
+                  const cuCheck = checkFor('telecom', 'cu')
+                  const ctCheck = checkFor('unicom', 'ct')
+                  const cmCheck = checkFor('mobile', 'cm')
+                  const firstCheck = checks[0] || {}
+                  const cuLatency = numeric(cuCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
+                  const ctLatency = numeric(ctCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
+                  const cmLatency = numeric(cmCheck.latency_ms) ?? numeric(firstCheck.latency_ms)
+                  const cuLoss = numeric(cuCheck.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
+                  const ctLoss = numeric(ctCheck.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
+                  const cmLoss = numeric(cmCheck.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
 
                   return (
                     <article
                       className="guest-node-card nezha-vps-card"
                       key={`${name}-${index}`}
-                      onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta))}
+                      onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry))}
                       title="点击查看详细性能遥测与监控"
                       style={{ cursor: 'pointer' }}
                     >
                       {/* 1. 顶部标题行: 状态圆点, 节点名, 系统 Logo, 国旗 */}
                       <div className="vps-card-header">
                         <div className="vps-header-left">
-                          <span className="vps-status-dot online" />
+                          <span className={`vps-status-dot ${telemetry.status === 'online' ? 'online' : telemetry.status === 'attention' ? 'warning' : 'offline'}`} />
                           <strong className="vps-node-name" title={displayName}>{displayName}</strong>
                         </div>
                         <div className="vps-header-right">
@@ -535,10 +578,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">CPU</span>
-                            <span className="vps-res-val mono">{cpuPercent.toFixed(1)}%</span>
+                            <span className="vps-res-val mono">{cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '—'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent || 0))}%` }} />
                           </div>
                           <div className="vps-res-sub mono">{loadText}</div>
                         </div>
@@ -547,10 +590,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">内存</span>
-                            <span className="vps-res-val mono">{memPercent.toFixed(1)}%</span>
+                            <span className="vps-res-val mono">{memPercent !== null ? `${memPercent.toFixed(1)}%` : '—'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent || 0))}%` }} />
                           </div>
                           <div className="vps-res-sub mono">{memSub}</div>
                         </div>
@@ -559,10 +602,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">硬盘</span>
-                            <span className="vps-res-val mono">{diskPercent.toFixed(1)}%</span>
+                            <span className="vps-res-val mono">{diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '—'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent || 0))}%` }} />
                           </div>
                           <div className="vps-res-sub mono">{diskSub}</div>
                         </div>
@@ -571,10 +614,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">流量</span>
-                            <span className="vps-res-val mono text-traffic">{trafficPercent.toFixed(1)}%</span>
+                            <span className="vps-res-val mono text-traffic">{trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '—'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent || 0))}%` }} />
                           </div>
                           <div className="vps-res-sub mono">{trafficSub}</div>
                         </div>
@@ -607,7 +650,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-tri-col vps-expiry-col">
                           <div className="vps-meta-line">
                             <span className="vps-meta-icon">📅</span>
-                            <span>剩余 {remainDays} 天</span>
+                            <span>{remainDays !== null ? `剩余 ${remainDays} 天` : '账单未配置'}</span>
                           </div>
                           <div className="vps-meta-line">
                             <span className="vps-meta-icon">💰</span>
@@ -634,9 +677,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot unicom-red" />
                                 <span>联通</span>
                               </span>
-                              <span className="vps-isp-val mono">{cuLatency} ms</span>
+                              <span className="vps-isp-val mono">{cuLatency !== null ? `${cuLatency} ms` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency || 0)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -645,9 +688,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot telecom-blue" />
                                 <span>电信</span>
                               </span>
-                              <span className="vps-isp-val mono">{ctLatency} ms</span>
+                              <span className="vps-isp-val mono">{ctLatency !== null ? `${ctLatency} ms` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency || 0)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -656,9 +699,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot mobile-green" />
                                 <span>移动</span>
                               </span>
-                              <span className="vps-isp-val mono">{cmLatency} ms</span>
+                              <span className="vps-isp-val mono">{cmLatency !== null ? `${cmLatency} ms` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency || 0)} />
                           </div>
                         </div>
 
@@ -675,9 +718,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot unicom-red" />
                                 <span>联通</span>
                               </span>
-                              <span className="vps-isp-val mono">{cuLoss.toFixed(1)}%</span>
+                              <span className="vps-isp-val mono">{cuLoss !== null ? `${cuLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
+                            <VpsDotTrack blocks={getLossBlocks(cuLoss || 0)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -686,9 +729,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot telecom-blue" />
                                 <span>电信</span>
                               </span>
-                              <span className="vps-isp-val mono">{ctLoss.toFixed(1)}%</span>
+                              <span className="vps-isp-val mono">{ctLoss !== null ? `${ctLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
+                            <VpsDotTrack blocks={getLossBlocks(ctLoss || 0)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -697,9 +740,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot mobile-green" />
                                 <span>移动</span>
                               </span>
-                              <span className="vps-isp-val mono">{cmLoss.toFixed(1)}%</span>
+                              <span className="vps-isp-val mono">{cmLoss !== null ? `${cmLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
+                            <VpsDotTrack blocks={getLossBlocks(cmLoss || 0)} />
                           </div>
                         </div>
                       </div>
@@ -727,6 +770,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                     {filteredNames.map((name, index) => {
                       const meta = detectRegionAndFlag(name, '')
                       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                      const telemetry = telemetryByName.get(name) || {}
                       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag
                       const displayName = custom.customName || name
                       const coloredTags = parseColoredTags(custom.tags)
@@ -734,14 +778,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <tr
                           key={`${name}-${index}`}
                           className="guest-table-row"
-                          onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta))}
+                          onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry))}
                           title="点击查看详细性能遥测与监控"
                           style={{ cursor: 'pointer' }}
                         >
                           <td>
                             <div className="inline-flex items-center gap-1.5">
-                              <StatusDot status="online" size="sm" />
-                              <span className="status-text online">正常</span>
+                              <StatusDot status={telemetry.status || 'unknown'} size="sm" />
+                              <span className={`status-text ${telemetry.status === 'online' ? 'online' : telemetry.status === 'attention' ? 'attention' : 'offline'}`}>{telemetry.status === 'online' ? '正常' : telemetry.status === 'attention' ? '需关注' : '离线'}</span>
                             </div>
                           </td>
                           <td>
@@ -768,7 +812,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                           </td>
                           <td>
                             <div style={{ width: '160px' }}>
-                              <UptimeBars count={24} uptimePercent={100} />
+                              <UptimeBars count={24} uptimePercent={telemetry.status === 'online' ? 100 : telemetry.status === 'attention' ? 92 : 0} />
                             </div>
                           </td>
                           <td className="mono text-mint">

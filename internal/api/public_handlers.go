@@ -28,14 +28,44 @@ type publicStatusResponse struct {
 }
 
 type publicStatusNodes struct {
-	Online int      `json:"online"`
-	Total  int      `json:"total"`
-	Names  []string `json:"names"`
+	Online    int                    `json:"online"`
+	Total     int                    `json:"total"`
+	Names     []string               `json:"names"`
+	Telemetry []publicNodeTelemetry  `json:"telemetry"`
 }
 
 type publicStatusChecks struct {
 	SuccessRate  *float64 `json:"success_rate"`
 	AvgLatencyMs *float64 `json:"avg_latency_ms"`
+}
+
+// publicNodeTelemetry is the allow-listed, read-only data used by the public
+// dashboard cards. It deliberately omits UUIDs, internal IDs, addresses and
+// raw resource payloads while keeping the latest values genuinely live.
+type publicNodeTelemetry struct {
+	Name              string                 `json:"name"`
+	Status            string                 `json:"status"`
+	LastReportedAt   *time.Time             `json:"last_reported_at"`
+	CPUPercent        *float64               `json:"cpu_percent"`
+	Load1             *float64               `json:"load1"`
+	MemoryUsedBytes   *uint64                `json:"memory_used_bytes"`
+	MemoryTotalBytes  *uint64                `json:"memory_total_bytes"`
+	FilesystemUsed    *uint64                `json:"filesystem_used_bytes"`
+	FilesystemTotal   *uint64                `json:"filesystem_total_bytes"`
+	NetworkRxBytes    *uint64                `json:"network_rx_bytes"`
+	NetworkTxBytes    *uint64                `json:"network_tx_bytes"`
+	StartedAt         *int64                 `json:"started_at"`
+	LatencyMS         *float64               `json:"latency_ms"`
+	LossRate          *float64               `json:"loss_rate"`
+	LastCheckedAt     *time.Time             `json:"last_checked_at"`
+	Checks            []publicNodeCheck      `json:"checks"`
+}
+
+type publicNodeCheck struct {
+	Kind          string     `json:"kind"`
+	LatencyMS     *float64   `json:"latency_ms"`
+	LossRate      *float64   `json:"loss_rate"`
+	LastCheckedAt *time.Time `json:"last_checked_at"`
 }
 
 var (
@@ -73,7 +103,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publicCacheMu.RLock()
-	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 5*time.Second {
+	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 2*time.Second {
 		cached := s.publicCache
 		s.publicCacheMu.RUnlock()
 		writeJSON(w, http.StatusOK, cached)
@@ -86,7 +116,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := publicStatusResponse{
-		Nodes:  publicStatusNodes{Names: make([]string, 0, len(nodes))},
+		Nodes:  publicStatusNodes{Names: make([]string, 0, len(nodes)), Telemetry: make([]publicNodeTelemetry, 0, len(nodes))},
 		Checks: publicStatusChecks{},
 	}
 	response.Nodes.Total = len(nodes)
@@ -98,7 +128,36 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	for _, node := range nodes {
 		// The resource payload is intentionally discarded here:
 		// only the report timestamp is used for the online count.
-		if reportedAt, _, e := s.service.Store().GetResourceLatest(r.Context(), node.ID); e == nil {
+		telemetry := publicNodeTelemetry{Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
+		if reportedAt, payload, e := s.service.Store().GetResourceLatest(r.Context(), node.ID); e == nil {
+			telemetry.LastReportedAt = &reportedAt
+			if time.Since(reportedAt) <= 2*time.Minute {
+				telemetry.Status = "online"
+			} else if time.Since(reportedAt) <= 10*time.Minute {
+				telemetry.Status = "attention"
+			}
+			var resource struct {
+				CPUPercent float64 `json:"cpu_percent"`
+				Load1 float64 `json:"load1"`
+				MemoryUsedBytes uint64 `json:"memory_used_bytes"`
+				MemoryTotalBytes uint64 `json:"memory_total_bytes"`
+				FilesystemUsedBytes uint64 `json:"filesystem_used_bytes"`
+				FilesystemTotalBytes uint64 `json:"filesystem_total_bytes"`
+				NetworkRxBytes uint64 `json:"network_rx_bytes"`
+				NetworkTxBytes uint64 `json:"network_tx_bytes"`
+				StartedAt int64 `json:"started_at"`
+			}
+			if json.Unmarshal(payload, &resource) == nil {
+				telemetry.CPUPercent = &resource.CPUPercent
+				telemetry.Load1 = &resource.Load1
+				telemetry.MemoryUsedBytes = &resource.MemoryUsedBytes
+				telemetry.MemoryTotalBytes = &resource.MemoryTotalBytes
+				telemetry.FilesystemUsed = &resource.FilesystemUsedBytes
+				telemetry.FilesystemTotal = &resource.FilesystemTotalBytes
+				telemetry.NetworkRxBytes = &resource.NetworkRxBytes
+				telemetry.NetworkTxBytes = &resource.NetworkTxBytes
+				telemetry.StartedAt = &resource.StartedAt
+			}
 			if lastUpdated.IsZero() || reportedAt.After(lastUpdated) {
 				lastUpdated = reportedAt
 			}
@@ -106,7 +165,36 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				response.Nodes.Online++
 			}
 		}
-		response.Nodes.Names = append(response.Nodes.Names, sanitizeNodeName(node.Name))
+		// Use the latest result per target to expose a safe aggregate for the card.
+		latestResults, _ := s.service.Store().ListNetworkLatest(r.Context(), node.ID)
+		var latencyTotal int64
+		var latencyCount, latestTotal, latestFailure int
+		var latestChecked time.Time
+		for _, latest := range latestResults {
+			var result struct { Status string `json:"status"`; Latency int64 `json:"latency_ms"` }
+			if json.Unmarshal(latest.Payload, &result) != nil { continue }
+			latestTotal++
+			if result.Status != "success" && result.Status != "available" { latestFailure++ }
+			if result.Latency > 0 { latencyTotal += result.Latency; latencyCount++ }
+			if latestChecked.IsZero() || latest.CheckedAt.After(latestChecked) { latestChecked = latest.CheckedAt }
+		}
+		if latestTotal > 0 {
+			loss := float64(latestFailure) / float64(latestTotal)
+			telemetry.LossRate = &loss
+		}
+		if latencyCount > 0 { avg := float64(latencyTotal) / float64(latencyCount); telemetry.LatencyMS = &avg }
+		if !latestChecked.IsZero() { telemetry.LastCheckedAt = &latestChecked }
+		if summaries, e := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now); e == nil {
+			for _, summary := range summaries {
+				check := publicNodeCheck{Kind: summary.Kind}
+				if summary.HasWindowData && summary.LatencyCount > 0 { value := summary.LatencyAvgMS; check.LatencyMS = &value }
+				if summary.HasWindowData && summary.Total > 0 { value := float64(summary.Failure) / float64(summary.Total); check.LossRate = &value }
+				if !summary.LastCheckedAt.IsZero() { value := summary.LastCheckedAt; check.LastCheckedAt = &value }
+				if check.LatencyMS != nil || check.LossRate != nil || check.LastCheckedAt != nil { telemetry.Checks = append(telemetry.Checks, check) }
+			}
+		}
+		response.Nodes.Names = append(response.Nodes.Names, telemetry.Name)
+		response.Nodes.Telemetry = append(response.Nodes.Telemetry, telemetry)
 		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
 			records, e := s.service.Store().GetResultHistory(r.Context(), kind, node.ID, from, now, limit)
 			if e != nil {

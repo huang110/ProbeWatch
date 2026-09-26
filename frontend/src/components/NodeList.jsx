@@ -139,71 +139,71 @@ export function NodeTable({
             const totalTransfer = (node.rx || 0) + (node.tx || 0)
             const os = node.os || 'Linux'
             const cores = node.cores || node.cpuCores || 1
-            const l1 = numeric(node.load1) ?? 0.05
-            const l5 = numeric(node.load5) ?? 0.03
-            const l15 = numeric(node.load15) ?? 0.01
+            const l1 = numeric(node.load1)
+            const l5 = numeric(node.load5)
+            const l15 = numeric(node.load15)
 
             // Bandwidth
             const upRate = rate?.up ?? 0
             const downRate = rate?.down ?? 0
 
             // Connections (TCP / UDP)
-            const tcpCount = numeric(node.tcpCount) ?? numeric(node.tcp_conn) ?? (isOnline ? ((Array.from(node.name || 'a').reduce((a, c) => a + c.charCodeAt(0), 17) % 35) + 20) : 0)
-            const udpCount = numeric(node.udpCount) ?? numeric(node.udp_conn) ?? (isOnline ? ((Array.from(node.name || 'b').reduce((a, c) => a + c.charCodeAt(0), 5) % 6) + 1) : 0)
+            const tcpCount = numeric(node.tcpCount) ?? numeric(node.tcp_conn) ?? numeric(node.resource?.socket_stats?.tcp_total)
+            const udpCount = numeric(node.udpCount) ?? numeric(node.udp_conn) ?? numeric(node.resource?.socket_stats?.udp_total)
 
             // Three-Network (三网) ISP telemetry
-            const baseLatency = numeric(node.avgLatency) ?? (node.flag === '🇨🇳' ? 28 : node.flag === '🇭🇰' ? 42 : node.flag === '🇯🇵' ? 68 : 155)
+            const baseLatency = numeric(node.avgLatency)
             const ispData = [
               {
                 name: '电信',
-                latency: numeric(node.pingCt) ?? Math.max(12, Math.round(baseLatency * 0.98)),
-                loss: numeric(node.lossCt) ?? (loss !== null ? loss : 0)
+                latency: numeric(node.pingCt) ?? baseLatency,
+                loss: numeric(node.lossCt) ?? loss
               },
               {
                 name: '联通',
-                latency: numeric(node.pingCu) ?? Math.max(10, Math.round(baseLatency * 0.94)),
-                loss: numeric(node.lossCu) ?? (loss !== null ? loss : 0)
+                latency: numeric(node.pingCu) ?? baseLatency,
+                loss: numeric(node.lossCu) ?? loss
               },
               {
                 name: '移动',
-                latency: numeric(node.pingCm) ?? Math.max(15, Math.round(baseLatency * 1.06)),
-                loss: numeric(node.lossCm) ?? (loss !== null ? loss : 0)
+                latency: numeric(node.pingCm) ?? baseLatency,
+                loss: numeric(node.lossCm) ?? loss
               }
             ]
 
-            const uptimeDays = node.uptime ? node.uptime : (isOnline ? '151 天' : '0 天')
-            const expireDays = calc.statusText || '长期有效'
+            const uptimeDays = node.uptime || '—'
+            const expireDays = calc.statusText || '账单未配置'
             const priceDisplay = billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`
 
             const uptimeText = uptimeDays
             const priceText = priceDisplay
-            const cpuPercent = node.cpu !== null ? Number(node.cpu) : 0.1
-            const loadText = `${l1.toFixed(2)}, ${l5.toFixed(2)}, ${l15.toFixed(2)}`
-            const memPercent = node.memory !== null ? Number(node.memory) : 30.9
-            const memSub = node.memUsed && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : '136.7 MB / 442.5 MB'
-            const diskPercent = node.disk !== null ? Number(node.disk) : 6.8
-            const diskSub = node.diskUsed && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : '1.3 GB / 19.6 GB'
+            const cpuPercent = node.cpu !== null ? Number(node.cpu) : null
+            const loadText = l1 !== null ? `${l1.toFixed(2)}, ${(l5 ?? 0).toFixed(2)}, ${(l15 ?? 0).toFixed(2)}` : '暂无实时数据'
+            const memPercent = node.memory !== null ? Number(node.memory) : null
+            const memSub = node.memUsed !== null && node.memTotal ? `${formatBytes(node.memUsed)} / ${formatBytes(node.memTotal)}` : '暂无实时数据'
+            const diskPercent = node.disk !== null ? Number(node.disk) : null
+            const diskSub = node.diskUsed !== null && node.diskTotal ? `${formatBytes(node.diskUsed)} / ${formatBytes(node.diskTotal)}` : '暂无实时数据'
 
-            const quotaStr = customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : '1.00 TB'
+            const quotaStr = customMeta?.trafficQuota && customMeta.trafficQuota !== '0 B' ? customMeta.trafficQuota : ''
             let quotaBytes = 1024 * 1024 * 1024 * 1024
             if (quotaStr.includes('GB')) {
               quotaBytes = parseFloat(quotaStr) * 1024 * 1024 * 1024
             } else if (quotaStr.includes('TB')) {
               quotaBytes = parseFloat(quotaStr) * 1024 * 1024 * 1024 * 1024
             }
-            const trafficPercent = Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100))
-            const trafficSub = `${formatBytes(totalTransfer)} / ${quotaStr}`
+            const trafficPercent = quotaStr ? Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100)) : null
+            const trafficSub = quotaStr ? `${formatBytes(totalTransfer)} / ${quotaStr}` : '流量配额未配置'
 
             const upRateText = formatRate(upRate)
             const downRateText = formatRate(downRate)
             const totalTxText = formatBytes(node.tx || 0)
             const totalRxText = formatBytes(node.rx || 0)
-            const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : 135
-            const costText = `${calc.symbol || '$'}${billing.price || 5}`
+            const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : null
+            const costText = billing.price !== undefined ? `${calc.symbol || '¥'}${billing.price}` : '账单未配置'
 
-            const cuIsp = ispData.find((d) => d.name === '联通') || { latency: 45, loss: 0 }
-            const ctIsp = ispData.find((d) => d.name === '电信') || { latency: 191, loss: 48.3 }
-            const cmIsp = ispData.find((d) => d.name === '移动') || { latency: 97, loss: 1.7 }
+            const cuIsp = ispData.find((d) => d.name === '联通') || { latency: null, loss: null }
+            const ctIsp = ispData.find((d) => d.name === '电信') || { latency: null, loss: null }
+            const cmIsp = ispData.find((d) => d.name === '移动') || { latency: null, loss: null }
 
             return (
               <article
@@ -295,7 +295,7 @@ export function NodeTable({
                     <div className="vps-res-header">
                       <span className="vps-res-label">CPU</span>
                       <span className="vps-res-val mono">
-                        {cpuPercent.toFixed(1)}%
+                        {cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '—'}
                         {node.cpuTempC && node.cpuTempC > 0 ? (
                           <small style={{ marginLeft: '4px', color: node.cpuTempC > 85 ? '#ef4444' : node.cpuTempC > 75 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>
                             {node.cpuTempC.toFixed(0)}°
@@ -304,7 +304,7 @@ export function NodeTable({
                       </span>
                     </div>
                     <div className="vps-res-bar-wrap">
-                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }} />
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent || 0))}%` }} />
                     </div>
                     <div className="vps-res-sub mono">{loadText}</div>
                   </div>
@@ -313,10 +313,10 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">内存</span>
-                      <span className="vps-res-val mono">{memPercent.toFixed(1)}%</span>
+                      <span className="vps-res-val mono">{memPercent !== null ? `${memPercent.toFixed(1)}%` : '—'}</span>
                     </div>
                     <div className="vps-res-bar-wrap">
-                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }} />
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent || 0))}%` }} />
                     </div>
                     <div className="vps-res-sub mono">{memSub}</div>
                   </div>
@@ -325,10 +325,10 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">硬盘</span>
-                      <span className="vps-res-val mono">{diskPercent.toFixed(1)}%</span>
+                      <span className="vps-res-val mono">{diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '—'}</span>
                     </div>
                     <div className="vps-res-bar-wrap">
-                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }} />
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent || 0))}%` }} />
                     </div>
                     <div className="vps-res-sub mono">{diskSub}</div>
                   </div>
@@ -337,10 +337,10 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">流量</span>
-                      <span className="vps-res-val mono text-traffic">{trafficPercent.toFixed(1)}%</span>
+                      <span className="vps-res-val mono text-traffic">{trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '—'}</span>
                     </div>
                     <div className="vps-res-bar-wrap">
-                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent))}%` }} />
+                      <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent || 0))}%` }} />
                     </div>
                     <div className="vps-res-sub mono">{trafficSub}</div>
                   </div>
@@ -380,7 +380,7 @@ export function NodeTable({
                   <div className="vps-tri-col vps-expiry-col">
                     <div className="vps-meta-line">
                       <span className="vps-meta-icon">📅</span>
-                      <span>剩余 {remainDays} 天</span>
+                        <span>{remainDays !== null ? `剩余 ${remainDays} 天` : '账单未配置'}</span>
                     </div>
                     <div className="vps-meta-line">
                       <span className="vps-meta-icon">💰</span>
@@ -407,9 +407,9 @@ export function NodeTable({
                           <span className="vps-isp-dot unicom-red" />
                           <span>联通</span>
                         </span>
-                        <span className="vps-isp-val mono">{cuIsp.latency} ms</span>
+                        <span className="vps-isp-val mono">{cuIsp.latency !== null ? `${cuIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(cuIsp.latency)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(cuIsp.latency || 0)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -418,9 +418,9 @@ export function NodeTable({
                           <span className="vps-isp-dot telecom-blue" />
                           <span>电信</span>
                         </span>
-                        <span className="vps-isp-val mono">{ctIsp.latency} ms</span>
+                        <span className="vps-isp-val mono">{ctIsp.latency !== null ? `${ctIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(ctIsp.latency)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(ctIsp.latency || 0)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -429,9 +429,9 @@ export function NodeTable({
                           <span className="vps-isp-dot mobile-green" />
                           <span>移动</span>
                         </span>
-                        <span className="vps-isp-val mono">{cmIsp.latency} ms</span>
+                        <span className="vps-isp-val mono">{cmIsp.latency !== null ? `${cmIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(cmIsp.latency)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(cmIsp.latency || 0)} />
                     </div>
                   </div>
 
@@ -448,9 +448,9 @@ export function NodeTable({
                           <span className="vps-isp-dot unicom-red" />
                           <span>联通</span>
                         </span>
-                        <span className="vps-isp-val mono">{cuIsp.loss.toFixed(1)}%</span>
+                        <span className="vps-isp-val mono">{cuIsp.loss !== null ? `${cuIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(cuIsp.loss)} />
+                      <VpsDotTrack blocks={getLossBlocks(cuIsp.loss || 0)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -459,9 +459,9 @@ export function NodeTable({
                           <span className="vps-isp-dot telecom-blue" />
                           <span>电信</span>
                         </span>
-                        <span className="vps-isp-val mono">{ctIsp.loss.toFixed(1)}%</span>
+                        <span className="vps-isp-val mono">{ctIsp.loss !== null ? `${ctIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(ctIsp.loss)} />
+                      <VpsDotTrack blocks={getLossBlocks(ctIsp.loss || 0)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -470,9 +470,9 @@ export function NodeTable({
                           <span className="vps-isp-dot mobile-green" />
                           <span>移动</span>
                         </span>
-                        <span className="vps-isp-val mono">{cmIsp.loss.toFixed(1)}%</span>
+                        <span className="vps-isp-val mono">{cmIsp.loss !== null ? `${cmIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(cmIsp.loss)} />
+                      <VpsDotTrack blocks={getLossBlocks(cmIsp.loss || 0)} />
                     </div>
                   </div>
                 </div>

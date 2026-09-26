@@ -118,11 +118,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		go termClient.Run(ctx)
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	// Keep resource and probe freshness aligned with the live console.
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	workloadTicker := time.NewTicker(30 * time.Second)
+	workloadTicker := time.NewTicker(10 * time.Second)
 	defer workloadTicker.Stop()
-	eventsTicker := time.NewTicker(30 * time.Second)
+	eventsTicker := time.NewTicker(10 * time.Second)
 	defer eventsTicker.Stop()
 	configTicker := time.NewTicker(5 * time.Minute)
 	defer configTicker.Stop()

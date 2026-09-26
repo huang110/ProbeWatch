@@ -77,7 +77,7 @@ const navItems = [
   { id: 'logs', label: '系统日志', icon: Scroll },
 ]
 const REFRESH_OPTIONS = [10, 30, 60]
-const OVERVIEW_INTERVAL_MS = 300000
+const OVERVIEW_INTERVAL_MS = 30000
 const pageTitleFor = (page) =>
   page === 'node-detail'
     ? '节点详情'
@@ -450,7 +450,7 @@ export function App() {
   const [guestPreview, setGuestPreview] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [refreshInterval, setRefreshInterval] = useState(30)
+  const [refreshInterval, setRefreshInterval] = useState(10)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState(getSavedTheme)
@@ -952,7 +952,7 @@ export function App() {
   useEffect(() => {
     if (guestPreview || apiState.kind === 'guest') {
       refreshGuest()
-      const interval = activeNav === 'node-detail' ? 3000 : 10000
+      const interval = activeNav === 'node-detail' ? 3000 : 5000
       const timer = setInterval(() => {
         if (document.visibilityState === 'visible') {
           refreshGuest()
@@ -1009,40 +1009,46 @@ export function App() {
       }
       const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+      const telemetry = safeArray(effectiveGuestStatus?.nodes?.telemetry).find((item) => item?.name === name) || {}
       const meta = detectRegionAndFlag(name, '')
       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
       const os = custom.os || 'Ubuntu 24.04 LTS'
-      const cpuPercent = custom.cpu !== undefined ? Number(custom.cpu) : 0.1
-      const uptimeText = custom.uptime || '24 天'
+      const cpuPercent = numeric(telemetry.cpu_percent)
+      const memUsed = numeric(telemetry.memory_used_bytes)
+      const memTotal = numeric(telemetry.memory_total_bytes)
+      const diskUsed = numeric(telemetry.filesystem_used_bytes)
+      const diskTotal = numeric(telemetry.filesystem_total_bytes)
+      const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
 
       return {
         uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
         id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
         name: name,
-        status: 'online',
+        status: safeText(telemetry.status, 'unknown'),
+        lastReportedAt: telemetry.last_reported_at || null,
         customName: displayName,
         flag: displayFlag,
         os: os,
         arch: custom.arch || 'kvm (x86_64)',
         kernel: custom.kernel || '6.8.0-31-generic',
-        uptime: uptimeText.includes('天') ? uptimeText : `${uptimeText} 天`,
+        uptime: uptimeText,
         cpu: cpuPercent,
-        memUsed: 143339520,
-        memTotal: 463994880,
-        diskUsed: 1395864371,
-        diskTotal: 21045339750,
+        memUsed,
+        memTotal,
+        diskUsed,
+        diskTotal,
         swapUsed: 0,
         swapTotal: 2147483648,
-        rx: 12133285888,
-        tx: 13207024435,
+        rx: numeric(telemetry.network_rx_bytes),
+        tx: numeric(telemetry.network_tx_bytes),
         resource: {
-          cpu_name: custom.cpuModel || 'Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz (1 vCPU)',
+          cpu_name: custom.cpuModel || '—',
           cpu_cores: 1,
-          ip: custom.ip || '103.159.207.11',
-          process_count: 106,
-          tcp_conn_count: 67,
-          udp_conn_count: 5,
+          ip: '',
+          process_count: null,
+          tcp_conn_count: null,
+          udp_conn_count: null,
         },
       }
     })
