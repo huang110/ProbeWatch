@@ -118,6 +118,57 @@ type SyntheticResultEnvelope struct {
 	Result   SyntheticResult `json:"result"`
 }
 
+// ContainerSnapshot represents a single container's metadata and real-time resource utilization.
+type ContainerSnapshot struct {
+	ID               string   `json:"id"`
+	Names            []string `json:"names"`
+	Image            string   `json:"image"`
+	ImageID          string   `json:"image_id,omitempty"`
+	Command          string   `json:"command,omitempty"`
+	Created          int64    `json:"created"`
+	State            string   `json:"state"` // running, exited, restarting, paused, dead
+	Status           string   `json:"status"` // e.g. "Up 2 hours", "Exited (1) 5 minutes ago"
+	Health           string   `json:"health,omitempty"` // healthy, unhealthy, starting, none
+	RestartCount     int      `json:"restart_count,omitempty"`
+	CPUPercent       float64  `json:"cpu_percent"`
+	MemoryUsageBytes uint64   `json:"memory_usage_bytes"`
+	MemoryLimitBytes uint64   `json:"memory_limit_bytes"`
+	MemoryPercent    float64  `json:"memory_percent"`
+	NetworkRxBytes   uint64   `json:"network_rx_bytes"`
+	NetworkTxBytes   uint64   `json:"network_tx_bytes"`
+	BlockReadBytes   uint64   `json:"block_read_bytes"`
+	BlockWriteBytes  uint64   `json:"block_write_bytes"`
+	PIDs             uint32   `json:"pids"`
+	Ports            []string `json:"ports,omitempty"`
+}
+
+// ProcessSnapshot represents a top system process running on the host.
+type ProcessSnapshot struct {
+	PID            int32   `json:"pid"`
+	PPID           int32   `json:"ppid"`
+	Name           string  `json:"name"`
+	User           string  `json:"user"`
+	State          string  `json:"state"` // R, S, D, Z, T
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryRSSBytes uint64  `json:"memory_rss_bytes"`
+	MemoryPercent  float64 `json:"memory_percent"`
+	Threads        int32   `json:"threads"`
+	CommandLine    string  `json:"command_line,omitempty"`
+}
+
+// NodeWorkloadReport is the payload submitted by edge nodes reporting container & process workloads.
+type NodeWorkloadReport struct {
+	NodeUUID          string              `json:"node_uuid"`
+	ReportedAt        int64               `json:"reported_at"`
+	DockerAvailable   bool                `json:"docker_available"`
+	DockerVersion     string              `json:"docker_version,omitempty"`
+	ContainersTotal   int                 `json:"containers_total"`
+	ContainersRunning int                 `json:"containers_running"`
+	ContainersStopped int                 `json:"containers_stopped"`
+	Containers        []ContainerSnapshot `json:"containers"`
+	TopProcesses      []ProcessSnapshot   `json:"top_processes"`
+}
+
 // InterfaceStat represents one network interface's traffic counters and addresses.
 type InterfaceStat struct {
 	Name      string `json:"name"`
@@ -851,6 +902,73 @@ func (r SpeedtestResult) Validate() error {
 	}
 	if r.TestedAt <= 0 {
 		return errors.New("tested_at must be greater than zero")
+	}
+	return nil
+}
+
+func (c ContainerSnapshot) Validate() error {
+	if err := validateString("id", c.ID, maxIDLength, true); err != nil {
+		return err
+	}
+	if err := validateString("image", c.Image, 512, false); err != nil {
+		return err
+	}
+	if err := validateString("state", c.State, maxKindLength, false); err != nil {
+		return err
+	}
+	if err := validateString("status", c.Status, maxReasonLength, false); err != nil {
+		return err
+	}
+	if err := validateString("health", c.Health, maxKindLength, false); err != nil {
+		return err
+	}
+	if len(c.Names) > 16 {
+		return errors.New("container names exceeds maximum allowed count")
+	}
+	if len(c.Ports) > 64 {
+		return errors.New("container ports exceeds maximum allowed count")
+	}
+	return nil
+}
+
+func (p ProcessSnapshot) Validate() error {
+	if err := validateString("name", p.Name, maxNameLength, true); err != nil {
+		return err
+	}
+	if err := validateString("user", p.User, maxNameLength, false); err != nil {
+		return err
+	}
+	if err := validateString("state", p.State, 16, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r NodeWorkloadReport) Validate() error {
+	if err := validateUUID("node_uuid", r.NodeUUID); err != nil {
+		return err
+	}
+	if r.ReportedAt <= 0 {
+		return errors.New("reported_at must be greater than zero")
+	}
+	if err := validateString("docker_version", r.DockerVersion, maxVersionLength, false); err != nil {
+		return err
+	}
+	if len(r.Containers) > 500 {
+		return errors.New("containers exceeds maximum count of 500")
+	}
+	for i := range r.Containers {
+		if err := r.Containers[i].Validate(); err != nil {
+			return fmt.Errorf("container[%d]: %w", i, err)
+		}
+	}
+	if len(r.TopProcesses) > 100 {
+		return errors.New("top_processes exceeds maximum count of 100")
+	}
+	for i := range r.TopProcesses {
+		if err := r.TopProcesses[i].Validate(); err != nil {
+			return fmt.Errorf("top_processes[%d]: %w", i, err)
+		}
 	}
 	return nil
 }

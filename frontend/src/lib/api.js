@@ -946,6 +946,48 @@ export async function testSyntheticTarget(payload = {}) {
   return await res.json()
 }
 
+export async function fetchFleetContainerOverview(signal) {
+  const res = await fetch('/api/containers/overview', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/containers/overview', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch fleet container overview')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchNodeContainers(nodeUuid, signal) {
+  const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/containers`, { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/containers`, { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch node containers')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchNodeProcesses(nodeUuid, signal) {
+  const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/processes`, { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/processes`, { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch node processes')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchNodes(signal) {
+  const res = await fetch('/api/nodes', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const guest = await fetchGuestStatus(signal).catch(() => null)
+    if (guest && guest.nodes) return guest.nodes
+    throw new Error('Failed to fetch nodes')
+  }
+  return await res.json()
+}
+
+
+
 
 
 

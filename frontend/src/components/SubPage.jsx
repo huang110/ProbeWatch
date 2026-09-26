@@ -11,6 +11,7 @@ import { CertificatesAndDNSView } from './CertificatesAndDNSView.jsx'
 import { MeshMatrixView } from './MeshMatrixView.jsx'
 import { SpeedtestBenchmarkView } from './SpeedtestBenchmarkView.jsx'
 import SyntheticProbingView from './SyntheticProbingView.jsx'
+import { ContainerProcessView } from './ContainerProcessView.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -73,6 +74,9 @@ export function SubPage({
     speed: ['测速与带宽基准', '多节点分布式测速调度：边缘节点并发下行/上行网络吞吐基准压测与往返时延抖动评估。'],
     synthetic: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流。'],
     sla: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流。'],
+    containers: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
+    processes: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
+    docker: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
     settings: ['系统设置', '管理控制台安全选项、状态页与事件发布、团队协作与权限、API 密钥与自动化灾备中心。'],
   }
 
@@ -127,6 +131,8 @@ export function SubPage({
         <SpeedtestBenchmarkView />
       ) : page === 'synthetic' || page === 'sla' ? (
         <SyntheticProbingView />
+      ) : page === 'containers' || page === 'processes' || page === 'docker' ? (
+        <ContainerProcessView />
       ) : page === 'network' ? (
         <TargetManage readOnly kinds={['tcp', 'http', 'https', 'dns']} title="网络检测目标" />
       ) : page === 'mtr' ? (

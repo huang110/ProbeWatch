@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/probewatch/probewatch/internal/protocol"
 	"github.com/probewatch/probewatch/internal/security"
 	moderncsqlite "modernc.org/sqlite"
 )
@@ -3273,5 +3274,308 @@ func (s *Store) ListSyntheticHistory(ctx context.Context, nodeID, targetID strin
 	}
 	return history, rows.Err()
 }
+
+type NodeWorkloadRecord struct {
+	NodeID            string                     `json:"node_id"`
+	NodeName          string                     `json:"node_name"`
+	DockerAvailable   bool                       `json:"docker_available"`
+	DockerVersion     string                     `json:"docker_version"`
+	ContainersTotal   int                        `json:"containers_total"`
+	ContainersRunning int                        `json:"containers_running"`
+	ContainersStopped int                        `json:"containers_stopped"`
+	TopProcesses      []protocol.ProcessSnapshot `json:"top_processes"`
+	ReportedAt        time.Time                  `json:"reported_at"`
+}
+
+type NodeContainerRecord struct {
+	NodeID           string    `json:"node_id"`
+	NodeName         string    `json:"node_name"`
+	ContainerID      string    `json:"container_id"`
+	Name             string    `json:"name"`
+	Image            string    `json:"image"`
+	State            string    `json:"state"`
+	Status           string    `json:"status"`
+	Health           string    `json:"health"`
+	CPUPercent       float64   `json:"cpu_percent"`
+	MemoryUsageBytes uint64    `json:"memory_usage_bytes"`
+	MemoryLimitBytes uint64    `json:"memory_limit_bytes"`
+	MemoryPercent    float64   `json:"memory_percent"`
+	NetworkRxBytes   uint64    `json:"network_rx_bytes"`
+	NetworkTxBytes   uint64    `json:"network_tx_bytes"`
+	BlockReadBytes   uint64    `json:"block_read_bytes"`
+	BlockWriteBytes  uint64    `json:"block_write_bytes"`
+	PIDs             uint32    `json:"pids"`
+	Ports            []string  `json:"ports"`
+	ReportedAt       time.Time `json:"reported_at"`
+}
+
+type FleetContainerOverview struct {
+	TotalNodes          int                   `json:"total_nodes"`
+	NodesWithDocker     int                   `json:"nodes_with_docker"`
+	TotalContainers     int                   `json:"total_containers"`
+	RunningContainers   int                   `json:"running_containers"`
+	StoppedContainers   int                   `json:"stopped_containers"`
+	UnhealthyContainers int                   `json:"unhealthy_containers"`
+	TopCPUContainers    []NodeContainerRecord `json:"top_cpu_containers"`
+	TopMemoryContainers []NodeContainerRecord `json:"top_memory_containers"`
+}
+
+func (s *Store) SaveNodeWorkload(ctx context.Context, nodeID string, report protocol.NodeWorkloadReport) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin save node workload tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	procsJSON, err := json.Marshal(report.TopProcesses)
+	if err != nil {
+		procsJSON = []byte("[]")
+	}
+
+	workloadQuery := `
+		INSERT INTO node_workload_latest (
+			node_id, docker_available, docker_version, containers_total, containers_running, containers_stopped, top_processes, reported_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET
+			docker_available = excluded.docker_available,
+			docker_version = excluded.docker_version,
+			containers_total = excluded.containers_total,
+			containers_running = excluded.containers_running,
+			containers_stopped = excluded.containers_stopped,
+			top_processes = excluded.top_processes,
+			reported_at = excluded.reported_at
+		WHERE excluded.reported_at >= node_workload_latest.reported_at;
+	`
+	if _, err := tx.ExecContext(ctx, workloadQuery,
+		nodeID,
+		boolInt(report.DockerAvailable),
+		report.DockerVersion,
+		report.ContainersTotal,
+		report.ContainersRunning,
+		report.ContainersStopped,
+		procsJSON,
+		report.ReportedAt,
+	); err != nil {
+		return fmt.Errorf("upsert node workload latest: %w", err)
+	}
+
+	// Replace containers for this node
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_containers_latest WHERE node_id = ?;`, nodeID); err != nil {
+		return fmt.Errorf("clear previous node containers: %w", err)
+	}
+
+	containerStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO node_containers_latest (
+			node_id, container_id, name, image, state, status, health,
+			cpu_percent, mem_usage_bytes, mem_limit_bytes, mem_percent,
+			net_rx_bytes, net_tx_bytes, block_read_bytes, block_write_bytes,
+			pids, ports, payload, reported_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare insert container: %w", err)
+	}
+	defer containerStmt.Close()
+
+	for _, c := range report.Containers {
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		if name == "" {
+			name = c.ID
+			if len(name) > 12 {
+				name = name[:12]
+			}
+		}
+		portsJSON, _ := json.Marshal(c.Ports)
+		payloadJSON, _ := json.Marshal(c)
+
+		if _, err := containerStmt.ExecContext(ctx,
+			nodeID,
+			c.ID,
+			name,
+			c.Image,
+			c.State,
+			c.Status,
+			c.Health,
+			c.CPUPercent,
+			c.MemoryUsageBytes,
+			c.MemoryLimitBytes,
+			c.MemoryPercent,
+			c.NetworkRxBytes,
+			c.NetworkTxBytes,
+			c.BlockReadBytes,
+			c.BlockWriteBytes,
+			c.PIDs,
+			string(portsJSON),
+			payloadJSON,
+			report.ReportedAt,
+		); err != nil {
+			return fmt.Errorf("insert node container %s: %w", c.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) GetNodeWorkload(ctx context.Context, nodeID string) (*NodeWorkloadRecord, error) {
+	q := `
+		SELECT w.node_id, COALESCE(n.name, w.node_id), w.docker_available, w.docker_version,
+		       w.containers_total, w.containers_running, w.containers_stopped, w.top_processes, w.reported_at
+		FROM node_workload_latest w
+		LEFT JOIN nodes n ON n.id = w.node_id
+		WHERE w.node_id = ?;
+	`
+	var r NodeWorkloadRecord
+	var dockerAvail int
+	var procsRaw []byte
+	var reportedAt int64
+	if err := s.db.QueryRowContext(ctx, q, nodeID).Scan(
+		&r.NodeID, &r.NodeName, &dockerAvail, &r.DockerVersion,
+		&r.ContainersTotal, &r.ContainersRunning, &r.ContainersStopped, &procsRaw, &reportedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get node workload: %w", err)
+	}
+	r.DockerAvailable = dockerAvail != 0
+	r.ReportedAt = time.Unix(reportedAt, 0).UTC()
+	if len(procsRaw) > 0 {
+		_ = json.Unmarshal(procsRaw, &r.TopProcesses)
+	}
+	return &r, nil
+}
+
+func (s *Store) ListNodeContainers(ctx context.Context, nodeID string) ([]NodeContainerRecord, error) {
+	q := `
+		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
+		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
+		       c.block_read_bytes, c.block_write_bytes, c.pids, c.ports, c.reported_at
+		FROM node_containers_latest c
+		LEFT JOIN nodes n ON n.id = c.node_id
+		WHERE c.node_id = ?
+		ORDER BY c.cpu_percent DESC, c.name ASC;
+	`
+	rows, err := s.db.QueryContext(ctx, q, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("list node containers: %w", err)
+	}
+	defer rows.Close()
+
+	var records []NodeContainerRecord
+	for rows.Next() {
+		var rec NodeContainerRecord
+		var portsRaw string
+		var reportedAt int64
+		if err := rows.Scan(
+			&rec.NodeID, &rec.NodeName, &rec.ContainerID, &rec.Name, &rec.Image, &rec.State, &rec.Status, &rec.Health,
+			&rec.CPUPercent, &rec.MemoryUsageBytes, &rec.MemoryLimitBytes, &rec.MemoryPercent, &rec.NetworkRxBytes, &rec.NetworkTxBytes,
+			&rec.BlockReadBytes, &rec.BlockWriteBytes, &rec.PIDs, &portsRaw, &reportedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan node container: %w", err)
+		}
+		rec.ReportedAt = time.Unix(reportedAt, 0).UTC()
+		if portsRaw != "" {
+			_ = json.Unmarshal([]byte(portsRaw), &rec.Ports)
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerOverview, error) {
+	overview := &FleetContainerOverview{
+		TopCPUContainers:    make([]NodeContainerRecord, 0),
+		TopMemoryContainers: make([]NodeContainerRecord, 0),
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN docker_available = 1 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(containers_total), 0),
+		       COALESCE(SUM(containers_running), 0),
+		       COALESCE(SUM(containers_stopped), 0)
+		FROM node_workload_latest;
+	`)
+	_ = row.Scan(
+		&overview.TotalNodes,
+		&overview.NodesWithDocker,
+		&overview.TotalContainers,
+		&overview.RunningContainers,
+		&overview.StoppedContainers,
+	)
+
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM node_containers_latest WHERE health = 'unhealthy';
+	`).Scan(&overview.UnhealthyContainers)
+
+	cpuRows, err := s.db.QueryContext(ctx, `
+		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
+		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
+		       c.block_read_bytes, c.block_write_bytes, c.pids, c.ports, c.reported_at
+		FROM node_containers_latest c
+		LEFT JOIN nodes n ON n.id = c.node_id
+		WHERE c.state = 'running'
+		ORDER BY c.cpu_percent DESC
+		LIMIT 10;
+	`)
+	if err == nil {
+		defer cpuRows.Close()
+		for cpuRows.Next() {
+			var rec NodeContainerRecord
+			var portsRaw string
+			var reportedAt int64
+			if err := cpuRows.Scan(
+				&rec.NodeID, &rec.NodeName, &rec.ContainerID, &rec.Name, &rec.Image, &rec.State, &rec.Status, &rec.Health,
+				&rec.CPUPercent, &rec.MemoryUsageBytes, &rec.MemoryLimitBytes, &rec.MemoryPercent, &rec.NetworkRxBytes, &rec.NetworkTxBytes,
+				&rec.BlockReadBytes, &rec.BlockWriteBytes, &rec.PIDs, &portsRaw, &reportedAt,
+			); err == nil {
+				rec.ReportedAt = time.Unix(reportedAt, 0).UTC()
+				if portsRaw != "" {
+					_ = json.Unmarshal([]byte(portsRaw), &rec.Ports)
+				}
+				overview.TopCPUContainers = append(overview.TopCPUContainers, rec)
+			}
+		}
+	}
+
+	memRows, err := s.db.QueryContext(ctx, `
+		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
+		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
+		       c.block_read_bytes, c.block_write_bytes, c.pids, c.ports, c.reported_at
+		FROM node_containers_latest c
+		LEFT JOIN nodes n ON n.id = c.node_id
+		WHERE c.state = 'running'
+		ORDER BY c.mem_usage_bytes DESC
+		LIMIT 10;
+	`)
+	if err == nil {
+		defer memRows.Close()
+		for memRows.Next() {
+			var rec NodeContainerRecord
+			var portsRaw string
+			var reportedAt int64
+			if err := memRows.Scan(
+				&rec.NodeID, &rec.NodeName, &rec.ContainerID, &rec.Name, &rec.Image, &rec.State, &rec.Status, &rec.Health,
+				&rec.CPUPercent, &rec.MemoryUsageBytes, &rec.MemoryLimitBytes, &rec.MemoryPercent, &rec.NetworkRxBytes, &rec.NetworkTxBytes,
+				&rec.BlockReadBytes, &rec.BlockWriteBytes, &rec.PIDs, &portsRaw, &reportedAt,
+			); err == nil {
+				rec.ReportedAt = time.Unix(reportedAt, 0).UTC()
+				if portsRaw != "" {
+					_ = json.Unmarshal([]byte(portsRaw), &rec.Ports)
+				}
+				overview.TopMemoryContainers = append(overview.TopMemoryContainers, rec)
+			}
+		}
+	}
+
+	return overview, nil
+}
+
 
 

@@ -488,6 +488,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureSyntheticTables(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureWorkloadTables(ctx, db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1094,5 +1097,52 @@ func ensureSyntheticTables(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+func ensureWorkloadTables(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS node_workload_latest (
+			node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+			docker_available INTEGER NOT NULL DEFAULT 0,
+			docker_version TEXT NOT NULL DEFAULT '',
+			containers_total INTEGER NOT NULL DEFAULT 0,
+			containers_running INTEGER NOT NULL DEFAULT 0,
+			containers_stopped INTEGER NOT NULL DEFAULT 0,
+			top_processes BLOB NOT NULL DEFAULT '[]',
+			reported_at INTEGER NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS node_containers_latest (
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			container_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			image TEXT NOT NULL,
+			state TEXT NOT NULL,
+			status TEXT NOT NULL,
+			health TEXT NOT NULL DEFAULT '',
+			cpu_percent REAL NOT NULL DEFAULT 0,
+			mem_usage_bytes INTEGER NOT NULL DEFAULT 0,
+			mem_limit_bytes INTEGER NOT NULL DEFAULT 0,
+			mem_percent REAL NOT NULL DEFAULT 0,
+			net_rx_bytes INTEGER NOT NULL DEFAULT 0,
+			net_tx_bytes INTEGER NOT NULL DEFAULT 0,
+			block_read_bytes INTEGER NOT NULL DEFAULT 0,
+			block_write_bytes INTEGER NOT NULL DEFAULT 0,
+			pids INTEGER NOT NULL DEFAULT 0,
+			ports TEXT NOT NULL DEFAULT '[]',
+			payload BLOB NOT NULL,
+			reported_at INTEGER NOT NULL,
+			PRIMARY KEY(node_id, container_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS node_containers_state_idx ON node_containers_latest(state);`,
+		`CREATE INDEX IF NOT EXISTS node_containers_node_idx ON node_containers_latest(node_id, state);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure workload tables: %w", err)
+		}
+	}
+	return nil
+}
+
 
 

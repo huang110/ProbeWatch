@@ -115,10 +115,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	workloadTicker := time.NewTicker(30 * time.Second)
+	defer workloadTicker.Stop()
 	configTicker := time.NewTicker(5 * time.Minute)
 	defer configTicker.Stop()
 	updateTicker := time.NewTicker(6 * time.Hour)
 	defer updateTicker.Stop()
+
+	// Initial workload report
+	go func() {
+		_ = r.reportWorkload(ctx)
+	}()
 
 	for {
 		if err := r.report(ctx); err != nil && ctx.Err() != nil {
@@ -128,12 +135,43 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+		case <-workloadTicker.C:
+			_ = r.reportWorkload(ctx)
 		case <-configTicker.C:
 			_ = r.refresh(ctx)
 		case <-updateTicker.C:
 			r.autoCheckUpdate(ctx)
 		}
 	}
+}
+
+func (r *Runner) reportWorkload(ctx context.Context) error {
+	dockerAvail, dockerVer, containers, _ := CollectDockerWorkload()
+	procs, _ := CollectTopProcesses(15)
+
+	running := 0
+	stopped := 0
+	for _, c := range containers {
+		if c.State == "running" {
+			running++
+		} else {
+			stopped++
+		}
+	}
+
+	report := protocol.NodeWorkloadReport{
+		NodeUUID:          r.cfg.AgentNodeUUID,
+		ReportedAt:        r.now().UTC().Unix(),
+		DockerAvailable:   dockerAvail,
+		DockerVersion:     dockerVer,
+		ContainersTotal:   len(containers),
+		ContainersRunning: running,
+		ContainersStopped: stopped,
+		Containers:        containers,
+		TopProcesses:      procs,
+	}
+
+	return r.doJSON(ctx, http.MethodPost, "/workload", report, nil)
 }
 
 func (r *Runner) autoCheckUpdate(ctx context.Context) {

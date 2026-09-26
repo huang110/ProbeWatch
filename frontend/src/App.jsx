@@ -52,6 +52,7 @@ const navItems = [
     children: [
       { id: 'latency', label: '延迟监测' },
       { id: 'route', label: '回程线路监测' },
+      { id: 'containers', label: '容器与进程' },
       { id: 'synthetic', label: '合成监控与 SLA' },
       { id: 'speedtest', label: '测速与带宽基准' },
       { id: 'certificates', label: '证书与 DNS 巡检' },
@@ -150,6 +151,9 @@ const VALID_NAV_PAGES = [
   'monitoring',
   'latency',
   'route',
+  'containers',
+  'processes',
+  'docker',
   'synthetic',
   'sla',
   'speedtest',

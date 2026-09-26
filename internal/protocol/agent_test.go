@@ -584,3 +584,80 @@ func TestSyntheticResultAndAssertionValidate(t *testing.T) {
 	}
 }
 
+func TestNodeWorkloadReportValidate(t *testing.T) {
+	report := NodeWorkloadReport{
+		NodeUUID:          "123e4567-e89b-12d3-a456-426614174000",
+		ReportedAt:        1700000000,
+		DockerAvailable:   true,
+		DockerVersion:     "24.0.7",
+		ContainersTotal:   2,
+		ContainersRunning: 1,
+		ContainersStopped: 1,
+		Containers: []ContainerSnapshot{
+			{
+				ID:               "c1234567890a",
+				Names:            []string{"/web-nginx"},
+				Image:            "nginx:alpine",
+				State:            "running",
+				Status:           "Up 3 hours",
+				Health:           "healthy",
+				CPUPercent:       1.5,
+				MemoryUsageBytes: 32000000,
+				MemoryLimitBytes: 512000000,
+				MemoryPercent:    6.25,
+				Ports:            []string{"80:80/tcp"},
+			},
+		},
+		TopProcesses: []ProcessSnapshot{
+			{
+				PID:            1234,
+				PPID:           1,
+				Name:           "nginx",
+				User:           "root",
+				State:          "S",
+				CPUPercent:     0.8,
+				MemoryRSSBytes: 16000000,
+				MemoryPercent:  1.2,
+				Threads:        4,
+			},
+		},
+	}
+
+	if err := report.Validate(); err != nil {
+		t.Fatalf("valid report rejected: %v", err)
+	}
+
+	// Invalid NodeUUID
+	invalidUUID := report
+	invalidUUID.NodeUUID = "invalid-uuid"
+	if err := invalidUUID.Validate(); err == nil {
+		t.Fatal("expected error on invalid node_uuid")
+	}
+
+	// Invalid ReportedAt
+	invalidReportedAt := report
+	invalidReportedAt.ReportedAt = 0
+	if err := invalidReportedAt.Validate(); err == nil {
+		t.Fatal("expected error on zero reported_at")
+	}
+
+	// Invalid Container
+	invalidContainer := report
+	invalidContainer.Containers = []ContainerSnapshot{
+		{ID: ""},
+	}
+	if err := invalidContainer.Validate(); err == nil {
+		t.Fatal("expected error on empty container ID")
+	}
+
+	// Invalid Process
+	invalidProcess := report
+	invalidProcess.TopProcesses = []ProcessSnapshot{
+		{Name: ""},
+	}
+	if err := invalidProcess.Validate(); err == nil {
+		t.Fatal("expected error on empty process Name")
+	}
+}
+
+

@@ -228,5 +228,13 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.publicNodeBilling(w, r, uuid)
 		return
 	}
+	if len(parts) == 5 && parts[4] == "containers" {
+		s.getNodeContainers(w, r, uuid)
+		return
+	}
+	if len(parts) == 5 && parts[4] == "processes" {
+		s.getNodeProcesses(w, r, uuid)
+		return
+	}
 	writeJSONError(w, http.StatusNotFound, "not found")
 }

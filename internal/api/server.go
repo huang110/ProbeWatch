@@ -157,6 +157,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/public/synthetic/results", s.publicSyntheticResultsHandler)
 	mux.Handle("/api/synthetic/history", middleware.RequireAuth(http.HandlerFunc(s.syntheticHistoryHandler)))
 	mux.Handle("/api/synthetic/test", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTestHandler))))
+	mux.Handle("/api/containers/overview", middleware.RequireAuth(http.HandlerFunc(s.fleetContainerOverviewHandler)))
+	mux.HandleFunc("/api/public/containers/overview", s.publicFleetContainerOverviewHandler)
 	mux.HandleFunc("/api/admin/status-page", s.adminStatusPageRoute)
 	mux.HandleFunc("/api/admin/incidents", s.adminIncidentsRoute)
 	mux.HandleFunc("/api/admin/incidents/", s.adminIncidentsRoute)
@@ -171,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/agent/v1/media-result", s.mediaResultAgent)
 	mux.HandleFunc("/api/agent/v1/speedtest-result", s.speedtestResultAgent)
 	mux.HandleFunc("/api/agent/v1/synthetic-result", s.syntheticResultAgent)
+	mux.HandleFunc("/api/agent/v1/workload", s.workloadAgent)
 	mux.HandleFunc("/api/agent/v1/update/check", s.agentUpdateCheck)
 	mux.HandleFunc("/api/agent/v1/update/download", s.agentUpdateDownload)
 
@@ -305,6 +308,14 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodGet {
+			if len(parts) == 4 && parts[3] == "containers" {
+				s.getNodeContainers(w, r, uuid)
+				return
+			}
+			if len(parts) == 4 && parts[3] == "processes" {
+				s.getNodeProcesses(w, r, uuid)
+				return
+			}
 			if len(parts) == 5 && parts[3] == "checks" && parts[4] == "summary" {
 				s.nodeChecksSummary(w, r, uuid)
 				return
