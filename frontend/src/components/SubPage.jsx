@@ -7,6 +7,7 @@ import { UserManagementCard } from './UserManagementCard.jsx'
 import { TokenManagementCard } from './TokenManagementCard.jsx'
 import { AuditLogView } from './AuditLogView.jsx'
 import { StatusPageAdminCard } from './StatusPageAdminCard.jsx'
+import { CertificatesAndDNSView } from './CertificatesAndDNSView.jsx'
 import { TargetManage } from './TargetManage.jsx'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { BillingCenter } from './BillingCenter.jsx'
@@ -58,6 +59,10 @@ export function SubPage({
     audit: ['安全审计中心', '管理操作与安全审计：记录用户登录、令牌签发、节点维护与云端灾备不可篡改流水。'],
     'status-admin': ['公开状态页与事件发布', '对外开放的服务可用率大屏、组件拓扑、90 天 SLA 历史心跳与故障/维护通告管理。'],
     incidents: ['服务异常与维护通告', '发布、跟进与闭环面向公众的服务事件与计划停机维护窗口。'],
+    certificates: ['SSL/TLS 证书生命周期巡检', '自动追踪 HTTPS/TLS 证书到期倒计时、颁发机构、SANs 别名与跨地域多节点告警。'],
+    ssl: ['SSL/TLS 证书生命周期巡检', '自动追踪 HTTPS/TLS 证书到期倒计时、颁发机构、SANs 别名与跨地域多节点告警。'],
+    dns: ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
+    'dns-matrix': ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
     settings: ['系统设置', '管理控制台安全选项、状态页与事件发布、团队协作与权限、API 密钥与自动化灾备中心。'],
   }
 
@@ -102,6 +107,10 @@ export function SubPage({
         <BillingCenter nodes={data} />
       ) : page === 'monitoring' ? (
         <MonitoringView nodes={data} readOnly={true} />
+      ) : page === 'certificates' || page === 'ssl' ? (
+        <CertificatesAndDNSView initialTab="certificates" />
+      ) : page === 'dns' || page === 'dns-matrix' ? (
+        <CertificatesAndDNSView initialTab="dns" />
       ) : page === 'network' ? (
         <TargetManage readOnly kinds={['tcp', 'http', 'https', 'dns']} title="网络检测目标" />
       ) : page === 'mtr' ? (

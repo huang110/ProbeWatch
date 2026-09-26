@@ -2,6 +2,9 @@ package monitor
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
 	"net"
@@ -367,3 +370,193 @@ type fakeAddr string
 
 func (a fakeAddr) Network() string { return "tcp" }
 func (a fakeAddr) String() string  { return string(a) }
+
+func TestProbeRunHTTPKeywordAssertionSuccess(t *testing.T) {
+	p := &Probe{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		Dialer:   &fakeDialer{conn: nopConn{}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"status":"healthy","uptime":9999}`)),
+				Request:    req,
+			}, nil
+		}),
+	}
+	task := networkTask("http")
+	task.Keyword = "healthy"
+	result := p.Run(context.Background(), task)
+	if result.Status != "success" {
+		t.Fatalf("status = %q, want success; error = %s", result.Status, result.Error)
+	}
+	if result.HTTP == nil || !result.HTTP.KeywordFound {
+		t.Fatalf("http result = %#v, want KeywordFound = true", result.HTTP)
+	}
+	if result.HTTP.ContentType != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", result.HTTP.ContentType)
+	}
+}
+
+func TestProbeRunHTTPKeywordAssertionFailure(t *testing.T) {
+	p := &Probe{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		Dialer:   &fakeDialer{conn: nopConn{}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"status":"maintenance"}`)),
+				Request:    req,
+			}, nil
+		}),
+	}
+	task := networkTask("http")
+	task.Keyword = "healthy"
+	result := p.Run(context.Background(), task)
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	if !strings.Contains(result.Error, `expected keyword "healthy" not found`) {
+		t.Fatalf("error = %q, want keyword not found message", result.Error)
+	}
+	if result.HTTP == nil || result.HTTP.KeywordFound {
+		t.Fatalf("http result = %#v, want KeywordFound = false", result.HTTP)
+	}
+}
+
+func TestProbeRunHTTPStatusCodeMismatch(t *testing.T) {
+	p := &Probe{
+		Resolver: &fakeResolver{addresses: [][]netip.Addr{{publicAddress(t, "93.184.216.34")}}},
+		Dialer:   &fakeDialer{conn: nopConn{}},
+		roundTripper: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("server busy")),
+				Request:    req,
+			}, nil
+		}),
+	}
+	task := networkTask("http")
+	task.ExpectedStatus = 200
+	result := p.Run(context.Background(), task)
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	if !strings.Contains(result.Error, "expected status 200, got 503") {
+		t.Fatalf("error = %q, want status mismatch message", result.Error)
+	}
+}
+
+func TestParseTLSCert(t *testing.T) {
+	now := time.Now()
+	cert := &x509.Certificate{
+		Subject:   pkix.Name{CommonName: "tz.115yu.us.ci"},
+		Issuer:    pkix.Name{Organization: []string{"Let's Encrypt"}},
+		DNSNames:  []string{"tz.115yu.us.ci", "*.115yu.us.ci"},
+		NotBefore: now.Add(-30 * 24 * time.Hour),
+		NotAfter:  now.Add(60 * 24 * time.Hour),
+	}
+	state := tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{cert},
+		Version:          tls.VersionTLS13,
+		CipherSuite:      tls.TLS_AES_128_GCM_SHA256,
+	}
+
+	result := parseTLSCert(state)
+	if result == nil {
+		t.Fatal("parseTLSCert returned nil")
+	}
+	if result.Subject != "tz.115yu.us.ci" {
+		t.Fatalf("subject = %q, want tz.115yu.us.ci", result.Subject)
+	}
+	if result.Issuer != "Let's Encrypt" {
+		t.Fatalf("issuer = %q, want Let's Encrypt", result.Issuer)
+	}
+	if len(result.DNSNames) != 2 || result.DNSNames[0] != "tz.115yu.us.ci" {
+		t.Fatalf("dns_names = %#v", result.DNSNames)
+	}
+	if result.DaysLeft < 58 || result.DaysLeft > 61 {
+		t.Fatalf("days_left = %d, want ~60", result.DaysLeft)
+	}
+	if result.IsExpired {
+		t.Fatal("is_expired = true, want false")
+	}
+	if result.ExpiringSoon {
+		t.Fatal("expiring_soon = true, want false")
+	}
+	if result.Protocol != "TLS 1.3" {
+		t.Fatalf("protocol = %q, want TLS 1.3", result.Protocol)
+	}
+	if !strings.Contains(result.CipherSuite, "TLS_AES_128_GCM_SHA256") {
+		t.Fatalf("cipher_suite = %q, want TLS_AES_128_GCM_SHA256", result.CipherSuite)
+	}
+}
+
+func TestParseTLSCertExpiredAndExpiringSoon(t *testing.T) {
+	now := time.Now()
+
+	// Expired certificate
+	expiredCert := &x509.Certificate{
+		Subject:   pkix.Name{CommonName: "expired.example.com"},
+		Issuer:    pkix.Name{CommonName: "DigiCert"},
+		NotBefore: now.Add(-100 * 24 * time.Hour),
+		NotAfter:  now.Add(-2 * 24 * time.Hour),
+	}
+	expiredResult := parseTLSCert(tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{expiredCert},
+		Version:          tls.VersionTLS12,
+		CipherSuite:      tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	})
+	if !expiredResult.IsExpired {
+		t.Fatal("expired cert: is_expired = false, want true")
+	}
+	if expiredResult.DaysLeft >= 0 {
+		t.Fatalf("expired cert: days_left = %d, want < 0", expiredResult.DaysLeft)
+	}
+	if expiredResult.ExpiringSoon {
+		t.Fatal("expired cert: expiring_soon = true, want false (already expired)")
+	}
+
+	// Expiring soon certificate (5 days left)
+	soonCert := &x509.Certificate{
+		Subject:   pkix.Name{CommonName: "soon.example.com"},
+		Issuer:    pkix.Name{CommonName: "Cloudflare"},
+		NotBefore: now.Add(-85 * 24 * time.Hour),
+		NotAfter:  now.Add(5 * 24 * time.Hour),
+	}
+	soonResult := parseTLSCert(tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{soonCert},
+		Version:          tls.VersionTLS13,
+		CipherSuite:      tls.TLS_AES_256_GCM_SHA384,
+	})
+	if soonResult.IsExpired {
+		t.Fatal("soon cert: is_expired = true, want false")
+	}
+	if !soonResult.ExpiringSoon {
+		t.Fatal("soon cert: expiring_soon = false, want true")
+	}
+	if soonResult.DaysLeft != 4 && soonResult.DaysLeft != 5 {
+		t.Fatalf("soon cert: days_left = %d, want ~5", soonResult.DaysLeft)
+	}
+}
+
+func TestProbeRunDNSResultRecords(t *testing.T) {
+	resolver := &fakeResolver{addresses: [][]netip.Addr{
+		{publicAddress(t, "1.1.1.1"), publicAddress(t, "1.0.0.1")},
+	}}
+	task := networkTask("dns")
+	task.DNSType = "A"
+	p := &Probe{Resolver: resolver, Dialer: &fakeDialer{conn: nopConn{}}}
+	result := p.Run(context.Background(), task)
+	if result.Status != "success" {
+		t.Fatalf("status = %q, want success; error = %s", result.Status, result.Error)
+	}
+	if result.DNS == nil {
+		t.Fatal("dns result is nil")
+	}
+	if len(result.DNS.Records) != 2 || result.DNS.Records[0] != "1.1.1.1" || result.DNS.Records[1] != "1.0.0.1" {
+		t.Fatalf("dns records = %#v, want [1.1.1.1, 1.0.0.1]", result.DNS.Records)
+	}
+}

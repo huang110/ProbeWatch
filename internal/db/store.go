@@ -1489,6 +1489,34 @@ func (s *Store) ListNetworkLatest(ctx context.Context, nodeID string) ([]LatestR
 	return s.listLatestResults(ctx, `SELECT target_id, checked_at, payload FROM network_results_latest WHERE node_id = ? ORDER BY target_id`, nodeID)
 }
 
+// NodeLatestResult represents the latest result from a node for a specific target.
+type NodeLatestResult struct {
+	NodeID    string
+	TargetID  string
+	CheckedAt time.Time
+	Payload   []byte
+}
+
+// ListAllNetworkLatest retrieves the latest network probe result across all nodes and targets.
+func (s *Store) ListAllNetworkLatest(ctx context.Context) ([]NodeLatestResult, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id, target_id, checked_at, payload FROM network_results_latest ORDER BY target_id, node_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list all network latest: %w", err)
+	}
+	defer rows.Close()
+	results := make([]NodeLatestResult, 0)
+	for rows.Next() {
+		var result NodeLatestResult
+		var checkedAt int64
+		if err := rows.Scan(&result.NodeID, &result.TargetID, &checkedAt, &result.Payload); err != nil {
+			return nil, fmt.Errorf("scan all network latest: %w", err)
+		}
+		result.CheckedAt = time.Unix(0, checkedAt).UTC()
+		results = append(results, result)
+	}
+	return results, rows.Err()
+}
+
 func (s *Store) UpsertMTRLatest(ctx context.Context, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
 	return s.upsertLatestResult(ctx, "mtr_results_latest", "target_id", nodeID, targetID, checkedAt, payload)
 }

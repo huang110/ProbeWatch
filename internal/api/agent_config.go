@@ -24,6 +24,9 @@ type agentTargetPayload struct {
 	MaxHops         int                   `json:"max_hops,omitempty"`
 	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
 	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
+	Keyword         string                `json:"keyword,omitempty"`
+	Nameserver      string                `json:"nameserver,omitempty"`
+	CheckTLS        bool                  `json:"check_tls,omitempty"`
 }
 
 // agentConfig serves the agent's read-only check configuration. It exposes only
@@ -85,6 +88,9 @@ func targetToCheckTask(target db.TargetRecord) (protocol.CheckTask, error) {
 		IntervalSeconds: config.IntervalSeconds,
 		Enabled:         target.Enabled,
 		RegionRules:     config.RegionRules,
+		Keyword:         config.Keyword,
+		Nameserver:      config.Nameserver,
+		CheckTLS:        config.CheckTLS,
 	}
 	if task.MaxHops == 0 {
 		task.MaxHops = 20

@@ -18,6 +18,7 @@ import { TrafficReportView } from './components/TrafficReportView.jsx'
 import { AlertCenterView } from './components/AlertCenterView.jsx'
 import { LogsView } from './components/LogsView.jsx'
 import { AICopilotView } from './components/AICopilotView.jsx'
+import { CertificatesAndDNSView } from './components/CertificatesAndDNSView.jsx'
 import TerminalView from './components/TerminalView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
@@ -48,6 +49,7 @@ const navItems = [
     children: [
       { id: 'latency', label: '延迟监测' },
       { id: 'route', label: '回程线路监测' },
+      { id: 'certificates', label: '证书与 DNS 巡检' },
     ],
   },
   { id: 'traffic', label: '流量与报告', icon: ChartBar },
@@ -102,6 +104,10 @@ const pageTitleFor = (page) =>
         'status-page': '公开状态页',
         'status-admin': '状态页管理',
         incidents: '事件与维护通告',
+        certificates: '证书与 DNS 巡检',
+        ssl: '证书巡检',
+        dns: 'DNS 解析矩阵',
+        'dns-matrix': 'DNS 解析矩阵',
       }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
@@ -151,6 +157,10 @@ const VALID_NAV_PAGES = [
   'status-page',
   'status-admin',
   'incidents',
+  'certificates',
+  'ssl',
+  'dns',
+  'dns-matrix',
   'node-detail',
 ]
 
@@ -1219,6 +1229,10 @@ export function App() {
           />
         ) : activeNav === 'billing' ? (
           <BillingCenter nodes={data} />
+        ) : activeNav === 'certificates' || activeNav === 'ssl' ? (
+          <CertificatesAndDNSView initialTab="certificates" />
+        ) : activeNav === 'dns' || activeNav === 'dns-matrix' ? (
+          <CertificatesAndDNSView initialTab="dns" />
         ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (
           <MonitoringView
             nodes={data}

@@ -724,4 +724,24 @@ export async function deleteAdminIncident(id) {
   return await res.json()
 }
 
+export async function fetchCertificates(signal) {
+  const res = await fetch('/api/certificates', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/certificates', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch certificates')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchDNSMatrix(signal) {
+  const res = await fetch('/api/dns-matrix', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/dns-matrix', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch DNS matrix')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
 

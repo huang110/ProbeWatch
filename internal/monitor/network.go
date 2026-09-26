@@ -84,19 +84,36 @@ func (p *Probe) Run(parent context.Context, task protocol.CheckTask) protocol.Ne
 	switch task.Kind {
 	case "tcp":
 		err = p.runTCP(ctx, task)
+		if err == nil && task.CheckTLS {
+			if tlsCert, tlsErr := p.inspectTLSCert(ctx, task.Host, task.Port); tlsErr == nil {
+				result.TLSCert = tlsCert
+			}
+		}
 	case "http", "https":
-		var statusCode int
-		statusCode, err = p.runHTTP(ctx, task)
+		var (
+			statusCode int
+			tlsCert    *protocol.TLSCertResult
+			httpResult *protocol.HTTPResult
+		)
+		statusCode, tlsCert, httpResult, err = p.runHTTP(ctx, task)
 		result.StatusCode = statusCode
+		result.TLSCert = tlsCert
+		result.HTTP = httpResult
 		if err == nil {
 			if task.ExpectedStatus != 0 && statusCode != task.ExpectedStatus {
 				result.Status = "failed"
+				result.Error = fmt.Sprintf("expected status %d, got %d", task.ExpectedStatus, statusCode)
+			} else if task.Keyword != "" && (httpResult == nil || !httpResult.KeywordFound) {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("expected keyword %q not found in response", task.Keyword)
 			} else {
 				result.Status = "success"
 			}
 		}
 	case "dns":
-		err = p.runDNS(ctx, task)
+		var dnsResult *protocol.DNSResult
+		dnsResult, err = p.runDNS(ctx, task)
+		result.DNS = dnsResult
 	default:
 		err = &blockedError{err: fmt.Errorf("unsupported network task kind %q", task.Kind)}
 	}
@@ -136,13 +153,13 @@ func (p *Probe) runTCP(ctx context.Context, task protocol.CheckTask) error {
 	return conn.Close()
 }
 
-func (p *Probe) runDNS(ctx context.Context, task protocol.CheckTask) error {
+func (p *Probe) runDNS(ctx context.Context, task protocol.CheckTask) (*protocol.DNSResult, error) {
 	if err := security.ValidateHost(task.Host); err != nil {
-		return &blockedError{err: err}
+		return nil, &blockedError{err: err}
 	}
-	resolver, err := p.resolver()
+	resolver, err := p.resolverForTask(task)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dnsType := strings.ToUpper(task.DNSType)
 	if dnsType == "" {
@@ -152,15 +169,28 @@ func (p *Probe) runDNS(ctx context.Context, task protocol.CheckTask) error {
 		if cnameResolver, ok := resolver.(interface {
 			LookupCNAME(context.Context, string) (string, error)
 		}); ok {
+			dnsStart := time.Now()
 			cname, lookupErr := cnameResolver.LookupCNAME(ctx, task.Host)
+			queryTime := time.Since(dnsStart).Milliseconds()
 			if lookupErr != nil {
-				return lookupErr
+				return nil, lookupErr
 			}
 			if err := security.ValidateHost(strings.TrimSuffix(cname, ".")); err != nil {
-				return &blockedError{err: fmt.Errorf("invalid CNAME target: %w", err)}
+				return nil, &blockedError{err: fmt.Errorf("invalid CNAME target: %w", err)}
 			}
-			_, err = p.resolveHost(ctx, strings.TrimSuffix(cname, "."))
-			return err
+			addresses, err := p.resolveHost(ctx, strings.TrimSuffix(cname, "."))
+			if err != nil {
+				return nil, err
+			}
+			records := []string{cname}
+			for _, addr := range addresses {
+				records = append(records, addr.String())
+			}
+			return &protocol.DNSResult{
+				Records:     records,
+				Nameserver:  task.Nameserver,
+				QueryTimeMS: queryTime,
+			}, nil
 		}
 	}
 
@@ -174,18 +204,31 @@ func (p *Probe) runDNS(ctx context.Context, task protocol.CheckTask) error {
 		// The public Resolver contract exposes IP lookups only. The lookup still
 		// remains bounded and is useful for resolvers without LookupCNAME.
 	default:
-		return &blockedError{err: fmt.Errorf("unsupported DNS type %q", task.DNSType)}
+		return nil, &blockedError{err: fmt.Errorf("unsupported DNS type %q", task.DNSType)}
 	}
+	dnsStart := time.Now()
 	addresses, err := resolver.LookupNetIP(ctx, network, task.Host)
+	queryTime := time.Since(dnsStart).Milliseconds()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return validateResolvedIPs(addresses)
+	if err := validateResolvedIPs(addresses); err != nil {
+		return nil, err
+	}
+	records := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		records = append(records, addr.String())
+	}
+	return &protocol.DNSResult{
+		Records:     records,
+		Nameserver:  task.Nameserver,
+		QueryTimeMS: queryTime,
+	}, nil
 }
 
-func (p *Probe) runHTTP(ctx context.Context, task protocol.CheckTask) (int, error) {
+func (p *Probe) runHTTP(ctx context.Context, task protocol.CheckTask) (int, *protocol.TLSCertResult, *protocol.HTTPResult, error) {
 	if task.Kind != "http" && task.Kind != "https" {
-		return 0, &blockedError{err: fmt.Errorf("unsupported HTTP task kind %q", task.Kind)}
+		return 0, nil, nil, &blockedError{err: fmt.Errorf("unsupported HTTP task kind %q", task.Kind)}
 	}
 	scheme := task.Kind
 	rawURL := (&url.URL{
@@ -195,10 +238,10 @@ func (p *Probe) runHTTP(ctx context.Context, task protocol.CheckTask) (int, erro
 	}).String()
 	target, err := security.ValidateURL(rawURL, []string{"http", "https"})
 	if err != nil {
-		return 0, &blockedError{err: err}
+		return 0, nil, nil, &blockedError{err: err}
 	}
 	if err := p.validateAndResolveURL(ctx, target); err != nil {
-		return 0, err
+		return 0, nil, nil, err
 	}
 
 	transport := p.httpTransport()
@@ -216,21 +259,36 @@ func (p *Probe) runHTTP(ctx context.Context, task protocol.CheckTask) (int, erro
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return 0, &blockedError{err: err}
+		return 0, nil, nil, &blockedError{err: err}
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return 0, err
+		return 0, nil, nil, err
 	}
 	defer response.Body.Close()
-	read, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, p.maxBodyBytes()+1))
+
+	var tlsCert *protocol.TLSCertResult
+	if response.TLS != nil && len(response.TLS.PeerCertificates) > 0 {
+		tlsCert = parseTLSCert(*response.TLS)
+	}
+
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(response.Body, p.maxBodyBytes()+1))
 	if readErr != nil {
-		return response.StatusCode, readErr
+		return response.StatusCode, tlsCert, nil, readErr
 	}
-	if read > p.maxBodyBytes() {
-		return response.StatusCode, fmt.Errorf("response body exceeds limit")
+	if int64(len(bodyBytes)) > p.maxBodyBytes() {
+		return response.StatusCode, tlsCert, nil, fmt.Errorf("response body exceeds limit")
 	}
-	return response.StatusCode, nil
+
+	httpResult := &protocol.HTTPResult{
+		ResponseBytes: len(bodyBytes),
+		ContentType:   response.Header.Get("Content-Type"),
+	}
+	if task.Keyword != "" {
+		httpResult.KeywordFound = strings.Contains(string(bodyBytes), task.Keyword)
+	}
+
+	return response.StatusCode, tlsCert, httpResult, nil
 }
 
 func (p *Probe) validateAndResolveURL(ctx context.Context, target *url.URL) error {
@@ -284,7 +342,7 @@ func (p *Probe) httpTransport() http.RoundTripper {
 	}
 	return &http.Transport{
 		Proxy:                 nil,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true},
 		DisableKeepAlives:     true,
 		ForceAttemptHTTP2:     false,
 		ResponseHeaderTimeout: p.timeoutFor(0),
@@ -301,6 +359,120 @@ func (p *Probe) httpTransport() http.RoundTripper {
 			return p.dialValidated(ctx, host, port)
 		},
 	}
+}
+
+func (p *Probe) inspectTLSCert(ctx context.Context, host string, port int) (*protocol.TLSCertResult, error) {
+	conn, err := p.dialValidated(ctx, host, port)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	tlsConn := tls.Client(conn, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true,
+	})
+	defer tlsConn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = tlsConn.SetDeadline(deadline)
+	}
+
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		return nil, err
+	}
+
+	state := tlsConn.ConnectionState()
+	return parseTLSCert(state), nil
+}
+
+func parseTLSCert(state tls.ConnectionState) *protocol.TLSCertResult {
+	if len(state.PeerCertificates) == 0 {
+		return nil
+	}
+	cert := state.PeerCertificates[0]
+	now := time.Now()
+
+	issuer := cert.Issuer.CommonName
+	if len(cert.Issuer.Organization) > 0 {
+		issuer = cert.Issuer.Organization[0]
+	} else if issuer == "" {
+		issuer = cert.Issuer.String()
+	}
+
+	subject := cert.Subject.CommonName
+	if subject == "" {
+		subject = cert.Subject.String()
+	}
+
+	daysLeft := int(time.Until(cert.NotAfter).Hours() / 24)
+	isExpired := now.After(cert.NotAfter)
+	expiringSoon := !isExpired && daysLeft <= 14
+
+	var proto string
+	switch state.Version {
+	case tls.VersionTLS13:
+		proto = "TLS 1.3"
+	case tls.VersionTLS12:
+		proto = "TLS 1.2"
+	case tls.VersionTLS11:
+		proto = "TLS 1.1"
+	case tls.VersionTLS10:
+		proto = "TLS 1.0"
+	default:
+		proto = fmt.Sprintf("TLS 0x%04x", state.Version)
+	}
+
+	cipher := tls.CipherSuiteName(state.CipherSuite)
+	if cipher == "" {
+		cipher = fmt.Sprintf("0x%04x", state.CipherSuite)
+	}
+
+	return &protocol.TLSCertResult{
+		Issuer:       issuer,
+		Subject:      subject,
+		DNSNames:     cert.DNSNames,
+		NotBefore:    cert.NotBefore.Unix(),
+		NotAfter:     cert.NotAfter.Unix(),
+		DaysLeft:     daysLeft,
+		Protocol:     proto,
+		CipherSuite:  cipher,
+		IsExpired:    isExpired,
+		ExpiringSoon: expiringSoon,
+	}
+}
+
+func (p *Probe) resolverForTask(task protocol.CheckTask) (Resolver, error) {
+	if p.Resolver != nil {
+		return p.Resolver, nil
+	}
+	if task.Nameserver != "" {
+		nsHost := task.Nameserver
+		nsPort := "53"
+		if h, pt, err := net.SplitHostPort(task.Nameserver); err == nil {
+			nsHost = h
+			nsPort = pt
+		}
+		if err := security.ValidateHost(nsHost); err != nil {
+			return nil, &blockedError{err: fmt.Errorf("invalid nameserver %q: %w", task.Nameserver, err)}
+		}
+		addrs, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", nsHost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve nameserver %q: %w", task.Nameserver, err)
+		}
+		if err := validateResolvedIPs(addrs); err != nil {
+			return nil, err
+		}
+		nsTarget := net.JoinHostPort(addrs[0].String(), nsPort)
+		return &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: p.timeoutFor(task.TimeoutMS)}
+				return d.DialContext(ctx, "udp", nsTarget)
+			},
+		}, nil
+	}
+	return net.DefaultResolver, nil
 }
 
 func (p *Probe) resolver() (Resolver, error) {

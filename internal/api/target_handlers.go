@@ -29,6 +29,9 @@ type targetRequest struct {
 	IntervalSeconds *int                   `json:"interval_seconds"`
 	Enabled         *bool                  `json:"enabled"`
 	RegionRules     *[]protocol.RegionRule `json:"region_rules"`
+	Keyword         *string                `json:"keyword"`
+	Nameserver      *string                `json:"nameserver"`
+	CheckTLS        *bool                  `json:"check_tls"`
 }
 
 type targetResponse struct {
@@ -45,6 +48,9 @@ type targetResponse struct {
 	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
 	Enabled         bool                  `json:"enabled"`
 	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
+	Keyword         string                `json:"keyword,omitempty"`
+	Nameserver      string                `json:"nameserver,omitempty"`
+	CheckTLS        bool                  `json:"check_tls,omitempty"`
 }
 
 type targetPayload struct {
@@ -57,6 +63,9 @@ type targetPayload struct {
 	MaxHops         int                   `json:"max_hops,omitempty"`
 	IntervalSeconds int                   `json:"interval_seconds,omitempty"`
 	RegionRules     []protocol.RegionRule `json:"region_rules,omitempty"`
+	Keyword         string                `json:"keyword,omitempty"`
+	Nameserver      string                `json:"nameserver,omitempty"`
+	CheckTLS        bool                  `json:"check_tls,omitempty"`
 }
 
 func (s *Server) targetCollection(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +215,7 @@ func decodeTargetRequest(w http.ResponseWriter, r *http.Request, limit int64, de
 		"id": {}, "name": {}, "kind": {}, "host": {}, "port": {}, "path": {},
 		"expected_status": {}, "dns_type": {}, "timeout_ms": {}, "max_hops": {},
 		"interval_seconds": {}, "enabled": {}, "region_rules": {},
+		"keyword": {}, "nameserver": {}, "check_tls": {},
 	}
 	for name, value := range fields {
 		if _, ok := allowed[name]; !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
@@ -272,6 +282,15 @@ func (r targetRequest) definition(existing *db.TargetRecord) (db.TargetDefinitio
 	}
 	if r.RegionRules != nil {
 		config.RegionRules = *r.RegionRules
+	}
+	if r.Keyword != nil {
+		config.Keyword = *r.Keyword
+	}
+	if r.Nameserver != nil {
+		config.Nameserver = *r.Nameserver
+	}
+	if r.CheckTLS != nil {
+		config.CheckTLS = *r.CheckTLS
 	}
 	enabled := true
 	if existing != nil {
@@ -343,6 +362,12 @@ func validateTargetFields(id, name, kindValue, host string, config targetPayload
 	if kindValue == "dns" && config.DNSType == "" {
 		return errors.New("DNS type is required")
 	}
+	if len([]byte(config.Keyword)) > 256 {
+		return errors.New("invalid keyword length")
+	}
+	if len([]byte(config.Nameserver)) > 253 {
+		return errors.New("invalid nameserver length")
+	}
 	return nil
 }
 
@@ -383,7 +408,24 @@ func targetToResponse(target db.TargetRecord) (targetResponse, error) {
 	if host == "" {
 		host = config.Host
 	}
-	return targetResponse{ID: target.ID, Name: target.Name, Kind: string(target.Kind), Host: host, Port: config.Port, Path: config.Path, ExpectedStatus: config.ExpectedStatus, DNSType: config.DNSType, TimeoutMS: config.TimeoutMS, MaxHops: config.MaxHops, IntervalSeconds: config.IntervalSeconds, Enabled: target.Enabled, RegionRules: config.RegionRules}, nil
+	return targetResponse{
+		ID:              target.ID,
+		Name:            target.Name,
+		Kind:            string(target.Kind),
+		Host:            host,
+		Port:            config.Port,
+		Path:            config.Path,
+		ExpectedStatus:  config.ExpectedStatus,
+		DNSType:         config.DNSType,
+		TimeoutMS:       config.TimeoutMS,
+		MaxHops:         config.MaxHops,
+		IntervalSeconds: config.IntervalSeconds,
+		Enabled:         target.Enabled,
+		RegionRules:     config.RegionRules,
+		Keyword:         config.Keyword,
+		Nameserver:      config.Nameserver,
+		CheckTLS:        config.CheckTLS,
+	}, nil
 }
 
 func findTarget(ctx context.Context, store *db.Store, id string) (db.TargetRecord, error) {

@@ -19,6 +19,7 @@ import (
 
 	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/protocol"
 	"github.com/probewatch/probewatch/internal/security"
 )
 
@@ -734,6 +735,30 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 						Reason:   "node_offline",
 						Severity: db.AlertSeverityCrit,
 						Failing:  isOffline,
+					}, now)
+				}
+			}
+		}
+
+		// 1b. Evaluate SSL/TLS Certificate Expiration for monitored targets
+		allNetworkLatest, netErr := store.ListAllNetworkLatest(scanCtx)
+		if netErr == nil {
+			for _, item := range allNetworkLatest {
+				var res protocol.NetworkResult
+				if json.Unmarshal(item.Payload, &res) == nil && res.TLSCert != nil {
+					failing := res.TLSCert.IsExpired || res.TLSCert.ExpiringSoon
+					severity := db.AlertSeverityWarn
+					reason := "tls_cert_expiring_soon"
+					if res.TLSCert.IsExpired || res.TLSCert.DaysLeft <= 3 {
+						severity = db.AlertSeverityCrit
+						reason = "tls_cert_expired"
+					}
+					_ = store.EvaluateAlert(scanCtx, item.NodeID, db.AlertEvaluation{
+						Category: "security",
+						TargetID: item.TargetID,
+						Reason:   reason,
+						Severity: severity,
+						Failing:  failing,
 					}, now)
 				}
 			}

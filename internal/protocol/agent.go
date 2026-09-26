@@ -155,6 +155,9 @@ type CheckTask struct {
 	IntervalSeconds int          `json:"interval_seconds"`
 	Enabled         bool         `json:"enabled"`
 	RegionRules     []RegionRule `json:"region_rules,omitempty"`
+	Keyword         string       `json:"keyword,omitempty"`
+	Nameserver      string       `json:"nameserver,omitempty"`
+	CheckTLS        bool         `json:"check_tls,omitempty"`
 }
 
 // RegionRule is one bounded body-marker rule for classifying the serving
@@ -252,15 +255,46 @@ func (r AgentConfigResponse) Validate() error {
 	return nil
 }
 
+// TLSCertResult contains parsed SSL/TLS certificate metadata and expiration tracking.
+type TLSCertResult struct {
+	Issuer       string   `json:"issuer,omitempty"`
+	Subject      string   `json:"subject,omitempty"`
+	DNSNames     []string `json:"dns_names,omitempty"`
+	NotBefore    int64    `json:"not_before,omitempty"`
+	NotAfter     int64    `json:"not_after,omitempty"`
+	DaysLeft     int      `json:"days_left"`
+	Protocol     string   `json:"protocol,omitempty"`
+	CipherSuite  string   `json:"cipher_suite,omitempty"`
+	IsExpired    bool     `json:"is_expired"`
+	ExpiringSoon bool     `json:"expiring_soon"`
+}
+
+// DNSResult contains resolved record addresses and query timing.
+type DNSResult struct {
+	Records     []string `json:"records,omitempty"`
+	Nameserver  string   `json:"nameserver,omitempty"`
+	QueryTimeMS int64    `json:"query_time_ms,omitempty"`
+}
+
+// HTTPResult contains HTTP body matching and content details.
+type HTTPResult struct {
+	KeywordFound  bool   `json:"keyword_found,omitempty"`
+	ResponseBytes int    `json:"response_bytes,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
+}
+
 // NetworkResult is the normalized result of a TCP or HTTP check.
 type NetworkResult struct {
-	Host       string `json:"host"`
-	Port       int    `json:"port,omitempty"`
-	Status     string `json:"status,omitempty"`
-	StatusCode int    `json:"status_code,omitempty"`
-	LatencyMS  int64  `json:"latency_ms,omitempty"`
-	Error      string `json:"error,omitempty"`
-	CheckedAt  int64  `json:"checked_at,omitempty"`
+	Host       string         `json:"host"`
+	Port       int            `json:"port,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	StatusCode int            `json:"status_code,omitempty"`
+	LatencyMS  int64          `json:"latency_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	CheckedAt  int64          `json:"checked_at,omitempty"`
+	TLSCert    *TLSCertResult `json:"tls_cert,omitempty"`
+	DNS        *DNSResult     `json:"dns,omitempty"`
+	HTTP       *HTTPResult    `json:"http,omitempty"`
 }
 
 // MTRResult is the normalized result of a bounded route trace.
