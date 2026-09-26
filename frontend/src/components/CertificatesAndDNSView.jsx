@@ -10,6 +10,7 @@ import {
   ShieldWarning,
   Warning,
   WarningCircle,
+  WarningOctagon,
   X,
   XCircle,
 } from '@phosphor-icons/react'
