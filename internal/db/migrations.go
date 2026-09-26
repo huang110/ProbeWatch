@@ -159,6 +159,44 @@ CREATE TABLE IF NOT EXISTS media_results_history (
     recorded_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS media_results_history_key_time_idx ON media_results_history(node_id, detector_id, checked_at, id);
+CREATE TABLE IF NOT EXISTS speedtest_tasks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    server_url TEXT NOT NULL,
+    download_bytes INTEGER NOT NULL DEFAULT 10485760,
+    upload_bytes INTEGER NOT NULL DEFAULT 5242880,
+    interval_seconds INTEGER NOT NULL DEFAULT 3600,
+    node_tags TEXT NOT NULL DEFAULT '',
+    node_ids TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS speedtest_results_latest (
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES speedtest_tasks(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    download_speed_mbps REAL NOT NULL DEFAULT 0,
+    upload_speed_mbps REAL NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    jitter_ms INTEGER NOT NULL DEFAULT 0,
+    tested_at INTEGER NOT NULL,
+    PRIMARY KEY(node_id, task_id)
+);
+CREATE TABLE IF NOT EXISTS speedtest_results_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES speedtest_tasks(id) ON DELETE CASCADE,
+    payload BLOB NOT NULL,
+    download_speed_mbps REAL NOT NULL DEFAULT 0,
+    upload_speed_mbps REAL NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    jitter_ms INTEGER NOT NULL DEFAULT 0,
+    tested_at INTEGER NOT NULL,
+    recorded_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS speedtest_results_history_key_time_idx ON speedtest_results_history(node_id, task_id, tested_at, id);
+CREATE INDEX IF NOT EXISTS speedtest_results_history_time_idx ON speedtest_results_history(tested_at DESC);
 CREATE TABLE IF NOT EXISTS request_replays (
     node_id TEXT NOT NULL,
     request_id TEXT NOT NULL,
@@ -442,6 +480,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureStatusPageTables(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureSpeedtestTables(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -929,6 +970,57 @@ func ensureStatusPageTables(ctx context.Context, db *sql.DB) error {
 	for _, q := range queries {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("ensure status page tables: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureSpeedtestTables idempotently creates speedtest_tasks, speedtest_results_latest, and speedtest_results_history tables.
+func ensureSpeedtestTables(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS speedtest_tasks (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			server_url TEXT NOT NULL,
+			download_bytes INTEGER NOT NULL DEFAULT 10485760,
+			upload_bytes INTEGER NOT NULL DEFAULT 5242880,
+			interval_seconds INTEGER NOT NULL DEFAULT 3600,
+			node_tags TEXT NOT NULL DEFAULT '',
+			node_ids TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS speedtest_results_latest (
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			task_id TEXT NOT NULL REFERENCES speedtest_tasks(id) ON DELETE CASCADE,
+			payload BLOB NOT NULL,
+			download_speed_mbps REAL NOT NULL DEFAULT 0,
+			upload_speed_mbps REAL NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			jitter_ms INTEGER NOT NULL DEFAULT 0,
+			tested_at INTEGER NOT NULL,
+			PRIMARY KEY(node_id, task_id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS speedtest_results_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			task_id TEXT NOT NULL REFERENCES speedtest_tasks(id) ON DELETE CASCADE,
+			payload BLOB NOT NULL,
+			download_speed_mbps REAL NOT NULL DEFAULT 0,
+			upload_speed_mbps REAL NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			jitter_ms INTEGER NOT NULL DEFAULT 0,
+			tested_at INTEGER NOT NULL,
+			recorded_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS speedtest_results_history_key_time_idx ON speedtest_results_history(node_id, task_id, tested_at, id);`,
+		`CREATE INDEX IF NOT EXISTS speedtest_results_history_time_idx ON speedtest_results_history(tested_at DESC);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure speedtest tables: %w", err)
 		}
 	}
 	return nil

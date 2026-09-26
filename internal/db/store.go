@@ -160,6 +160,7 @@ const (
 	TargetKindDNS       TargetKind = "dns"
 	TargetKindMTR       TargetKind = "mtr"
 	TargetKindMediaHTTP TargetKind = "media_http"
+	TargetKindSpeedtest TargetKind = "speedtest"
 )
 
 type TargetDefinition struct {
@@ -1487,6 +1488,8 @@ func historyTable(kind TargetKind) (string, string, error) {
 		return "mtr_results_history", "target_id", nil
 	case TargetKindMediaHTTP:
 		return "media_results_history", "detector_id", nil
+	case TargetKindSpeedtest:
+		return "speedtest_results_history", "task_id", nil
 	default:
 		return "", "", errors.New("invalid history result kind")
 	}
@@ -1791,6 +1794,13 @@ func evaluateResultAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, resul
 		e.Reason = raw.Error
 		if e.Reason == "" && !raw.Reached {
 			e.Reason = "unreached"
+		}
+	case TargetKindSpeedtest:
+		e.Category = "speedtest"
+		e.Failing = raw.Status != "ok" || raw.Error != ""
+		e.Reason = raw.Status
+		if raw.Error != "" {
+			e.Reason = raw.Error
 		}
 	}
 	if e.Reason == "" {
@@ -2151,12 +2161,31 @@ func latestResultQuery(kind TargetKind) (string, error) {
 		return `INSERT INTO mtr_results_latest (node_id, target_id, payload, checked_at) VALUES (?, ?, ?, ?) ON CONFLICT(node_id, target_id) DO UPDATE SET payload = excluded.payload, checked_at = excluded.checked_at WHERE excluded.checked_at >= mtr_results_latest.checked_at`, nil
 	case TargetKindMediaHTTP:
 		return `INSERT INTO media_results_latest (node_id, detector_id, payload, checked_at) VALUES (?, ?, ?, ?) ON CONFLICT(node_id, detector_id) DO UPDATE SET payload = excluded.payload, checked_at = excluded.checked_at WHERE excluded.checked_at >= media_results_latest.checked_at`, nil
+	case TargetKindSpeedtest:
+		return `INSERT INTO speedtest_results_latest (node_id, task_id, payload, download_speed_mbps, upload_speed_mbps, latency_ms, jitter_ms, tested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(node_id, task_id) DO UPDATE SET payload = excluded.payload, download_speed_mbps = excluded.download_speed_mbps, upload_speed_mbps = excluded.upload_speed_mbps, latency_ms = excluded.latency_ms, jitter_ms = excluded.jitter_ms, tested_at = excluded.tested_at WHERE excluded.tested_at >= speedtest_results_latest.tested_at`, nil
 	default:
 		return "", ErrTargetKindMismatch
 	}
 }
 
 func upsertLatestResultTx(ctx context.Context, tx *sql.Tx, query, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
+	if strings.Contains(query, "speedtest_results_latest") {
+		var sRes struct {
+			DownloadSpeedMbps float64 `json:"download_speed_mbps"`
+			UploadSpeedMbps   float64 `json:"upload_speed_mbps"`
+			LatencyMS         int64   `json:"latency_ms"`
+			JitterMS          int64   `json:"jitter_ms"`
+		}
+		_ = json.Unmarshal(payload, &sRes)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO speedtest_results_history (node_id, task_id, payload, download_speed_mbps, upload_speed_mbps, latency_ms, jitter_ms, tested_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, targetID, payload, sRes.DownloadSpeedMbps, sRes.UploadSpeedMbps, sRes.LatencyMS, sRes.JitterMS, unixNano(checkedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert speedtest result history: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, query, nodeID, targetID, payload, sRes.DownloadSpeedMbps, sRes.UploadSpeedMbps, sRes.LatencyMS, sRes.JitterMS, unixNano(checkedAt)); err != nil {
+			return fmt.Errorf("upsert latest speedtest result: %w", err)
+		}
+		return nil
+	}
+
 	var historyTableName, historyColumn string
 	switch {
 	case strings.Contains(query, "network_results_latest"):
@@ -2637,5 +2666,283 @@ func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
 		settings[k] = v
 	}
 	return settings, rows.Err()
+}
+
+// SpeedtestTaskRecord stores a benchmark speedtest target configuration.
+type SpeedtestTaskRecord struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	ServerURL       string    `json:"server_url"`
+	DownloadBytes   int64     `json:"download_bytes"`
+	UploadBytes     int64     `json:"upload_bytes"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	NodeTags        string    `json:"node_tags"`
+	NodeIDs         string    `json:"node_ids"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// SpeedtestResultRecord stores the latest benchmark measurement from a node.
+type SpeedtestResultRecord struct {
+	NodeID            string    `json:"node_id"`
+	NodeName          string    `json:"node_name"`
+	TaskID            string    `json:"task_id"`
+	TaskName          string    `json:"task_name"`
+	DownloadSpeedMbps float64   `json:"download_speed_mbps"`
+	UploadSpeedMbps   float64   `json:"upload_speed_mbps"`
+	LatencyMS         int64     `json:"latency_ms"`
+	JitterMS          int64     `json:"jitter_ms"`
+	Payload           []byte    `json:"payload"`
+	TestedAt          time.Time `json:"tested_at"`
+}
+
+// SpeedtestHistoryRecord stores an audit/historical entry of a speedtest probe.
+type SpeedtestHistoryRecord struct {
+	ID                int64     `json:"id"`
+	NodeID            string    `json:"node_id"`
+	NodeName          string    `json:"node_name"`
+	TaskID            string    `json:"task_id"`
+	TaskName          string    `json:"task_name"`
+	DownloadSpeedMbps float64   `json:"download_speed_mbps"`
+	UploadSpeedMbps   float64   `json:"upload_speed_mbps"`
+	LatencyMS         int64     `json:"latency_ms"`
+	JitterMS          int64     `json:"jitter_ms"`
+	Payload           []byte    `json:"payload"`
+	TestedAt          time.Time `json:"tested_at"`
+	RecordedAt        time.Time `json:"recorded_at"`
+}
+
+func (s *Store) CreateSpeedtestTask(ctx context.Context, task SpeedtestTaskRecord) error {
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Name) == "" || strings.TrimSpace(task.ServerURL) == "" {
+		return errors.New("speedtest task id, name, and server_url are required")
+	}
+	if task.DownloadBytes <= 0 {
+		task.DownloadBytes = 10 * 1024 * 1024
+	}
+	if task.UploadBytes <= 0 {
+		task.UploadBytes = 5 * 1024 * 1024
+	}
+	if task.IntervalSeconds <= 0 {
+		task.IntervalSeconds = 3600
+	}
+	now := time.Now().UTC()
+	task.CreatedAt = now
+	task.UpdatedAt = now
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO speedtest_tasks (id, name, server_url, download_bytes, upload_bytes, interval_seconds, node_tags, node_ids, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.Name, task.ServerURL, task.DownloadBytes, task.UploadBytes, task.IntervalSeconds, task.NodeTags, task.NodeIDs, boolInt(task.Enabled), unixNano(task.CreatedAt), unixNano(task.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("create speedtest task: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetSpeedtestTask(ctx context.Context, id string) (SpeedtestTaskRecord, error) {
+	var task SpeedtestTaskRecord
+	var enabled int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, server_url, download_bytes, upload_bytes, interval_seconds, node_tags, node_ids, enabled, created_at, updated_at
+		FROM speedtest_tasks WHERE id = ?
+	`, id).Scan(&task.ID, &task.Name, &task.ServerURL, &task.DownloadBytes, &task.UploadBytes, &task.IntervalSeconds, &task.NodeTags, &task.NodeIDs, &enabled, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SpeedtestTaskRecord{}, ErrTargetNotFound
+	}
+	if err != nil {
+		return SpeedtestTaskRecord{}, fmt.Errorf("get speedtest task: %w", err)
+	}
+	task.Enabled = enabled != 0
+	task.CreatedAt = time.Unix(0, createdAt).UTC()
+	task.UpdatedAt = time.Unix(0, updatedAt).UTC()
+	return task, nil
+}
+
+func (s *Store) UpdateSpeedtestTask(ctx context.Context, task SpeedtestTaskRecord) error {
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Name) == "" || strings.TrimSpace(task.ServerURL) == "" {
+		return errors.New("speedtest task id, name, and server_url are required")
+	}
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE speedtest_tasks
+		SET name = ?, server_url = ?, download_bytes = ?, upload_bytes = ?, interval_seconds = ?, node_tags = ?, node_ids = ?, enabled = ?, updated_at = ?
+		WHERE id = ?
+	`, task.Name, task.ServerURL, task.DownloadBytes, task.UploadBytes, task.IntervalSeconds, task.NodeTags, task.NodeIDs, boolInt(task.Enabled), unixNano(now), task.ID)
+	if err != nil {
+		return fmt.Errorf("update speedtest task: %w", err)
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if aff == 0 {
+		return ErrTargetNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteSpeedtestTask(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM speedtest_tasks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete speedtest task: %w", err)
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if aff == 0 {
+		return ErrTargetNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListSpeedtestTasks(ctx context.Context) ([]SpeedtestTaskRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, server_url, download_bytes, upload_bytes, interval_seconds, node_tags, node_ids, enabled, created_at, updated_at
+		FROM speedtest_tasks ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list speedtest tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []SpeedtestTaskRecord
+	for rows.Next() {
+		var task SpeedtestTaskRecord
+		var enabled int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&task.ID, &task.Name, &task.ServerURL, &task.DownloadBytes, &task.UploadBytes, &task.IntervalSeconds, &task.NodeTags, &task.NodeIDs, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan speedtest task: %w", err)
+		}
+		task.Enabled = enabled != 0
+		task.CreatedAt = time.Unix(0, createdAt).UTC()
+		task.UpdatedAt = time.Unix(0, updatedAt).UTC()
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+func (s *Store) ListEnabledSpeedtestTasks(ctx context.Context) ([]SpeedtestTaskRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, server_url, download_bytes, upload_bytes, interval_seconds, node_tags, node_ids, enabled, created_at, updated_at
+		FROM speedtest_tasks WHERE enabled = 1 ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled speedtest tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []SpeedtestTaskRecord
+	for rows.Next() {
+		var task SpeedtestTaskRecord
+		var enabled int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&task.ID, &task.Name, &task.ServerURL, &task.DownloadBytes, &task.UploadBytes, &task.IntervalSeconds, &task.NodeTags, &task.NodeIDs, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan enabled speedtest task: %w", err)
+		}
+		task.Enabled = enabled != 0
+		task.CreatedAt = time.Unix(0, createdAt).UTC()
+		task.UpdatedAt = time.Unix(0, updatedAt).UTC()
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+func (s *Store) UpsertSpeedtestResult(ctx context.Context, nodeID, taskID string, testedAt time.Time, payload []byte) error {
+	query, err := latestResultQuery(TargetKindSpeedtest)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ensureNodeInTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
+	if err := upsertLatestResultTx(ctx, tx, query, nodeID, taskID, testedAt, payload); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListLatestSpeedtestResults(ctx context.Context) ([]SpeedtestResultRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.node_id, COALESCE(n.name, r.node_id), r.task_id, COALESCE(t.name, r.task_id),
+		       r.download_speed_mbps, r.upload_speed_mbps, r.latency_ms, r.jitter_ms, r.payload, r.tested_at
+		FROM speedtest_results_latest r
+		LEFT JOIN nodes n ON n.id = r.node_id
+		LEFT JOIN speedtest_tasks t ON t.id = r.task_id
+		ORDER BY r.download_speed_mbps DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list latest speedtest results: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SpeedtestResultRecord
+	for rows.Next() {
+		var r SpeedtestResultRecord
+		var testedAt int64
+		if err := rows.Scan(&r.NodeID, &r.NodeName, &r.TaskID, &r.TaskName, &r.DownloadSpeedMbps, &r.UploadSpeedMbps, &r.LatencyMS, &r.JitterMS, &r.Payload, &testedAt); err != nil {
+			return nil, fmt.Errorf("scan latest speedtest result: %w", err)
+		}
+		r.TestedAt = time.Unix(0, testedAt).UTC()
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) ListSpeedtestHistory(ctx context.Context, nodeID, taskID string, limit int) ([]SpeedtestHistoryRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var conditions []string
+	var args []any
+	if nodeID != "" {
+		conditions = append(conditions, "h.node_id = ?")
+		args = append(args, nodeID)
+	}
+	if taskID != "" {
+		conditions = append(conditions, "h.task_id = ?")
+		args = append(args, taskID)
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	q := fmt.Sprintf(`
+		SELECT h.id, h.node_id, COALESCE(n.name, h.node_id), h.task_id, COALESCE(t.name, h.task_id),
+		       h.download_speed_mbps, h.upload_speed_mbps, h.latency_ms, h.jitter_ms, h.payload, h.tested_at, h.recorded_at
+		FROM speedtest_results_history h
+		LEFT JOIN nodes n ON n.id = h.node_id
+		LEFT JOIN speedtest_tasks t ON t.id = h.task_id
+		%s
+		ORDER BY h.tested_at DESC, h.id DESC
+		LIMIT ?
+	`, whereClause)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list speedtest history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []SpeedtestHistoryRecord
+	for rows.Next() {
+		var h SpeedtestHistoryRecord
+		var testedAt, recordedAt int64
+		if err := rows.Scan(&h.ID, &h.NodeID, &h.NodeName, &h.TaskID, &h.TaskName, &h.DownloadSpeedMbps, &h.UploadSpeedMbps, &h.LatencyMS, &h.JitterMS, &h.Payload, &testedAt, &recordedAt); err != nil {
+			return nil, fmt.Errorf("scan speedtest history: %w", err)
+		}
+		h.TestedAt = time.Unix(0, testedAt).UTC()
+		h.RecordedAt = time.Unix(0, recordedAt).UTC()
+		history = append(history, h)
+	}
+	return history, rows.Err()
 }
 

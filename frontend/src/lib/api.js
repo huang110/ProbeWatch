@@ -769,5 +769,91 @@ export async function updateNode(id, payload) {
   return await res.json()
 }
 
+export async function fetchSpeedtestTasks() {
+  const res = await fetch('/api/speedtest/tasks', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch speedtest tasks')
+  return await res.json()
+}
+
+export async function createSpeedtestTask(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/speedtest/tasks', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create speedtest task')
+  }
+  return await res.json()
+}
+
+export async function updateSpeedtestTask(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/speedtest/tasks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update speedtest task')
+  }
+  return await res.json()
+}
+
+export async function deleteSpeedtestTask(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/speedtest/tasks/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete speedtest task')
+  }
+  return await res.json()
+}
+
+export async function fetchSpeedtestResults(signal) {
+  const res = await fetch('/api/speedtest/results', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/speedtest/results', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch speedtest results')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchSpeedtestHistory(nodeId, taskId, limit = 100, signal) {
+  const params = new URLSearchParams()
+  if (nodeId) params.set('node_id', nodeId)
+  if (taskId) params.set('task_id', taskId)
+  if (limit) params.set('limit', limit)
+  const res = await fetch(`/api/speedtest/history?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to fetch speedtest history')
+  return await res.json()
+}
+
+export async function runSpeedtestNow(payload = {}) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/speedtest/run', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to trigger speedtest')
+  }
+  return await res.json()
+}
+
+
 
 

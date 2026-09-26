@@ -39,6 +39,13 @@ func (f *fakeMTRMonitor) Run(context.Context, protocol.CheckTask) protocol.MTRRe
 	return protocol.MTRResult{Error: "unsupported: fake"}
 }
 
+type fakeSpeedtestMonitor struct{ calls int }
+
+func (f *fakeSpeedtestMonitor) Run(context.Context, protocol.CheckTask) protocol.SpeedtestResult {
+	f.calls++
+	return protocol.SpeedtestResult{Status: "ok", DownloadSpeedMbps: 100.0, UploadSpeedMbps: 50.0, TestedAt: 1}
+}
+
 func TestNewRequiresOutboundAgentCredentials(t *testing.T) {
 	if _, err := New(config.Config{}); err == nil {
 		t.Fatal("New accepted an agent without endpoint or credentials")
@@ -488,5 +495,47 @@ func TestRefreshFailureLeavesLastRefreshStateUntouched(t *testing.T) {
 	}
 	if runner.lastConfigVersion != 100 || runner.configMaxAgeSeconds != 30 || !runner.lastRefreshSuccessAt.Equal(time.Unix(10000, 0)) {
 		t.Fatalf("failed refresh mutated state: version %d, max age %d, refreshed at %v", runner.lastConfigVersion, runner.configMaxAgeSeconds, runner.lastRefreshSuccessAt)
+	}
+}
+
+func TestReportRunsSpeedtestTask(t *testing.T) {
+	stub := &stubControlPlane{}
+	speedTask := protocol.CheckTask{
+		ID:              "speed-1",
+		Kind:            "speedtest",
+		Host:            "speed.example.com",
+		Port:            443,
+		ServerURL:       "https://speed.example.com/__down",
+		DownloadBytes:   1024 * 1024,
+		UploadBytes:     512 * 1024,
+		IntervalSeconds: 60,
+		MaxHops:         10,
+		Enabled:         true,
+		TimeoutMS:       5000,
+	}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{speedTask}})
+	runner := newStubRunner(t, stub)
+	fakeSpeed := &fakeSpeedtestMonitor{}
+	runner.speedtest = fakeSpeed
+
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fakeSpeed.calls != 1 {
+		t.Fatalf("expected 1 speedtest call, got %d", fakeSpeed.calls)
+	}
+	reports := stub.receivedReports()
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(reports))
+	}
+	if len(reports[0].Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(reports[0].Results))
+	}
+	res := reports[0].Results[0]
+	if res.Kind != "speedtest" || res.Speedtest == nil || res.Speedtest.DownloadSpeedMbps != 100.0 {
+		t.Fatalf("unexpected speedtest result: %#v", res)
 	}
 }

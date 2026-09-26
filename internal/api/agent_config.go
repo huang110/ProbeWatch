@@ -66,6 +66,31 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			tasks = append(tasks, task)
 		}
 	}
+	speedTasks, err := s.service.Store().ListEnabledSpeedtestTasks(r.Context())
+	if err == nil {
+		for _, st := range speedTasks {
+			if !nodeMatchesSpeedtestTask(node, st) {
+				continue
+			}
+			host := st.Name
+			if host == "" {
+				host = "speedtest"
+			}
+			tasks = append(tasks, protocol.CheckTask{
+				ID:              st.ID,
+				Kind:            "speedtest",
+				Host:            host,
+				Port:            443,
+				ServerURL:       st.ServerURL,
+				DownloadBytes:   st.DownloadBytes,
+				UploadBytes:     st.UploadBytes,
+				IntervalSeconds: st.IntervalSeconds,
+				MaxHops:         20,
+				TimeoutMS:       25000,
+				Enabled:         true,
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{
 		Tasks:               tasks,
 		ConfigVersion:       time.Now().UTC().Unix(),
@@ -108,6 +133,32 @@ func nodeMatchesTarget(node db.Node, config agentTargetPayload) bool {
 			}
 			for _, nt := range nodeTags {
 				if strings.EqualFold(nt, reqTag) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func nodeMatchesSpeedtestTask(node db.Node, st db.SpeedtestTaskRecord) bool {
+	tags := parseNodeTags(st.NodeTags)
+	ids := parseNodeTags(st.NodeIDs)
+	if len(tags) == 0 && len(ids) == 0 {
+		return true
+	}
+	if len(ids) > 0 {
+		for _, id := range ids {
+			if strings.EqualFold(id, node.ID) || strings.EqualFold(id, node.UUID) {
+				return true
+			}
+		}
+	}
+	if len(tags) > 0 {
+		nodeTags := parseNodeTags(node.Tags)
+		for _, t := range tags {
+			for _, nt := range nodeTags {
+				if strings.EqualFold(nt, t) {
 					return true
 				}
 			}

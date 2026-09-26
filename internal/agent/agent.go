@@ -44,6 +44,7 @@ type Runner struct {
 	probe     networkMonitor
 	media     mediaMonitor
 	mtr       mtrMonitor
+	speedtest speedtestMonitor
 
 	// configMaxAgeSeconds is the freshness window the control plane asked for
 	// (0 = no fail-closed enforcement, legacy behavior). lastRefreshSuccessAt
@@ -66,6 +67,9 @@ type mediaMonitor interface {
 type mtrMonitor interface {
 	Run(context.Context, protocol.CheckTask) protocol.MTRResult
 }
+type speedtestMonitor interface {
+	Run(context.Context, protocol.CheckTask) protocol.SpeedtestResult
+}
 type cpuSampler interface{ Sample() (float64, error) }
 
 type queuedReport struct {
@@ -86,6 +90,7 @@ func New(cfg config.Config) (*Runner, error) {
 		}},
 		next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(),
 		cpu: newCPUTracker(), probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{},
+		speedtest: &monitor.SpeedtestRunner{},
 	}, nil
 }
 
@@ -204,6 +209,9 @@ func (r *Runner) report(ctx context.Context) error {
 		case "media_http":
 			value := r.media.Run(ctx, task)
 			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Media: &value}
+		case "speedtest":
+			value := r.speedtest.Run(ctx, task)
+			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Speedtest: &value}
 		default:
 			value := r.probe.Run(ctx, task)
 			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Network: &value}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestCheckTaskValidateAcceptsEveryAllowedKind(t *testing.T) {
-	for _, kind := range []string{"tcp", "http", "https", "dns", "mtr", "media_http"} {
+	for _, kind := range []string{"tcp", "http", "https", "dns", "mtr", "media_http", "speedtest"} {
 		t.Run(kind, func(t *testing.T) {
 			task := validCheckTask()
 			task.Kind = kind
@@ -443,5 +443,61 @@ func TestRegionRulesDecodeStrictly(t *testing.T) {
 	var rejected CheckTask
 	if err := DecodeJSON(bytes.NewReader(unknown), 1024, &rejected); err == nil {
 		t.Fatal("DecodeJSON accepted an unknown field inside a region rule")
+	}
+}
+
+func TestSpeedtestResultValidation(t *testing.T) {
+	valid := SpeedtestResult{
+		ServerName:        "Cloudflare Edge",
+		ServerURL:         "https://speed.cloudflare.com/__down",
+		DownloadSpeedMbps: 125.5,
+		UploadSpeedMbps:   48.2,
+		LatencyMS:         18,
+		JitterMS:          2,
+		BytesReceived:     10485760,
+		BytesSent:         5242880,
+		DurationMS:        2500,
+		Status:            "ok",
+		TestedAt:          1700000000,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid speedtest result rejected: %v", err)
+	}
+
+	invalidNegative := valid
+	invalidNegative.DownloadSpeedMbps = -1
+	if err := invalidNegative.Validate(); err == nil {
+		t.Fatal("expected error on negative download speed")
+	}
+
+	invalidTestedAt := valid
+	invalidTestedAt.TestedAt = 0
+	if err := invalidTestedAt.Validate(); err == nil {
+		t.Fatal("expected error on zero tested_at")
+	}
+
+	envelope := SpeedtestResultEnvelope{
+		TaskID: "speed-1",
+		Result: valid,
+	}
+	if err := envelope.Validate(); err != nil {
+		t.Fatalf("valid envelope rejected: %v", err)
+	}
+
+	checkRes := CheckResult{
+		ID:        "speed-1",
+		Kind:      "speedtest",
+		Speedtest: &valid,
+	}
+	if err := checkRes.Validate(); err != nil {
+		t.Fatalf("valid check result with speedtest rejected: %v", err)
+	}
+
+	missingRes := CheckResult{
+		ID:   "speed-1",
+		Kind: "speedtest",
+	}
+	if err := missingRes.Validate(); err == nil {
+		t.Fatal("expected error when speedtest result is nil")
 	}
 }

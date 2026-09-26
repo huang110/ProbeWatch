@@ -244,6 +244,54 @@ func (s *Server) mediaResultAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) speedtestResultAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	node, requestID, now, ok := s.authenticateAgentRequest(w, r)
+	if !ok {
+		return
+	}
+	var request protocol.SpeedtestResultEnvelope
+	if err := decodeJSONRequest(w, r, s.requestBodyLimit(), &request); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	if err := request.Validate(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid speedtest result")
+		return
+	}
+	if err := validateResultTimestamp(request.Result.TestedAt, now, s.agentClockSkew()); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid speedtest result")
+		return
+	}
+	if err := s.validateTargetBinding(r.Context(), db.TargetKindSpeedtest, request.TaskID); err != nil {
+		writeTargetBindingError(w, err)
+		return
+	}
+	payload, err := json.Marshal(request.Result)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid speedtest result")
+		return
+	}
+	if err := s.service.Store().PersistAgentResult(r.Context(), node.ID, requestID, now.Add(2*s.agentClockSkew()), now, db.AgentResultInput{
+		Kind:      db.TargetKindSpeedtest,
+		TargetID:  request.TaskID,
+		CheckedAt: checkedAt(request.Result.TestedAt, now),
+		Payload:   payload,
+	}); err != nil {
+		if errors.Is(err, db.ErrReplay) {
+			writeAgentRequestError(w, err)
+			return
+		}
+		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request) (db.Node, string, time.Time, bool) {
 	if !s.agentIPLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
@@ -273,6 +321,16 @@ func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, id string) error {
+	if kind == db.TargetKindSpeedtest {
+		task, err := s.service.Store().GetSpeedtestTask(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !task.Enabled {
+			return db.ErrTargetDisabled
+		}
+		return nil
+	}
 	_, err := s.service.Store().LookupEnabledTarget(ctx, kind, id)
 	return err
 }
@@ -329,6 +387,12 @@ func agentResultInput(result protocol.CheckResult, now time.Time) (db.AgentResul
 			return db.AgentResultInput{}, err
 		}
 		return db.AgentResultInput{Kind: db.TargetKindMediaHTTP, TargetID: result.ID, CheckedAt: checkedAt(result.Media.CheckedAt, now), Payload: payload}, nil
+	case result.Speedtest != nil:
+		payload, err := json.Marshal(result.Speedtest)
+		if err != nil {
+			return db.AgentResultInput{}, err
+		}
+		return db.AgentResultInput{Kind: db.TargetKindSpeedtest, TargetID: result.ID, CheckedAt: checkedAt(result.Speedtest.TestedAt, now), Payload: payload}, nil
 	default:
 		return db.AgentResultInput{}, errors.New("invalid check result shape")
 	}
@@ -349,6 +413,8 @@ func checkResultTimestamp(result protocol.CheckResult, now time.Time, skew time.
 		return validateResultTimestamp(result.MTR.CheckedAt, now, skew)
 	case result.Media != nil:
 		return validateResultTimestamp(result.Media.CheckedAt, now, skew)
+	case result.Speedtest != nil:
+		return validateResultTimestamp(result.Speedtest.TestedAt, now, skew)
 	default:
 		return errors.New("invalid check result shape")
 	}

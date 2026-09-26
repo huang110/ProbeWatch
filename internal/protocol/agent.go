@@ -39,6 +39,7 @@ var allowedTaskKinds = map[string]struct{}{
 	"dns":        {},
 	"mtr":        {},
 	"media_http": {},
+	"speedtest":  {},
 }
 
 // ReportRequest is the complete resource and check report sent by an agent.
@@ -51,11 +52,12 @@ type ReportRequest struct {
 
 // CheckResult contains exactly one typed result for a configured check.
 type CheckResult struct {
-	ID      string         `json:"id"`
-	Kind    string         `json:"kind"`
-	Network *NetworkResult `json:"network,omitempty"`
-	MTR     *MTRResult     `json:"mtr,omitempty"`
-	Media   *MediaResult   `json:"media,omitempty"`
+	ID        string           `json:"id"`
+	Kind      string           `json:"kind"`
+	Network   *NetworkResult   `json:"network,omitempty"`
+	MTR       *MTRResult       `json:"mtr,omitempty"`
+	Media     *MediaResult     `json:"media,omitempty"`
+	Speedtest *SpeedtestResult `json:"speedtest,omitempty"`
 }
 
 // RegisterRequest contains the one-time registration credential and node identity.
@@ -97,6 +99,12 @@ type MTRResultEnvelope struct {
 type MediaResultEnvelope struct {
 	DetectorID string      `json:"detector_id"`
 	Result     MediaResult `json:"result"`
+}
+
+// SpeedtestResultEnvelope is the strict wire shape for a standalone speedtest result.
+type SpeedtestResultEnvelope struct {
+	TaskID string          `json:"task_id"`
+	Result SpeedtestResult `json:"result"`
 }
 
 // InterfaceStat represents one network interface's traffic counters and addresses.
@@ -158,6 +166,9 @@ type CheckTask struct {
 	Keyword         string       `json:"keyword,omitempty"`
 	Nameserver      string       `json:"nameserver,omitempty"`
 	CheckTLS        bool         `json:"check_tls,omitempty"`
+	DownloadBytes   int64        `json:"download_bytes,omitempty"`
+	UploadBytes     int64        `json:"upload_bytes,omitempty"`
+	ServerURL       string       `json:"server_url,omitempty"`
 }
 
 // RegionRule is one bounded body-marker rule for classifying the serving
@@ -326,6 +337,22 @@ type MediaResult struct {
 	CheckedAt int64  `json:"checked_at,omitempty"`
 }
 
+// SpeedtestResult contains bandwidth, latency, and duration metrics from a benchmark probe.
+type SpeedtestResult struct {
+	ServerName        string  `json:"server_name,omitempty"`
+	ServerURL         string  `json:"server_url,omitempty"`
+	DownloadSpeedMbps float64 `json:"download_speed_mbps"`
+	UploadSpeedMbps   float64 `json:"upload_speed_mbps"`
+	LatencyMS         int64   `json:"latency_ms,omitempty"`
+	JitterMS          int64   `json:"jitter_ms,omitempty"`
+	BytesReceived     int64   `json:"bytes_received,omitempty"`
+	BytesSent         int64   `json:"bytes_sent,omitempty"`
+	DurationMS        int64   `json:"duration_ms,omitempty"`
+	Status            string  `json:"status,omitempty"`
+	Error             string  `json:"error,omitempty"`
+	TestedAt          int64   `json:"tested_at,omitempty"`
+}
+
 func (r ReportRequest) Validate() error {
 	if err := validateUUID("node_uuid", r.NodeUUID); err != nil {
 		return err
@@ -407,6 +434,13 @@ func (r MTRResultEnvelope) Validate() error {
 
 func (r MediaResultEnvelope) Validate() error {
 	if err := validateString("detector_id", r.DetectorID, maxIDLength, true); err != nil {
+		return err
+	}
+	return r.Result.Validate()
+}
+
+func (r SpeedtestResultEnvelope) Validate() error {
+	if err := validateString("task_id", r.TaskID, maxIDLength, true); err != nil {
 		return err
 	}
 	return r.Result.Validate()
@@ -505,6 +539,15 @@ func (t CheckTask) Validate() error {
 			return errors.New("path is required for HTTP tasks")
 		}
 	}
+	if t.DownloadBytes < 0 || t.DownloadBytes > 500*1024*1024 {
+		return errors.New("download_bytes must be between 0 and 500MB")
+	}
+	if t.UploadBytes < 0 || t.UploadBytes > 200*1024*1024 {
+		return errors.New("upload_bytes must be between 0 and 200MB")
+	}
+	if err := validateString("server_url", t.ServerURL, maxEndpointLength, false); err != nil {
+		return err
+	}
 	return ValidateRegionRules(t.Kind, t.RegionRules)
 }
 
@@ -537,6 +580,12 @@ func (r CheckResult) Validate() error {
 			return fmt.Errorf("media: %w", err)
 		}
 	}
+	if r.Speedtest != nil {
+		resultCount++
+		if err := r.Speedtest.Validate(); err != nil {
+			return fmt.Errorf("speedtest: %w", err)
+		}
+	}
 	if resultCount != 1 {
 		return errors.New("check result must contain exactly one typed result")
 	}
@@ -552,6 +601,10 @@ func (r CheckResult) Validate() error {
 	case "media_http":
 		if r.Media == nil {
 			return errors.New("kind media_http requires a media result")
+		}
+	case "speedtest":
+		if r.Speedtest == nil {
+			return errors.New("kind speedtest requires a speedtest result")
 		}
 	}
 	return nil
@@ -621,6 +674,46 @@ func (r MediaResult) Validate() error {
 	}
 	if r.CheckedAt <= 0 {
 		return errors.New("checked_at must be greater than zero")
+	}
+	return nil
+}
+
+func (r SpeedtestResult) Validate() error {
+	if err := validateString("server_name", r.ServerName, maxNameLength, false); err != nil {
+		return err
+	}
+	if err := validateString("server_url", r.ServerURL, maxEndpointLength, false); err != nil {
+		return err
+	}
+	if r.DownloadSpeedMbps < 0 || r.DownloadSpeedMbps > 1000000 {
+		return errors.New("download_speed_mbps must be between 0 and 1000000")
+	}
+	if r.UploadSpeedMbps < 0 || r.UploadSpeedMbps > 1000000 {
+		return errors.New("upload_speed_mbps must be between 0 and 1000000")
+	}
+	if r.LatencyMS < 0 || r.LatencyMS > 60000 {
+		return errors.New("latency_ms must be between 0 and 60000")
+	}
+	if r.JitterMS < 0 || r.JitterMS > 60000 {
+		return errors.New("jitter_ms must be between 0 and 60000")
+	}
+	if r.BytesReceived < 0 {
+		return errors.New("bytes_received must not be negative")
+	}
+	if r.BytesSent < 0 {
+		return errors.New("bytes_sent must not be negative")
+	}
+	if r.DurationMS < 0 {
+		return errors.New("duration_ms must not be negative")
+	}
+	if err := validateString("status", r.Status, maxKindLength, false); err != nil {
+		return err
+	}
+	if err := validateString("error", r.Error, maxReasonLength, false); err != nil {
+		return err
+	}
+	if r.TestedAt <= 0 {
+		return errors.New("tested_at must be greater than zero")
 	}
 	return nil
 }
