@@ -94,7 +94,7 @@ func TestAlertRulesAPI(t *testing.T) {
 	}
 
 	// 8. DELETE /api/alerts/rules/rule-test-load with CSRF -> 200
-	delRes, _ := task4AdminWriteWithCSRF(t, handler, http.MethodDelete, session, csrf, "/api/alerts/rules/rule-test-load", "")
+	delRes, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodDelete, session, csrf, "/api/alerts/rules/rule-test-load", "")
 	if delRes.Code != http.StatusOK {
 		t.Fatalf("delete rule code = %d, body = %s", delRes.Code, delRes.Body.String())
 	}
@@ -107,4 +107,17 @@ func TestAlertRulesAPI(t *testing.T) {
 	if get404Rec.Code != http.StatusNotFound {
 		t.Fatalf("get deleted rule code = %d, want 404", get404Rec.Code)
 	}
+
+	// 10. POST composite rule with CSRF -> 201
+	compPayload := `{"id":"rule-test-comp","name":"Composite Memory & CPU","expression_type":"composite","logic":"AND","consecutive_count":3,"conditions":[{"metric":"cpu","operator":">","threshold":90.0},{"metric":"memory","operator":">","threshold":85.0}],"severity":"critical","enabled":true}`
+	compRes, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/rules", compPayload)
+	if compRes.Code != http.StatusCreated {
+		t.Fatalf("create composite rule code = %d, body = %s", compRes.Code, compRes.Body.String())
+	}
+	var compCreated db.AlertRule
+	_ = json.Unmarshal(compRes.Body.Bytes(), &compCreated)
+	if compCreated.ExpressionType != "composite" || compCreated.Logic != "AND" || compCreated.ConsecutiveCount != 3 || len(compCreated.Conditions) != 2 {
+		t.Fatalf("unexpected composite rule: %+v", compCreated)
+	}
 }
+

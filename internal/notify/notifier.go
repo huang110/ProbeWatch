@@ -26,11 +26,12 @@ import (
 const maxWebhookResponseBytes = 64 * 1024
 
 type Notifier struct {
-	cfg        config.Config
-	store      *db.Store
-	client     *http.Client
-	mu         sync.Mutex
-	dispatched map[string]int64 // alertID -> occurrenceCount
+	cfg             config.Config
+	store           *db.Store
+	client          *http.Client
+	flappingTracker *FlappingTracker
+	mu              sync.Mutex
+	dispatched      map[string]int64 // alertID -> occurrenceCount
 }
 
 func NewNotifier(cfg config.Config) *Notifier {
@@ -39,8 +40,9 @@ func NewNotifier(cfg config.Config) *Notifier {
 
 func NewNotifierWithStore(cfg config.Config, store *db.Store) *Notifier {
 	return &Notifier{
-		cfg:   cfg,
-		store: store,
+		cfg:             cfg,
+		store:           store,
+		flappingTracker: NewFlappingTracker(),
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
@@ -57,6 +59,16 @@ func NewNotifierWithStore(cfg config.Config, store *db.Store) *Notifier {
 		},
 		dispatched: make(map[string]int64),
 	}
+}
+
+func (n *Notifier) FlappingTracker() *FlappingTracker {
+	return n.flappingTracker
+}
+
+func (n *Notifier) SetFlappingTracker(t *FlappingTracker) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.flappingTracker = t
 }
 
 func (n *Notifier) SetStore(store *db.Store) {
@@ -105,6 +117,32 @@ func (n *Notifier) Enabled() bool {
 }
 
 func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.Node) error {
+	// 1. Check if alert is silenced (via maintenance window or snooze)
+	if n.store != nil {
+		silenced, reason, sErr := n.store.IsAlertSilenced(ctx, alert.NodeID, alert.Category, alert.TargetID, alert.Fingerprint, time.Now().UTC())
+		if sErr == nil && silenced {
+			slog.Info("alert silenced by maintenance window or snooze", "alert_id", alert.ID, "node_id", alert.NodeID, "reason", reason)
+			return nil
+		}
+	}
+
+	// 2. Check flapping tracker
+	if n.flappingTracker != nil {
+		isFlapping, justEntered := n.flappingTracker.RecordAlert(alert.NodeID, alert.Fingerprint, alert.Status, time.Now().UTC())
+		if justEntered {
+			slog.Warn("alert entered flapping state, suppressing repetitive notifications", "node_id", alert.NodeID, "fingerprint", alert.Fingerprint)
+			flappingAlert := alert
+			flappingAlert.Severity = "warning"
+			flappingAlert.Reason = "flapping_suppressed: 状态频繁抖动(5分钟内>=4次切换)，已自动开启静默抑制，指标稳定3分钟后自动恢复"
+			_ = n.dispatchToChannels(ctx, flappingAlert, node)
+			return nil
+		}
+		if isFlapping {
+			slog.Debug("suppressing notification for flapping alert", "node_id", alert.NodeID, "fingerprint", alert.Fingerprint)
+			return nil
+		}
+	}
+
 	n.mu.Lock()
 	lastCount, exists := n.dispatched[alert.ID]
 	// If already dispatched this occurrence count and status hasn't resolved, skip
@@ -119,6 +157,30 @@ func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.No
 	}
 	n.mu.Unlock()
 
+	err := n.dispatchToChannels(ctx, alert, node)
+
+	n.mu.Lock()
+	if alert.Status == db.AlertStatusResolved {
+		n.dispatched[alert.ID] = -1 // marked as resolved dispatched
+	} else {
+		n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
+	}
+	if len(n.dispatched) > 5000 {
+		trimmed := make(map[string]int64)
+		for k, v := range n.dispatched {
+			trimmed[k] = v
+			if len(trimmed) >= 2500 {
+				break
+			}
+		}
+		n.dispatched = trimmed
+	}
+	n.mu.Unlock()
+
+	return err
+}
+
+func (n *Notifier) dispatchToChannels(ctx context.Context, alert db.AlertEvent, node db.Node) error {
 	var channels []db.NotificationChannel
 	if n.store != nil {
 		dbChannels, err := n.store.ListNotificationChannels(ctx)
@@ -175,24 +237,6 @@ func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.No
 			errs = append(errs, fmt.Sprintf("%s (%s): %v", ch.Name, ch.Type, err))
 		}
 	}
-
-	n.mu.Lock()
-	if alert.Status == db.AlertStatusResolved {
-		n.dispatched[alert.ID] = -1 // marked as resolved dispatched
-	} else {
-		n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
-	}
-	if len(n.dispatched) > 5000 {
-		trimmed := make(map[string]int64)
-		for k, v := range n.dispatched {
-			trimmed[k] = v
-			if len(trimmed) >= 2500 {
-				break
-			}
-		}
-		n.dispatched = trimmed
-	}
-	n.mu.Unlock()
 
 	if len(errs) > 0 {
 		return fmt.Errorf("dispatch errors: %s", strings.Join(errs, "; "))
@@ -310,6 +354,9 @@ func formatEmoji(alert db.AlertEvent) string {
 }
 
 func formatCategoryTitle(category, reason string) string {
+	if strings.HasPrefix(reason, "flapping_suppressed") {
+		return "告警抖动抑制通知"
+	}
 	switch strings.ToLower(category) {
 	case "node":
 		if reason == "node_offline" {

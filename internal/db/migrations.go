@@ -341,10 +341,29 @@ CREATE TABLE IF NOT EXISTS alert_rules (
     severity TEXT NOT NULL DEFAULT 'warning',
     node_filter TEXT NOT NULL DEFAULT '*',
     enabled INTEGER NOT NULL DEFAULT 1,
+    expression_type TEXT NOT NULL DEFAULT 'simple',
+    conditions TEXT NOT NULL DEFAULT '[]',
+    logic TEXT NOT NULL DEFAULT 'AND',
+    consecutive_count INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS alert_rules_metric_idx ON alert_rules(metric, enabled);
+CREATE TABLE IF NOT EXISTS alert_silences (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    node_filter TEXT NOT NULL DEFAULT '*',
+    category TEXT NOT NULL DEFAULT '*',
+    rule_id TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL DEFAULT '',
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS alert_silences_time_idx ON alert_silences(ends_at, starts_at);
+CREATE INDEX IF NOT EXISTS alert_silences_node_idx ON alert_silences(node_filter);
 CREATE TABLE IF NOT EXISTS webauthn_credentials (
     id TEXT PRIMARY KEY,
     admin_id TEXT NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
@@ -492,6 +511,12 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureSystemEventsTable(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureAlertRulesAdvancedSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureAlertSilencesTable(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -1168,6 +1193,75 @@ func ensureSystemEventsTable(ctx context.Context, db *sql.DB) error {
 	for _, q := range queries {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("ensure system events table: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureAlertRulesAdvancedSchema(ctx context.Context, db *sql.DB) error {
+	columns := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(alert_rules)`)
+	if err != nil {
+		return fmt.Errorf("inspect alert_rules schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan alert_rules schema: %w", err)
+		}
+		columns[strings.ToLower(name)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate alert_rules schema: %w", err)
+	}
+
+	if !columns["expression_type"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE alert_rules ADD COLUMN expression_type TEXT NOT NULL DEFAULT 'simple'`); err != nil {
+			return fmt.Errorf("add expression_type to alert_rules: %w", err)
+		}
+	}
+	if !columns["conditions"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE alert_rules ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("add conditions to alert_rules: %w", err)
+		}
+	}
+	if !columns["logic"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE alert_rules ADD COLUMN logic TEXT NOT NULL DEFAULT 'AND'`); err != nil {
+			return fmt.Errorf("add logic to alert_rules: %w", err)
+		}
+	}
+	if !columns["consecutive_count"] {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE alert_rules ADD COLUMN consecutive_count INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return fmt.Errorf("add consecutive_count to alert_rules: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureAlertSilencesTable(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS alert_silences (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			node_filter TEXT NOT NULL DEFAULT '*',
+			category TEXT NOT NULL DEFAULT '*',
+			rule_id TEXT NOT NULL DEFAULT '',
+			fingerprint TEXT NOT NULL DEFAULT '',
+			starts_at INTEGER NOT NULL,
+			ends_at INTEGER NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS alert_silences_time_idx ON alert_silences(ends_at, starts_at);`,
+		`CREATE INDEX IF NOT EXISTS alert_silences_node_idx ON alert_silences(node_filter);`,
+	}
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure alert silences table: %w", err)
 		}
 	}
 	return nil

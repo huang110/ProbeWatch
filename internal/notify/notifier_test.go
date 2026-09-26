@@ -153,3 +153,89 @@ func TestDispatchToChannels(t *testing.T) {
 	_ = receivedPath
 	_ = receivedHeader
 }
+
+func TestDispatchWithSilenceAndFlapping(t *testing.T) {
+	sendCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sendCount++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true}`))
+	}))
+	defer srv.Close()
+
+	n := NewNotifier(config.Config{
+		WebhookURL: srv.URL + "/webhook",
+	})
+	n.client = srv.Client()
+
+	node := db.Node{ID: "node-suppress-1", Name: "Node Suppress"}
+	now := time.Now().UTC()
+
+	// Rapid flip-flopping alert
+	// Initial open
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "open", OccurrenceCount: 1,
+	}, node)
+	if sendCount != 1 {
+		t.Fatalf("expected 1 dispatch for initial alert, got %d", sendCount)
+	}
+
+	// 1. Flip to resolved
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "resolved", OccurrenceCount: 2,
+	}, node)
+	if sendCount != 2 {
+		t.Fatalf("expected 2 dispatches after 1st flip, got %d", sendCount)
+	}
+
+	// 2. Flip to open
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "open", OccurrenceCount: 3,
+	}, node)
+	if sendCount != 3 {
+		t.Fatalf("expected 3 dispatches after 2nd flip, got %d", sendCount)
+	}
+
+	// 3. Flip to resolved
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "resolved", OccurrenceCount: 4,
+	}, node)
+	if sendCount != 4 {
+		t.Fatalf("expected 4 dispatches after 3rd flip, got %d", sendCount)
+	}
+
+	// 4. Flip to open -> 4th transition within 5m! Enters flapping suppression!
+	// Emits the single flapping warning notice (sendCount becomes 5)
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "open", OccurrenceCount: 5,
+	}, node)
+	if sendCount != 5 {
+		t.Fatalf("expected flapping notice dispatch, got %d", sendCount)
+	}
+
+	// 5. Flip to resolved while flapping -> SUPPRESSED! No dispatch!
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "resolved", OccurrenceCount: 6,
+	}, node)
+	if sendCount != 5 {
+		t.Fatalf("expected dispatch to be suppressed while flapping, got %d", sendCount)
+	}
+
+	// 6. Flip to open while flapping -> SUPPRESSED! No dispatch!
+	_ = n.Dispatch(context.Background(), db.AlertEvent{
+		ID: "alert-flip-1", NodeID: node.ID, Fingerprint: "fp-flapping-test",
+		Category: "resource", Status: "open", OccurrenceCount: 7,
+	}, node)
+	if sendCount != 5 {
+		t.Fatalf("expected dispatch to be suppressed while flapping, got %d", sendCount)
+	}
+
+	_ = now
+}
+

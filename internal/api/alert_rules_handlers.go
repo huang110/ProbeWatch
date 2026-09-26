@@ -10,15 +10,19 @@ import (
 )
 
 type alertRuleRequest struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Metric          string  `json:"metric"`
-	Operator        string  `json:"operator"`
-	Threshold       float64 `json:"threshold"`
-	DurationSeconds int     `json:"duration_seconds"`
-	Severity        string  `json:"severity"`
-	NodeFilter      string  `json:"node_filter"`
-	Enabled         bool    `json:"enabled"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	Metric           string              `json:"metric"`
+	Operator         string              `json:"operator"`
+	Threshold        float64             `json:"threshold"`
+	DurationSeconds  int                 `json:"duration_seconds"`
+	Severity         string              `json:"severity"`
+	NodeFilter       string              `json:"node_filter"`
+	Enabled          bool                `json:"enabled"`
+	ExpressionType   string              `json:"expression_type"`
+	Conditions       []db.AlertCondition `json:"conditions"`
+	Logic            string              `json:"logic"`
+	ConsecutiveCount int                 `json:"consecutive_count"`
 }
 
 func (s *Server) listAlertRules(w http.ResponseWriter, r *http.Request) {
@@ -49,10 +53,35 @@ func (s *Server) createAlertRule(w http.ResponseWriter, r *http.Request) {
 		writeRequestError(w, err)
 		return
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" {
-		writeJSONError(w, http.StatusBadRequest, "name and metric are required")
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSONError(w, http.StatusBadRequest, "rule name is required")
 		return
 	}
+
+	expType := strings.ToLower(strings.TrimSpace(req.ExpressionType))
+	if expType == "" {
+		if len(req.Conditions) > 0 {
+			expType = "composite"
+		} else {
+			expType = "simple"
+		}
+	}
+
+	if expType == "composite" {
+		if len(req.Conditions) == 0 {
+			writeJSONError(w, http.StatusBadRequest, "conditions array cannot be empty for composite rules")
+			return
+		}
+		if strings.TrimSpace(req.Metric) == "" {
+			req.Metric = req.Conditions[0].Metric
+		}
+	} else {
+		if strings.TrimSpace(req.Metric) == "" {
+			writeJSONError(w, http.StatusBadRequest, "metric is required for simple rules")
+			return
+		}
+	}
+
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
 		id = "rule-" + randomHex(6)
@@ -69,19 +98,31 @@ func (s *Server) createAlertRule(w http.ResponseWriter, r *http.Request) {
 	if filter == "" {
 		filter = "*"
 	}
+	logic := strings.ToUpper(strings.TrimSpace(req.Logic))
+	if logic == "" {
+		logic = "AND"
+	}
+	consecutiveCount := req.ConsecutiveCount
+	if consecutiveCount <= 0 {
+		consecutiveCount = 1
+	}
 
 	rule := db.AlertRule{
-		ID:              id,
-		Name:            strings.TrimSpace(req.Name),
-		Metric:          strings.TrimSpace(strings.ToLower(req.Metric)),
-		Operator:        op,
-		Threshold:       req.Threshold,
-		DurationSeconds: req.DurationSeconds,
-		Severity:        sev,
-		NodeFilter:      filter,
-		Enabled:         req.Enabled,
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		ID:               id,
+		Name:             strings.TrimSpace(req.Name),
+		Metric:           strings.TrimSpace(strings.ToLower(req.Metric)),
+		Operator:         op,
+		Threshold:        req.Threshold,
+		DurationSeconds:  req.DurationSeconds,
+		Severity:         sev,
+		NodeFilter:       filter,
+		Enabled:          req.Enabled,
+		ExpressionType:   expType,
+		Conditions:       req.Conditions,
+		Logic:            logic,
+		ConsecutiveCount: consecutiveCount,
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
 	}
 	if err := s.service.Store().CreateAlertRule(r.Context(), rule); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -96,10 +137,35 @@ func (s *Server) updateAlertRule(w http.ResponseWriter, r *http.Request, id stri
 		writeRequestError(w, err)
 		return
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" {
-		writeJSONError(w, http.StatusBadRequest, "name and metric are required")
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSONError(w, http.StatusBadRequest, "rule name is required")
 		return
 	}
+
+	expType := strings.ToLower(strings.TrimSpace(req.ExpressionType))
+	if expType == "" {
+		if len(req.Conditions) > 0 {
+			expType = "composite"
+		} else {
+			expType = "simple"
+		}
+	}
+
+	if expType == "composite" {
+		if len(req.Conditions) == 0 {
+			writeJSONError(w, http.StatusBadRequest, "conditions array cannot be empty for composite rules")
+			return
+		}
+		if strings.TrimSpace(req.Metric) == "" {
+			req.Metric = req.Conditions[0].Metric
+		}
+	} else {
+		if strings.TrimSpace(req.Metric) == "" {
+			writeJSONError(w, http.StatusBadRequest, "metric is required for simple rules")
+			return
+		}
+	}
+
 	op := strings.TrimSpace(req.Operator)
 	if op == "" {
 		op = ">"
@@ -112,18 +178,30 @@ func (s *Server) updateAlertRule(w http.ResponseWriter, r *http.Request, id stri
 	if filter == "" {
 		filter = "*"
 	}
+	logic := strings.ToUpper(strings.TrimSpace(req.Logic))
+	if logic == "" {
+		logic = "AND"
+	}
+	consecutiveCount := req.ConsecutiveCount
+	if consecutiveCount <= 0 {
+		consecutiveCount = 1
+	}
 
 	rule := db.AlertRule{
-		ID:              id,
-		Name:            strings.TrimSpace(req.Name),
-		Metric:          strings.TrimSpace(strings.ToLower(req.Metric)),
-		Operator:        op,
-		Threshold:       req.Threshold,
-		DurationSeconds: req.DurationSeconds,
-		Severity:        sev,
-		NodeFilter:      filter,
-		Enabled:         req.Enabled,
-		UpdatedAt:       time.Now().UTC(),
+		ID:               id,
+		Name:             strings.TrimSpace(req.Name),
+		Metric:           strings.TrimSpace(strings.ToLower(req.Metric)),
+		Operator:         op,
+		Threshold:        req.Threshold,
+		DurationSeconds:  req.DurationSeconds,
+		Severity:         sev,
+		NodeFilter:       filter,
+		Enabled:          req.Enabled,
+		ExpressionType:   expType,
+		Conditions:       req.Conditions,
+		Logic:            logic,
+		ConsecutiveCount: consecutiveCount,
+		UpdatedAt:        time.Now().UTC(),
 	}
 	if err := s.service.Store().UpdateAlertRule(r.Context(), rule); err != nil {
 		if errors.Is(err, db.ErrAlertRuleNotFound) {

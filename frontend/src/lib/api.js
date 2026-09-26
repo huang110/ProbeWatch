@@ -201,6 +201,47 @@ export async function toggleAlertRule(id) {
   return await res.json()
 }
 
+export async function fetchAlertSilences() {
+  const res = await fetch('/api/alerts/silences', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch alert silences')
+  return await res.json()
+}
+
+export async function createAlertSilence(silence) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/alerts/silences', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(silence),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create alert silence')
+  }
+  return await res.json()
+}
+
+export async function deleteAlertSilence(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/alerts/silences/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete alert silence')
+  }
+  return await res.json()
+}
+
+export async function fetchFlappingAlerts() {
+  const res = await fetch('/api/alerts/flapping', { credentials: 'same-origin' })
+  if (!res.ok) throw new Error('Failed to fetch flapping alerts')
+  return await res.json()
+}
+
 export async function fetchBackups() {
   const res = await fetch('/api/system/backups', { credentials: 'same-origin' })
   if (!res.ok) throw new Error('Failed to fetch backups')

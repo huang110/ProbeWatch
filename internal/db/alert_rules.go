@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,24 +16,50 @@ var (
 	ErrInvalidAlertRule  = errors.New("invalid alert rule")
 )
 
-// AlertRule represents a custom metric threshold condition for alerting.
+// AlertCondition defines an atomic threshold condition within a composite rule.
+type AlertCondition struct {
+	Metric    string  `json:"metric"`
+	Operator  string  `json:"operator"` // >, >=, <, <=, ==
+	Threshold float64 `json:"threshold"`
+}
+
+// AlertRule represents a custom metric threshold or composite condition for alerting.
 type AlertRule struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Metric          string    `json:"metric"` // cpu, memory, disk, load1, load5, load15, traffic_percent, network_loss, network_latency
-	Operator        string    `json:"operator"` // >, >=, <, <=, ==
-	Threshold       float64   `json:"threshold"`
-	DurationSeconds int       `json:"duration_seconds"`
-	Severity        string    `json:"severity"` // critical, warning, info
-	NodeFilter      string    `json:"node_filter"` // * or comma-separated node IDs
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	Metric           string           `json:"metric"` // For simple rules, primary metric
+	Operator         string           `json:"operator"` // >, >=, <, <=, ==
+	Threshold        float64          `json:"threshold"`
+	DurationSeconds  int              `json:"duration_seconds"`
+	Severity         string           `json:"severity"` // critical, warning, info
+	NodeFilter       string           `json:"node_filter"` // * or comma-separated node IDs
+	Enabled          bool             `json:"enabled"`
+	ExpressionType   string           `json:"expression_type"` // "simple" | "composite"
+	Conditions       []AlertCondition `json:"conditions"`
+	Logic            string           `json:"logic"` // "AND" | "OR"
+	ConsecutiveCount int              `json:"consecutive_count"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+}
+
+var consecutiveTracker = struct {
+	sync.Mutex
+	counts map[string]int
+}{
+	counts: make(map[string]int),
+}
+
+// ResetConsecutiveTracker clears the consecutive evaluation counts.
+func ResetConsecutiveTracker() {
+	consecutiveTracker.Lock()
+	defer consecutiveTracker.Unlock()
+	consecutiveTracker.counts = make(map[string]int)
 }
 
 func (s *Store) ListAlertRules(ctx context.Context) ([]AlertRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled, created_at, updated_at
+		SELECT id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled,
+		       expression_type, conditions, logic, consecutive_count, created_at, updated_at
 		FROM alert_rules
 		ORDER BY created_at ASC
 	`)
@@ -43,17 +71,38 @@ func (s *Store) ListAlertRules(ctx context.Context) ([]AlertRule, error) {
 	var rules []AlertRule
 	for rows.Next() {
 		var (
-			r       AlertRule
-			enabled int
-			created int64
-			updated int64
+			r             AlertRule
+			enabled       int
+			created       int64
+			updated       int64
+			conditionsRaw string
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.Metric, &r.Operator, &r.Threshold, &r.DurationSeconds, &r.Severity, &r.NodeFilter, &enabled, &created, &updated); err != nil {
+		if err := rows.Scan(
+			&r.ID, &r.Name, &r.Metric, &r.Operator, &r.Threshold, &r.DurationSeconds,
+			&r.Severity, &r.NodeFilter, &enabled,
+			&r.ExpressionType, &conditionsRaw, &r.Logic, &r.ConsecutiveCount,
+			&created, &updated,
+		); err != nil {
 			return nil, fmt.Errorf("scan alert rule: %w", err)
 		}
 		r.Enabled = enabled == 1
 		r.CreatedAt = time.Unix(0, created).UTC()
 		r.UpdatedAt = time.Unix(0, updated).UTC()
+		if r.ExpressionType == "" {
+			r.ExpressionType = "simple"
+		}
+		if r.Logic == "" {
+			r.Logic = "AND"
+		}
+		if r.ConsecutiveCount <= 0 {
+			r.ConsecutiveCount = 1
+		}
+		if conditionsRaw != "" && conditionsRaw != "[]" {
+			_ = json.Unmarshal([]byte(conditionsRaw), &r.Conditions)
+		}
+		if r.Conditions == nil {
+			r.Conditions = []AlertCondition{}
+		}
 		rules = append(rules, r)
 	}
 	if rules == nil {
@@ -64,16 +113,23 @@ func (s *Store) ListAlertRules(ctx context.Context) ([]AlertRule, error) {
 
 func (s *Store) GetAlertRule(ctx context.Context, id string) (AlertRule, error) {
 	var (
-		r       AlertRule
-		enabled int
-		created int64
-		updated int64
+		r             AlertRule
+		enabled       int
+		created       int64
+		updated       int64
+		conditionsRaw string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled, created_at, updated_at
+		SELECT id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled,
+		       expression_type, conditions, logic, consecutive_count, created_at, updated_at
 		FROM alert_rules
 		WHERE id = ?
-	`, id).Scan(&r.ID, &r.Name, &r.Metric, &r.Operator, &r.Threshold, &r.DurationSeconds, &r.Severity, &r.NodeFilter, &enabled, &created, &updated)
+	`, id).Scan(
+		&r.ID, &r.Name, &r.Metric, &r.Operator, &r.Threshold, &r.DurationSeconds,
+		&r.Severity, &r.NodeFilter, &enabled,
+		&r.ExpressionType, &conditionsRaw, &r.Logic, &r.ConsecutiveCount,
+		&created, &updated,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AlertRule{}, ErrAlertRuleNotFound
 	}
@@ -83,6 +139,21 @@ func (s *Store) GetAlertRule(ctx context.Context, id string) (AlertRule, error) 
 	r.Enabled = enabled == 1
 	r.CreatedAt = time.Unix(0, created).UTC()
 	r.UpdatedAt = time.Unix(0, updated).UTC()
+	if r.ExpressionType == "" {
+		r.ExpressionType = "simple"
+	}
+	if r.Logic == "" {
+		r.Logic = "AND"
+	}
+	if r.ConsecutiveCount <= 0 {
+		r.ConsecutiveCount = 1
+	}
+	if conditionsRaw != "" && conditionsRaw != "[]" {
+		_ = json.Unmarshal([]byte(conditionsRaw), &r.Conditions)
+	}
+	if r.Conditions == nil {
+		r.Conditions = []AlertCondition{}
+	}
 	return r, nil
 }
 
@@ -102,11 +173,40 @@ func (s *Store) CreateAlertRule(ctx context.Context, rule AlertRule) error {
 	if rule.NodeFilter == "" {
 		rule.NodeFilter = "*"
 	}
+	if rule.ExpressionType == "" {
+		if len(rule.Conditions) > 0 {
+			rule.ExpressionType = "composite"
+		} else {
+			rule.ExpressionType = "simple"
+		}
+	}
+	if rule.Logic == "" {
+		rule.Logic = "AND"
+	} else {
+		rule.Logic = strings.ToUpper(strings.TrimSpace(rule.Logic))
+	}
+	if rule.ConsecutiveCount <= 0 {
+		rule.ConsecutiveCount = 1
+	}
 
-	if rule.ID == "" || rule.Name == "" || rule.Metric == "" {
+	if rule.ID == "" || rule.Name == "" {
 		return ErrInvalidAlertRule
 	}
 
+	if rule.ExpressionType == "composite" {
+		if len(rule.Conditions) == 0 {
+			return ErrInvalidAlertRule
+		}
+		if rule.Metric == "" && len(rule.Conditions) > 0 {
+			rule.Metric = rule.Conditions[0].Metric
+		}
+	} else {
+		if rule.Metric == "" {
+			return ErrInvalidAlertRule
+		}
+	}
+
+	condBytes, _ := json.Marshal(rule.Conditions)
 	now := time.Now().UTC().UnixNano()
 	enabledInt := 0
 	if rule.Enabled {
@@ -114,9 +214,14 @@ func (s *Store) CreateAlertRule(ctx context.Context, rule AlertRule) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO alert_rules (id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, rule.ID, rule.Name, rule.Metric, rule.Operator, rule.Threshold, rule.DurationSeconds, rule.Severity, rule.NodeFilter, enabledInt, now, now)
+		INSERT INTO alert_rules (
+			id, name, metric, operator, threshold, duration_seconds, severity, node_filter, enabled,
+			expression_type, conditions, logic, consecutive_count, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, rule.ID, rule.Name, rule.Metric, rule.Operator, rule.Threshold, rule.DurationSeconds,
+		rule.Severity, rule.NodeFilter, enabledInt,
+		rule.ExpressionType, string(condBytes), rule.Logic, rule.ConsecutiveCount, now, now)
 	if err != nil {
 		return fmt.Errorf("create alert rule: %w", err)
 	}
@@ -138,11 +243,40 @@ func (s *Store) UpdateAlertRule(ctx context.Context, rule AlertRule) error {
 	if rule.NodeFilter == "" {
 		rule.NodeFilter = "*"
 	}
+	if rule.ExpressionType == "" {
+		if len(rule.Conditions) > 0 {
+			rule.ExpressionType = "composite"
+		} else {
+			rule.ExpressionType = "simple"
+		}
+	}
+	if rule.Logic == "" {
+		rule.Logic = "AND"
+	} else {
+		rule.Logic = strings.ToUpper(strings.TrimSpace(rule.Logic))
+	}
+	if rule.ConsecutiveCount <= 0 {
+		rule.ConsecutiveCount = 1
+	}
 
-	if rule.ID == "" || rule.Name == "" || rule.Metric == "" {
+	if rule.ID == "" || rule.Name == "" {
 		return ErrInvalidAlertRule
 	}
 
+	if rule.ExpressionType == "composite" {
+		if len(rule.Conditions) == 0 {
+			return ErrInvalidAlertRule
+		}
+		if rule.Metric == "" && len(rule.Conditions) > 0 {
+			rule.Metric = rule.Conditions[0].Metric
+		}
+	} else {
+		if rule.Metric == "" {
+			return ErrInvalidAlertRule
+		}
+	}
+
+	condBytes, _ := json.Marshal(rule.Conditions)
 	now := time.Now().UTC().UnixNano()
 	enabledInt := 0
 	if rule.Enabled {
@@ -151,9 +285,11 @@ func (s *Store) UpdateAlertRule(ctx context.Context, rule AlertRule) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE alert_rules
-		SET name = ?, metric = ?, operator = ?, threshold = ?, duration_seconds = ?, severity = ?, node_filter = ?, enabled = ?, updated_at = ?
+		SET name = ?, metric = ?, operator = ?, threshold = ?, duration_seconds = ?, severity = ?, node_filter = ?, enabled = ?,
+		    expression_type = ?, conditions = ?, logic = ?, consecutive_count = ?, updated_at = ?
 		WHERE id = ?
-	`, rule.Name, rule.Metric, rule.Operator, rule.Threshold, rule.DurationSeconds, rule.Severity, rule.NodeFilter, enabledInt, now, rule.ID)
+	`, rule.Name, rule.Metric, rule.Operator, rule.Threshold, rule.DurationSeconds, rule.Severity, rule.NodeFilter, enabledInt,
+		rule.ExpressionType, string(condBytes), rule.Logic, rule.ConsecutiveCount, now, rule.ID)
 	if err != nil {
 		return fmt.Errorf("update alert rule: %w", err)
 	}
@@ -219,10 +355,11 @@ func checkThreshold(val float64, op string, threshold float64) bool {
 	}
 }
 
-// EvaluateResourceMetricsWithRules checks the node's live metrics against configured alert rules.
+// EvaluateResourceMetricsWithRules checks the node's live metrics against configured alert rules,
+// evaluating simple and composite conditions along with consecutive evaluation breach counts.
 func (s *Store) EvaluateResourceMetricsWithRules(ctx context.Context, tx *sql.Tx, nodeID string, metrics map[string]float64, now time.Time) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, name, metric, operator, threshold, severity, node_filter
+		SELECT id, name, metric, operator, threshold, severity, node_filter, expression_type, conditions, logic, consecutive_count
 		FROM alert_rules
 		WHERE enabled = 1
 	`)
@@ -234,11 +371,18 @@ func (s *Store) EvaluateResourceMetricsWithRules(ctx context.Context, tx *sql.Tx
 	type activeRule struct {
 		id, name, metric, op, severity, filter string
 		threshold                             float64
+		expressionType                        string
+		conditionsRaw                         string
+		logic                                 string
+		consecutiveCount                      int
 	}
 	var rules []activeRule
 	for rows.Next() {
 		var r activeRule
-		if err := rows.Scan(&r.id, &r.name, &r.metric, &r.op, &r.threshold, &r.severity, &r.filter); err != nil {
+		if err := rows.Scan(
+			&r.id, &r.name, &r.metric, &r.op, &r.threshold, &r.severity, &r.filter,
+			&r.expressionType, &r.conditionsRaw, &r.logic, &r.consecutiveCount,
+		); err != nil {
 			continue
 		}
 		rules = append(rules, r)
@@ -250,17 +394,86 @@ func (s *Store) EvaluateResourceMetricsWithRules(ctx context.Context, tx *sql.Tx
 		if !isRuleApplicableToNode(rule.filter, nodeID) {
 			continue
 		}
-		val, exists := metrics[rule.metric]
-		if !exists {
-			continue
+
+		var breached bool
+
+		if strings.EqualFold(rule.expressionType, "composite") {
+			var conditions []AlertCondition
+			if rule.conditionsRaw != "" && rule.conditionsRaw != "[]" {
+				_ = json.Unmarshal([]byte(rule.conditionsRaw), &conditions)
+			}
+			if len(conditions) == 0 {
+				continue
+			}
+
+			allMet := true
+			anyMet := false
+			atLeastOnePresent := false
+
+			for _, cond := range conditions {
+				matchedMetrics[cond.Metric] = true
+				val, exists := metrics[cond.Metric]
+				if !exists {
+					allMet = false
+					continue
+				}
+				atLeastOnePresent = true
+				met := checkThreshold(val, cond.Operator, cond.Threshold)
+				if met {
+					anyMet = true
+				} else {
+					allMet = false
+				}
+			}
+
+			if !atLeastOnePresent {
+				continue
+			}
+
+			if strings.EqualFold(rule.logic, "OR") {
+				breached = anyMet
+			} else {
+				breached = allMet
+			}
+		} else {
+			val, exists := metrics[rule.metric]
+			if !exists {
+				continue
+			}
+			matchedMetrics[rule.metric] = true
+			breached = checkThreshold(val, rule.op, rule.threshold)
 		}
-		matchedMetrics[rule.metric] = true
-		failing := checkThreshold(val, rule.op, rule.threshold)
+
+		// Consecutive breach check
+		trackerKey := fmt.Sprintf("%s:%s", nodeID, rule.id)
+		consecutiveTracker.Lock()
+		var failing bool
+		if breached {
+			consecutiveTracker.counts[trackerKey]++
+			req := rule.consecutiveCount
+			if req <= 0 {
+				req = 1
+			}
+			failing = consecutiveTracker.counts[trackerKey] >= req
+		} else {
+			consecutiveTracker.counts[trackerKey] = 0
+			failing = false
+		}
+		consecutiveTracker.Unlock()
+
+		targetID := rule.metric
+		if targetID == "" {
+			targetID = "composite"
+		}
+		reason := fmt.Sprintf("%s_%s_%.1f", rule.metric, rule.op, rule.threshold)
+		if strings.EqualFold(rule.expressionType, "composite") {
+			reason = fmt.Sprintf("composite_%s_%s", rule.id, strings.ToLower(rule.logic))
+		}
 
 		eval := AlertEvaluation{
 			Category:             "resource",
-			TargetID:             rule.metric,
-			Reason:               fmt.Sprintf("%s_%s_%.1f", rule.metric, rule.op, rule.threshold),
+			TargetID:             targetID,
+			Reason:               reason,
 			Severity:             rule.severity,
 			Failing:              failing,
 			FingerprintDimension: rule.id,

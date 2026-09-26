@@ -38,6 +38,10 @@ import {
   updateAlertRule,
   deleteAlertRule,
   toggleAlertRule,
+  fetchAlertSilences,
+  createAlertSilence,
+  deleteAlertSilence,
+  fetchFlappingAlerts,
 } from '../lib/api.js'
 
 
@@ -117,7 +121,26 @@ export function AlertCenterView({
   const [ruleFormSeverity, setRuleFormSeverity] = useState('warning')
   const [ruleFormNodeFilter, setRuleFormNodeFilter] = useState('*')
   const [ruleFormEnabled, setRuleFormEnabled] = useState(true)
+  const [ruleFormExpressionType, setRuleFormExpressionType] = useState('simple') // 'simple' | 'composite'
+  const [ruleFormLogic, setRuleFormLogic] = useState('AND') // 'AND' | 'OR'
+  const [ruleFormConsecutiveCount, setRuleFormConsecutiveCount] = useState(1)
+  const [ruleFormConditions, setRuleFormConditions] = useState([
+    { metric: 'cpu', operator: '>', threshold: '85' },
+    { metric: 'memory', operator: '>', threshold: '85' },
+  ])
   const [savingRule, setSavingRule] = useState(false)
+
+  // 告警静默(Snooze)与抖动(Flapping)抑制状态
+  const [silences, setSilences] = useState([])
+  const [loadingSilences, setLoadingSilences] = useState(false)
+  const [flappingAlerts, setFlappingAlerts] = useState([])
+  const [loadingFlapping, setLoadingFlapping] = useState(false)
+  const [showSnoozeModal, setShowSnoozeModal] = useState(false)
+  const [snoozeTarget, setSnoozeTarget] = useState(null)
+  const [snoozeDurationPreset, setSnoozeDurationPreset] = useState(60) // minutes
+  const [snoozeScope, setSnoozeScope] = useState('fingerprint') // 'fingerprint' | 'node' | 'category'
+  const [snoozeReason, setSnoozeReason] = useState('')
+  const [savingSnooze, setSavingSnooze] = useState(false)
 
   const filteredLoadRules = useMemo(() => {
     return loadRules.filter((r) => {
@@ -183,6 +206,8 @@ export function AlertCenterView({
   useEffect(() => {
     loadChannelsAndSettings()
     loadRulesData()
+    loadSilencesData()
+    loadFlappingData()
   }, [])
 
   const handleOpenAddRule = () => {
@@ -195,6 +220,13 @@ export function AlertCenterView({
     setRuleFormSeverity('warning')
     setRuleFormNodeFilter('*')
     setRuleFormEnabled(true)
+    setRuleFormExpressionType('simple')
+    setRuleFormLogic('AND')
+    setRuleFormConsecutiveCount(1)
+    setRuleFormConditions([
+      { metric: 'cpu', operator: '>', threshold: '85' },
+      { metric: 'memory', operator: '>', threshold: '85' },
+    ])
     setShowAddLoadModal(true)
   }
 
@@ -208,13 +240,52 @@ export function AlertCenterView({
     setRuleFormSeverity(rule.severity || 'warning')
     setRuleFormNodeFilter(rule.node_filter || '*')
     setRuleFormEnabled(rule.enabled ?? true)
+    setRuleFormExpressionType(rule.expression_type || 'simple')
+    setRuleFormLogic(rule.logic || 'AND')
+    setRuleFormConsecutiveCount(rule.consecutive_count || 1)
+    if (rule.conditions && rule.conditions.length > 0) {
+      setRuleFormConditions(
+        rule.conditions.map((c) => ({
+          metric: c.metric,
+          operator: c.operator || '>',
+          threshold: String(c.threshold ?? 85),
+        }))
+      )
+    } else {
+      setRuleFormConditions([
+        { metric: rule.metric || 'cpu', operator: rule.operator || '>', threshold: String(rule.threshold ?? 85) },
+      ])
+    }
     setShowAddLoadModal(true)
+  }
+
+  const handleAddCondition = () => {
+    setRuleFormConditions((prev) => [
+      ...prev,
+      { metric: 'memory', operator: '>', threshold: '85' },
+    ])
+  }
+
+  const handleRemoveCondition = (index) => {
+    setRuleFormConditions((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleConditionChange = (index, field, value) => {
+    setRuleFormConditions((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
   }
 
   const handleSaveRule = async (e) => {
     if (e) e.preventDefault()
     if (!ruleFormName.trim()) {
       showToast('请输入规则名称')
+      return
+    }
+    if (ruleFormExpressionType === 'composite' && ruleFormConditions.length === 0) {
+      showToast('复合规则请至少配置一项指标条件')
       return
     }
     setSavingRule(true)
@@ -228,6 +299,17 @@ export function AlertCenterView({
         severity: ruleFormSeverity,
         node_filter: ruleFormNodeFilter.trim() || '*',
         enabled: ruleFormEnabled,
+        expression_type: ruleFormExpressionType,
+        logic: ruleFormLogic,
+        consecutive_count: parseInt(ruleFormConsecutiveCount, 10) || 1,
+        conditions:
+          ruleFormExpressionType === 'composite'
+            ? ruleFormConditions.map((c) => ({
+                metric: c.metric,
+                operator: c.operator || '>',
+                threshold: parseFloat(c.threshold) || 0,
+              }))
+            : [],
       }
       if (editingRule && editingRule.id) {
         await updateAlertRule(editingRule.id, payload)
@@ -242,6 +324,52 @@ export function AlertCenterView({
       showToast(err.message || '保存规则失败')
     } finally {
       setSavingRule(false)
+    }
+  }
+
+  const handleOpenSnooze = (alert) => {
+    setSnoozeTarget(alert)
+    setSnoozeDurationPreset(60)
+    setSnoozeScope('fingerprint')
+    const initialReason = alert ? `排查故障: ${alert.message || alert.title || alert.type || '未命名告警'}` : '例行维护静默'
+    setSnoozeReason(initialReason)
+    setShowSnoozeModal(true)
+  }
+
+  const handleCreateSnooze = async (e) => {
+    if (e) e.preventDefault()
+    setSavingSnooze(true)
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const durationSec = (parseInt(snoozeDurationPreset, 10) || 60) * 60
+      const endsAt = now + durationSec
+      const payload = {
+        name: snoozeReason.trim() || '快速静默',
+        reason: snoozeReason.trim() || '例行排查维护',
+        starts_at: now,
+        ends_at: endsAt,
+        node_filter: snoozeScope === 'node' && snoozeTarget ? (snoozeTarget.node_id || '*') : '*',
+        category: snoozeScope === 'category' && snoozeTarget ? (snoozeTarget.category || '*') : '*',
+        fingerprint: snoozeScope === 'fingerprint' && snoozeTarget ? (snoozeTarget.fingerprint || '') : '',
+      }
+      await createAlertSilence(payload)
+      showToast('已开启告警静默')
+      setShowSnoozeModal(false)
+      await loadSilencesData()
+    } catch (err) {
+      showToast(err.message || '开启静默失败')
+    } finally {
+      setSavingSnooze(false)
+    }
+  }
+
+  const handleDeleteSilence = async (id, name) => {
+    try {
+      await deleteAlertSilence(id)
+      setSilences((prev) => prev.filter((s) => s.id !== id))
+      showToast(`已解除静默: ${name || id}`)
+    } catch (err) {
+      showToast(err.message || '解除静默失败')
     }
   }
 
@@ -1204,6 +1332,14 @@ export function AlertCenterView({
                 <Bell size={14} className="inline mr-1" />
                 当前告警 {alerts.filter((a) => a.status === 'open').length > 0 && `(${alerts.filter((a) => a.status === 'open').length})`}
               </button>
+              <button
+                type="button"
+                className={`monitor-toggle-btn ${loadSubTab === 'silences' ? 'active' : ''}`}
+                onClick={() => setLoadSubTab('silences')}
+              >
+                <Clock size={14} className="inline mr-1" />
+                静默与防抖 {flappingAlerts.length > 0 && `(⚠️ ${flappingAlerts.length})`}
+              </button>
             </div>
 
             <div className="lite-toolbar-right">
@@ -1228,6 +1364,16 @@ export function AlertCenterView({
                   <span>添加规则</span>
                 </button>
               )}
+              {loadSubTab === 'silences' && (
+                <button
+                  type="button"
+                  className="lite-btn-primary"
+                  onClick={() => handleOpenSnooze(null)}
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>新建维护静默</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1241,8 +1387,8 @@ export function AlertCenterView({
                       <th style={{ width: '64px' }}>启用</th>
                       <th style={{ minWidth: '150px' }}>规则名称</th>
                       <th style={{ minWidth: '200px' }}>适用服务器</th>
-                      <th style={{ width: '130px' }}>监控指标</th>
-                      <th style={{ width: '110px' }}>判定条件</th>
+                      <th style={{ width: '150px' }}>监控指标</th>
+                      <th style={{ minWidth: '160px' }}>判定条件与防抖</th>
                       <th style={{ width: '80px' }}>级别</th>
                       <th style={{ width: '90px', textAlign: 'right' }}>操作</th>
                     </tr>
@@ -1264,6 +1410,7 @@ export function AlertCenterView({
                     ) : (
                       filteredLoadRules.map((rule) => {
                         const isPercent = ['cpu', 'memory', 'disk', 'traffic_percent', 'network_loss'].includes(rule.metric)
+                        const isComposite = rule.expression_type === 'composite'
                         return (
                           <tr key={rule.id}>
                             <td>
@@ -1288,12 +1435,42 @@ export function AlertCenterView({
                               )}
                             </td>
                             <td>
-                              <span className="badge badge-subtle font-bold mono">
-                                {METRIC_LABELS[rule.metric] || rule.metric}
-                              </span>
+                              {isComposite ? (
+                                <span className="badge badge-subtle font-bold" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                                  复合规则 ({rule.logic || 'AND'})
+                                </span>
+                              ) : (
+                                <span className="badge badge-subtle font-bold mono">
+                                  {METRIC_LABELS[rule.metric] || rule.metric}
+                                </span>
+                              )}
                             </td>
-                            <td className="mono text-rose font-bold">
-                              {rule.operator} {rule.threshold}{isPercent ? '%' : ''}
+                            <td>
+                              {isComposite ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="mono text-rose font-bold text-xs leading-snug">
+                                    {rule.conditions && rule.conditions.length > 0
+                                      ? rule.conditions.map((c) => `${c.metric} ${c.operator} ${c.threshold}`).join(` ${rule.logic || 'AND'} `)
+                                      : '未设置条件'}
+                                  </div>
+                                  {rule.consecutive_count > 1 && (
+                                    <span className="badge badge-subtle text-[10px] w-fit">
+                                      连续 ≥ {rule.consecutive_count} 次触发
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="mono text-rose font-bold">
+                                    {rule.operator} {rule.threshold}{isPercent ? '%' : ''}
+                                  </span>
+                                  {rule.consecutive_count > 1 && (
+                                    <span className="badge badge-subtle text-[10px]">
+                                      连续 ≥ {rule.consecutive_count} 次
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td>
                               <span className={`badge ${rule.severity === 'critical' ? 'badge-danger' : rule.severity === 'warning' ? 'badge-warning' : 'badge-subtle'}`}>
@@ -1348,8 +1525,8 @@ export function AlertCenterView({
                 </div>
               </div>
             </div>
-          ) : (
-            /* 当前告警列表（含确认告警、状态契约测试支持） */
+          ) : loadSubTab === 'current' ? (
+            /* 当前告警列表（含确认告警、快捷静默支持） */
             <div className="panel p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1395,18 +1572,29 @@ export function AlertCenterView({
                             </span>
                           </td>
                           <td className="text-right">
-                            {alert.status === 'open' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              {alert.status === 'open' ? (
+                                <button
+                                  type="button"
+                                  className="button button-quiet btn-xs"
+                                  disabled={ackingId === alert.id}
+                                  onClick={() => onAck && onAck(alert.id)}
+                                >
+                                  {ackingId === alert.id ? '确认中…' : '确认告警'}
+                                </button>
+                              ) : (
+                                <span className="text-muted text-xs">已确认</span>
+                              )}
                               <button
                                 type="button"
                                 className="button button-quiet btn-xs"
-                                disabled={ackingId === alert.id}
-                                onClick={() => onAck && onAck(alert.id)}
+                                title="一键设置快捷静默，暂停重复推送"
+                                onClick={() => handleOpenSnooze(alert)}
                               >
-                                {ackingId === alert.id ? '确认中…' : '确认告警'}
+                                <Clock size={13} className="inline mr-1" />
+                                <span>静默</span>
                               </button>
-                            ) : (
-                              <span className="text-muted text-xs">已确认</span>
-                            )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1414,6 +1602,143 @@ export function AlertCenterView({
                   </table>
                 </div>
               )}
+            </div>
+          ) : (
+            /* 静默与防抖子 Tab */
+            <div className="space-y-4">
+              {/* 防抖监测状态栏 */}
+              <div className="panel p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Warning size={18} className={flappingAlerts.length > 0 ? 'text-amber' : 'text-mint'} />
+                    <div>
+                      <h3 className="font-bold text-sm">告警抖动抑制系统 (Flapping Mitigation Engine)</h3>
+                      <p className="text-xs text-muted">
+                        滑窗 5 分钟内状态翻转达到 4 次自动阻断重复推送，冷却 3 分钟持续稳定后自动恢复正常通知。
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`badge ${flappingAlerts.length > 0 ? 'badge-rose' : 'badge-mint'}`}>
+                    {flappingAlerts.length > 0 ? `${flappingAlerts.length} 项频繁震荡抖动中` : '状态平稳运行中'}
+                  </span>
+                </div>
+
+                {flappingAlerts.length > 0 && (
+                  <div className="table-scroll mt-3">
+                    <table className="table w-full text-xs">
+                      <thead>
+                        <tr>
+                          <th>节点 ID</th>
+                          <th>告警指纹</th>
+                          <th>5m 内翻转次数</th>
+                          <th>最近翻转时间</th>
+                          <th>防抖抑制状态</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {flappingAlerts.map((f) => (
+                          <tr key={f.key}>
+                            <td className="font-semibold mono">{f.node_id}</td>
+                            <td className="mono text-muted">{f.fingerprint}</td>
+                            <td>
+                              <span className="badge badge-rose font-bold">{f.transitions} 次切换</span>
+                            </td>
+                            <td className="mono text-muted">{formatAlertTime(f.last_transition)}</td>
+                            <td>
+                              <span className="badge badge-subtle text-amber">已静默防刷 (稳定3m恢复)</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 静默与维护窗口列表 */}
+              <div className="panel p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-base flex items-center gap-2">
+                      <Clock size={18} className="text-blue" />
+                      <span>活跃静默与维护窗口 (Alert Silences)</span>
+                    </h3>
+                    <p className="text-xs text-muted mt-0.5">所有已生效与即将生效的告警静默与维护规则列表</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="lite-btn-primary"
+                    onClick={() => handleOpenSnooze(null)}
+                  >
+                    <Plus size={14} weight="bold" />
+                    <span>新建维护静默</span>
+                  </button>
+                </div>
+
+                {loadingSilences ? (
+                  <div className="text-center py-8 text-muted">
+                    <CircleNotch size={20} className="animate-spin inline mr-2" />
+                    正在加载静默规则...
+                  </div>
+                ) : silences.length === 0 ? (
+                  <div className="text-center py-8 text-muted text-sm">
+                    当前无生效中的告警静默规则。在排查问题或进行例行维护时，可快速开启静默以避免报警骚扰。
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="table w-full text-xs">
+                      <thead>
+                        <tr>
+                          <th>静默主题 / 原因</th>
+                          <th>适用节点</th>
+                          <th>类别 / 指纹</th>
+                          <th>生效时段</th>
+                          <th>创建人</th>
+                          <th className="text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {silences.map((s) => (
+                          <tr key={s.id}>
+                            <td>
+                              <strong style={{ color: 'var(--text-1)' }}>{s.name}</strong>
+                              {s.reason && s.reason !== s.name && (
+                                <div className="text-xs text-muted">{s.reason}</div>
+                              )}
+                            </td>
+                            <td className="mono text-muted">
+                              {s.node_filter === '*' ? <span className="badge badge-subtle">所有节点</span> : s.node_filter}
+                            </td>
+                            <td className="mono text-xs">
+                              {s.fingerprint ? (
+                                <span className="badge badge-subtle">{s.fingerprint.slice(0, 16)}...</span>
+                              ) : s.category !== '*' ? (
+                                <span className="badge badge-subtle">{s.category}</span>
+                              ) : (
+                                <span className="badge badge-subtle">全类别</span>
+                              )}
+                            </td>
+                            <td className="mono text-muted text-xs">
+                              <div>{formatAlertTime(s.starts_at)} 至</div>
+                              <div>{formatAlertTime(s.ends_at)}</div>
+                            </td>
+                            <td className="text-muted">{s.created_by || 'admin'}</td>
+                            <td className="text-right">
+                              <button
+                                type="button"
+                                className="button button-quiet btn-xs text-rose"
+                                onClick={() => handleDeleteSilence(s.id, s.name)}
+                              >
+                                解除静默
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </>
@@ -1928,53 +2253,185 @@ export function AlertCenterView({
                   />
                 </div>
 
-                <div className="form-grid-2">
-                  <div className="field">
-                    <label className="field-label">监控指标</label>
-                    <select
-                      className="field-select"
-                      value={ruleFormMetric}
-                      onChange={(e) => setRuleFormMetric(e.target.value)}
+                {/* 规则类型切换: 单一指标 vs 复合多维度 */}
+                <div className="field">
+                  <label className="field-label">规则模式</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className={`button text-xs py-2 ${ruleFormExpressionType === 'simple' ? 'button-primary font-bold' : 'button-quiet'}`}
+                      onClick={() => setRuleFormExpressionType('simple')}
                     >
-                      <option value="cpu">CPU 使用率 (%)</option>
-                      <option value="memory">物理内存使用率 (%)</option>
-                      <option value="disk">磁盘根分区使用率 (%)</option>
-                      <option value="load1">系统负载 Load 1m</option>
-                      <option value="load5">系统负载 Load 5m</option>
-                      <option value="load15">系统负载 Load 15m</option>
-                      <option value="traffic_percent">周期流量使用率 (%)</option>
-                      <option value="network_loss">丢包率 (%)</option>
-                      <option value="network_latency">网络延迟 (ms)</option>
-                    </select>
+                      单一指标阈值
+                    </button>
+                    <button
+                      type="button"
+                      className={`button text-xs py-2 ${ruleFormExpressionType === 'composite' ? 'button-primary font-bold' : 'button-quiet'}`}
+                      onClick={() => setRuleFormExpressionType('composite')}
+                    >
+                      复合多维度规则 (AND / OR)
+                    </button>
                   </div>
+                </div>
 
+                {ruleFormExpressionType === 'simple' ? (
+                  /* 单一指标配置 */
                   <div className="form-grid-2">
                     <div className="field">
-                      <label className="field-label">判定符</label>
+                      <label className="field-label">监控指标</label>
                       <select
                         className="field-select"
-                        value={ruleFormOperator}
-                        onChange={(e) => setRuleFormOperator(e.target.value)}
+                        value={ruleFormMetric}
+                        onChange={(e) => setRuleFormMetric(e.target.value)}
                       >
-                        <option value=">">&gt; 大于</option>
-                        <option value=">=">&gt;= 大于等于</option>
-                        <option value="<">&lt; 小于</option>
-                        <option value="<=">&lt;= 小于等于</option>
-                        <option value="==">== 等于</option>
+                        <option value="cpu">CPU 使用率 (%)</option>
+                        <option value="memory">物理内存使用率 (%)</option>
+                        <option value="disk">磁盘根分区使用率 (%)</option>
+                        <option value="load1">系统负载 Load 1m</option>
+                        <option value="load5">系统负载 Load 5m</option>
+                        <option value="load15">系统负载 Load 15m</option>
+                        <option value="traffic_percent">周期流量使用率 (%)</option>
+                        <option value="network_loss">丢包率 (%)</option>
+                        <option value="network_latency">网络延迟 (ms)</option>
                       </select>
                     </div>
-                    <div className="field">
-                      <label className="field-label required">触发阈值</label>
-                      <input
-                        className="field-input mono"
-                        type="number"
-                        step="any"
-                        placeholder="85"
-                        value={ruleFormThreshold}
-                        onChange={(e) => setRuleFormThreshold(e.target.value)}
-                        required
-                      />
+
+                    <div className="form-grid-2">
+                      <div className="field">
+                        <label className="field-label">判定符</label>
+                        <select
+                          className="field-select"
+                          value={ruleFormOperator}
+                          onChange={(e) => setRuleFormOperator(e.target.value)}
+                        >
+                          <option value=">">&gt; 大于</option>
+                          <option value=">=">&gt;= 大于等于</option>
+                          <option value="<">&lt; 小于</option>
+                          <option value="<=">&lt;= 小于等于</option>
+                          <option value="==">== 等于</option>
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label className="field-label required">触发阈值</label>
+                        <input
+                          className="field-input mono"
+                          type="number"
+                          step="any"
+                          placeholder="85"
+                          value={ruleFormThreshold}
+                          onChange={(e) => setRuleFormThreshold(e.target.value)}
+                          required
+                        />
+                      </div>
                     </div>
+                  </div>
+                ) : (
+                  /* 复合多维度条件构建器 */
+                  <div className="p-3.5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold flex items-center gap-1.5">
+                        <Sliders size={14} className="text-blue" />
+                        <span>多指标判定逻辑</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          className={`btn-xs button ${ruleFormLogic === 'AND' ? 'button-primary font-bold' : 'button-quiet'}`}
+                          onClick={() => setRuleFormLogic('AND')}
+                        >
+                          全部满足 (AND 交集)
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn-xs button ${ruleFormLogic === 'OR' ? 'button-primary font-bold' : 'button-quiet'}`}
+                          onClick={() => setRuleFormLogic('OR')}
+                        >
+                          任一满足 (OR 并集)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {ruleFormConditions.map((cond, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-2 rounded bg-[var(--surface)] border border-[var(--border)]">
+                          <span className="mono text-xs text-muted w-5 text-center">#{idx + 1}</span>
+                          <select
+                            className="field-select text-xs py-1"
+                            value={cond.metric}
+                            onChange={(e) => handleConditionChange(idx, 'metric', e.target.value)}
+                          >
+                            <option value="cpu">CPU 使用率 (%)</option>
+                            <option value="memory">物理内存使用率 (%)</option>
+                            <option value="disk">磁盘根分区使用率 (%)</option>
+                            <option value="load1">系统负载 Load 1m</option>
+                            <option value="load5">系统负载 Load 5m</option>
+                            <option value="load15">系统负载 Load 15m</option>
+                            <option value="traffic_percent">周期流量使用率 (%)</option>
+                            <option value="network_loss">丢包率 (%)</option>
+                            <option value="network_latency">网络延迟 (ms)</option>
+                          </select>
+                          <select
+                            className="field-select text-xs py-1 w-28"
+                            value={cond.operator}
+                            onChange={(e) => handleConditionChange(idx, 'operator', e.target.value)}
+                          >
+                            <option value=">">&gt; 大于</option>
+                            <option value=">=">&gt;= 大于等于</option>
+                            <option value="<">&lt; 小于</option>
+                            <option value="<=">&lt;= 小于等于</option>
+                            <option value="==">== 等于</option>
+                          </select>
+                          <input
+                            className="field-input mono text-xs py-1 w-24"
+                            type="number"
+                            step="any"
+                            placeholder="阈值"
+                            value={cond.threshold}
+                            onChange={(e) => handleConditionChange(idx, 'threshold', e.target.value)}
+                            required
+                          />
+                          {ruleFormConditions.length > 1 && (
+                            <button
+                              type="button"
+                              className="icon-action-btn text-rose"
+                              title="移除此条件"
+                              onClick={() => handleRemoveCondition(idx)}
+                            >
+                              <Trash size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="button button-quiet btn-xs w-full justify-center"
+                      onClick={handleAddCondition}
+                    >
+                      <Plus size={13} className="inline mr-1" />
+                      <span>添加组合指标条件</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* 连续触发判定次数 (防毛刺) */}
+                <div className="field">
+                  <label className="field-label">连续采样判定次数 (防抖与防毛刺)</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      className="field-select mono w-48 text-xs"
+                      value={ruleFormConsecutiveCount}
+                      onChange={(e) => setRuleFormConsecutiveCount(parseInt(e.target.value, 10) || 1)}
+                    >
+                      <option value="1">1 次 (达到即触发)</option>
+                      <option value="2">连续 2 次采样超标</option>
+                      <option value="3">连续 3 次采样超标</option>
+                      <option value="5">连续 5 次采样超标</option>
+                    </select>
+                    <span className="text-xs text-muted">
+                      需要连续多次采样超标才触发告警，有效过滤偶发突增或瞬时毛刺。
+                    </span>
                   </div>
                 </div>
 
@@ -2038,6 +2495,130 @@ export function AlertCenterView({
                     </>
                   ) : (
                     '保存规则'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 快捷静默 / 维护窗口弹窗 */}
+      {showSnoozeModal && (
+        <div className="modal-backdrop" onClick={() => setShowSnoozeModal(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <div className="modal-icon-badge text-amber">
+                  <Clock size={20} />
+                </div>
+                <div>
+                  <h2 className="modal-title">设置告警静默 / 维护窗口</h2>
+                  <p className="modal-subtitle">在指定维护或故障排查时段内抑制通知推送，避免频繁告警打扰</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="icon-button modal-close"
+                onClick={() => setShowSnoozeModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSnooze}>
+              <div className="modal-body space-y-4">
+                <div className="field">
+                  <label className="field-label required">静默原因 / 维护主题</label>
+                  <input
+                    className="field-input"
+                    placeholder="如: 服务器系统升级维护 / 正在排查内存泄漏"
+                    value={snoozeReason}
+                    onChange={(e) => setSnoozeReason(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field-label">快捷静默时长</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { label: '15 分钟', value: 15 },
+                      { label: '1 小时', value: 60 },
+                      { label: '4 小时', value: 240 },
+                      { label: '24 小时', value: 1440 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`button text-xs py-2 ${snoozeDurationPreset === opt.value ? 'button-primary font-bold' : 'button-quiet'}`}
+                        onClick={() => setSnoozeDurationPreset(opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {snoozeTarget && (
+                  <div className="field">
+                    <label className="field-label">静默生效范围</label>
+                    <div className="space-y-1.5 text-xs">
+                      <label className="flex items-center gap-2 cursor-pointer p-2.5 rounded border border-[var(--border)] bg-[var(--surface-subtle)]">
+                        <input
+                          type="radio"
+                          name="snooze_scope"
+                          value="fingerprint"
+                          checked={snoozeScope === 'fingerprint'}
+                          onChange={() => setSnoozeScope('fingerprint')}
+                        />
+                        <span>仅静默当前特定告警 (<span className="mono font-semibold">{snoozeTarget.type || snoozeTarget.category}</span>)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-2.5 rounded border border-[var(--border)] bg-[var(--surface-subtle)]">
+                        <input
+                          type="radio"
+                          name="snooze_scope"
+                          value="node"
+                          checked={snoozeScope === 'node'}
+                          onChange={() => setSnoozeScope('node')}
+                        />
+                        <span>静默当前服务器的所有告警 (节点: <span className="mono font-semibold">{snoozeTarget.node_name || snoozeTarget.node_id}</span>)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer p-2.5 rounded border border-[var(--border)] bg-[var(--surface-subtle)]">
+                        <input
+                          type="radio"
+                          name="snooze_scope"
+                          value="category"
+                          checked={snoozeScope === 'category'}
+                          onChange={() => setSnoozeScope('category')}
+                        />
+                        <span>静默该类别所有告警 (类别: <span className="mono font-semibold">{snoozeTarget.category || '全部'}</span>)</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="button button-quiet"
+                  onClick={() => setShowSnoozeModal(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={savingSnooze}
+                >
+                  {savingSnooze ? (
+                    <>
+                      <CircleNotch size={14} className="animate-spin inline mr-1" />
+                      正在设置...
+                    </>
+                  ) : (
+                    '确认静默'
                   )}
                 </button>
               </div>

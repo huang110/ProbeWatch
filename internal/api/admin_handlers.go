@@ -94,6 +94,44 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Alert Silences endpoints
+	if cleanPath == "/api/alerts/silences" {
+		switch r.Method {
+		case http.MethodGet:
+			s.listAlertSilences(w, r)
+		case http.MethodPost:
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createAlertSilence)).ServeHTTP(w, r)
+		default:
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	if strings.HasPrefix(cleanPath, "/api/alerts/silences/") {
+		parts := strings.Split(cleanPath, "/")
+		if len(parts) == 5 {
+			silenceID := parts[4]
+			if r.Method == http.MethodDelete {
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.deleteAlertSilence(w, r, silenceID)
+				})).ServeHTTP(w, r)
+				return
+			}
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+	}
+
+	// Flapping targets endpoint
+	if cleanPath == "/api/alerts/flapping" {
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.listFlappingAlerts(w, r)
+		return
+	}
+
 	// Channel endpoints
 	if cleanPath == "/api/alerts/channels" {
 		switch r.Method {

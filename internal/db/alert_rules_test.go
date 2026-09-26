@@ -209,3 +209,112 @@ func TestEvaluateResourceMetricsWithCustomRules(t *testing.T) {
 		t.Fatalf("expected 1 resolved alert, got %d", len(resolvedAlerts))
 	}
 }
+
+func TestCompositeAlertRulesAndConsecutiveBreaches(t *testing.T) {
+	ctx := context.Background()
+	store := newTestAlertsStore(t)
+	defer store.Close()
+	ResetConsecutiveTracker()
+
+	nodeID := "test-node-comp-1"
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES (?, '550e8400-e29b-41d4-a716-446655440088', 'Composite Eval Node', 'online', 1, 1)`, nodeID); err != nil {
+		t.Fatalf("insert test node: %v", err)
+	}
+
+	// Clear default rules
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM alert_rules"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create a composite rule: CPU > 80 AND memory > 80, consecutive_count = 2
+	compRule := AlertRule{
+		ID:             "rule-comp-cpu-mem",
+		Name:           "High CPU and Memory (Consecutive 2)",
+		ExpressionType: "composite",
+		Logic:          "AND",
+		Conditions: []AlertCondition{
+			{Metric: "cpu", Operator: ">", Threshold: 80.0},
+			{Metric: "memory", Operator: ">", Threshold: 80.0},
+		},
+		ConsecutiveCount: 2,
+		Severity:         "critical",
+		NodeFilter:       "*",
+		Enabled:          true,
+	}
+	if err := store.CreateAlertRule(ctx, compRule); err != nil {
+		t.Fatalf("CreateAlertRule: %v", err)
+	}
+
+	now := time.Now().UTC()
+
+	// Evaluation 1: CPU = 85 (breached), Memory = 50 (not breached) -> AND condition fails, 0 open alerts
+	tx1, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics1 := map[string]float64{"cpu": 85.0, "memory": 50.0}
+	if err := store.EvaluateResourceMetricsWithRules(ctx, tx1, nodeID, metrics1, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx1.Commit()
+
+	openAlerts, _ := store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected 0 open alerts when memory < 80, got %d", len(openAlerts))
+	}
+
+	// Evaluation 2: CPU = 85, Memory = 85 -> Breach #1, but consecutive_count = 2, so should NOT fire yet!
+	now = now.Add(time.Minute)
+	tx2, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics2 := map[string]float64{"cpu": 85.0, "memory": 85.0}
+	if err := store.EvaluateResourceMetricsWithRules(ctx, tx2, nodeID, metrics2, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx2.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected 0 open alerts on 1st consecutive breach (requires 2), got %d", len(openAlerts))
+	}
+
+	// Evaluation 3: CPU = 85, Memory = 85 -> Breach #2 -> Reached consecutive_count = 2 -> FIRES!
+	now = now.Add(time.Minute)
+	tx3, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics3 := map[string]float64{"cpu": 85.0, "memory": 85.0}
+	if err := store.EvaluateResourceMetricsWithRules(ctx, tx3, nodeID, metrics3, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx3.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 1 {
+		t.Fatalf("expected 1 open alert on 2nd consecutive breach, got %d", len(openAlerts))
+	}
+	if openAlerts[0].Severity != "critical" {
+		t.Fatalf("expected critical severity, got %s", openAlerts[0].Severity)
+	}
+
+	// Evaluation 4: CPU drops to 40 -> Recovered -> Alert resolves!
+	now = now.Add(time.Minute)
+	tx4, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics4 := map[string]float64{"cpu": 40.0, "memory": 85.0}
+	if err := store.EvaluateResourceMetricsWithRules(ctx, tx4, nodeID, metrics4, now); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx4.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected alert to resolve after recovery, got %d", len(openAlerts))
+	}
+}
+
