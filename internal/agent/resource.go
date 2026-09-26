@@ -16,10 +16,10 @@ import (
 )
 
 func collectResource() protocol.ResourceSnapshot {
-	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector())
+	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector(), defaultHostHealthCollector())
 }
 
-func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector) protocol.ResourceSnapshot {
+func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector, health HostHealthCollector) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
@@ -60,6 +60,9 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 		}
 	}
 	if runtime.GOOS != "linux" {
+		if health != nil {
+			resource.HealthInfo = health.Collect(&resource)
+		}
 		return resource
 	}
 	if cpu != nil {
@@ -93,6 +96,9 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 	}
 	if procs, err := readProcessCount(); err == nil {
 		resource.ProcessCount = procs
+	}
+	if health != nil {
+		resource.HealthInfo = health.Collect(&resource)
 	}
 	return resource
 }

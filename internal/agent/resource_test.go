@@ -70,8 +70,8 @@ func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
 }
 
 func TestCollectResourceKeepsStartedAt(t *testing.T) {
-	first := collectResourceWith(1234, nil, nil, nil, nil)
-	second := collectResourceWith(1234, nil, nil, nil, nil)
+	first := collectResourceWith(1234, nil, nil, nil, nil, nil)
+	second := collectResourceWith(1234, nil, nil, nil, nil, nil)
 	if first.StartedAt != 1234 || second.StartedAt != 1234 {
 		t.Fatalf("started_at = %d, %d", first.StartedAt, second.StartedAt)
 	}
@@ -86,6 +86,14 @@ func (m *mockSocketCollector) Collect() (*protocol.SocketStats, []protocol.Liste
 	return m.stats, m.ports, nil
 }
 
+type mockHealthCollector struct {
+	info *protocol.HostHealthInfo
+}
+
+func (m *mockHealthCollector) Collect(snap *protocol.ResourceSnapshot) *protocol.HostHealthInfo {
+	return m.info
+}
+
 func TestCollectResourceWithSockets(t *testing.T) {
 	mock := &mockSocketCollector{
 		stats: &protocol.SocketStats{
@@ -96,12 +104,25 @@ func TestCollectResourceWithSockets(t *testing.T) {
 			{Proto: "tcp", Port: 80, BindIP: "0.0.0.0", Process: "nginx", PID: 123, IsPublic: true},
 		},
 	}
-	snap := collectResourceWith(1234, nil, nil, nil, mock)
+	snap := collectResourceWith(1234, nil, nil, nil, mock, nil)
 	if snap.SocketStats == nil || snap.SocketStats.TCPEstablished != 10 {
 		t.Fatalf("expected TCPEstablished = 10, got %v", snap.SocketStats)
 	}
 	if len(snap.ListeningPorts) != 1 || snap.ListeningPorts[0].Port != 80 {
 		t.Fatalf("expected 1 port with port 80, got %v", snap.ListeningPorts)
+	}
+}
+
+func TestCollectResourceWithHealth(t *testing.T) {
+	mock := &mockHealthCollector{
+		info: &protocol.HostHealthInfo{
+			HealthScore:  95,
+			HealthStatus: "optimal",
+		},
+	}
+	snap := collectResourceWith(1234, nil, nil, nil, nil, mock)
+	if snap.HealthInfo == nil || snap.HealthInfo.HealthScore != 95 {
+		t.Fatalf("expected HealthScore = 95, got %v", snap.HealthInfo)
 	}
 }
 

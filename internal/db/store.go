@@ -1928,6 +1928,7 @@ func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID 
 		Disks                []protocol.DiskStat   `json:"disks"`
 		Mounts               []protocol.MountStat  `json:"mounts"`
 		SocketStats          *protocol.SocketStats `json:"socket_stats"`
+		HealthInfo           *protocol.HostHealthInfo `json:"health_info"`
 	}
 	if err := json.Unmarshal(payload, &r); err != nil {
 		return err
@@ -1977,6 +1978,16 @@ func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID 
 		metrics["tcp_listen"] = float64(r.SocketStats.TCPListen)
 		metrics["tcp_total"] = float64(r.SocketStats.TCPTotal)
 		metrics["udp_total"] = float64(r.SocketStats.UDPTotal)
+	}
+	if r.HealthInfo != nil {
+		metrics["health_score"] = float64(r.HealthInfo.HealthScore)
+		if r.HealthInfo.RebootRequired {
+			metrics["reboot_required"] = 1
+		} else {
+			metrics["reboot_required"] = 0
+		}
+		metrics["security_updates"] = float64(r.HealthInfo.SecurityUpdates)
+		metrics["failed_services"] = float64(len(r.HealthInfo.FailedServices))
 	}
 
 	// Compute traffic_percent if billing settings are configured

@@ -238,7 +238,7 @@ export function NodeTable({
                   </div>
                 </div>
 
-                {/* 2. 状态标签行 (在线天数 & 价格周期) */}
+                {/* 2. 状态标签行 (在线天数 & 价格周期 & 健康评分) */}
                 <div className="vps-sub-pills">
                   <span className="vps-sub-pill">在线 {uptimeText}</span>
                   <span
@@ -251,6 +251,41 @@ export function NodeTable({
                   >
                     {priceText}
                   </span>
+                  {node.healthInfo && node.healthInfo.health_score !== undefined && (
+                    <span
+                      className="vps-sub-pill health-pill"
+                      style={{
+                        color: node.healthInfo.health_score >= 90 ? '#10b981' :
+                               node.healthInfo.health_score >= 75 ? '#06b6d4' :
+                               node.healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444',
+                        borderColor: node.healthInfo.health_score >= 90 ? 'rgba(16,185,129,0.3)' :
+                                     node.healthInfo.health_score >= 75 ? 'rgba(6,182,212,0.3)' :
+                                     node.healthInfo.health_score >= 60 ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)',
+                        fontWeight: 600,
+                      }}
+                      title={`健康评分: ${node.healthInfo.health_score}/100 (${node.healthInfo.health_status || '未知'})${node.healthInfo.health_deductions?.length ? '\n扣分项: ' + node.healthInfo.health_deductions.join('; ') : ''}`}
+                    >
+                      健康 {node.healthInfo.health_score}分
+                    </span>
+                  )}
+                  {node.healthInfo?.reboot_required && (
+                    <span
+                      className="vps-sub-pill reboot-pill"
+                      style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)', fontWeight: 600 }}
+                      title="系统内核或核心组件已更新，需要重启生效"
+                    >
+                      待重启
+                    </span>
+                  )}
+                  {node.healthInfo?.security_updates > 0 && (
+                    <span
+                      className="vps-sub-pill sec-pill"
+                      style={{ color: '#f59e0b', borderColor: 'rgba(245,158,11,0.3)', fontWeight: 600 }}
+                      title={`发现 ${node.healthInfo.security_updates} 个未安装的安全更新`}
+                    >
+                      {node.healthInfo.security_updates} 补丁
+                    </span>
+                  )}
                 </div>
 
                 {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
@@ -490,6 +525,22 @@ export function NodeTable({
                     <span className="node-name-text">
                       <span className="inline-flex items-center gap-1">
                         <strong>{customMeta?.customName || node.name}</strong>
+                        {node.healthInfo && node.healthInfo.health_score !== undefined && (
+                          <span
+                            className="vps-pill-badge"
+                            style={{
+                              fontSize: '10px',
+                              padding: '0 4px',
+                              borderRadius: '4px',
+                              color: node.healthInfo.health_score >= 90 ? '#10b981' : node.healthInfo.health_score >= 75 ? '#06b6d4' : node.healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444',
+                              background: node.healthInfo.health_score >= 90 ? 'rgba(16,185,129,0.1)' : node.healthInfo.health_score >= 75 ? 'rgba(6,182,212,0.1)' : node.healthInfo.health_score >= 60 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                              border: `1px solid ${node.healthInfo.health_score >= 90 ? 'rgba(16,185,129,0.3)' : node.healthInfo.health_score >= 75 ? 'rgba(6,182,212,0.3)' : node.healthInfo.health_score >= 60 ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                            }}
+                            title={`健康评分: ${node.healthInfo.health_score}/100${node.healthInfo.reboot_required ? ' (需重启)' : ''}`}
+                          >
+                            {node.healthInfo.health_score}分{node.healthInfo.reboot_required ? ' 🔄' : ''}
+                          </span>
+                        )}
                         <button
                           type="button"
                           className="vps-edit-btn"

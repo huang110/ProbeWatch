@@ -472,4 +472,71 @@ func TestEvaluateResourceAlertTxSocketStats(t *testing.T) {
 	}
 }
 
+func TestHostHealthAlertEvaluation(t *testing.T) {
+	ctx := context.Background()
+	store := newTestAlertsStore(t)
+	defer store.Close()
+	ResetConsecutiveTracker()
+
+	nodeID := "test-node-health-1"
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO nodes (id, uuid, name, status, created_at, updated_at) VALUES (?, '550e8400-e29b-41d4-a716-446655440099', 'Health Eval Node', 'online', 1, 1)`, nodeID); err != nil {
+		t.Fatalf("insert test node: %v", err)
+	}
+
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM alert_rules"); err != nil {
+		t.Fatal(err)
+	}
+
+	rule := AlertRule{
+		ID:              "rule-health-low",
+		Name:            "Host Health Score Degraded",
+		Metric:          "health_score",
+		Operator:        "<",
+		Threshold:       70,
+		DurationSeconds: 0,
+		Severity:        "warning",
+		NodeFilter:      "*",
+		Enabled:         true,
+	}
+	if err := store.CreateAlertRule(ctx, rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Optimal health (95) - no alert
+	normalPayload := []byte(`{"health_info":{"health_score": 95, "health_status": "optimal"}}`)
+	tx1, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx1, nodeID, normalPayload, now); err != nil {
+		t.Fatalf("eval normal: %v", err)
+	}
+	_ = tx1.Commit()
+
+	openAlerts, _ := store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 0 {
+		t.Fatalf("expected 0 open alerts, got %d", len(openAlerts))
+	}
+
+	// Degraded health (55) - trigger alert
+	breachPayload := []byte(`{"health_info":{"health_score": 55, "health_status": "warning", "reboot_required": true}}`)
+	tx2, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.evaluateResourceAlertTx(ctx, tx2, nodeID, breachPayload, now); err != nil {
+		t.Fatalf("eval breach: %v", err)
+	}
+	_ = tx2.Commit()
+
+	openAlerts, _ = store.ListAlerts(ctx, AlertQuery{Statuses: []string{AlertStatusOpen}})
+	if len(openAlerts) != 1 {
+		t.Fatalf("expected 1 open alert, got %d", len(openAlerts))
+	}
+	if openAlerts[0].TargetID != "health_score" {
+		t.Fatalf("expected alert for health_score, got %s", openAlerts[0].TargetID)
+	}
+}
+
 

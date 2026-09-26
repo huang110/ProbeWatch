@@ -44,6 +44,7 @@ type Runner struct {
 	hardware  HardwareCollector
 	disk      DiskIOTracker
 	sockets   SocketCollector
+	health    HostHealthCollector
 	probe     networkMonitor
 	media     mediaMonitor
 	mtr       mtrMonitor
@@ -96,7 +97,7 @@ func New(cfg config.Config) (*Runner, error) {
 			return fmt.Errorf("agent endpoint redirects are not allowed")
 		}},
 		next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(),
-		cpu: newCPUTracker(), hardware: defaultHardwareCollector(), disk: newPlatformDiskTracker(), sockets: defaultSocketCollector(),
+		cpu: newCPUTracker(), hardware: defaultHardwareCollector(), disk: newPlatformDiskTracker(), sockets: defaultSocketCollector(), health: defaultHostHealthCollector(),
 		probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{},
 		speedtest: &monitor.SpeedtestRunner{}, synthetic: monitor.NewSyntheticMonitor(),
 	}, nil
@@ -288,7 +289,7 @@ func (r *Runner) report(ctx context.Context) error {
 		}
 		results = append(results, result)
 	}
-	request := protocol.ReportRequest{NodeUUID: r.cfg.AgentNodeUUID, ReportedAt: r.now().UTC().Unix(), Resource: collectResourceWith(r.startedAt, r.cpu, r.hardware, r.disk, r.sockets), Results: results}
+	request := protocol.ReportRequest{NodeUUID: r.cfg.AgentNodeUUID, ReportedAt: r.now().UTC().Unix(), Resource: collectResourceWith(r.startedAt, r.cpu, r.hardware, r.disk, r.sockets, r.health), Results: results}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return err

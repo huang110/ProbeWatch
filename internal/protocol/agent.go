@@ -274,6 +274,17 @@ type ListeningPort struct {
 	IsPublic bool   `json:"is_public"` // true if listening on 0.0.0.0 or :: or non-loopback
 }
 
+// HostHealthInfo contains multi-dimensional health scoring, pending updates, and service daemon status.
+type HostHealthInfo struct {
+	HealthScore      int      `json:"health_score"`                // 0 to 100
+	HealthStatus     string   `json:"health_status"`               // "optimal", "good", "warning", "critical"
+	RebootRequired   bool     `json:"reboot_required"`             // true if system restart is pending
+	SecurityUpdates  int      `json:"security_updates"`            // number of security patches available
+	TotalUpdates     int      `json:"total_updates"`               // total packages upgradeable
+	FailedServices   []string `json:"failed_services,omitempty"`   // failed systemd service names
+	HealthDeductions []string `json:"health_deductions,omitempty"` // human-readable deduction reasons
+}
+
 // ResourceSnapshot contains the bounded resource and identity data an agent reports.
 type ResourceSnapshot struct {
 	CPUPercent           float64         `json:"cpu_percent,omitempty"`
@@ -313,6 +324,8 @@ type ResourceSnapshot struct {
 	// Network Socket Diagnostics & Open Ports (v0.8.7)
 	SocketStats    *SocketStats    `json:"socket_stats,omitempty"`
 	ListeningPorts []ListeningPort `json:"listening_ports,omitempty"`
+	// Host Health Scoring & System Maintenance (v0.8.8)
+	HealthInfo *HostHealthInfo `json:"health_info,omitempty"`
 }
 
 // CheckTask is the only task shape an agent accepts from the control plane.
@@ -772,6 +785,17 @@ func (r ResourceSnapshot) Validate() error {
 		}
 		if err := validateString(fmt.Sprintf("listening_ports[%d].process", i), lp.Process, 64, false); err != nil {
 			return err
+		}
+	}
+	if r.HealthInfo != nil {
+		if r.HealthInfo.HealthScore < 0 || r.HealthInfo.HealthScore > 100 {
+			return errors.New("health_info.health_score must be between 0 and 100")
+		}
+		if len(r.HealthInfo.FailedServices) > 64 {
+			return errors.New("failed_services count exceeds 64")
+		}
+		if len(r.HealthInfo.HealthDeductions) > 32 {
+			return errors.New("health_deductions count exceeds 32")
 		}
 	}
 	return nil

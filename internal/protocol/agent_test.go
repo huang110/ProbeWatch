@@ -833,5 +833,37 @@ func TestResourceSnapshotSocketStatsAndListeningPorts(t *testing.T) {
 	}
 }
 
+func TestResourceSnapshotHostHealthInfo(t *testing.T) {
+	valid := ResourceSnapshot{
+		OS:       "linux",
+		Hostname: "test-node",
+		HealthInfo: &HostHealthInfo{
+			HealthScore:      92,
+			HealthStatus:     "optimal",
+			RebootRequired:   true,
+			SecurityUpdates:  3,
+			TotalUpdates:     12,
+			FailedServices:   []string{"nginx.service"},
+			HealthDeductions: []string{"待重启加载新内核 -8分"},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid health info snapshot rejected: %v", err)
+	}
+
+	invalidScoreHigh := valid
+	invalidScoreHigh.HealthInfo = &HostHealthInfo{HealthScore: 101}
+	if err := invalidScoreHigh.Validate(); err == nil {
+		t.Fatal("expected error on health_score > 100")
+	}
+
+	invalidScoreLow := valid
+	invalidScoreLow.HealthInfo = &HostHealthInfo{HealthScore: -1}
+	if err := invalidScoreLow.Validate(); err == nil {
+		t.Fatal("expected error on health_score < 0")
+	}
+}
+
+
 
 

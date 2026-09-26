@@ -218,6 +218,7 @@ export const normalizeNode = (node) => {
     mounts: Array.isArray(resource.mounts) ? resource.mounts : [],
     socketStats: safeObject(resource.socket_stats),
     listeningPorts: Array.isArray(resource.listening_ports) ? resource.listening_ports : [],
+    healthInfo: safeObject(resource.health_info),
     flag: meta.flag,
     region: meta.region,
     tag: meta.tag,

@@ -414,6 +414,7 @@ export function NodeDetailPage({
   const mounts = Array.isArray(resource.mounts) ? resource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
   const socketStats = resource.socket_stats || node?.socketStats || node?.socket_stats || {}
   const listeningPorts = Array.isArray(resource.listening_ports) ? resource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
+  const healthInfo = resource.health_info || node?.healthInfo || node?.health_info || null
 
   const [portFilter, setPortFilter] = useState('all')
   const [portSearch, setPortSearch] = useState('')
@@ -1792,6 +1793,206 @@ export function NodeDetailPage({
             </div>
           )}
         </div>
+      </div>
+
+      {/* 主机多维健康评分引擎、系统安全补丁雷达与守护进程诊断 (Host Health Scoring & Maintenance Radar) */}
+      <div className="komari-info-card" style={{ marginBottom: '16px' }}>
+        <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {healthInfo && healthInfo.health_score !== undefined && healthInfo.health_score < 75 ? (
+              <ShieldWarning size={16} className="text-amber" />
+            ) : (
+              <ShieldCheck size={16} style={{ color: '#10b981' }} />
+            )}
+            <h3 style={{ margin: 0 }}>主机多维健康评分与系统维护诊断</h3>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {healthInfo && healthInfo.health_score !== undefined ? (
+              <>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: 700,
+                    background: healthInfo.health_score >= 90 ? 'rgba(16, 185, 129, 0.12)' : healthInfo.health_score >= 75 ? 'rgba(6, 182, 212, 0.12)' : healthInfo.health_score >= 60 ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                    color: healthInfo.health_score >= 90 ? '#10b981' : healthInfo.health_score >= 75 ? '#06b6d4' : healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444',
+                    border: `1px solid ${healthInfo.health_score >= 90 ? 'rgba(16, 185, 129, 0.25)' : healthInfo.health_score >= 75 ? 'rgba(6, 182, 212, 0.25)' : healthInfo.health_score >= 60 ? 'rgba(245, 158, 11, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                  }}
+                >
+                  评分 {healthInfo.health_score} / 100 · {healthInfo.health_status === 'optimal' ? '极佳' : healthInfo.health_status === 'good' ? '良好' : healthInfo.health_status === 'degraded' ? '亚健康' : '严重风险'}
+                </span>
+                {healthInfo.reboot_required && (
+                  <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 600 }}>
+                    ⚠️ 内核待重启生效
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="mono text-xs text-muted">等待 Agent 资源快照诊断上报</span>
+            )}
+            <span className="mono text-xs text-muted">启发式多维健康引擎</span>
+          </div>
+        </div>
+
+        {healthInfo && healthInfo.health_score !== undefined ? (
+          <div>
+            {/* 顶部指标四宫格 */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+              {/* 1. 综合健康评分 */}
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>综合健康指数</span>
+                  <span className="mono" style={{ fontSize: '11px', fontWeight: 600, color: healthInfo.health_score >= 90 ? '#10b981' : healthInfo.health_score >= 75 ? '#06b6d4' : healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444' }}>
+                    {healthInfo.health_status?.toUpperCase() || 'NORMAL'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '8px' }}>
+                  <span className="mono" style={{ fontSize: '24px', fontWeight: 800, color: healthInfo.health_score >= 90 ? '#10b981' : healthInfo.health_score >= 75 ? '#06b6d4' : healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444' }}>
+                    {healthInfo.health_score}
+                  </span>
+                  <span className="mono text-muted text-xs">/ 100 分</span>
+                </div>
+                <div style={{ height: '5px', width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${Math.min(100, Math.max(0, healthInfo.health_score))}%`,
+                      background: healthInfo.health_score >= 90 ? '#10b981' : healthInfo.health_score >= 75 ? '#06b6d4' : healthInfo.health_score >= 60 ? '#f59e0b' : '#ef4444',
+                      borderRadius: '3px',
+                      transition: 'width 0.4s ease',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* 2. 系统待重启状态 */}
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>系统内核维护</span>
+                  {healthInfo.reboot_required ? (
+                    <WarningCircle size={14} style={{ color: '#ef4444' }} />
+                  ) : (
+                    <CheckCircle size={14} style={{ color: '#10b981' }} />
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
+                  <span className="mono" style={{ fontSize: '18px', fontWeight: 700, color: healthInfo.reboot_required ? '#ef4444' : '#10b981' }}>
+                    {healthInfo.reboot_required ? '需要系统重启' : '内核运行良好'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+                  {healthInfo.reboot_required ? '检测到内核/关键底层库更新待重启' : '无挂起的重启更新待办'}
+                </div>
+              </div>
+
+              {/* 3. 安全更新补丁雷达 */}
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>系统安全更新雷达</span>
+                  <span className="mono" style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '3px', background: healthInfo.security_updates > 0 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.12)', color: healthInfo.security_updates > 0 ? '#f59e0b' : '#10b981' }}>
+                    {healthInfo.security_updates > 0 ? `${healthInfo.security_updates} 待加固` : '补丁最新'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
+                  <span className="mono" style={{ fontSize: '20px', fontWeight: 700, color: healthInfo.security_updates > 0 ? '#f59e0b' : 'var(--text-main, #f8fafc)' }}>
+                    {healthInfo.security_updates || 0}
+                  </span>
+                  <span className="mono text-muted text-xs">个安全补丁 (总共 {healthInfo.total_updates || 0} 个更新)</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+                  {healthInfo.security_updates > 0 ? '建议及时运行 apt upgrade 或 dnf update' : '当前无未修补的已知漏洞组件'}
+                </div>
+              </div>
+
+              {/* 4. 系统守护服务诊断 */}
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>系统守护进程 (Systemd)</span>
+                  <span className="mono" style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '3px', background: (healthInfo.failed_services?.length || 0) > 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.12)', color: (healthInfo.failed_services?.length || 0) > 0 ? '#ef4444' : '#10b981' }}>
+                    {(healthInfo.failed_services?.length || 0) > 0 ? '异常' : '正常'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '4px' }}>
+                  <span className="mono" style={{ fontSize: '20px', fontWeight: 700, color: (healthInfo.failed_services?.length || 0) > 0 ? '#ef4444' : '#10b981' }}>
+                    {healthInfo.failed_services?.length || 0}
+                  </span>
+                  <span className="mono text-muted text-xs">个崩溃/失败服务</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+                  {(healthInfo.failed_services?.length || 0) > 0 ? 'systemctl --failed 存在异常退出单元' : '核心守护进程均处于 active (running)'}
+                </div>
+              </div>
+            </div>
+
+            {/* 扣分诊断项明细与优化建议 */}
+            {healthInfo.health_deductions && healthInfo.health_deductions.length > 0 ? (
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)', marginBottom: (healthInfo.failed_services?.length || 0) > 0 ? '12px' : 0 }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#f59e0b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <WarningCircle size={14} /> 启发式健康扣分诊断归因 (共 {healthInfo.health_deductions.length} 项)
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {healthInfo.health_deductions.map((deduction, idx) => (
+                    <span
+                      key={idx}
+                      className="mono"
+                      style={{
+                        fontSize: '11.5px',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        color: 'var(--text-main, #f8fafc)',
+                        border: '1px solid rgba(245, 158, 11, 0.25)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <span style={{ color: '#ef4444', fontWeight: 700 }}>•</span> {deduction}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.18)', display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontSize: '12px' }}>
+                <CheckCircle size={15} /> 各维度运行指标均处于极佳区间 (Optimal)，CPU、内存、磁盘、Inode、温度及后台服务无瓶颈或风险。
+              </div>
+            )}
+
+            {/* 失败服务详细列表 (如果有) */}
+            {healthInfo.failed_services && healthInfo.failed_services.length > 0 && (
+              <div style={{ marginTop: '12px', padding: '12px 14px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#ef4444', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <WarningCircle size={14} /> 异常/崩溃服务单元 (systemd --failed)
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {healthInfo.failed_services.map((svc, idx) => (
+                    <span
+                      key={idx}
+                      className="mono"
+                      style={{
+                        fontSize: '11px',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        background: 'rgba(239, 68, 68, 0.12)',
+                        color: '#fca5a5',
+                        border: '1px solid rgba(239, 68, 68, 0.25)',
+                      }}
+                    >
+                      {svc}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted, #94a3b8)', fontSize: '12px' }}>
+            <p style={{ margin: '0 0 6px' }}>尚未接收到该节点的系统健康诊断快照。</p>
+            <p className="mono text-xs" style={{ margin: 0 }}>请确保客户端已升级至 ProbeWatch Agent v0.8.8+，健康引擎将在下次采集时自动生效。</p>
+          </div>
+        )}
       </div>
 
       {/* 全球流媒体与 AI 服务解锁能力卡片 */}
