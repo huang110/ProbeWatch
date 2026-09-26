@@ -117,14 +117,17 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	workloadTicker := time.NewTicker(30 * time.Second)
 	defer workloadTicker.Stop()
+	eventsTicker := time.NewTicker(30 * time.Second)
+	defer eventsTicker.Stop()
 	configTicker := time.NewTicker(5 * time.Minute)
 	defer configTicker.Stop()
 	updateTicker := time.NewTicker(6 * time.Hour)
 	defer updateTicker.Stop()
 
-	// Initial workload report
+	// Initial workload & events report
 	go func() {
 		_ = r.reportWorkload(ctx)
+		_ = r.reportEvents(ctx)
 	}()
 
 	for {
@@ -137,12 +140,30 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-ticker.C:
 		case <-workloadTicker.C:
 			_ = r.reportWorkload(ctx)
+		case <-eventsTicker.C:
+			_ = r.reportEvents(ctx)
 		case <-configTicker.C:
 			_ = r.refresh(ctx)
 		case <-updateTicker.C:
 			r.autoCheckUpdate(ctx)
 		}
 	}
+}
+
+func (r *Runner) reportEvents(ctx context.Context) error {
+	collector := GetDefaultEventCollector()
+	events, err := collector.CollectSystemEvents(ctx)
+	if err != nil || len(events) == 0 {
+		return nil
+	}
+
+	report := protocol.SystemEventBatchReport{
+		NodeUUID:   r.cfg.AgentNodeUUID,
+		ReportedAt: r.now().UTC().Unix(),
+		Events:     events,
+	}
+
+	return r.doJSON(ctx, http.MethodPost, "/events", report, nil)
 }
 
 func (r *Runner) reportWorkload(ctx context.Context) error {

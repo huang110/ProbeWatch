@@ -660,4 +660,105 @@ func TestNodeWorkloadReportValidate(t *testing.T) {
 	}
 }
 
+func TestSystemEventsValidate(t *testing.T) {
+	validEvent := SystemEvent{
+		ID:         "evt-1",
+		Category:   "oom",
+		Severity:   "critical",
+		Title:      "Out of memory: Killed process 1234 (mysqld)",
+		Message:    "total-vm:1024000kB, anon-rss:512000kB, file-rss:0kB",
+		Source:     "kernel",
+		OccurredAt: 1700000000,
+	}
+
+	if err := validEvent.Validate(); err != nil {
+		t.Fatalf("valid system event rejected: %v", err)
+	}
+
+	invalidCategory := validEvent
+	invalidCategory.Category = ""
+	if err := invalidCategory.Validate(); err == nil {
+		t.Fatal("expected error on empty category")
+	}
+
+	invalidSeverity := validEvent
+	invalidSeverity.Severity = ""
+	if err := invalidSeverity.Validate(); err == nil {
+		t.Fatal("expected error on empty severity")
+	}
+
+	invalidTitle := validEvent
+	invalidTitle.Title = ""
+	if err := invalidTitle.Validate(); err == nil {
+		t.Fatal("expected error on empty title")
+	}
+
+	invalidOccurred := validEvent
+	invalidOccurred.OccurredAt = 0
+	if err := invalidOccurred.Validate(); err == nil {
+		t.Fatal("expected error on zero occurred_at")
+	}
+
+	validBatch := SystemEventBatchReport{
+		NodeUUID:   "123e4567-e89b-12d3-a456-426614174000",
+		ReportedAt: 1700000000,
+		Events:     []SystemEvent{validEvent},
+	}
+	if err := validBatch.Validate(); err != nil {
+		t.Fatalf("valid system event batch rejected: %v", err)
+	}
+
+	invalidUUID := validBatch
+	invalidUUID.NodeUUID = "invalid-uuid"
+	if err := invalidUUID.Validate(); err == nil {
+		t.Fatal("expected error on invalid node_uuid")
+	}
+
+	invalidReported := validBatch
+	invalidReported.ReportedAt = 0
+	if err := invalidReported.Validate(); err == nil {
+		t.Fatal("expected error on zero reported_at")
+	}
+
+	invalidEventInBatch := validBatch
+	invalidEventInBatch.Events = []SystemEvent{invalidTitle}
+	if err := invalidEventInBatch.Validate(); err == nil {
+		t.Fatal("expected error on invalid event inside batch")
+	}
+}
+
+func TestLogQueryRequestValidate(t *testing.T) {
+	validReq := LogQueryRequest{
+		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+		Unit:     "probewatch.service",
+		Priority: "err",
+		Grep:     "panic",
+		Lines:    100,
+		Since:    "1h",
+	}
+
+	if err := validReq.Validate(); err != nil {
+		t.Fatalf("valid log query request rejected: %v", err)
+	}
+
+	invalidUUID := validReq
+	invalidUUID.NodeUUID = "bad-uuid"
+	if err := invalidUUID.Validate(); err == nil {
+		t.Fatal("expected error on invalid node_uuid")
+	}
+
+	invalidLines := validReq
+	invalidLines.Lines = 1001
+	if err := invalidLines.Validate(); err == nil {
+		t.Fatal("expected error on lines > 1000")
+	}
+
+	negativeLines := validReq
+	negativeLines.Lines = -5
+	if err := negativeLines.Validate(); err == nil {
+		t.Fatal("expected error on negative lines")
+	}
+}
+
+
 

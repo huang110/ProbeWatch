@@ -336,6 +336,7 @@ type LifecycleCleanupResult struct {
 	RegistrationTokens    int64
 	NodeTokens            int64
 	RequestReplays        int64
+	SystemEventsHistory   int64
 }
 
 func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleCleanupResult, error) {
@@ -358,6 +359,7 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 		return count, nil
 	}
 	cutoff30 := unixNano(now.Add(-30 * 24 * time.Hour))
+	cutoffSec30 := now.Add(-30 * 24 * time.Hour).Unix()
 	cutoff90 := unixNano(now.Add(-90 * 24 * time.Hour))
 	history := []struct {
 		name  string
@@ -374,6 +376,7 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 		{"registration tokens", `DELETE FROM registration_tokens WHERE rowid IN (SELECT rowid FROM registration_tokens WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RegistrationTokens},
 		{"node tokens", `DELETE FROM node_tokens WHERE rowid IN (SELECT rowid FROM node_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL ORDER BY COALESCE(revoked_at, expires_at), rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.NodeTokens},
 		{"request replays", `DELETE FROM request_replays WHERE rowid IN (SELECT rowid FROM request_replays WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RequestReplays},
+		{"system events history", `DELETE FROM system_events_history WHERE rowid IN (SELECT rowid FROM system_events_history WHERE occurred_at < ? ORDER BY occurred_at, rowid LIMIT ?)`, []any{cutoffSec30, maxLifecycleCleanupRows}, &result.SystemEventsHistory},
 	}
 	for _, item := range history {
 		count, err := deleteBatch(item.query, item.name, item.args...)
@@ -3576,6 +3579,190 @@ func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerO
 
 	return overview, nil
 }
+
+// SystemEventRecord represents a stored system event with node metadata.
+type SystemEventRecord struct {
+	ID         int64     `json:"id"`
+	NodeID     string    `json:"node_id"`
+	NodeName   string    `json:"node_name,omitempty"`
+	Category   string    `json:"category"`
+	Severity   string    `json:"severity"`
+	Title      string    `json:"title"`
+	Message    string    `json:"message"`
+	Source     string    `json:"source"`
+	OccurredAt time.Time `json:"occurred_at"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// SystemEventsOverview aggregates recent kernel & security events across the fleet.
+type SystemEventsOverview struct {
+	TotalEvents24h    int64               `json:"total_events_24h"`
+	CriticalEvents24h int64               `json:"critical_events_24h"`
+	WarningEvents24h  int64               `json:"warning_events_24h"`
+	CategoryCounts    map[string]int64    `json:"category_counts"`
+	RecentEvents      []SystemEventRecord `json:"recent_events"`
+}
+
+func (s *Store) SaveSystemEvents(ctx context.Context, nodeID string, events []protocol.SystemEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	nowSec := time.Now().Unix()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin save system events tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	checkStmt, err := tx.PrepareContext(ctx, `
+		SELECT 1 FROM system_events_history
+		WHERE node_id = ? AND category = ? AND title = ? AND occurred_at = ?
+		LIMIT 1;
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare check system event: %w", err)
+	}
+	defer checkStmt.Close()
+
+	insertStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO system_events_history (
+			node_id, category, severity, title, message, source, occurred_at, recorded_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare insert system event: %w", err)
+	}
+	defer insertStmt.Close()
+
+	for _, ev := range events {
+		var exists int
+		err := checkStmt.QueryRowContext(ctx, nodeID, ev.Category, ev.Title, ev.OccurredAt).Scan(&exists)
+		if err == nil {
+			// duplicate event, skip
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("query existing event: %w", err)
+		}
+
+		if _, err := insertStmt.ExecContext(ctx,
+			nodeID, ev.Category, ev.Severity, ev.Title, ev.Message, ev.Source, ev.OccurredAt, nowSec,
+		); err != nil {
+			return fmt.Errorf("insert system event: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) ListSystemEvents(ctx context.Context, nodeID string, category string, severity string, limit int) ([]SystemEventRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	var where []string
+	var args []any
+
+	if nodeID != "" {
+		where = append(where, "e.node_id = ?")
+		args = append(args, nodeID)
+	}
+	if category != "" {
+		where = append(where, "e.category = ?")
+		args = append(args, category)
+	}
+	if severity != "" {
+		where = append(where, "e.severity = ?")
+		args = append(args, severity)
+	}
+
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT e.id, e.node_id, COALESCE(n.name, e.node_id), e.category, e.severity,
+		       e.title, e.message, e.source, e.occurred_at, e.recorded_at
+		FROM system_events_history e
+		LEFT JOIN nodes n ON n.id = e.node_id
+		%s
+		ORDER BY e.occurred_at DESC
+		LIMIT ?;
+	`, whereClause)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list system events: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]SystemEventRecord, 0)
+	for rows.Next() {
+		var rec SystemEventRecord
+		var occurredAt, recordedAt int64
+		if err := rows.Scan(
+			&rec.ID, &rec.NodeID, &rec.NodeName, &rec.Category, &rec.Severity,
+			&rec.Title, &rec.Message, &rec.Source, &occurredAt, &recordedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan system event: %w", err)
+		}
+		rec.OccurredAt = time.Unix(occurredAt, 0).UTC()
+		rec.RecordedAt = time.Unix(recordedAt, 0).UTC()
+		records = append(records, rec)
+	}
+
+	return records, rows.Err()
+}
+
+func (s *Store) GetSystemEventsOverview(ctx context.Context) (*SystemEventsOverview, error) {
+	overview := &SystemEventsOverview{
+		CategoryCounts: make(map[string]int64),
+		RecentEvents:   make([]SystemEventRecord, 0),
+	}
+
+	cutoff24h := time.Now().Add(-24 * time.Hour).Unix()
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END), 0)
+		FROM system_events_history
+		WHERE occurred_at >= ?;
+	`, cutoff24h)
+	_ = row.Scan(&overview.TotalEvents24h, &overview.CriticalEvents24h, &overview.WarningEvents24h)
+
+	catRows, err := s.db.QueryContext(ctx, `
+		SELECT category, COUNT(*)
+		FROM system_events_history
+		WHERE occurred_at >= ?
+		GROUP BY category;
+	`, cutoff24h)
+	if err == nil {
+		defer catRows.Close()
+		for catRows.Next() {
+			var cat string
+			var count int64
+			if err := catRows.Scan(&cat, &count); err == nil {
+				overview.CategoryCounts[cat] = count
+			}
+		}
+	}
+
+	recent, err := s.ListSystemEvents(ctx, "", "", "", 15)
+	if err == nil {
+		overview.RecentEvents = recent
+	}
+
+	return overview, nil
+}
+
 
 
 

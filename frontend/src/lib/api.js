@@ -986,6 +986,58 @@ export async function fetchNodes(signal) {
   return await res.json()
 }
 
+// System Events & Log Streaming API
+export async function fetchEventsOverview(signal) {
+  const res = await fetch('/api/events/overview', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/events/overview', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch events overview')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchFleetEvents({ category = '', severity = '', nodeId = '', limit = 100 } = {}, signal) {
+  const params = new URLSearchParams()
+  if (category) params.set('category', category)
+  if (severity) params.set('severity', severity)
+  if (nodeId) params.set('node_id', nodeId)
+  if (limit) params.set('limit', String(limit))
+  const res = await fetch(`/api/events?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to fetch fleet events')
+  return await res.json()
+}
+
+export async function fetchNodeEvents(nodeUuid, { category = '', severity = '', limit = 100 } = {}, signal) {
+  const params = new URLSearchParams()
+  if (category) params.set('category', category)
+  if (severity) params.set('severity', severity)
+  if (limit) params.set('limit', String(limit))
+  const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/events?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/events?${params.toString()}`, { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch node events')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function queryNodeLogs(nodeUuid, { unit = '', priority = '', grep = '', lines = 100, since = '' } = {}, signal) {
+  const params = new URLSearchParams()
+  if (unit) params.set('unit', unit)
+  if (priority) params.set('priority', priority)
+  if (grep) params.set('grep', grep)
+  if (lines) params.set('lines', String(lines))
+  if (since) params.set('since', since)
+  const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/logs/query?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to query node logs')
+  }
+  return await res.json()
+}
+
+
 
 
 

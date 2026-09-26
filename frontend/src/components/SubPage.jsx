@@ -143,8 +143,8 @@ export function SubPage({
         <TrafficReportView nodes={data} onSelectNode={onSelectNode} />
       ) : page === 'notifications' || page === 'alerts' ? (
         <AlertCenterView alerts={alerts} onAck={onAck} ackingId={ackingId} />
-      ) : page === 'logs' ? (
-        <LogsView />
+      ) : page === 'logs' || page === 'events' || page === 'journal' ? (
+        <LogsView nodes={data} />
       ) : page === 'media' ? (
         <MediaMatrix nodes={data} />
       ) : page === 'targets' ? (

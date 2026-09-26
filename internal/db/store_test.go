@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/probewatch/probewatch/internal/protocol"
 	"github.com/probewatch/probewatch/internal/security"
 )
 
@@ -1349,3 +1350,82 @@ func assertFileMode(t *testing.T, path string, want os.FileMode) {
 		t.Fatalf("%s mode = %04o, want %04o", path, got, want)
 	}
 }
+
+func TestSystemEventsStore(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	node := registerTestNode(t, store, "events-node")
+
+	now := time.Now().Unix()
+
+	events := []protocol.SystemEvent{
+		{
+			Category:   "oom",
+			Severity:   "critical",
+			Title:      "Out of memory: Killed process 555 (redis-server)",
+			Message:    "total-vm:2048kB, anon-rss:1024kB",
+			Source:     "kernel",
+			OccurredAt: now - 100,
+		},
+		{
+			Category:   "ssh_auth",
+			Severity:   "warning",
+			Title:      "SSH login failed from 192.168.1.100 port 45212",
+			Message:    "Failed password for invalid user admin",
+			Source:     "sshd",
+			OccurredAt: now - 50,
+		},
+	}
+
+	if err := store.SaveSystemEvents(ctx, node.Node.ID, events); err != nil {
+		t.Fatalf("SaveSystemEvents failed: %v", err)
+	}
+
+	// Resaving identical events should not produce duplicates
+	if err := store.SaveSystemEvents(ctx, node.Node.ID, events); err != nil {
+		t.Fatalf("SaveSystemEvents duplicate test failed: %v", err)
+	}
+
+	list, err := store.ListSystemEvents(ctx, node.Node.ID, "", "", 50)
+	if err != nil {
+		t.Fatalf("ListSystemEvents failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(list))
+	}
+	if list[0].Category != "ssh_auth" { // ordered by occurred_at DESC
+		t.Fatalf("expected ssh_auth first, got %s", list[0].Category)
+	}
+
+	// Test category filter
+	oomList, err := store.ListSystemEvents(ctx, node.Node.ID, "oom", "", 50)
+	if err != nil || len(oomList) != 1 {
+		t.Fatalf("expected 1 oom event, got %d (err: %v)", len(oomList), err)
+	}
+
+	// Test severity filter
+	critList, err := store.ListSystemEvents(ctx, node.Node.ID, "", "critical", 50)
+	if err != nil || len(critList) != 1 {
+		t.Fatalf("expected 1 critical event, got %d (err: %v)", len(critList), err)
+	}
+
+	overview, err := store.GetSystemEventsOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetSystemEventsOverview failed: %v", err)
+	}
+	if overview.TotalEvents24h != 2 {
+		t.Fatalf("expected 2 total events in 24h, got %d", overview.TotalEvents24h)
+	}
+	if overview.CriticalEvents24h != 1 {
+		t.Fatalf("expected 1 critical event, got %d", overview.CriticalEvents24h)
+	}
+	if overview.WarningEvents24h != 1 {
+		t.Fatalf("expected 1 warning event, got %d", overview.WarningEvents24h)
+	}
+	if overview.CategoryCounts["oom"] != 1 || overview.CategoryCounts["ssh_auth"] != 1 {
+		t.Fatalf("category counts mismatch: %#v", overview.CategoryCounts)
+	}
+}
+

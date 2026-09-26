@@ -169,6 +169,44 @@ type NodeWorkloadReport struct {
 	TopProcesses      []ProcessSnapshot   `json:"top_processes"`
 }
 
+// SystemEvent represents a single detected system, kernel, or security event.
+type SystemEvent struct {
+	ID         string `json:"id"`
+	Category   string `json:"category"`   // oom, kernel, ssh_auth, service
+	Severity   string `json:"severity"`   // critical, warning, info
+	Title      string `json:"title"`      // e.g. "OOM Killer: killed process 1234 (mysqld)"
+	Message    string `json:"message"`    // detailed log line or explanation
+	Source     string `json:"source"`     // e.g. "kernel", "sshd", "systemd"
+	OccurredAt int64  `json:"occurred_at"` // Unix epoch seconds
+}
+
+// SystemEventBatchReport represents a batch of system events reported by an edge node.
+type SystemEventBatchReport struct {
+	NodeUUID   string        `json:"node_uuid"`
+	ReportedAt int64         `json:"reported_at"`
+	Events     []SystemEvent `json:"events"`
+}
+
+// LogQueryRequest defines parameters for a structured log retrieval request.
+type LogQueryRequest struct {
+	NodeUUID string `json:"node_uuid"`
+	Unit     string `json:"unit,omitempty"`     // e.g. "nginx.service", "docker.service"
+	Priority string `json:"priority,omitempty"` // "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"
+	Grep     string `json:"grep,omitempty"`     // pattern or keyword
+	Lines    int    `json:"lines,omitempty"`    // max 500
+	Since    string `json:"since,omitempty"`    // e.g. "1h", "30m", "1d"
+}
+
+// LogQueryResponse returns the retrieved log lines and metadata.
+type LogQueryResponse struct {
+	NodeUUID   string   `json:"node_uuid"`
+	NodeName   string   `json:"node_name,omitempty"`
+	Unit       string   `json:"unit,omitempty"`
+	LinesCount int      `json:"lines_count"`
+	Lines      []string `json:"lines"`
+	QueriedAt  int64    `json:"queried_at"`
+}
+
 // InterfaceStat represents one network interface's traffic counters and addresses.
 type InterfaceStat struct {
 	Name      string `json:"name"`
@@ -969,6 +1007,71 @@ func (r NodeWorkloadReport) Validate() error {
 		if err := r.TopProcesses[i].Validate(); err != nil {
 			return fmt.Errorf("top_processes[%d]: %w", i, err)
 		}
+	}
+	return nil
+}
+
+func (e SystemEvent) Validate() error {
+	if err := validateString("id", e.ID, maxIDLength, false); err != nil {
+		return err
+	}
+	if err := validateString("category", e.Category, maxKindLength, true); err != nil {
+		return err
+	}
+	if err := validateString("severity", e.Severity, maxKindLength, true); err != nil {
+		return err
+	}
+	if err := validateString("title", e.Title, 256, true); err != nil {
+		return err
+	}
+	if err := validateString("message", e.Message, 2048, false); err != nil {
+		return err
+	}
+	if err := validateString("source", e.Source, maxIDLength, false); err != nil {
+		return err
+	}
+	if e.OccurredAt <= 0 {
+		return errors.New("occurred_at must be greater than zero")
+	}
+	return nil
+}
+
+func (r SystemEventBatchReport) Validate() error {
+	if err := validateUUID("node_uuid", r.NodeUUID); err != nil {
+		return err
+	}
+	if r.ReportedAt <= 0 {
+		return errors.New("reported_at must be greater than zero")
+	}
+	if len(r.Events) > 500 {
+		return errors.New("events exceeds maximum count of 500")
+	}
+	for i := range r.Events {
+		if err := r.Events[i].Validate(); err != nil {
+			return fmt.Errorf("events[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (q LogQueryRequest) Validate() error {
+	if err := validateUUID("node_uuid", q.NodeUUID); err != nil {
+		return err
+	}
+	if err := validateString("unit", q.Unit, maxIDLength, false); err != nil {
+		return err
+	}
+	if err := validateString("priority", q.Priority, maxKindLength, false); err != nil {
+		return err
+	}
+	if err := validateString("grep", q.Grep, 256, false); err != nil {
+		return err
+	}
+	if err := validateString("since", q.Since, 32, false); err != nil {
+		return err
+	}
+	if q.Lines < 0 || q.Lines > 1000 {
+		return errors.New("lines must be between 0 and 1000")
 	}
 	return nil
 }

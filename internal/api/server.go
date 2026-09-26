@@ -159,6 +159,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/synthetic/test", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTestHandler))))
 	mux.Handle("/api/containers/overview", middleware.RequireAuth(http.HandlerFunc(s.fleetContainerOverviewHandler)))
 	mux.HandleFunc("/api/public/containers/overview", s.publicFleetContainerOverviewHandler)
+	mux.Handle("/api/events/overview", middleware.RequireAuth(http.HandlerFunc(s.eventsOverviewHandler)))
+	mux.HandleFunc("/api/public/events/overview", s.publicEventsOverviewHandler)
+	mux.Handle("/api/events", middleware.RequireAuth(http.HandlerFunc(s.fleetEventsHandler)))
 	mux.HandleFunc("/api/admin/status-page", s.adminStatusPageRoute)
 	mux.HandleFunc("/api/admin/incidents", s.adminIncidentsRoute)
 	mux.HandleFunc("/api/admin/incidents/", s.adminIncidentsRoute)
@@ -174,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/agent/v1/speedtest-result", s.speedtestResultAgent)
 	mux.HandleFunc("/api/agent/v1/synthetic-result", s.syntheticResultAgent)
 	mux.HandleFunc("/api/agent/v1/workload", s.workloadAgent)
+	mux.HandleFunc("/api/agent/v1/events", s.eventsAgent)
 	mux.HandleFunc("/api/agent/v1/update/check", s.agentUpdateCheck)
 	mux.HandleFunc("/api/agent/v1/update/download", s.agentUpdateDownload)
 
@@ -316,6 +320,14 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				s.getNodeProcesses(w, r, uuid)
 				return
 			}
+			if len(parts) == 4 && parts[3] == "events" {
+				s.getNodeEvents(w, r, uuid)
+				return
+			}
+			if len(parts) == 5 && parts[3] == "logs" && parts[4] == "query" {
+				s.queryNodeLogs(w, r, uuid)
+				return
+			}
 			if len(parts) == 5 && parts[3] == "checks" && parts[4] == "summary" {
 				s.nodeChecksSummary(w, r, uuid)
 				return
@@ -324,6 +336,10 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				s.nodeTraffic(w, r, uuid)
 				return
 			}
+		}
+		if r.Method == http.MethodPost && len(parts) == 5 && parts[3] == "logs" && parts[4] == "query" {
+			s.queryNodeLogs(w, r, uuid)
+			return
 		}
 		if r.Method == http.MethodPatch && len(parts) == 3 {
 			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

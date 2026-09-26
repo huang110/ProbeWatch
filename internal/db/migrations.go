@@ -491,6 +491,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureWorkloadTables(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureSystemEventsTable(ctx, db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1143,6 +1146,33 @@ func ensureWorkloadTables(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+func ensureSystemEventsTable(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS system_events_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			category TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			title TEXT NOT NULL,
+			message TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			occurred_at INTEGER NOT NULL,
+			recorded_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_node_occurred ON system_events_history(node_id, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_category ON system_events_history(category, occurred_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_occurred ON system_events_history(occurred_at DESC);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure system events table: %w", err)
+		}
+	}
+	return nil
+}
+
 
 
 

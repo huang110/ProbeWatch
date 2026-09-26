@@ -236,5 +236,9 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.getNodeProcesses(w, r, uuid)
 		return
 	}
+	if len(parts) == 5 && parts[4] == "events" {
+		s.getNodeEvents(w, r, uuid)
+		return
+	}
 	writeJSONError(w, http.StatusNotFound, "not found")
 }

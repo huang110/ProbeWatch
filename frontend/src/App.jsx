@@ -1300,8 +1300,8 @@ export function App() {
             }
             onNavigate={navigate}
           />
-        ) : activeNav === 'logs' ? (
-          <LogsView />
+        ) : activeNav === 'logs' || activeNav === 'events' ? (
+          <LogsView nodes={data} />
         ) : activeNav === 'status' || activeNav === 'status-page' ? (
           <StatusPageView
             theme={theme}
