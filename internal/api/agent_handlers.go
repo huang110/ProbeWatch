@@ -292,6 +292,54 @@ func (s *Server) speedtestResultAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) syntheticResultAgent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	node, requestID, now, ok := s.authenticateAgentRequest(w, r)
+	if !ok {
+		return
+	}
+	var request protocol.SyntheticResultEnvelope
+	if err := decodeJSONRequest(w, r, s.requestBodyLimit(), &request); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	if err := request.Validate(); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid synthetic result")
+		return
+	}
+	if err := validateResultTimestamp(request.Result.CheckedAt, now, s.agentClockSkew()); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid synthetic result")
+		return
+	}
+	if err := s.validateTargetBinding(r.Context(), db.TargetKindSynthetic, request.TargetID); err != nil {
+		writeTargetBindingError(w, err)
+		return
+	}
+	payload, err := json.Marshal(request.Result)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid synthetic result")
+		return
+	}
+	if err := s.service.Store().PersistAgentResult(r.Context(), node.ID, requestID, now.Add(2*s.agentClockSkew()), now, db.AgentResultInput{
+		Kind:      db.TargetKindSynthetic,
+		TargetID:  request.TargetID,
+		CheckedAt: checkedAt(request.Result.CheckedAt, now),
+		Payload:   payload,
+	}); err != nil {
+		if errors.Is(err, db.ErrReplay) {
+			writeAgentRequestError(w, err)
+			return
+		}
+		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request) (db.Node, string, time.Time, bool) {
 	if !s.agentIPLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
@@ -331,9 +379,20 @@ func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, 
 		}
 		return nil
 	}
+	if kind == db.TargetKindGRPC || kind == db.TargetKindWebSocket || kind == db.TargetKindDoH || kind == db.TargetKindSynthetic {
+		target, err := s.service.Store().GetSyntheticTarget(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !target.Enabled {
+			return db.ErrTargetDisabled
+		}
+		return nil
+	}
 	_, err := s.service.Store().LookupEnabledTarget(ctx, kind, id)
 	return err
 }
+
 
 func (s *Server) validateNetworkTargetBinding(ctx context.Context, id string) error {
 	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} {
@@ -393,6 +452,12 @@ func agentResultInput(result protocol.CheckResult, now time.Time) (db.AgentResul
 			return db.AgentResultInput{}, err
 		}
 		return db.AgentResultInput{Kind: db.TargetKindSpeedtest, TargetID: result.ID, CheckedAt: checkedAt(result.Speedtest.TestedAt, now), Payload: payload}, nil
+	case result.Synthetic != nil:
+		payload, err := json.Marshal(result.Synthetic)
+		if err != nil {
+			return db.AgentResultInput{}, err
+		}
+		return db.AgentResultInput{Kind: db.TargetKindSynthetic, TargetID: result.ID, CheckedAt: checkedAt(result.Synthetic.CheckedAt, now), Payload: payload}, nil
 	default:
 		return db.AgentResultInput{}, errors.New("invalid check result shape")
 	}
@@ -415,10 +480,13 @@ func checkResultTimestamp(result protocol.CheckResult, now time.Time, skew time.
 		return validateResultTimestamp(result.Media.CheckedAt, now, skew)
 	case result.Speedtest != nil:
 		return validateResultTimestamp(result.Speedtest.TestedAt, now, skew)
+	case result.Synthetic != nil:
+		return validateResultTimestamp(result.Synthetic.CheckedAt, now, skew)
 	default:
 		return errors.New("invalid check result shape")
 	}
 }
+
 
 func writeAgentRequestError(w http.ResponseWriter, err error) {
 	if errors.Is(err, db.ErrReplay) {

@@ -161,6 +161,10 @@ const (
 	TargetKindMTR       TargetKind = "mtr"
 	TargetKindMediaHTTP TargetKind = "media_http"
 	TargetKindSpeedtest TargetKind = "speedtest"
+	TargetKindGRPC      TargetKind = "grpc"
+	TargetKindWebSocket TargetKind = "websocket"
+	TargetKindDoH       TargetKind = "doh"
+	TargetKindSynthetic TargetKind = "synthetic"
 )
 
 type TargetDefinition struct {
@@ -1490,6 +1494,8 @@ func historyTable(kind TargetKind) (string, string, error) {
 		return "media_results_history", "detector_id", nil
 	case TargetKindSpeedtest:
 		return "speedtest_results_history", "task_id", nil
+	case TargetKindSynthetic, TargetKindGRPC, TargetKindWebSocket, TargetKindDoH:
+		return "synthetic_results_history", "target_id", nil
 	default:
 		return "", "", errors.New("invalid history result kind")
 	}
@@ -1797,6 +1803,13 @@ func evaluateResultAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, resul
 		}
 	case TargetKindSpeedtest:
 		e.Category = "speedtest"
+		e.Failing = raw.Status != "ok" || raw.Error != ""
+		e.Reason = raw.Status
+		if raw.Error != "" {
+			e.Reason = raw.Error
+		}
+	case TargetKindSynthetic, TargetKindGRPC, TargetKindWebSocket, TargetKindDoH:
+		e.Category = "synthetic"
 		e.Failing = raw.Status != "ok" || raw.Error != ""
 		e.Reason = raw.Status
 		if raw.Error != "" {
@@ -2163,12 +2176,38 @@ func latestResultQuery(kind TargetKind) (string, error) {
 		return `INSERT INTO media_results_latest (node_id, detector_id, payload, checked_at) VALUES (?, ?, ?, ?) ON CONFLICT(node_id, detector_id) DO UPDATE SET payload = excluded.payload, checked_at = excluded.checked_at WHERE excluded.checked_at >= media_results_latest.checked_at`, nil
 	case TargetKindSpeedtest:
 		return `INSERT INTO speedtest_results_latest (node_id, task_id, payload, download_speed_mbps, upload_speed_mbps, latency_ms, jitter_ms, tested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(node_id, task_id) DO UPDATE SET payload = excluded.payload, download_speed_mbps = excluded.download_speed_mbps, upload_speed_mbps = excluded.upload_speed_mbps, latency_ms = excluded.latency_ms, jitter_ms = excluded.jitter_ms, tested_at = excluded.tested_at WHERE excluded.tested_at >= speedtest_results_latest.tested_at`, nil
+	case TargetKindSynthetic, TargetKindGRPC, TargetKindWebSocket, TargetKindDoH:
+		return `INSERT INTO synthetic_results_latest (node_id, target_id, payload, protocol, status_code, passed, failed_assertion, dns_ms, connect_ms, tls_ms, ttfb_ms, total_ms, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(node_id, target_id) DO UPDATE SET payload = excluded.payload, protocol = excluded.protocol, status_code = excluded.status_code, passed = excluded.passed, failed_assertion = excluded.failed_assertion, dns_ms = excluded.dns_ms, connect_ms = excluded.connect_ms, tls_ms = excluded.tls_ms, ttfb_ms = excluded.ttfb_ms, total_ms = excluded.total_ms, checked_at = excluded.checked_at WHERE excluded.checked_at >= synthetic_results_latest.checked_at`, nil
 	default:
 		return "", ErrTargetKindMismatch
 	}
 }
 
 func upsertLatestResultTx(ctx context.Context, tx *sql.Tx, query, nodeID, targetID string, checkedAt time.Time, payload []byte) error {
+	if strings.Contains(query, "synthetic_results_latest") {
+		var syn struct {
+			Protocol        string `json:"protocol"`
+			StatusCode      int    `json:"status_code"`
+			Passed          bool   `json:"passed"`
+			FailedAssertion string `json:"failed_assertion"`
+			Timing          struct {
+				DNSLookupMS     int64 `json:"dns_lookup_ms"`
+				TCPConnectMS    int64 `json:"tcp_connect_ms"`
+				TLSHandshakeMS  int64 `json:"tls_handshake_ms"`
+				TTFBMS          int64 `json:"ttfb_ms"`
+				TotalDurationMS int64 `json:"total_duration_ms"`
+			} `json:"timing"`
+		}
+		_ = json.Unmarshal(payload, &syn)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO synthetic_results_history (node_id, target_id, payload, protocol, status_code, passed, failed_assertion, dns_ms, connect_ms, tls_ms, ttfb_ms, total_ms, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, targetID, payload, syn.Protocol, syn.StatusCode, boolInt(syn.Passed), syn.FailedAssertion, syn.Timing.DNSLookupMS, syn.Timing.TCPConnectMS, syn.Timing.TLSHandshakeMS, syn.Timing.TTFBMS, syn.Timing.TotalDurationMS, unixNano(checkedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert synthetic result history: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, query, nodeID, targetID, payload, syn.Protocol, syn.StatusCode, boolInt(syn.Passed), syn.FailedAssertion, syn.Timing.DNSLookupMS, syn.Timing.TCPConnectMS, syn.Timing.TLSHandshakeMS, syn.Timing.TTFBMS, syn.Timing.TotalDurationMS, unixNano(checkedAt)); err != nil {
+			return fmt.Errorf("upsert latest synthetic result: %w", err)
+		}
+		return nil
+	}
+
 	if strings.Contains(query, "speedtest_results_latest") {
 		var sRes struct {
 			DownloadSpeedMbps float64 `json:"download_speed_mbps"`
@@ -2945,4 +2984,294 @@ func (s *Store) ListSpeedtestHistory(ctx context.Context, nodeID, taskID string,
 	}
 	return history, rows.Err()
 }
+
+type SyntheticTargetRecord struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Protocol        string    `json:"protocol"` // http, https, grpc, websocket, doh
+	TargetURL       string    `json:"target_url"`
+	Method          string    `json:"method"`
+	Headers         string    `json:"headers"`
+	BodyPayload     string    `json:"body_payload"`
+	Assertions      string    `json:"assertions"`
+	GRPCService     string    `json:"grpc_service"`
+	TimeoutMS       int       `json:"timeout_ms"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	NodeTags        string    `json:"node_tags"`
+	NodeIDs         string    `json:"node_ids"`
+	ConsensusNodes  int       `json:"consensus_nodes"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type SyntheticResultRecord struct {
+	NodeID          string    `json:"node_id"`
+	NodeName        string    `json:"node_name"`
+	TargetID        string    `json:"target_id"`
+	TargetName      string    `json:"target_name"`
+	Protocol        string    `json:"protocol"`
+	StatusCode      int       `json:"status_code"`
+	Passed          bool      `json:"passed"`
+	FailedAssertion string    `json:"failed_assertion"`
+	DNSMS           int64     `json:"dns_ms"`
+	ConnectMS       int64     `json:"connect_ms"`
+	TLSMS           int64     `json:"tls_ms"`
+	TTFBMS          int64     `json:"ttfb_ms"`
+	TotalMS         int64     `json:"total_ms"`
+	Payload         []byte    `json:"payload"`
+	CheckedAt       time.Time `json:"checked_at"`
+}
+
+type SyntheticHistoryRecord struct {
+	ID              int64     `json:"id"`
+	NodeID          string    `json:"node_id"`
+	NodeName        string    `json:"node_name"`
+	TargetID        string    `json:"target_id"`
+	TargetName      string    `json:"target_name"`
+	Protocol        string    `json:"protocol"`
+	StatusCode      int       `json:"status_code"`
+	Passed          bool      `json:"passed"`
+	FailedAssertion string    `json:"failed_assertion"`
+	DNSMS           int64     `json:"dns_ms"`
+	ConnectMS       int64     `json:"connect_ms"`
+	TLSMS           int64     `json:"tls_ms"`
+	TTFBMS          int64     `json:"ttfb_ms"`
+	TotalMS         int64     `json:"total_ms"`
+	Payload         []byte    `json:"payload"`
+	CheckedAt       time.Time `json:"checked_at"`
+	RecordedAt      time.Time `json:"recorded_at"`
+}
+
+func (s *Store) CreateSyntheticTarget(ctx context.Context, target SyntheticTargetRecord) error {
+	if strings.TrimSpace(target.ID) == "" || strings.TrimSpace(target.Name) == "" || strings.TrimSpace(target.TargetURL) == "" {
+		return errors.New("synthetic target id, name, and target_url are required")
+	}
+	now := time.Now().UTC()
+	if target.TimeoutMS <= 0 {
+		target.TimeoutMS = 5000
+	}
+	if target.IntervalSeconds <= 0 {
+		target.IntervalSeconds = 60
+	}
+	if target.ConsensusNodes <= 0 {
+		target.ConsensusNodes = 1
+	}
+	if target.Method == "" {
+		target.Method = "GET"
+	}
+	if target.Headers == "" {
+		target.Headers = "{}"
+	}
+	if target.Assertions == "" {
+		target.Assertions = "[]"
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO synthetic_targets (
+			id, name, protocol, target_url, method, headers, body_payload, assertions, grpc_service,
+			timeout_ms, interval_seconds, node_tags, node_ids, consensus_nodes, enabled, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, target.ID, target.Name, target.Protocol, target.TargetURL, target.Method, target.Headers, target.BodyPayload, target.Assertions, target.GRPCService, target.TimeoutMS, target.IntervalSeconds, target.NodeTags, target.NodeIDs, target.ConsensusNodes, boolInt(target.Enabled), unixNano(now), unixNano(now))
+	if err != nil {
+		return fmt.Errorf("create synthetic target: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetSyntheticTarget(ctx context.Context, id string) (SyntheticTargetRecord, error) {
+	var target SyntheticTargetRecord
+	var enabled int
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, protocol, target_url, method, headers, body_payload, assertions, grpc_service,
+		       timeout_ms, interval_seconds, node_tags, node_ids, consensus_nodes, enabled, created_at, updated_at
+		FROM synthetic_targets WHERE id = ?
+	`, id).Scan(&target.ID, &target.Name, &target.Protocol, &target.TargetURL, &target.Method, &target.Headers, &target.BodyPayload, &target.Assertions, &target.GRPCService, &target.TimeoutMS, &target.IntervalSeconds, &target.NodeTags, &target.NodeIDs, &target.ConsensusNodes, &enabled, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SyntheticTargetRecord{}, ErrTargetNotFound
+	}
+	if err != nil {
+		return SyntheticTargetRecord{}, fmt.Errorf("get synthetic target: %w", err)
+	}
+	target.Enabled = enabled != 0
+	target.CreatedAt = time.Unix(0, createdAt).UTC()
+	target.UpdatedAt = time.Unix(0, updatedAt).UTC()
+	return target, nil
+}
+
+func (s *Store) UpdateSyntheticTarget(ctx context.Context, target SyntheticTargetRecord) error {
+	if strings.TrimSpace(target.ID) == "" || strings.TrimSpace(target.Name) == "" || strings.TrimSpace(target.TargetURL) == "" {
+		return errors.New("synthetic target id, name, and target_url are required")
+	}
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE synthetic_targets
+		SET name = ?, protocol = ?, target_url = ?, method = ?, headers = ?, body_payload = ?, assertions = ?, grpc_service = ?,
+		    timeout_ms = ?, interval_seconds = ?, node_tags = ?, node_ids = ?, consensus_nodes = ?, enabled = ?, updated_at = ?
+		WHERE id = ?
+	`, target.Name, target.Protocol, target.TargetURL, target.Method, target.Headers, target.BodyPayload, target.Assertions, target.GRPCService, target.TimeoutMS, target.IntervalSeconds, target.NodeTags, target.NodeIDs, target.ConsensusNodes, boolInt(target.Enabled), unixNano(now), target.ID)
+	if err != nil {
+		return fmt.Errorf("update synthetic target: %w", err)
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if aff == 0 {
+		return ErrTargetNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteSyntheticTarget(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM synthetic_targets WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete synthetic target: %w", err)
+	}
+	aff, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if aff == 0 {
+		return ErrTargetNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListSyntheticTargets(ctx context.Context) ([]SyntheticTargetRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, protocol, target_url, method, headers, body_payload, assertions, grpc_service,
+		       timeout_ms, interval_seconds, node_tags, node_ids, consensus_nodes, enabled, created_at, updated_at
+		FROM synthetic_targets ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list synthetic targets: %w", err)
+	}
+	defer rows.Close()
+
+	var targets []SyntheticTargetRecord
+	for rows.Next() {
+		var t SyntheticTargetRecord
+		var enabled int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&t.ID, &t.Name, &t.Protocol, &t.TargetURL, &t.Method, &t.Headers, &t.BodyPayload, &t.Assertions, &t.GRPCService, &t.TimeoutMS, &t.IntervalSeconds, &t.NodeTags, &t.NodeIDs, &t.ConsensusNodes, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan synthetic target: %w", err)
+		}
+		t.Enabled = enabled != 0
+		t.CreatedAt = time.Unix(0, createdAt).UTC()
+		t.UpdatedAt = time.Unix(0, updatedAt).UTC()
+		targets = append(targets, t)
+	}
+	return targets, rows.Err()
+}
+
+func (s *Store) ListEnabledSyntheticTargets(ctx context.Context) ([]SyntheticTargetRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, protocol, target_url, method, headers, body_payload, assertions, grpc_service,
+		       timeout_ms, interval_seconds, node_tags, node_ids, consensus_nodes, enabled, created_at, updated_at
+		FROM synthetic_targets WHERE enabled = 1 ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled synthetic targets: %w", err)
+	}
+	defer rows.Close()
+
+	var targets []SyntheticTargetRecord
+	for rows.Next() {
+		var t SyntheticTargetRecord
+		var enabled int
+		var createdAt, updatedAt int64
+		if err := rows.Scan(&t.ID, &t.Name, &t.Protocol, &t.TargetURL, &t.Method, &t.Headers, &t.BodyPayload, &t.Assertions, &t.GRPCService, &t.TimeoutMS, &t.IntervalSeconds, &t.NodeTags, &t.NodeIDs, &t.ConsensusNodes, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan enabled synthetic target: %w", err)
+		}
+		t.Enabled = enabled != 0
+		t.CreatedAt = time.Unix(0, createdAt).UTC()
+		t.UpdatedAt = time.Unix(0, updatedAt).UTC()
+		targets = append(targets, t)
+	}
+	return targets, rows.Err()
+}
+
+func (s *Store) ListLatestSyntheticResults(ctx context.Context) ([]SyntheticResultRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT r.node_id, COALESCE(n.name, r.node_id), r.target_id, COALESCE(t.name, r.target_id),
+		       r.protocol, r.status_code, r.passed, r.failed_assertion, r.dns_ms, r.connect_ms, r.tls_ms, r.ttfb_ms, r.total_ms, r.payload, r.checked_at
+		FROM synthetic_results_latest r
+		LEFT JOIN nodes n ON n.id = r.node_id
+		LEFT JOIN synthetic_targets t ON t.id = r.target_id
+		ORDER BY r.checked_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list latest synthetic results: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SyntheticResultRecord
+	for rows.Next() {
+		var r SyntheticResultRecord
+		var passed int
+		var checkedAt int64
+		if err := rows.Scan(&r.NodeID, &r.NodeName, &r.TargetID, &r.TargetName, &r.Protocol, &r.StatusCode, &passed, &r.FailedAssertion, &r.DNSMS, &r.ConnectMS, &r.TLSMS, &r.TTFBMS, &r.TotalMS, &r.Payload, &checkedAt); err != nil {
+			return nil, fmt.Errorf("scan latest synthetic result: %w", err)
+		}
+		r.Passed = passed != 0
+		r.CheckedAt = time.Unix(0, checkedAt).UTC()
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) ListSyntheticHistory(ctx context.Context, nodeID, targetID string, limit int) ([]SyntheticHistoryRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var conditions []string
+	var args []any
+	if nodeID != "" {
+		conditions = append(conditions, "h.node_id = ?")
+		args = append(args, nodeID)
+	}
+	if targetID != "" {
+		conditions = append(conditions, "h.target_id = ?")
+		args = append(args, targetID)
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+	q := fmt.Sprintf(`
+		SELECT h.id, h.node_id, COALESCE(n.name, h.node_id), h.target_id, COALESCE(t.name, h.target_id),
+		       h.protocol, h.status_code, h.passed, h.failed_assertion, h.dns_ms, h.connect_ms, h.tls_ms, h.ttfb_ms, h.total_ms, h.payload, h.checked_at, h.recorded_at
+		FROM synthetic_results_history h
+		LEFT JOIN nodes n ON n.id = h.node_id
+		LEFT JOIN synthetic_targets t ON t.id = h.target_id
+		%s
+		ORDER BY h.checked_at DESC, h.id DESC
+		LIMIT ?
+	`, whereClause)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list synthetic history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []SyntheticHistoryRecord
+	for rows.Next() {
+		var h SyntheticHistoryRecord
+		var passed int
+		var checkedAt, recordedAt int64
+		if err := rows.Scan(&h.ID, &h.NodeID, &h.NodeName, &h.TargetID, &h.TargetName, &h.Protocol, &h.StatusCode, &passed, &h.FailedAssertion, &h.DNSMS, &h.ConnectMS, &h.TLSMS, &h.TTFBMS, &h.TotalMS, &h.Payload, &checkedAt, &recordedAt); err != nil {
+			return nil, fmt.Errorf("scan synthetic history: %w", err)
+		}
+		h.Passed = passed != 0
+		h.CheckedAt = time.Unix(0, checkedAt).UTC()
+		h.RecordedAt = time.Unix(0, recordedAt).UTC()
+		history = append(history, h)
+	}
+	return history, rows.Err()
+}
+
 

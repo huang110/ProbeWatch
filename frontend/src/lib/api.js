@@ -854,6 +854,99 @@ export async function runSpeedtestNow(payload = {}) {
   return await res.json()
 }
 
+// Synthetic Probing & Multi-Protocol SLA Engine API
+export async function fetchSyntheticTargets(signal) {
+  const res = await fetch('/api/synthetic/targets', { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to fetch synthetic targets')
+  return await res.json()
+}
+
+export async function getSyntheticTarget(id, signal) {
+  const res = await fetch(`/api/synthetic/targets/${encodeURIComponent(id)}`, { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to get synthetic target')
+  return await res.json()
+}
+
+export async function createSyntheticTarget(payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/synthetic/targets', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to create synthetic target')
+  }
+  return await res.json()
+}
+
+export async function updateSyntheticTarget(id, payload) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/synthetic/targets/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to update synthetic target')
+  }
+  return await res.json()
+}
+
+export async function deleteSyntheticTarget(id) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch(`/api/synthetic/targets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to delete synthetic target')
+  }
+  return true
+}
+
+export async function fetchSyntheticResults(signal) {
+  const res = await fetch('/api/synthetic/results', { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const pubRes = await fetch('/api/public/synthetic/results', { credentials: 'same-origin', signal })
+    if (!pubRes.ok) throw new Error('Failed to fetch synthetic results')
+    return await pubRes.json()
+  }
+  return await res.json()
+}
+
+export async function fetchSyntheticHistory(targetId, nodeId, limit = 100, signal) {
+  const params = new URLSearchParams()
+  if (targetId) params.set('target_id', targetId)
+  if (nodeId) params.set('node_id', nodeId)
+  if (limit) params.set('limit', limit)
+  const res = await fetch(`/api/synthetic/history?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (!res.ok) throw new Error('Failed to fetch synthetic history')
+  return await res.json()
+}
+
+export async function testSyntheticTarget(payload = {}) {
+  const csrf = await fetchCsrfToken()
+  const res = await fetch('/api/synthetic/test', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || 'Failed to test synthetic probe')
+  }
+  return await res.json()
+}
+
+
 
 
 

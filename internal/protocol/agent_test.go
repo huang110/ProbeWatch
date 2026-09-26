@@ -8,7 +8,7 @@ import (
 )
 
 func TestCheckTaskValidateAcceptsEveryAllowedKind(t *testing.T) {
-	for _, kind := range []string{"tcp", "http", "https", "dns", "mtr", "media_http", "speedtest"} {
+	for _, kind := range []string{"tcp", "http", "https", "dns", "mtr", "media_http", "speedtest", "grpc", "websocket", "doh", "synthetic"} {
 		t.Run(kind, func(t *testing.T) {
 			task := validCheckTask()
 			task.Kind = kind
@@ -501,3 +501,86 @@ func TestSpeedtestResultValidation(t *testing.T) {
 		t.Fatal("expected error when speedtest result is nil")
 	}
 }
+
+func TestSyntheticResultAndAssertionValidate(t *testing.T) {
+	rule := SyntheticAssertionRule{
+		Source:   "status_code",
+		Operator: "equals",
+		Target:   "200",
+	}
+	if err := rule.Validate(); err != nil {
+		t.Fatalf("valid rule rejected: %v", err)
+	}
+
+	invalidRule := rule
+	invalidRule.Source = "unknown_source"
+	if err := invalidRule.Validate(); err == nil {
+		t.Fatal("expected error on invalid rule source")
+	}
+
+	invalidOp := rule
+	invalidOp.Operator = "invalid_op"
+	if err := invalidOp.Validate(); err == nil {
+		t.Fatal("expected error on invalid rule operator")
+	}
+
+	synRes := SyntheticResult{
+		Protocol:   "https",
+		TargetURL:  "https://api.example.com/healthz",
+		StatusCode: 200,
+		Timing: SyntheticTiming{
+			DNSLookupMS:     12,
+			TCPConnectMS:    25,
+			TLSHandshakeMS:  40,
+			TTFBMS          : 80,
+			TransferMS      : 10,
+			TotalDurationMS : 167,
+		},
+		Passed:    true,
+		Status:    "ok",
+		CheckedAt: 1700000000,
+	}
+	if err := synRes.Validate(); err != nil {
+		t.Fatalf("valid synthetic result rejected: %v", err)
+	}
+
+	invalidProtocol := synRes
+	invalidProtocol.Protocol = ""
+	if err := invalidProtocol.Validate(); err == nil {
+		t.Fatal("expected error on empty protocol")
+	}
+
+	invalidCheckedAt := synRes
+	invalidCheckedAt.CheckedAt = 0
+	if err := invalidCheckedAt.Validate(); err == nil {
+		t.Fatal("expected error on zero checked_at")
+	}
+
+	envelope := SyntheticResultEnvelope{
+		TargetID: "syn-1",
+		Result:   synRes,
+	}
+	if err := envelope.Validate(); err != nil {
+		t.Fatalf("valid envelope rejected: %v", err)
+	}
+
+	checkRes := CheckResult{
+		ID:        "syn-1",
+		Kind:      "synthetic",
+		Synthetic: &synRes,
+	}
+	if err := checkRes.Validate(); err != nil {
+		t.Fatalf("valid check result with synthetic rejected: %v", err)
+	}
+
+	for _, kind := range []string{"grpc", "websocket", "doh", "synthetic"} {
+		res := CheckResult{
+			ID:   "syn-1",
+			Kind: kind,
+		}
+		if err := res.Validate(); err == nil {
+			t.Fatalf("expected error when kind %s has nil synthetic result", kind)
+		}
+	}
+}
+

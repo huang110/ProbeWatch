@@ -21,6 +21,7 @@ import { AICopilotView } from './components/AICopilotView.jsx'
 import { CertificatesAndDNSView } from './components/CertificatesAndDNSView.jsx'
 import { MeshMatrixView } from './components/MeshMatrixView.jsx'
 import { SpeedtestBenchmarkView } from './components/SpeedtestBenchmarkView.jsx'
+import SyntheticProbingView from './components/SyntheticProbingView.jsx'
 import TerminalView from './components/TerminalView.jsx'
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
@@ -51,6 +52,7 @@ const navItems = [
     children: [
       { id: 'latency', label: '延迟监测' },
       { id: 'route', label: '回程线路监测' },
+      { id: 'synthetic', label: '合成监控与 SLA' },
       { id: 'speedtest', label: '测速与带宽基准' },
       { id: 'certificates', label: '证书与 DNS 巡检' },
       { id: 'mesh', label: '全球互联矩阵' },
@@ -117,6 +119,8 @@ const pageTitleFor = (page) =>
         'mesh-matrix': '全球互联延迟网格',
         speedtest: '测速与带宽基准',
         speed: '测速与带宽基准',
+        synthetic: '合成监控与全景 SLA 契约',
+        sla: '合成监控与全景 SLA 契约',
       }[page] || '仪表盘')
 
 // 基于 document.cookie 保持纯状态流通与主题偏好
@@ -146,6 +150,8 @@ const VALID_NAV_PAGES = [
   'monitoring',
   'latency',
   'route',
+  'synthetic',
+  'sla',
   'speedtest',
   'speed',
   'network',
@@ -1249,6 +1255,8 @@ export function App() {
           <CertificatesAndDNSView initialTab="dns" />
         ) : activeNav === 'mesh' || activeNav === 'matrix' || activeNav === 'mesh-matrix' ? (
           <MeshMatrixView />
+        ) : activeNav === 'synthetic' || activeNav === 'sla' ? (
+          <SyntheticProbingView />
         ) : activeNav === 'speedtest' || activeNav === 'speed' ? (
           <SpeedtestBenchmarkView />
         ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (

@@ -91,6 +91,16 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	syntheticTargets, err := s.service.Store().ListEnabledSyntheticTargets(r.Context())
+	if err == nil {
+		for _, st := range syntheticTargets {
+			if !nodeMatchesSyntheticTarget(node, st) {
+				continue
+			}
+			tasks = append(tasks, syntheticTargetToCheckTask(st))
+		}
+	}
+
 	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{
 		Tasks:               tasks,
 		ConfigVersion:       time.Now().UTC().Unix(),
@@ -238,3 +248,63 @@ func payloadToCheckTask(target db.TargetRecord, config agentTargetPayload) (prot
 	}
 	return task, nil
 }
+
+func nodeMatchesSyntheticTarget(node db.Node, st db.SyntheticTargetRecord) bool {
+	tags := parseNodeTags(st.NodeTags)
+	ids := parseNodeTags(st.NodeIDs)
+	if len(tags) == 0 && len(ids) == 0 {
+		return true
+	}
+	if len(ids) > 0 {
+		for _, id := range ids {
+			if strings.EqualFold(id, node.ID) || strings.EqualFold(id, node.UUID) {
+				return true
+			}
+		}
+	}
+	if len(tags) > 0 {
+		nodeTags := parseNodeTags(node.Tags)
+		for _, t := range tags {
+			for _, nt := range nodeTags {
+				if strings.EqualFold(nt, t) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func syntheticTargetToCheckTask(st db.SyntheticTargetRecord) protocol.CheckTask {
+	var headers map[string]string
+	if st.Headers != "" {
+		_ = json.Unmarshal([]byte(st.Headers), &headers)
+	}
+	var assertions []protocol.SyntheticAssertionRule
+	if st.Assertions != "" {
+		_ = json.Unmarshal([]byte(st.Assertions), &assertions)
+	}
+
+	task := protocol.CheckTask{
+		ID:              st.ID,
+		Kind:            st.Protocol,
+		Host:            st.TargetURL,
+		Method:          st.Method,
+		ServerURL:       st.TargetURL,
+		Headers:         headers,
+		BodyPayload:     st.BodyPayload,
+		Assertions:      assertions,
+		GRPCService:     st.GRPCService,
+		TimeoutMS:       st.TimeoutMS,
+		IntervalSeconds: st.IntervalSeconds,
+		Enabled:         st.Enabled,
+	}
+	if task.TimeoutMS <= 0 {
+		task.TimeoutMS = 5000
+	}
+	if task.IntervalSeconds <= 0 {
+		task.IntervalSeconds = 60
+	}
+	return task
+}
+

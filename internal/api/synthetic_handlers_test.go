@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -204,3 +206,238 @@ func TestCertificatesAndDNSMatrixHandlers(t *testing.T) {
 		t.Fatalf("divergent nodes = %#v, want [Node-Frankfurt]", divResp.Matrix[0].DivergentNodes)
 	}
 }
+
+func TestSyntheticTargetsCRUDAndResults(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	// 1. Create Synthetic Target
+	createPayload := map[string]any{
+		"id":               "syn-api-test",
+		"name":             "Production API Health",
+		"protocol":         "https",
+		"target_url":       "https://api.example.com/healthz",
+		"method":           "GET",
+		"headers":          map[string]string{"X-Test": "Synthetic"},
+		"timeout_ms":       4000,
+		"interval_seconds": 30,
+		"consensus_nodes":  2,
+		"node_tags":        []string{"edge", "prod"},
+		"node_ids":         []string{},
+		"assertions": []map[string]any{
+			{
+				"source":   "status_code",
+				"operator": "equals",
+				"target":   "200",
+			},
+		},
+		"enabled": true,
+	}
+	body, _ := json.Marshal(createPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/synthetic/targets", bytes.NewReader(body))
+	req.AddCookie(task4SessionCookie(session))
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if newCsrf := rec.Header().Get("X-CSRF-Token"); newCsrf != "" {
+		csrf = newCsrf
+	}
+
+	// 2. List Synthetic Targets
+	reqList := httptest.NewRequest(http.MethodGet, "/api/synthetic/targets", nil)
+	reqList.AddCookie(task4SessionCookie(session))
+	recList := httptest.NewRecorder()
+	handler.ServeHTTP(recList, reqList)
+
+	if recList.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recList.Code)
+	}
+	var targets []db.SyntheticTargetRecord
+	if err := json.Unmarshal(recList.Body.Bytes(), &targets); err != nil {
+		t.Fatalf("unmarshal targets: %v", err)
+	}
+	if len(targets) != 1 || targets[0].ID != "syn-api-test" {
+		t.Fatalf("unexpected targets: %#v", targets)
+	}
+
+	// 3. Update Synthetic Target
+	updatePayload := map[string]any{
+		"name": "Production API Health (Updated)",
+	}
+	updateBody, _ := json.Marshal(updatePayload)
+	reqUpdate := httptest.NewRequest(http.MethodPatch, "/api/synthetic/targets/syn-api-test", bytes.NewReader(updateBody))
+	reqUpdate.AddCookie(task4SessionCookie(session))
+	reqUpdate.Header.Set("X-CSRF-Token", csrf)
+	reqUpdate.Header.Set("Origin", "http://127.0.0.1:8080")
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	recUpdate := httptest.NewRecorder()
+	handler.ServeHTTP(recUpdate, reqUpdate)
+
+	if recUpdate.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on update, got %d: %s", recUpdate.Code, recUpdate.Body.String())
+	}
+	if newCsrf := recUpdate.Header().Get("X-CSRF-Token"); newCsrf != "" {
+		csrf = newCsrf
+	}
+
+	// 4. Ingest Synthetic Result from Agent
+	reg, nextCSRF := task4CreateRegistration(t, handler, session, csrf)
+	csrf = nextCSRF
+	regResp := task4Register(t, handler, protocol.RegisterRequest{
+		RegistrationToken: reg.Token,
+		NodeUUID:          task4NodeUUID1,
+		Name:              "Edge Node Singapore",
+	})
+	now := time.Now().UTC()
+
+	synRes := protocol.SyntheticResult{
+		Status:     "ok",
+		Protocol:   "https",
+		TargetURL:  "https://api.example.com/healthz",
+		StatusCode: 200,
+		Timing: protocol.SyntheticTiming{
+			TotalDurationMS: 35,
+			DNSLookupMS:     2,
+			TCPConnectMS:    10,
+			TLSHandshakeMS:  12,
+			TTFBMS:          8,
+			TransferMS:      3,
+		},
+		Passed:    true,
+		CheckedAt: now.Unix(),
+	}
+	env := protocol.SyntheticResultEnvelope{
+		TargetID: "syn-api-test",
+		Result:   synRes,
+	}
+	envBytes, _ := json.Marshal(env)
+	agentReq := httptest.NewRequest(http.MethodPost, "/api/agent/v1/synthetic-result", bytes.NewReader(envBytes))
+	agentReq.Header.Set("Authorization", "Bearer "+regResp.NodeToken)
+	agentReq.Header.Set("X-Probe-Request-ID", "syn-req-1")
+	agentReq.Header.Set("X-Probe-Timestamp", strconv.FormatInt(now.Unix(), 10))
+	agentReq.Header.Set("Content-Type", "application/json")
+	agentRec := httptest.NewRecorder()
+	handler.ServeHTTP(agentRec, agentReq)
+
+	if agentRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 NoContent, got %d: %s", agentRec.Code, agentRec.Body.String())
+	}
+
+
+	// 5. Test GET /api/synthetic/results & /api/public/synthetic/results
+	reqResults := httptest.NewRequest(http.MethodGet, "/api/public/synthetic/results", nil)
+	recResults := httptest.NewRecorder()
+	handler.ServeHTTP(recResults, reqResults)
+
+	if recResults.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for synthetic results, got %d: %s", recResults.Code, recResults.Body.String())
+	}
+	var overview SyntheticResultsOverviewResponse
+	if err := json.Unmarshal(recResults.Body.Bytes(), &overview); err != nil {
+		t.Fatalf("unmarshal overview: %v", err)
+	}
+	if overview.TotalTargets != 1 || len(overview.Targets) != 1 {
+		t.Fatalf("unexpected overview targets count: %d", overview.TotalTargets)
+	}
+	if overview.Targets[0].ConsensusStatus != "healthy" {
+		t.Fatalf("expected consensus healthy, got %s", overview.Targets[0].ConsensusStatus)
+	}
+
+	// 6. Test GET /api/synthetic/history
+	reqHist := httptest.NewRequest(http.MethodGet, "/api/synthetic/history?target_id=syn-api-test", nil)
+	reqHist.AddCookie(task4SessionCookie(session))
+	recHist := httptest.NewRecorder()
+	handler.ServeHTTP(recHist, reqHist)
+
+	if recHist.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for synthetic history, got %d", recHist.Code)
+	}
+	var history []db.SyntheticHistoryRecord
+	if err := json.Unmarshal(recHist.Body.Bytes(), &history); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history record, got %d", len(history))
+	}
+
+	// 7. Delete Synthetic Target
+	reqDel := httptest.NewRequest(http.MethodDelete, "/api/synthetic/targets/syn-api-test", nil)
+	reqDel.AddCookie(task4SessionCookie(session))
+	reqDel.Header.Set("X-CSRF-Token", csrf)
+	reqDel.Header.Set("Origin", "http://127.0.0.1:8080")
+	reqDel.Header.Set("Content-Type", "application/json")
+	recDel := httptest.NewRecorder()
+	handler.ServeHTTP(recDel, reqDel)
+
+	if recDel.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 on delete, got %d", recDel.Code)
+	}
+}
+
+func TestSyntheticSimulationTest(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	// Mock target server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"up","version":"1.0"}`))
+	}))
+	defer ts.Close()
+
+	testReq := map[string]any{
+		"protocol":   "http",
+		"target_url": ts.URL,
+		"method":     "GET",
+		"timeout_ms": 3000,
+		"assertions": []map[string]any{
+			{
+				"source":   "status_code",
+				"operator": "equals",
+				"target":   "200",
+			},
+			{
+				"source":   "jsonpath",
+				"property": "status",
+				"operator": "equals",
+				"target":   "up",
+			},
+		},
+	}
+	body, _ := json.Marshal(testReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/synthetic/test", bytes.NewReader(body))
+	req.AddCookie(task4SessionCookie(session))
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for synthetic test, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res protocol.SyntheticResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal simulation result: %v", err)
+	}
+	if res.StatusCode != 200 || !res.Passed {
+		t.Fatalf("expected test probe to pass, got: %#v", res)
+	}
+}
+

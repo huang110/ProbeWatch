@@ -485,6 +485,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureSpeedtestTables(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureSyntheticTables(ctx, db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1025,4 +1028,71 @@ func ensureSpeedtestTables(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+func ensureSyntheticTables(ctx context.Context, db *sql.DB) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS synthetic_targets (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			target_url TEXT NOT NULL,
+			method TEXT NOT NULL DEFAULT 'GET',
+			headers TEXT NOT NULL DEFAULT '{}',
+			body_payload TEXT NOT NULL DEFAULT '',
+			assertions TEXT NOT NULL DEFAULT '[]',
+			grpc_service TEXT NOT NULL DEFAULT '',
+			timeout_ms INTEGER NOT NULL DEFAULT 5000,
+			interval_seconds INTEGER NOT NULL DEFAULT 60,
+			node_tags TEXT NOT NULL DEFAULT '',
+			node_ids TEXT NOT NULL DEFAULT '',
+			consensus_nodes INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS synthetic_results_latest (
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			target_id TEXT NOT NULL REFERENCES synthetic_targets(id) ON DELETE CASCADE,
+			payload BLOB NOT NULL,
+			protocol TEXT NOT NULL,
+			status_code INTEGER NOT NULL DEFAULT 0,
+			passed INTEGER NOT NULL DEFAULT 1,
+			failed_assertion TEXT NOT NULL DEFAULT '',
+			dns_ms INTEGER NOT NULL DEFAULT 0,
+			connect_ms INTEGER NOT NULL DEFAULT 0,
+			tls_ms INTEGER NOT NULL DEFAULT 0,
+			ttfb_ms INTEGER NOT NULL DEFAULT 0,
+			total_ms INTEGER NOT NULL DEFAULT 0,
+			checked_at INTEGER NOT NULL,
+			PRIMARY KEY(node_id, target_id)
+		);`,
+		`CREATE TABLE IF NOT EXISTS synthetic_results_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			target_id TEXT NOT NULL REFERENCES synthetic_targets(id) ON DELETE CASCADE,
+			payload BLOB NOT NULL,
+			protocol TEXT NOT NULL,
+			status_code INTEGER NOT NULL DEFAULT 0,
+			passed INTEGER NOT NULL DEFAULT 1,
+			failed_assertion TEXT NOT NULL DEFAULT '',
+			dns_ms INTEGER NOT NULL DEFAULT 0,
+			connect_ms INTEGER NOT NULL DEFAULT 0,
+			tls_ms INTEGER NOT NULL DEFAULT 0,
+			ttfb_ms INTEGER NOT NULL DEFAULT 0,
+			total_ms INTEGER NOT NULL DEFAULT 0,
+			checked_at INTEGER NOT NULL,
+			recorded_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS synthetic_results_history_key_time_idx ON synthetic_results_history(node_id, target_id, checked_at, id);`,
+		`CREATE INDEX IF NOT EXISTS synthetic_results_history_time_idx ON synthetic_results_history(checked_at DESC);`,
+	}
+
+	for _, q := range queries {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("ensure synthetic tables: %w", err)
+		}
+	}
+	return nil
+}
+
 

@@ -40,6 +40,10 @@ var allowedTaskKinds = map[string]struct{}{
 	"mtr":        {},
 	"media_http": {},
 	"speedtest":  {},
+	"grpc":       {},
+	"websocket":  {},
+	"doh":        {},
+	"synthetic":  {},
 }
 
 // ReportRequest is the complete resource and check report sent by an agent.
@@ -58,6 +62,7 @@ type CheckResult struct {
 	MTR       *MTRResult       `json:"mtr,omitempty"`
 	Media     *MediaResult     `json:"media,omitempty"`
 	Speedtest *SpeedtestResult `json:"speedtest,omitempty"`
+	Synthetic *SyntheticResult `json:"synthetic,omitempty"`
 }
 
 // RegisterRequest contains the one-time registration credential and node identity.
@@ -105,6 +110,12 @@ type MediaResultEnvelope struct {
 type SpeedtestResultEnvelope struct {
 	TaskID string          `json:"task_id"`
 	Result SpeedtestResult `json:"result"`
+}
+
+// SyntheticResultEnvelope is the strict wire shape for a standalone synthetic check result.
+type SyntheticResultEnvelope struct {
+	TargetID string          `json:"target_id"`
+	Result   SyntheticResult `json:"result"`
 }
 
 // InterfaceStat represents one network interface's traffic counters and addresses.
@@ -166,9 +177,14 @@ type CheckTask struct {
 	Keyword         string       `json:"keyword,omitempty"`
 	Nameserver      string       `json:"nameserver,omitempty"`
 	CheckTLS        bool         `json:"check_tls,omitempty"`
-	DownloadBytes   int64        `json:"download_bytes,omitempty"`
-	UploadBytes     int64        `json:"upload_bytes,omitempty"`
-	ServerURL       string       `json:"server_url,omitempty"`
+	DownloadBytes   int64                    `json:"download_bytes,omitempty"`
+	UploadBytes     int64                    `json:"upload_bytes,omitempty"`
+	ServerURL       string                   `json:"server_url,omitempty"`
+	Method          string                   `json:"method,omitempty"`
+	Headers         map[string]string        `json:"headers,omitempty"`
+	BodyPayload     string                   `json:"body_payload,omitempty"`
+	Assertions      []SyntheticAssertionRule `json:"assertions,omitempty"`
+	GRPCService     string                   `json:"grpc_service,omitempty"`
 }
 
 // RegionRule is one bounded body-marker rule for classifying the serving
@@ -353,6 +369,82 @@ type SpeedtestResult struct {
 	TestedAt          int64   `json:"tested_at,omitempty"`
 }
 
+// SyntheticAssertionRule defines one declarative SLA / contract check rule.
+type SyntheticAssertionRule struct {
+	Source   string `json:"source"`             // status_code, header, body_regex, jsonpath, max_latency_ms, cert_days_left
+	Property string `json:"property,omitempty"` // header key or jsonpath expression
+	Operator string `json:"operator"`           // equals, not_equals, contains, not_contains, regex_match, less_than, greater_than
+	Target   string `json:"target"`             // expected value or threshold string
+}
+
+func (r SyntheticAssertionRule) Validate() error {
+	switch r.Source {
+	case "status_code", "header", "body_regex", "jsonpath", "max_latency_ms", "cert_days_left":
+	default:
+		return fmt.Errorf("invalid assertion source %q", r.Source)
+	}
+	switch r.Operator {
+	case "equals", "not_equals", "contains", "not_contains", "regex_match", "less_than", "greater_than":
+	default:
+		return fmt.Errorf("invalid assertion operator %q", r.Operator)
+	}
+	if err := validateString("property", r.Property, 256, false); err != nil {
+		return err
+	}
+	if err := validateString("target", r.Target, 1024, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SyntheticTiming contains the multi-phase network connection breakdown.
+type SyntheticTiming struct {
+	DNSLookupMS     int64 `json:"dns_lookup_ms"`
+	TCPConnectMS    int64 `json:"tcp_connect_ms"`
+	TLSHandshakeMS  int64 `json:"tls_handshake_ms"`
+	TTFBMS          int64 `json:"ttfb_ms"`
+	TransferMS      int64 `json:"transfer_ms"`
+	TotalDurationMS int64 `json:"total_duration_ms"`
+}
+
+// SyntheticResult contains outcome, timing waterfall, and assertion status for a synthetic probe.
+type SyntheticResult struct {
+	Protocol        string          `json:"protocol"`
+	TargetURL       string          `json:"target_url"`
+	Timing          SyntheticTiming `json:"timing"`
+	StatusCode      int             `json:"status_code,omitempty"`
+	GRPCStatus      string          `json:"grpc_status,omitempty"`
+	WebSocketEcho   bool            `json:"websocket_echo,omitempty"`
+	DNSAnswers      []string        `json:"dns_answers,omitempty"`
+	Passed          bool            `json:"passed"`
+	FailedAssertion string          `json:"failed_assertion,omitempty"`
+	Status          string          `json:"status"`
+	Error           string          `json:"error,omitempty"`
+	CheckedAt       int64           `json:"checked_at"`
+}
+
+func (r SyntheticResult) Validate() error {
+	if err := validateString("protocol", r.Protocol, maxKindLength, true); err != nil {
+		return err
+	}
+	if err := validateString("target_url", r.TargetURL, maxEndpointLength, false); err != nil {
+		return err
+	}
+	if err := validateString("status", r.Status, maxKindLength, false); err != nil {
+		return err
+	}
+	if err := validateString("error", r.Error, maxReasonLength, false); err != nil {
+		return err
+	}
+	if err := validateString("failed_assertion", r.FailedAssertion, maxReasonLength, false); err != nil {
+		return err
+	}
+	if r.CheckedAt <= 0 {
+		return errors.New("checked_at must be greater than zero")
+	}
+	return nil
+}
+
 func (r ReportRequest) Validate() error {
 	if err := validateUUID("node_uuid", r.NodeUUID); err != nil {
 		return err
@@ -441,6 +533,13 @@ func (r MediaResultEnvelope) Validate() error {
 
 func (r SpeedtestResultEnvelope) Validate() error {
 	if err := validateString("task_id", r.TaskID, maxIDLength, true); err != nil {
+		return err
+	}
+	return r.Result.Validate()
+}
+
+func (r SyntheticResultEnvelope) Validate() error {
+	if err := validateString("target_id", r.TargetID, maxIDLength, true); err != nil {
 		return err
 	}
 	return r.Result.Validate()
@@ -548,6 +647,34 @@ func (t CheckTask) Validate() error {
 	if err := validateString("server_url", t.ServerURL, maxEndpointLength, false); err != nil {
 		return err
 	}
+	if len(t.Assertions) > 16 {
+		return errors.New("assertions count exceeds 16")
+	}
+	for i, a := range t.Assertions {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("assertions[%d]: %w", i, err)
+		}
+	}
+	if len(t.Headers) > 32 {
+		return errors.New("headers count exceeds 32")
+	}
+	for k, v := range t.Headers {
+		if err := validateString("header key", k, 128, true); err != nil {
+			return err
+		}
+		if err := validateString("header value", v, 1024, false); err != nil {
+			return err
+		}
+	}
+	if len([]byte(t.BodyPayload)) > 65536 {
+		return errors.New("body_payload exceeds 64KB")
+	}
+	if err := validateString("method", t.Method, 16, false); err != nil {
+		return err
+	}
+	if err := validateString("grpc_service", t.GRPCService, 256, false); err != nil {
+		return err
+	}
 	return ValidateRegionRules(t.Kind, t.RegionRules)
 }
 
@@ -586,6 +713,12 @@ func (r CheckResult) Validate() error {
 			return fmt.Errorf("speedtest: %w", err)
 		}
 	}
+	if r.Synthetic != nil {
+		resultCount++
+		if err := r.Synthetic.Validate(); err != nil {
+			return fmt.Errorf("synthetic: %w", err)
+		}
+	}
 	if resultCount != 1 {
 		return errors.New("check result must contain exactly one typed result")
 	}
@@ -605,6 +738,10 @@ func (r CheckResult) Validate() error {
 	case "speedtest":
 		if r.Speedtest == nil {
 			return errors.New("kind speedtest requires a speedtest result")
+		}
+	case "grpc", "websocket", "doh", "synthetic":
+		if r.Synthetic == nil {
+			return fmt.Errorf("kind %s requires a synthetic result", r.Kind)
 		}
 	}
 	return nil

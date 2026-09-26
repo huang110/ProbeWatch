@@ -46,6 +46,30 @@ func (f *fakeSpeedtestMonitor) Run(context.Context, protocol.CheckTask) protocol
 	return protocol.SpeedtestResult{Status: "ok", DownloadSpeedMbps: 100.0, UploadSpeedMbps: 50.0, TestedAt: 1}
 }
 
+type fakeSyntheticMonitor struct{ calls int }
+
+func (f *fakeSyntheticMonitor) Run(context.Context, protocol.CheckTask) protocol.SyntheticResult {
+	f.calls++
+	return protocol.SyntheticResult{
+		Status:     "ok",
+		Protocol:   "https",
+		TargetURL:  "https://api.example.com/health",
+		StatusCode: 200,
+		Timing: protocol.SyntheticTiming{
+			TotalDurationMS: 45,
+			DNSLookupMS:     2,
+			TCPConnectMS:    10,
+			TLSHandshakeMS:  15,
+			TTFBMS:          12,
+			TransferMS:      5,
+		},
+		Passed:    true,
+		CheckedAt: 1720000000,
+	}
+}
+
+
+
 func TestNewRequiresOutboundAgentCredentials(t *testing.T) {
 	if _, err := New(config.Config{}); err == nil {
 		t.Fatal("New accepted an agent without endpoint or credentials")
@@ -539,3 +563,45 @@ func TestReportRunsSpeedtestTask(t *testing.T) {
 		t.Fatalf("unexpected speedtest result: %#v", res)
 	}
 }
+
+func TestReportRunsSyntheticTask(t *testing.T) {
+	stub := &stubControlPlane{}
+	syntheticTask := protocol.CheckTask{
+		ID:              "synthetic-1",
+		Kind:            "synthetic",
+		Host:            "api.example.com",
+		Port:            443,
+		Method:          "GET",
+		Path:            "/health",
+		IntervalSeconds: 30,
+		MaxHops:         20,
+		Enabled:         true,
+		TimeoutMS:       5000,
+	}
+	stub.setConfig(protocol.AgentConfigResponse{Tasks: []protocol.CheckTask{syntheticTask}})
+	runner := newStubRunner(t, stub)
+	fakeSyn := &fakeSyntheticMonitor{}
+	runner.synthetic = fakeSyn
+
+	if err := runner.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.report(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fakeSyn.calls != 1 {
+		t.Fatalf("expected 1 synthetic call, got %d", fakeSyn.calls)
+	}
+	reports := stub.receivedReports()
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 report, got %d", len(reports))
+	}
+	if len(reports[0].Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(reports[0].Results))
+	}
+	res := reports[0].Results[0]
+	if res.Kind != "synthetic" || res.Synthetic == nil || res.Synthetic.StatusCode != 200 {
+		t.Fatalf("unexpected synthetic result: %#v", res)
+	}
+}
+
