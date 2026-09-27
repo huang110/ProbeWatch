@@ -11628,3 +11628,311 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .ssh-result-pending { padding: 18px 12px; color: var(--text-3, #7d8b99); font-size: 11px; }
 [data-theme="dark"] .ssh-runner-card, [data-theme="dark"] .ssh-result-section, :root:not([data-theme="light"]) .ssh-runner-card, :root:not([data-theme="light"]) .ssh-result-section { background: #0e1012; }
 @media (max-width: 720px) { .ssh-section-heading, .ssh-runner-footer { flex-direction: column; align-items: flex-start; } .ssh-execute-button { width: 100%; justify-content: center; } .ssh-search-box { max-width: none; width: 100%; } }
+
+/* ==========================================================================
+   ProbeWatch admin console unified visual system
+   All admin sub-pages share the same surface, spacing, typography and controls.
+   ========================================================================== */
+.app-shell {
+  --admin-page-max: 1440px;
+  --admin-space-1: 6px;
+  --admin-space-2: 10px;
+  --admin-space-3: 14px;
+  --admin-space-4: 18px;
+  --admin-space-5: 24px;
+  --admin-control-h: 36px;
+  --admin-radius: 10px;
+  --admin-radius-sm: 7px;
+  --admin-surface: var(--bg-panel);
+  --admin-surface-soft: var(--bg-inset);
+  --admin-border: var(--border);
+  --admin-border-strong: var(--border-strong);
+  --admin-heading: var(--text-1);
+  --admin-muted: var(--text-2);
+  --admin-subtle: var(--text-3);
+}
+
+.app-shell .content-wrap {
+  width: min(100%, var(--admin-page-max));
+  max-width: var(--admin-page-max);
+  padding: 26px 30px 34px;
+}
+.app-shell .content-wrap > * { min-width: 0; }
+.app-shell .subpage,
+.app-shell .dashboard-lite-container,
+.app-shell .settings-layout,
+.app-shell .storage-layout {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* Page heading rhythm */
+.app-shell .page-heading,
+.app-shell .subpage-heading {
+  align-items: flex-start;
+  min-height: 58px;
+  margin: 0 0 var(--admin-space-5);
+  padding-bottom: var(--admin-space-4);
+  border-bottom: 1px solid var(--admin-border);
+}
+.app-shell .page-heading h1,
+.app-shell .subpage-heading h1 {
+  margin: 0 0 6px;
+  color: var(--admin-heading);
+  font-size: clamp(22px, 2vw, 28px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -.035em;
+}
+.app-shell .page-heading p,
+.app-shell .subpage-heading p {
+  max-width: 760px;
+  color: var(--admin-subtle);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.app-shell .heading-actions { gap: var(--admin-space-2); }
+
+/* One card language across dashboards and sub-pages */
+.app-shell .panel,
+.app-shell .card,
+.app-shell .stat-card,
+.app-shell .placeholder-panel,
+.app-shell .lite-table-panel,
+.app-shell .network-stat-card,
+.app-shell .network-controls-bar,
+.app-shell .traffic-report-container > .panel,
+.app-shell .dashboard-lite-container .panel {
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface);
+  box-shadow: var(--shadow-card);
+}
+.app-shell .panel,
+.app-shell .card { padding: var(--admin-space-5); }
+.app-shell .stat-card { padding: var(--admin-space-4); }
+.app-shell .panel + .panel,
+.app-shell .card + .card { margin-top: var(--admin-space-4); }
+.app-shell .panel:hover,
+.app-shell .card:hover { border-color: var(--admin-border-strong); }
+.app-shell .panel-header {
+  align-items: flex-start;
+  min-height: 34px;
+  margin: 0 0 var(--admin-space-4);
+  padding-bottom: var(--admin-space-3);
+  border-bottom: 1px solid var(--admin-border);
+}
+.app-shell .panel-header h2,
+.app-shell .panel-header h3 {
+  color: var(--admin-heading);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.app-shell .panel-header p { color: var(--admin-subtle); font-size: 11px; line-height: 1.55; }
+
+/* Consistent controls */
+.app-shell input:not([type=checkbox]):not([type=radio]),
+.app-shell select,
+.app-shell textarea,
+.app-shell .field-input,
+.app-shell .field-select,
+.app-shell .field-textarea,
+.app-shell .search-field {
+  min-height: var(--admin-control-h);
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-surface-soft);
+  color: var(--admin-heading);
+  font-size: 12px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.app-shell input:not([type=checkbox]):not([type=radio]),
+.app-shell select,
+.app-shell textarea,
+.app-shell .field-input,
+.app-shell .field-select,
+.app-shell .field-textarea { padding: 0 11px; }
+.app-shell textarea,
+.app-shell .field-textarea { min-height: 84px; padding-top: 9px; padding-bottom: 9px; }
+.app-shell input:not([type=checkbox]):not([type=radio]):focus,
+.app-shell select:focus,
+.app-shell textarea:focus,
+.app-shell .field-input:focus,
+.app-shell .field-select:focus,
+.app-shell .field-textarea:focus,
+.app-shell .search-field:focus-within {
+  border-color: var(--blue);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--blue-dim);
+}
+.app-shell .field-label,
+.app-shell .control-label,
+.app-shell .traffic-cal-input-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.app-shell .field { min-width: 0; }
+
+/* Consistent buttons and status pills */
+.app-shell .button {
+  min-height: var(--admin-control-h);
+  padding: 0 13px;
+  border-radius: var(--admin-radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+.app-shell .button.btn-sm,
+.app-shell .btn-sm { min-height: 30px; padding: 0 10px; font-size: 11px; }
+.app-shell .button-primary { background: var(--blue); border-color: var(--blue); }
+.app-shell .button-quiet { background: var(--admin-surface); border-color: var(--admin-border-strong); }
+.app-shell .badge,
+.app-shell .status-pill,
+.app-shell .badge-quiet,
+.app-shell .status-tag {
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+/* Tables use the same density, header and row treatment everywhere. */
+.app-shell .table-responsive,
+.app-shell .table-scroll,
+.app-shell .node-table-wrap,
+.app-shell .table-wrap,
+.app-shell .lite-table-panel {
+  overflow-x: auto;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+}
+.app-shell table { width: 100%; border-collapse: collapse; }
+.app-shell table thead th {
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--admin-border);
+  color: var(--admin-subtle);
+  background: var(--admin-surface-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-align: left;
+  white-space: nowrap;
+}
+.app-shell table tbody td {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--admin-border) 72%, transparent);
+  color: var(--admin-muted);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.app-shell table tbody tr { transition: background 120ms ease; }
+.app-shell table tbody tr:hover { background: color-mix(in srgb, var(--blue-dim) 42%, transparent); }
+
+/* Uniform section tabs and toolbars */
+.app-shell .tabs,
+.app-shell .settings-tabs,
+.app-shell .storage-tabs,
+.app-shell .tab-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 42px;
+  padding: 3px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-surface-soft);
+  overflow-x: auto;
+}
+.app-shell .tabs button,
+.app-shell .settings-tabs button,
+.app-shell .settings-tabs a,
+.app-shell .storage-tabs button,
+.app-shell .tab-list button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--admin-subtle);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-shell .tabs button:hover,
+.app-shell .settings-tabs button:hover,
+.app-shell .settings-tabs a:hover,
+.app-shell .storage-tabs button:hover,
+.app-shell .tab-list button:hover,
+.app-shell .tabs button.is-active,
+.app-shell .settings-tabs button.is-active,
+.app-shell .settings-tabs a:first-child,
+.app-shell .storage-tabs button.is-active,
+.app-shell .tab-list button.is-active {
+  color: var(--admin-heading);
+  background: var(--admin-surface);
+  box-shadow: 0 1px 2px rgba(25,45,70,.08);
+}
+.app-shell .settings-tabs,
+.app-shell .storage-tabs { border: 0; border-bottom: 1px solid var(--admin-border); border-radius: 0; background: transparent; padding: 0; gap: 18px; }
+.app-shell .settings-tabs button,
+.app-shell .settings-tabs a,
+.app-shell .storage-tabs button { border-radius: 0; min-height: 42px; padding: 0 2px; box-shadow: none; }
+.app-shell .settings-tabs button.is-active,
+.app-shell .settings-tabs a:first-child,
+.app-shell .storage-tabs button.is-active { color: var(--blue); background: transparent; box-shadow: inset 0 -2px var(--blue); }
+
+/* Modal and overlay rhythm */
+.app-shell .modal-overlay,
+.app-shell .modal-backdrop { padding: 24px; }
+.app-shell .modal-card,
+.app-shell .modal-dialog,
+.app-shell .traffic-cal-modal-card {
+  border: 1px solid var(--admin-border-strong);
+  border-radius: 14px;
+  background: var(--admin-surface);
+  box-shadow: var(--shadow-pop);
+}
+.app-shell .modal-card .modal-header,
+.app-shell .modal-dialog .modal-header,
+.app-shell .traffic-cal-header {
+  min-height: 62px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--admin-border);
+}
+.app-shell .modal-card .modal-body,
+.app-shell .modal-dialog .modal-body { padding: 20px; }
+.app-shell .modal-card .modal-actions,
+.app-shell .modal-dialog .modal-footer,
+.app-shell .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--admin-border);
+}
+
+/* Responsive spacing stays predictable on narrow screens. */
+@media (max-width: 900px) {
+  .app-shell .content-wrap { padding: 22px 18px 28px; }
+  .app-shell .panel, .app-shell .card { padding: 18px; }
+  .app-shell .page-heading, .app-shell .subpage-heading { flex-direction: column; gap: 12px; }
+  .app-shell .heading-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+}
+@media (max-width: 600px) {
+  .app-shell .content-wrap { padding: 18px 12px 24px; }
+  .app-shell .panel, .app-shell .card { padding: 14px; border-radius: 9px; }
+  .app-shell .panel-header { flex-direction: column; gap: 8px; }
+  .app-shell table { min-width: 640px; }
+  .app-shell .modal-overlay, .app-shell .modal-backdrop { padding: 10px; }
+}
+
+[data-theme="light"] .app-shell table tbody td { border-top-color: #edf1f4; }
+[data-theme="light"] .app-shell .panel:hover,
+[data-theme="light"] .app-shell .card:hover { border-color: #d5e0e9; }
