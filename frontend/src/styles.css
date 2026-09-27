@@ -125,6 +125,16 @@
 .storage-intro h2 { margin: 0; color: var(--text-1); font-size: 20px; }
 .storage-intro p { margin: 6px 0 0; color: var(--text-3); font-size: 12px; }
 .storage-layout .backup-management-card { margin-top: 0 !important; }
+.storage-overview-panel { padding: 24px; }
+.storage-overview-panel h3 { margin: 0; font-size: 16px; color: var(--text-1); }
+.storage-overview-panel > p { margin: 6px 0 20px; color: var(--text-3); font-size: 12px; }
+.storage-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.storage-overview-grid > div { display: flex; flex-direction: column; gap: 6px; padding: 18px 16px; }
+.storage-overview-grid > div + div { border-left: 1px solid var(--border); }
+.storage-overview-grid span, .storage-overview-grid small { color: var(--text-3); font-size: 12px; }
+.storage-overview-grid strong { color: var(--text-1); font-size: 20px; }
+[data-theme="light"] .storage-overview-grid { border-color: #e5eaf0; }
+[data-theme="light"] .storage-overview-grid > div + div { border-left-color: #e5eaf0; }
 [data-theme="light"] .storage-tabs { border-bottom-color: #dce5ed; }
 [data-theme="light"] .storage-tabs button.is-active::after { background: #1687e8; }
 .settings-section-heading { display: flex; align-items: flex-start; gap: 28px; margin-top: 12px; padding: 8px 0 10px; border-bottom: 1px solid var(--border); scroll-margin-top: 20px; }
@@ -169,6 +179,8 @@
   .settings-layout .theme-card-grid { grid-template-columns: 1fr; }
   .settings-layout .panel-header { align-items: flex-start; }
   .storage-intro { gap: 8px; flex-direction: column; }
+  .storage-overview-grid { grid-template-columns: 1fr; }
+  .storage-overview-grid > div + div { border-top: 1px solid var(--border); border-left: 0; }
 }
 
 /* 深色主题下，仪表盘也使用同一套暗色设计令牌 */

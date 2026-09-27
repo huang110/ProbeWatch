@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertCenterView } from './AlertCenterView.jsx'
 import { MediaMatrix } from './MediaMatrix.jsx'
 import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
@@ -81,6 +82,8 @@ export function SubPage({
   }
 
   const [title, description] = pages[page] || pages.dashboard
+  const [settingsTab, setSettingsTab] = useState('public')
+  const [storageTab, setStorageTab] = useState('overview')
 
   return (
     <section className="subpage">
@@ -152,19 +155,19 @@ export function SubPage({
       ) : page === 'settings' ? (
         <div className="settings-layout">
           <nav className="settings-tabs" aria-label="系统设置分区">
-            {[['settings-public', '公开状态'], ['settings-access', '团队与开发者'], ['settings-security', '账号安全'], ['settings-data', '数据与审计']].map(([id, label], index) => (
+            {[['public', '公开状态'], ['access', '团队与开发者'], ['security', '账号安全'], ['data', '数据与审计']].map(([id, label]) => (
               <button
                 key={id}
                 type="button"
-                className={index === 0 ? 'is-active' : ''}
-                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className={settingsTab === id ? 'is-active' : ''}
+                onClick={() => setSettingsTab(id)}
               >
                 {label}
               </button>
             ))}
           </nav>
 
-          <div id="settings-public" className="settings-section-heading">
+          {settingsTab === 'public' && <><div className="settings-section-heading">
             <span className="settings-section-kicker">PUBLIC STATUS</span>
             <div>
               <h2>状态页与事件</h2>
@@ -173,9 +176,9 @@ export function SubPage({
           </div>
           <div className="settings-grid settings-grid-wide">
             <div className="settings-card-span"><StatusPageAdminCard nodes={data} /></div>
-          </div>
+          </div></>}
 
-          <div id="settings-access" className="settings-section-heading">
+          {settingsTab === 'access' && <><div className="settings-section-heading">
             <span className="settings-section-kicker">ACCESS CONTROL</span>
             <div>
               <h2>团队与开发者访问</h2>
@@ -185,9 +188,9 @@ export function SubPage({
           <div className="settings-grid">
             <UserManagementCard currentUser={currentUser} nodes={data} />
             <TokenManagementCard currentUser={currentUser} nodes={data} />
-          </div>
+          </div></>}
 
-          <div id="settings-security" className="settings-section-heading">
+          {settingsTab === 'security' && <><div className="settings-section-heading">
             <span className="settings-section-kicker">SECURITY</span>
             <div>
               <h2>账号安全与偏好</h2>
@@ -202,9 +205,9 @@ export function SubPage({
               theme={theme}
               onThemeChange={onThemeChange}
             />
-          </div>
+          </div></>}
 
-          <div id="settings-data" className="settings-section-heading">
+          {settingsTab === 'data' && <><div className="settings-section-heading">
             <span className="settings-section-kicker">DATA & AUDIT</span>
             <div>
               <h2>数据备份与安全审计</h2>
@@ -214,7 +217,7 @@ export function SubPage({
           <div className="settings-grid settings-grid-wide">
             <AuditLogView />
             <div className="settings-card-span"><BackupManagementCard /></div>
-          </div>
+          </div></>}
         </div>
       ) : page === 'status-admin' || page === 'incidents' ? (
         <StatusPageAdminCard nodes={data} />
@@ -227,14 +230,24 @@ export function SubPage({
       ) : page === 'backups' ? (
         <div className="storage-layout">
           <nav className="storage-tabs" aria-label="数据与存储分区">
-            <button type="button" className="is-active">存储概览</button>
-            <button type="button" onClick={() => document.querySelector('.backup-management-card')?.scrollIntoView({ behavior: 'smooth' })}>备份与迁移</button>
+            <button type="button" className={storageTab === 'overview' ? 'is-active' : ''} onClick={() => setStorageTab('overview')}>存储概览</button>
+            <button type="button" className={storageTab === 'backup' ? 'is-active' : ''} onClick={() => setStorageTab('backup')}>备份与迁移</button>
           </nav>
           <div className="storage-intro">
             <span className="settings-section-kicker">DATA & STORAGE</span>
             <div><h2>数据与存储</h2><p>查看数据库占用、备份快照与异地迁移状态。</p></div>
           </div>
-          <BackupManagementCard />
+          {storageTab === 'overview' ? (
+            <div className="storage-overview-panel panel">
+              <h3>存储使用</h3>
+              <p>数据库、运行日志和备份文件的空间管理。</p>
+              <div className="storage-overview-grid">
+                <div><span>主数据库</span><strong>实时统计</strong><small>配置、服务器与任务数据</small></div>
+                <div><span>备份空间</span><strong>按快照统计</strong><small>本地快照与异地备份状态</small></div>
+              </div>
+              <button type="button" className="button button-primary" onClick={() => setStorageTab('backup')}>打开备份与迁移</button>
+            </div>
+          ) : <BackupManagementCard />}
         </div>
       ) : (
         <div className="panel placeholder-panel">
