@@ -994,6 +994,7 @@ export function App() {
       const meta = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name)
       return !meta?.hidden
     })
+    const targetUuid = parseRouteFromHash()?.nodeUuid
 
     const guestNodesList = visibleGuestNames.map((name) => {
       if (data.length > 0) {
@@ -1007,6 +1008,11 @@ export function App() {
       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
       const os = custom.os || 'Ubuntu 24.04 LTS'
+      // The public status contract intentionally omits UUIDs. When a public
+      // detail link contains a UUID and there is only one visible node, bind
+      // that URL UUID to the live telemetry row so the detail page can load
+      // its public history/check/traffic endpoints without requiring login.
+      const publicUuid = targetUuid && visibleGuestNames.length === 1 ? targetUuid : null
       const cpuPercent = numeric(telemetry.cpu_percent)
       const memUsed = numeric(telemetry.memory_used_bytes)
       const memTotal = numeric(telemetry.memory_total_bytes)
@@ -1015,8 +1021,8 @@ export function App() {
       const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
 
       return {
-        uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
-        id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+        uuid: custom.uuid || publicUuid || customKey || `guest-${encodeURIComponent(name)}`,
+        id: custom.uuid || publicUuid || customKey || `guest-${encodeURIComponent(name)}`,
         name: name,
         status: safeText(telemetry.status, 'unknown'),
         lastReportedAt: telemetry.last_reported_at || null,
@@ -1046,7 +1052,6 @@ export function App() {
       }
     })
 
-    const targetUuid = parseRouteFromHash()?.nodeUuid
     const currentDetailNode = detailNode || (targetUuid ? guestNodesList.find((n) => (n.uuid || n.id) === targetUuid) : null) || (activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null)
 
     if (activeNav === 'node-detail' && currentDetailNode) {
