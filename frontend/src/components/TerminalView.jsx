@@ -160,6 +160,9 @@ function renderANSI(text) {
 export default function TerminalView({ initialNodeId = null }) {
   const [nodes, setNodes] = useState([])
   const [selectedNodeId, setSelectedNodeId] = useState(initialNodeId || '')
+  const [selectedNodeIds, setSelectedNodeIds] = useState(initialNodeId ? [initialNodeId] : [])
+  const [nodeSearch, setNodeSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('interactive') // 'interactive' | 'runner'
@@ -183,9 +186,16 @@ export default function TerminalView({ initialNodeId = null }) {
   const [timeoutSec, setTimeoutSec] = useState(30)
   const [executing, setExecuting] = useState(false)
   const [execResult, setExecResult] = useState(null)
+  const [batchResults, setBatchResults] = useState([])
   const [copied, setCopied] = useState(false)
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId || n.uuid === selectedNodeId)
+  const filteredNodes = nodes.filter((node) => {
+    const query = nodeSearch.trim().toLowerCase()
+    const matchesQuery = !query || [node.name, node.id, node.uuid].filter(Boolean).some((value) => String(value).toLowerCase().includes(query))
+    const matchesStatus = statusFilter === 'all' || (statusFilter === 'online' ? node.terminal_online : !node.terminal_online)
+    return matchesQuery && matchesStatus
+  })
 
   // Fetch node terminal statuses
   const loadStatus = useCallback(async () => {
@@ -193,9 +203,19 @@ export default function TerminalView({ initialNodeId = null }) {
       setLoading(true)
       const data = await fetchTerminalStatus()
       setNodes(data.nodes || [])
+      if (selectedNodeId) {
+        const matchingNode = (data.nodes || []).find((node) => node.id === selectedNodeId || node.uuid === selectedNodeId)
+        if (matchingNode && matchingNode.id !== selectedNodeId) setSelectedNodeId(matchingNode.id)
+      }
       if (!selectedNodeId && data.nodes && data.nodes.length > 0) {
         setSelectedNodeId(data.nodes[0].id)
       }
+      setSelectedNodeIds((current) => {
+        const available = new Map((data.nodes || []).flatMap((node) => [[node.id, node.id], [node.uuid, node.id]]))
+        const kept = Array.from(new Set(current.map((id) => available.get(id)).filter(Boolean)))
+        if (kept.length > 0) return kept
+        return data.nodes?.[0] ? [data.nodes[0].id] : []
+      })
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -207,6 +227,13 @@ export default function TerminalView({ initialNodeId = null }) {
   useEffect(() => {
     loadStatus()
   }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadStatus()
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [loadStatus])
 
   // Auto-scroll terminal output
   useEffect(() => {
@@ -363,33 +390,51 @@ export default function TerminalView({ initialNodeId = null }) {
   // Handle command runner execution
   const runCommand = async (cmdText) => {
     const toRun = cmdText || customCmd
-    if (!toRun.trim() || !selectedNode) return
+    const targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : (selectedNode ? [selectedNode.id] : [])
+    const targetNodes = targetIds.map((id) => nodes.find((node) => node.id === id || node.uuid === id)).filter(Boolean)
+    if (!toRun.trim() || targetNodes.length === 0) return
 
     setExecuting(true)
     setExecResult(null)
+    setBatchResults(targetNodes.map((node) => ({ node, status: 'pending' })))
     setError(null)
 
-    try {
-      const res = await execTerminalCommand({
-        nodeId: selectedNode.id,
-        command: toRun,
-        timeoutSec: Number(timeoutSec),
-      })
-      setExecResult({
-        ...res,
-        command: toRun,
-        timestamp: new Date().toLocaleTimeString(),
-      })
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setExecuting(false)
+    const results = []
+    for (const node of targetNodes) {
+      setBatchResults((current) => current.map((item) => item.node.id === node.id ? { ...item, status: 'running' } : item))
+      try {
+        const res = await execTerminalCommand({
+          nodeId: node.id,
+          command: toRun,
+          timeoutSec: Number(timeoutSec),
+        })
+        const result = { ...res, node, status: res.exit_code === 0 ? 'success' : 'failed', command: toRun, timestamp: new Date().toLocaleTimeString() }
+        results.push(result)
+        setBatchResults((current) => current.map((item) => item.node.id === node.id ? result : item))
+        setExecResult(result)
+      } catch (err) {
+        const result = { node, status: 'failed', command: toRun, error: err.message, timestamp: new Date().toLocaleTimeString() }
+        results.push(result)
+        setBatchResults((current) => current.map((item) => item.node.id === node.id ? result : item))
+      }
     }
+    setExecuting(false)
+  }
+
+  const toggleNode = (nodeId) => {
+    setSelectedNodeIds((current) => current.includes(nodeId) ? current.filter((id) => id !== nodeId) : [...current, nodeId])
+  }
+
+  const toggleVisibleNodes = () => {
+    const visibleIds = filteredNodes.map((node) => node.id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedNodeIds.includes(id))
+    setSelectedNodeIds((current) => allSelected ? current.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...current, ...visibleIds])))
   }
 
   const handleCopy = () => {
-    if (!execResult?.stdout) return
-    navigator.clipboard.writeText(execResult.stdout)
+    const output = batchResults.map((item) => `${item.node.name || item.node.uuid}:\n${item.stdout || item.error || '(无输出)'}`).join('\n\n')
+    if (!output) return
+    navigator.clipboard.writeText(output)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -478,7 +523,7 @@ export default function TerminalView({ initialNodeId = null }) {
           }`}
         >
           <Play size={18} />
-          受控快捷执行 (Command Runner)
+          远程执行
         </button>
       </div>
 
@@ -598,151 +643,17 @@ export default function TerminalView({ initialNodeId = null }) {
 
       {/* Tab 2: Controlled Command Runner */}
       {activeTab === 'runner' && (
-        <div className="space-y-6">
-          {/* Quick Diagnostics Grid */}
-          <div>
-            <h3 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
-              <Cpu size={16} className="text-cyan-400" />
-              快捷受控诊断指令 (一键执行)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {QUICK_PRESETS.map((p) => {
-                const Icon = p.icon
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => runCommand(p.cmd)}
-                    className="p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-cyan-500/30 hover:bg-white/[0.04] transition-all cursor-pointer group flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2 text-sm font-medium text-white group-hover:text-cyan-300 transition-colors">
-                          <Icon size={18} className="text-slate-400 group-hover:text-cyan-400" />
-                          {p.title}
-                        </div>
-                        <Play
-                          size={14}
-                          className="text-slate-500 group-hover:text-cyan-400 group-hover:translate-x-0.5 transition-all"
-                        />
-                      </div>
-                      <p className="text-xs text-slate-400 line-clamp-2">{p.desc}</p>
-                    </div>
-                    <div className="mt-3 pt-2 border-t border-white/5 font-mono text-[11px] text-slate-500 truncate group-hover:text-slate-400">
-                      $ {p.cmd}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Custom Command Input */}
-          <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
-            <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <TerminalIcon size={16} className="text-emerald-400" />
-              自定义受控指令执行
-            </h3>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 flex items-center bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 font-mono">
-                <span className="text-emerald-400 font-bold mr-2 text-sm">$</span>
-                <input
-                  type="text"
-                  value={customCmd}
-                  onChange={(e) => setCustomCmd(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && runCommand()}
-                  placeholder="例如: docker ps 或 ping -c 3 8.8.8.8"
-                  className="flex-1 bg-transparent text-xs text-white placeholder-slate-500 outline-none"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <select
-                  value={timeoutSec}
-                  onChange={(e) => setTimeoutSec(Number(e.target.value))}
-                  className="bg-slate-900 border border-white/10 text-xs text-slate-300 rounded-xl px-3 py-2 outline-none cursor-pointer"
-                >
-                  <option value={10}>超时 10s</option>
-                  <option value={30}>超时 30s</option>
-                  <option value={60}>超时 60s</option>
-                  <option value={120}>超时 120s</option>
-                </select>
-
-                <button
-                  onClick={() => runCommand()}
-                  disabled={executing || !customCmd.trim() || !selectedNode?.terminal_online}
-                  className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-white font-medium text-xs shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  {executing ? (
-                    <>
-                      <ArrowClockwise size={16} className="animate-spin" />
-                      执行中...
-                    </>
-                  ) : (
-                    <>
-                      <Play size={16} weight="fill" />
-                      立即受控执行
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Execution Result Box */}
-            {execResult && (
-              <div className="rounded-xl border border-white/10 bg-[#090d16] overflow-hidden font-mono text-xs">
-                {/* Result Status Bar */}
-                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/80 border-b border-white/10">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ${
-                        execResult.exit_code === 0
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}
-                    >
-                      {execResult.exit_code === 0 ? <CheckCircle size={14} /> : <WarningCircle size={14} />}
-                      Exit Code: {execResult.exit_code}
-                    </span>
-                    <span className="text-slate-400 text-[11px]">
-                      耗时: <span className="text-slate-200">{execResult.duration_ms} ms</span>
-                    </span>
-                    <span className="text-slate-500 text-[11px] hidden sm:inline">
-                      执行命令: <span className="text-cyan-300 font-semibold">{execResult.command}</span>
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={handleCopy}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs transition-colors"
-                  >
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    {copied ? '已复制' : '复制输出'}
-                  </button>
-                </div>
-
-                {/* Output Stream Content */}
-                <div className="p-4 max-h-[400px] overflow-y-auto leading-relaxed text-slate-200 whitespace-pre-wrap break-all selection:bg-cyan-500/30">
-                  {execResult.stdout ? (
-                    renderANSI(execResult.stdout)
-                  ) : (
-                    <span className="text-slate-500 italic">(无标准输出)</span>
-                  )}
-                  {execResult.stderr && (
-                    <div className="mt-3 pt-2 border-t border-rose-500/20 text-rose-400">
-                      <div className="text-[10px] text-rose-500 font-semibold uppercase tracking-wider mb-1">
-                        标准错误 (STDERR):
-                      </div>
-                      {execResult.stderr}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+        <div className="ssh-runner-page">
+          <section className="ssh-runner-card ssh-command-section">
+            <div className="ssh-section-heading"><div><span className="ssh-eyebrow">COMMAND RUNNER</span><h3>远程执行</h3><p>通过受控 Agent 通道向选中的节点执行命令，结果会逐节点返回并写入审计记录。</p></div><span className="ssh-live-badge"><span /> 状态每 8 秒自动同步</span></div>
+            <textarea value={customCmd} onChange={(e) => setCustomCmd(e.target.value)} placeholder="输入要执行的 Shell 命令，例如：docker ps 或 systemctl status probewatch" className="ssh-command-editor" rows={4} />
+            <div className="ssh-command-meta"><div className="ssh-preset-list">{QUICK_PRESETS.slice(0, 4).map((preset) => { const Icon = preset.icon; return <button key={preset.id} type="button" className="ssh-preset-chip" onClick={() => setCustomCmd(preset.cmd)} title={preset.desc}><Icon size={14} /> {preset.title}</button> })}</div><label className="ssh-timeout-control">超时<select value={timeoutSec} onChange={(e) => setTimeoutSec(Number(e.target.value))}><option value={10}>10 秒</option><option value={30}>30 秒</option><option value={60}>60 秒</option><option value={120}>120 秒</option></select></label></div>
+          </section>
+          <section className="ssh-runner-card ssh-target-section"><div className="ssh-section-heading ssh-target-heading"><div><span className="ssh-eyebrow">TARGET NODES</span><h3>选择目标节点</h3><p>仅显示当前账号可访问的 Agent 节点，在线状态来自实时终端隧道。</p></div><strong className="ssh-selection-count">已选 {selectedNodeIds.length} / {nodes.length}</strong></div><div className="ssh-node-toolbar"><button type="button" className="ssh-toolbar-button" onClick={toggleVisibleNodes}>{filteredNodes.length > 0 && filteredNodes.every((node) => selectedNodeIds.includes(node.id)) ? '取消全选' : '全选当前'}</button><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="ssh-filter-select"><option value="all">全部状态</option><option value="online">仅在线</option><option value="offline">仅离线</option></select><div className="ssh-search-box"><span>⌕</span><input value={nodeSearch} onChange={(e) => setNodeSearch(e.target.value)} placeholder="搜索节点名称或 UUID" /></div></div><div className="ssh-node-table-wrap"><table className="ssh-node-table"><thead><tr><th aria-label="选择" /><th>节点</th><th>终端状态</th><th>节点标识</th><th>执行权限</th></tr></thead><tbody>{filteredNodes.map((node) => { const checked = selectedNodeIds.includes(node.id); return <tr key={node.id} className={checked ? 'is-selected' : ''} onClick={() => toggleNode(node.id)}><td><input type="checkbox" checked={checked} onChange={() => toggleNode(node.id)} onClick={(e) => e.stopPropagation()} /></td><td><strong>{node.name || node.uuid?.slice(0, 8) || '未命名节点'}</strong></td><td><span className={node.terminal_online ? 'ssh-status-pill online' : 'ssh-status-pill offline'}><span />{node.terminal_online ? '在线' : '离线'}</span></td><td><code>{node.uuid || node.id}</code></td><td><span className="ssh-access-pill">受控执行</span></td></tr> })}{filteredNodes.length === 0 && <tr><td colSpan={5} className="ssh-empty-row">没有匹配的节点</td></tr>}</tbody></table></div></section>
+          <section className="ssh-runner-footer"><div className="ssh-runner-note"><ShieldCheck size={18} /><span>命令通过受控接口执行，保留权限校验、CSRF 防护与审计流水。</span></div><button type="button" onClick={() => runCommand()} disabled={executing || !customCmd.trim() || selectedNodeIds.length === 0 || selectedNodeIds.every((id) => !nodes.find((node) => node.id === id)?.terminal_online)} className="ssh-execute-button">{executing ? <><ArrowClockwise size={17} className="spin" /> 执行中...</> : <><Play size={17} weight="fill" /> 执行命令</>}</button></section>
+          {batchResults.length > 0 && <section className="ssh-result-section"><div className="ssh-result-heading"><div><span className="ssh-eyebrow">EXECUTION RESULTS</span><h3>执行结果</h3></div><button type="button" className="ssh-toolbar-button" onClick={handleCopy}><Copy size={14} /> 复制全部输出</button></div><div className="ssh-result-grid">{batchResults.map((result) => <article className={'ssh-result-card ' + result.status} key={result.node.id}><header><strong>{result.node.name || result.node.uuid?.slice(0, 8)}</strong><span>{result.status === 'running' ? '执行中' : result.status === 'pending' ? '等待中' : result.status === 'success' ? '成功' : '失败'}</span></header>{result.status === 'success' || result.status === 'failed' ? <><div className="ssh-result-meta">退出码 {result.exit_code ?? '—'} · {result.duration_ms ?? '—'} ms</div><pre>{result.stdout || result.stderr || result.error || '(无输出)'}</pre></> : <div className="ssh-result-pending">等待执行...</div>}</article>)}</div></section>}
         </div>
       )}
-
       {/* Security & Audit Compliance Footer */}
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
