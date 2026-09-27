@@ -76,8 +76,8 @@ const navItems = [
   },
   { id: 'logs', label: '系统日志', icon: Scroll },
 ]
-const REFRESH_OPTIONS = [10, 30, 60]
-const OVERVIEW_INTERVAL_MS = 30000
+const OVERVIEW_INTERVAL_MS = 10000
+const LIVE_CORE_INTERVAL_MS = 5000
 const pageTitleFor = (page) =>
   page === 'node-detail'
     ? '节点详情'
@@ -233,7 +233,7 @@ function getInitialNav() {
   return { page: 'overview', nodeUuid: null }
 }
 
-function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRefresh, onIntervalChange, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
+function Topbar({ activeNav, clockText, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
   return <header className="topbar">
     <div className="topbar-left">
       <button className="icon-button mobile-menu" aria-label="打开导航菜单" onClick={onOpenMobileNav}><List size={19} /></button>
@@ -256,12 +256,7 @@ function Topbar({ activeNav, clockText, autoRefresh, refreshInterval, onToggleRe
         <Eye size={15} />
         <span>游客模式</span>
       </button>
-      <div className="refresh-controls" role="group" aria-label="全局自动刷新">
-        <button type="button" className={`refresh-toggle ${autoRefresh ? 'refresh-on' : ''}`} aria-pressed={autoRefresh} onClick={onToggleRefresh}><span className="refresh-toggle-dot" aria-hidden="true" />自动刷新</button>
-        <select className="refresh-interval" value={refreshInterval} onChange={(event) => onIntervalChange(Number(event.target.value))} aria-label="自动刷新间隔">
-          {REFRESH_OPTIONS.map((seconds) => <option key={seconds} value={seconds}>{seconds}s</option>)}
-        </select>
-      </div>
+      <span className="guest-live-indicator" title="节点、告警和概览数据会自动同步"><span className="status-dot status-online" />实时同步</span>
       <span className="last-sync">最后同步 <b>{lastSyncText}</b></span>
       <span className="sync-state"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? 'API 已连接' : 'API 状态未知'}</span>
       <button className="icon-button" aria-label="查看告警" onClick={() => onNavigate('alerts')}><Bell size={19} /></button>
@@ -449,8 +444,7 @@ export function App() {
   const [publicStatus, setPublicStatus] = useState(null)
   const [guestPreview, setGuestPreview] = useState(false)
   const [clock, setClock] = useState(() => new Date())
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [refreshInterval, setRefreshInterval] = useState(10)
+  const refreshInterval = 5
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState(getSavedTheme)
@@ -595,7 +589,7 @@ export function App() {
     }
   }, [])
 
-  // 实时数据轮询：节点 / 告警 / 会话，间隔由顶栏开关控制（默认 30s）。
+  // 实时数据轮询：节点 / 告警 / 会话，固定 5 秒自动同步。
   const loadCore = useCallback(async (manual = false) => {
     const current = ++coreRequestRef.current
     coreAbortRef.current?.abort()
@@ -674,10 +668,9 @@ export function App() {
   }, [loadCore, loadOverview])
 
   useEffect(() => {
-    if (!autoRefresh) return undefined
-    const id = setInterval(() => { if (document.visibilityState === 'visible') loadCore(false) }, refreshInterval * 1000)
+    const id = setInterval(() => { if (document.visibilityState === 'visible') loadCore(false) }, LIVE_CORE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [autoRefresh, refreshInterval, loadCore])
+  }, [loadCore])
 
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') loadOverview() }, OVERVIEW_INTERVAL_MS)
@@ -1203,10 +1196,6 @@ export function App() {
       <Topbar
         activeNav={activeNav}
         clockText={clockText}
-        autoRefresh={autoRefresh}
-        refreshInterval={refreshInterval}
-        onToggleRefresh={() => setAutoRefresh((value) => !value)}
-        onIntervalChange={setRefreshInterval}
         lastSyncText={lastSyncText}
         apiState={apiState}
         me={me}
@@ -1359,7 +1348,6 @@ export function App() {
             rates={rates}
             lossRates={lossRates}
             refreshInterval={refreshInterval}
-            onIntervalChange={setRefreshInterval}
             theme={theme}
             onThemeChange={setTheme}
             overview={overview}

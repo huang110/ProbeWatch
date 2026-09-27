@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowClockwise, Broadcast, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
+import { Broadcast, CheckCircle, CircleNotch, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatLatency, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
@@ -86,17 +86,6 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     }
     return () => { active = false }
   }, [status])
-
-  const handleRefreshClick = () => {
-    setLocalRefreshing(true)
-    fetchGuestStatus()
-      .then((res) => {
-        if (res) setInternalStatus(res)
-      })
-      .catch(() => {})
-      .finally(() => setLocalRefreshing(false))
-    if (onRefresh) onRefresh()
-  }
 
   // Close modal on ESC
   useEffect(() => {
@@ -319,15 +308,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             <Broadcast size={16} />
             <span>90天 SLA 状态页</span>
           </a>
-          <button
-            className="button button-quiet"
-            onClick={handleRefreshClick}
-            disabled={isRefreshing || localRefreshing}
-            title="重新请求状态 API"
-          >
-            {isRefreshing || localRefreshing ? <CircleNotch size={16} className="spin" /> : <ArrowClockwise size={16} />}
-            {isRefreshing || localRefreshing ? '正在同步…' : '刷新数据'}
-          </button>
+          <span className="guest-live-indicator" title="页面会自动同步最新探针数据">
+            <span className="status-dot status-online" />
+            实时同步
+          </span>
           {isPreview ? (
             <>
               <button className="button button-primary" onClick={onExitPreview} title="返回管理员控制台">

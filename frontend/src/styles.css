@@ -492,6 +492,21 @@ h1, h2, h3, p { margin-top: 0; }
   overflow: hidden;
   background: rgba(255, 255, 255, 0.02);
 }
+
+.guest-live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.guest-live-indicator .status-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 3px rgba(48, 164, 108, 0.14);
+}
 .refresh-toggle {
   display: inline-flex;
   align-items: center;
