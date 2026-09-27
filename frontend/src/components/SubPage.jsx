@@ -151,7 +151,20 @@ export function SubPage({
         <TargetManage />
       ) : page === 'settings' ? (
         <div className="settings-layout">
-          <div className="settings-section-heading">
+          <nav className="settings-tabs" aria-label="系统设置分区">
+            {[['settings-public', '公开状态'], ['settings-access', '团队与开发者'], ['settings-security', '账号安全'], ['settings-data', '数据与审计']].map(([id, label], index) => (
+              <button
+                key={id}
+                type="button"
+                className={index === 0 ? 'is-active' : ''}
+                onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div id="settings-public" className="settings-section-heading">
             <span className="settings-section-kicker">PUBLIC STATUS</span>
             <div>
               <h2>状态页与事件</h2>
@@ -162,7 +175,7 @@ export function SubPage({
             <div className="settings-card-span"><StatusPageAdminCard nodes={data} /></div>
           </div>
 
-          <div className="settings-section-heading">
+          <div id="settings-access" className="settings-section-heading">
             <span className="settings-section-kicker">ACCESS CONTROL</span>
             <div>
               <h2>团队与开发者访问</h2>
@@ -174,7 +187,7 @@ export function SubPage({
             <TokenManagementCard currentUser={currentUser} nodes={data} />
           </div>
 
-          <div className="settings-section-heading">
+          <div id="settings-security" className="settings-section-heading">
             <span className="settings-section-kicker">SECURITY</span>
             <div>
               <h2>账号安全与偏好</h2>
@@ -191,7 +204,7 @@ export function SubPage({
             />
           </div>
 
-          <div className="settings-section-heading">
+          <div id="settings-data" className="settings-section-heading">
             <span className="settings-section-kicker">DATA & AUDIT</span>
             <div>
               <h2>数据备份与安全审计</h2>
@@ -212,7 +225,17 @@ export function SubPage({
       ) : page === 'audit' || page === 'audit-logs' ? (
         <AuditLogView />
       ) : page === 'backups' ? (
-        <BackupManagementCard />
+        <div className="storage-layout">
+          <nav className="storage-tabs" aria-label="数据与存储分区">
+            <button type="button" className="is-active">存储概览</button>
+            <button type="button" onClick={() => document.querySelector('.backup-management-card')?.scrollIntoView({ behavior: 'smooth' })}>备份与迁移</button>
+          </nav>
+          <div className="storage-intro">
+            <span className="settings-section-kicker">DATA & STORAGE</span>
+            <div><h2>数据与存储</h2><p>查看数据库占用、备份快照与异地迁移状态。</p></div>
+          </div>
+          <BackupManagementCard />
+        </div>
       ) : (
         <div className="panel placeholder-panel">
           <div className="placeholder-icon">

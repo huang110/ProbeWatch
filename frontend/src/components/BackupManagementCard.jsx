@@ -306,7 +306,7 @@ export function BackupManagementCard() {
   }
 
   return (
-    <div className="panel" style={{ marginTop: '16px' }}>
+    <div className="panel backup-management-card" style={{ marginTop: '16px' }}>
       <div className="panel-header">
         <div>
           <h2>SQLite 灾难备份与多区域热备 (Disaster Recovery & Hot Standby)</h2>
