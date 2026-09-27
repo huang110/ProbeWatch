@@ -524,7 +524,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const remainDays = custom.remainingDays ?? null
                   const checks = safeArray(telemetry.checks)
                   const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle) || String(check.label || '').toLowerCase().includes(needle))) || null
-                  const hasIspChecks = checks.some((check) => check.label || /telecom|unicom|mobile|\bcu\b|\bct\b|\bcm\b/i.test(String(check.kind || '')))
+                  const hasIspChecks = checks.some((check) => /电信|联通|移动|telecom|unicom|mobile|\bcu\b|\bct\b|\bcm\b/i.test(`${String(check.label || '')} ${String(check.kind || '')}`))
                   const groupedChecks = ['dns', 'https', 'tcp'].map((kind) => {
                     const matching = checks.filter((check) => String(check.kind || '').toLowerCase() === kind)
                     if (matching.length === 0) return null
