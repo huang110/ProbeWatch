@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
-import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, safeArray, detectRegionAndFlag } from './lib/format.js'
+import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, formatUptime, safeArray, detectRegionAndFlag } from './lib/format.js'
 import { fetchCsrfToken, fetchGuestStatus, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
