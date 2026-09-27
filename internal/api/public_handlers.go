@@ -63,6 +63,7 @@ type publicNodeTelemetry struct {
 
 type publicNodeCheck struct {
 	Kind          string     `json:"kind"`
+	Label         string     `json:"label,omitempty"`
 	LatencyMS     *float64   `json:"latency_ms"`
 	LossRate      *float64   `json:"loss_rate"`
 	LastCheckedAt *time.Time `json:"last_checked_at"`
@@ -74,6 +75,20 @@ var (
 )
 
 const publicNodeNameLimit = 48
+
+func publicCheckLabel(name, kind string) string {
+	text := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(text, "电信") || strings.Contains(text, "telecom") || strings.Contains(text, "china tel"):
+		return "电信"
+	case strings.Contains(text, "联通") || strings.Contains(text, "unicom") || strings.Contains(text, "china unicom"):
+		return "联通"
+	case strings.Contains(text, "移动") || strings.Contains(text, "mobile") || strings.Contains(text, "china mobile"):
+		return "移动"
+	default:
+		return strings.ToUpper(strings.TrimSpace(kind))
+	}
+}
 
 // sanitizeNodeName masks anything that could identify infrastructure
 // (IPv4 literals and UUIDs) inside an operator-chosen node name before
@@ -188,7 +203,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		if !latestChecked.IsZero() { telemetry.LastCheckedAt = &latestChecked }
 		if summaries, e := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now); e == nil {
 			for _, summary := range summaries {
-				check := publicNodeCheck{Kind: summary.Kind}
+				check := publicNodeCheck{Kind: summary.Kind, Label: publicCheckLabel(summary.Name, summary.Kind)}
 				if summary.HasWindowData && summary.LatencyCount > 0 { value := summary.LatencyAvgMS; check.LatencyMS = &value }
 				if summary.HasWindowData && summary.Total > 0 { value := float64(summary.Failure) / float64(summary.Total); check.LossRate = &value }
 				if !summary.LastCheckedAt.IsZero() { value := summary.LastCheckedAt; check.LastCheckedAt = &value }

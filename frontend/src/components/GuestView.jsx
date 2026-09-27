@@ -523,8 +523,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const costText = custom.costText || '账单未配置'
                   const remainDays = custom.remainingDays ?? null
                   const checks = safeArray(telemetry.checks)
-                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle))) || null
-                  const hasIspChecks = checks.some((check) => /telecom|unicom|mobile|\bcu\b|\bct\b|\bcm\b/i.test(String(check.kind || '')))
+                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle) || String(check.label || '').toLowerCase().includes(needle))) || null
+                  const hasIspChecks = checks.some((check) => check.label || /telecom|unicom|mobile|\bcu\b|\bct\b|\bcm\b/i.test(String(check.kind || '')))
                   const groupedChecks = ['dns', 'https', 'tcp'].map((kind) => {
                     const matching = checks.filter((check) => String(check.kind || '').toLowerCase() === kind)
                     if (matching.length === 0) return null
@@ -535,16 +535,18 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                       loss_rate: losses.length ? losses.reduce((sum, value) => sum + value, 0) / losses.length : null,
                     }
                   })
-                  const cuCheck = checkFor('telecom', 'cu') || (!hasIspChecks ? groupedChecks[2] : null)
-                  const ctCheck = checkFor('unicom', 'ct') || (!hasIspChecks ? groupedChecks[1] : null)
-                  const cmCheck = checkFor('mobile', 'cm') || (!hasIspChecks ? groupedChecks[0] : null)
+                  const cuCheck = checkFor('unicom', 'cu', '联通') || (!hasIspChecks ? groupedChecks[2] : null)
+                  const ctCheck = checkFor('telecom', 'ct', '电信') || (!hasIspChecks ? groupedChecks[1] : null)
+                  const cmCheck = checkFor('mobile', 'cm', '移动') || (!hasIspChecks ? groupedChecks[0] : null)
                   const cuLatency = numeric(cuCheck?.latency_ms)
                   const ctLatency = numeric(ctCheck?.latency_ms)
                   const cmLatency = numeric(cmCheck?.latency_ms)
                   const cuLoss = numeric(cuCheck?.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
                   const ctLoss = numeric(ctCheck?.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
                   const cmLoss = numeric(cmCheck?.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
-                  const checkLabels = hasIspChecks ? ['联通', '电信', '移动'] : ['TCP', 'HTTPS', 'DNS']
+                  const checkLabels = hasIspChecks
+                    ? [cuCheck?.label || '联通', ctCheck?.label || '电信', cmCheck?.label || '移动']
+                    : ['TCP', 'HTTPS', 'DNS']
 
                   return (
                     <article
