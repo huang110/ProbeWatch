@@ -19,6 +19,7 @@ import {
   Desktop,
   Tag,
   WifiHigh,
+  Lightning,
   ArrowsLeftRight,
   ArrowsClockwise,
   CheckCircle,
