@@ -11936,3 +11936,150 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 [data-theme="light"] .app-shell table tbody td { border-top-color: #edf1f4; }
 [data-theme="light"] .app-shell .panel:hover,
 [data-theme="light"] .app-shell .card:hover { border-color: #d5e0e9; }
+
+/* ==========================================================================
+   Page shell normalization and legacy token bridge
+   ========================================================================== */
+:root {
+  --bg-card: var(--bg-panel);
+  --bg-surface: var(--bg-panel);
+  --bg-subtle: var(--bg-inset);
+  --surface-1: var(--bg-panel);
+  --surface-2: var(--bg-raised);
+  --surface-subtle: var(--bg-inset);
+  --border-subtle: var(--border);
+  --text-primary: var(--text-1);
+  --text-foreground: var(--text-1);
+  --text-secondary: var(--text-2);
+  --text-muted: var(--text-3);
+  --text-subtle: var(--text-3);
+  --accent-color: var(--blue);
+}
+
+/* Child pages live inside App's content-wrap; remove their historical nested gutters. */
+.app-shell .subpage-view,
+.app-shell .subpage-container,
+.app-shell .overview-page-wrap,
+.app-shell .node-container,
+.app-shell .server-manage-view,
+.app-shell .speedtest-benchmark-view,
+.app-shell .log-streaming-view,
+.app-shell .synthetic-probing-view,
+.app-shell .traffic-report-container,
+.app-shell .cost-center-shell,
+.app-shell .monitor-view-container,
+.app-shell .notify-page-container,
+.app-shell .network-module-view,
+.app-shell .mtr-module-view,
+.app-shell .media-module-view {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+}
+.app-shell .subpage-view,
+.app-shell .subpage-container { padding: 0 !important; }
+.app-shell .subpage-view,
+.app-shell .subpage-container,
+.app-shell .overview-page-wrap,
+.app-shell .node-container,
+.app-shell .server-manage-view,
+.app-shell .speedtest-benchmark-view,
+.app-shell .log-streaming-view,
+.app-shell .synthetic-probing-view,
+.app-shell .traffic-report-container,
+.app-shell .cost-center-shell,
+.app-shell .monitor-view-container,
+.app-shell .notify-page-container,
+.app-shell .network-module-view,
+.app-shell .mtr-module-view,
+.app-shell .media-module-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Legacy page-specific cards inherit the same surface language. */
+.app-shell .lite-card-box,
+.app-shell .monitor-table-card,
+.app-shell .cost-metric-card,
+.app-shell .cost-chart-card,
+.app-shell .cost-composition-card,
+.app-shell .cost-table-panel,
+.app-shell .monitor-stat-card,
+.app-shell .media-top-banner,
+.app-shell .mtr-add-form,
+.app-shell .mtr-result-panel,
+.app-shell .network-table-panel,
+.app-shell .traffic-panel,
+.app-shell .modern-traffic-panel,
+.app-shell .nezha-theme-panel {
+  border-color: var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface);
+  box-shadow: var(--shadow-card);
+}
+.app-shell .lite-card-box,
+.app-shell .monitor-table-card,
+.app-shell .cost-table-panel { padding: 18px; }
+.app-shell .monitor-top-nav-bar,
+.app-shell .monitor-view-container .monitor-top-nav-bar,
+.app-shell .cost-tabs-row {
+  border-color: var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  background: var(--admin-surface-soft);
+}
+.app-shell .monitor-nav-tab-btn,
+.app-shell .cost-tab-btn { min-height: 32px; border-radius: 5px; font-size: 11px; }
+.app-shell .monitor-nav-tab-btn.active { background: var(--admin-surface); border-color: var(--admin-border); color: var(--admin-heading); }
+
+/* Headings inside modules follow the page heading scale. */
+.app-shell .cost-title-col h1,
+.app-shell .monitor-title-col h1,
+.app-shell .notify-title-col h1 {
+  color: var(--admin-heading);
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -.035em;
+}
+.app-shell .cost-title-col p,
+.app-shell .monitor-title-col p,
+.app-shell .notify-title-col p { color: var(--admin-subtle); font-size: 12px; line-height: 1.6; }
+
+/* Prevent inline utility remnants from creating a second visual system. */
+.app-shell .subpage-view[style],
+.app-shell .subpage-container[style],
+.app-shell .speedtest-benchmark-view[style],
+.app-shell .synthetic-probing-view[style],
+.app-shell .log-streaming-view[style] {
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+@media (max-width: 900px) {
+  .app-shell .network-stats-row,
+  .app-shell .cost-metrics-grid,
+  .app-shell .monitor-stats-grid-3,
+  .app-shell .monitor-stats-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .app-shell .network-stats-row,
+  .app-shell .cost-metrics-grid,
+  .app-shell .monitor-stats-grid-3,
+  .app-shell .monitor-stats-grid-4 { grid-template-columns: 1fr; }
+  .app-shell .lite-card-box, .app-shell .monitor-table-card, .app-shell .cost-table-panel { padding: 14px; }
+}
+
+/* Remove legacy nested spacing when a page shell already uses flex gap. */
+.app-shell .traffic-report-container.space-y-5 > * + *,
+.app-shell .server-manage-view.space-y-4 > * + *,
+.app-shell .log-streaming-view.space-y-4 > * + *,
+.app-shell .speedtest-benchmark-view.space-y-6 > * + *,
+.app-shell .synthetic-probing-view.space-y-6 > * + * { margin-top: 0 !important; }
+.app-shell .log-streaming-view[style] { gap: 18px !important; }
+.app-shell .speedtest-benchmark-view[style],
+.app-shell .synthetic-probing-view[style] { padding: 0 !important; }
+.app-shell .ai-copilot-view > :first-child { margin-bottom: 18px !important; }
+.app-shell .ai-copilot-view > :first-child h1,
+.app-shell .ai-copilot-view > :first-child h2 { margin-top: 0; }
+.app-shell .subpage-container .panel[style] { border-color: var(--admin-border) !important; border-radius: var(--admin-radius) !important; background: var(--admin-surface) !important; }
