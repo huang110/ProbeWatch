@@ -389,6 +389,17 @@ export function NodeTable({
                   </div>
                 </div>
 
+                <div className="vps-connection-row">
+                  <div className="vps-connection-item">
+                    <span className="vps-connection-label">TCP 连接</span>
+                    <strong className="mono">{tcpCount !== null ? tcpCount : '—'}</strong>
+                  </div>
+                  <div className="vps-connection-item">
+                    <span className="vps-connection-label">UDP 连接</span>
+                    <strong className="mono">{udpCount !== null ? udpCount : '—'}</strong>
+                  </div>
+                </div>
+
                 {/* 5. 分割线 */}
                 <div className="vps-divider-line" />
 
@@ -475,6 +486,11 @@ export function NodeTable({
                       <VpsDotTrack blocks={getLossBlocks(cmIsp.loss || 0)} />
                     </div>
                   </div>
+                </div>
+
+                <div className="vps-card-footer">
+                  <span className="vps-footer-item"><Pulse size={14} /> 在线 <strong>{uptimeText}</strong></span>
+                  <span className="vps-footer-item"><CalendarBlank size={14} /> 到期 <strong>{remainDays !== null ? `${remainDays} 天` : '未配置'}</strong></span>
                 </div>
               </article>
             )
