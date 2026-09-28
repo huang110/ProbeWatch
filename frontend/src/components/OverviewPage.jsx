@@ -337,7 +337,7 @@ export function OverviewPage({
             <div className="throughput-value mono">
               <b>{avgLatency !== null ? `${avgLatency}ms` : '—'}</b>
               <small className="sla-tag text-mint">
-                {successRate !== null ? `${successRate}%` : '99.9%'}
+                {successRate !== null ? `${successRate}%` : '—'}
               </small>
             </div>
           </div>

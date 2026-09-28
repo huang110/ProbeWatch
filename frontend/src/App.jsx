@@ -986,7 +986,7 @@ export function App() {
         names: data.map((n) => safeText(n.name)).filter(Boolean),
       },
       checks: {
-        success_rate: overview?.checks?.success_rate ?? 100,
+        success_rate: overview?.checks?.success_rate ?? null,
         avg_latency_ms: overview?.checks?.avg_latency_ms ?? null,
       },
       last_updated_at: new Date().toISOString(),

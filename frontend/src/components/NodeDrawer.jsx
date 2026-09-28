@@ -392,7 +392,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <span className="spec-label">探针版本</span>
                 <div className="spec-value mono flex items-center gap-1.5 flex-wrap">
                   <span className="text-mint font-semibold">
-                    {node.resource?.agent_version ? `v${node.resource.agent_version}` : node.agentVersion || node.version || 'v0.5.6'}
+                    {node.resource?.agent_version ? `v${node.resource.agent_version}` : node.agentVersion || node.version || '—'}
                   </span>
                   {node.resource?.agent_version && !node.resource.agent_version.includes('0.5.6') && (
                     <span className="badge badge-warning text-[10px]" title="服务端已发布 v0.5.6，支持热更新自升级">

@@ -240,7 +240,7 @@ export function DashboardView({
 
   // 4. 时延监测概览 (整行平滑折线)
   const latencyOverview = useMemo(() => {
-    let avg = 0
+    let avg = null
     if (overview?.checks?.avg_latency_ms !== null && overview?.checks?.avg_latency_ms !== undefined) {
       avg = Math.round(Number(overview.checks.avg_latency_ms))
     } else if (checkSummaries.length > 0) {
@@ -266,7 +266,7 @@ export function DashboardView({
     // 对应 6 个点的平滑曲线控制点
     const pts = hours.map((_, i) => {
       const x = i * 120
-      const y = avg > 0 ? Math.max(10, Math.min(50, 45 - (avg / 300) * 20 + Math.sin(i * 1.5) * 4)) : 50
+      const y = avg !== null ? Math.max(10, Math.min(50, 45 - (avg / 300) * 20)) : 50
       return { x, y }
     })
     const pathD = pointsToSmoothPath(pts)
@@ -274,6 +274,7 @@ export function DashboardView({
 
     return {
       avgLatencyMs: avg,
+      hasLatencySample: avg !== null,
       targetCount,
       anomalies: networkAlerts,
       hours,
@@ -693,7 +694,7 @@ export function DashboardView({
           {/* 左侧三个微型指标: 水平并排 */}
           <div className="dash-latency-sidebar">
             <div className="dash-latency-stat">
-              <div className="text-xl font-bold text-blue mono">{latencyOverview.avgLatencyMs} ms</div>
+              <div className="text-xl font-bold text-blue mono">{latencyOverview.hasLatencySample ? `${latencyOverview.avgLatencyMs} ms` : '等待采样'}</div>
               <div className="text-[11px] text-muted">平均时延</div>
             </div>
             <div className="dash-latency-stat">
@@ -716,8 +717,8 @@ export function DashboardView({
                     <stop offset="100%" stopColor="#1687e8" stopOpacity="0.0" />
                   </linearGradient>
                 </defs>
-                <path d={latencyOverview.areaD} fill="url(#latencyAreaGrad)" />
-                <path d={latencyOverview.pathD} fill="none" stroke="#1687e8" strokeWidth="2.5" strokeLinecap="round" />
+                {latencyOverview.hasLatencySample && <path d={latencyOverview.areaD} fill="url(#latencyAreaGrad)" />}
+                {latencyOverview.hasLatencySample && <path d={latencyOverview.pathD} fill="none" stroke="#1687e8" strokeWidth="2.5" strokeLinecap="round" />}
               </svg>
             </div>
             <div className="flex justify-between text-[11px] text-muted mono pt-1.5">
