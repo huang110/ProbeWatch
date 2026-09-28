@@ -118,6 +118,7 @@ export function SpeedtestBenchmarkView() {
   const [taskModalError, setTaskModalError] = useState(null)
   const dataRequestRef = useRef(null)
   const historyRequestRef = useRef(null)
+  const hasSpeedtestData = Number(resultsData.stats?.total_benchmarks_count || 0) > 0
 
   const showToast = (msg) => {
     setSuccessToast(msg)
@@ -549,11 +550,11 @@ export function SpeedtestBenchmarkView() {
             </div>
           </div>
           <div style={{ fontSize: '28px', fontWeight: 700, marginTop: '8px', color: '#2563eb' }}>
-            {resultsData.stats?.max_download_mbps || 0}{' '}
+            {hasSpeedtestData ? (resultsData.stats?.max_download_mbps ?? '—') : '暂无数据'}{' '}
             <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-muted)' }}>Mbps</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            平均下行 {resultsData.stats?.avg_download_mbps || 0} Mbps
+            平均下行 {hasSpeedtestData ? `${resultsData.stats?.avg_download_mbps ?? '—'} Mbps` : '等待首次测速'}
           </div>
         </div>
 
@@ -584,11 +585,11 @@ export function SpeedtestBenchmarkView() {
             </div>
           </div>
           <div style={{ fontSize: '28px', fontWeight: 700, marginTop: '8px', color: '#10b981' }}>
-            {resultsData.stats?.max_upload_mbps || 0}{' '}
+            {hasSpeedtestData ? (resultsData.stats?.max_upload_mbps ?? '—') : '暂无数据'}{' '}
             <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-muted)' }}>Mbps</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            平均上行 {resultsData.stats?.avg_upload_mbps || 0} Mbps
+            平均上行 {hasSpeedtestData ? `${resultsData.stats?.avg_upload_mbps ?? '—'} Mbps` : '等待首次测速'}
           </div>
         </div>
 
@@ -619,7 +620,7 @@ export function SpeedtestBenchmarkView() {
             </div>
           </div>
           <div style={{ fontSize: '28px', fontWeight: 700, marginTop: '8px', color: '#f59e0b' }}>
-            {resultsData.stats?.avg_latency_ms || 0}{' '}
+            {hasSpeedtestData ? (resultsData.stats?.avg_latency_ms ?? '—') : '暂无数据'}{' '}
             <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-muted)' }}>ms</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
@@ -654,11 +655,11 @@ export function SpeedtestBenchmarkView() {
             </div>
           </div>
           <div style={{ fontSize: '28px', fontWeight: 700, marginTop: '8px', color: '#8b5cf6' }}>
-            {resultsData.stats?.active_benchmark_nodes || 0}{' '}
+            {hasSpeedtestData ? (resultsData.stats?.active_benchmark_nodes ?? '—') : '暂无数据'}{' '}
             <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-muted)' }}>台</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            累计完成 {resultsData.stats?.total_benchmarks_count || 0} 次基准压测
+            {hasSpeedtestData ? `累计完成 ${resultsData.stats?.total_benchmarks_count} 次基准压测` : '尚未完成基准压测'}
           </div>
         </div>
       </div>
