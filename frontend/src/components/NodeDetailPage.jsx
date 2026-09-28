@@ -345,22 +345,33 @@ export function NodeDetailPage({
   const [loadingMedia, setLoadingMedia] = useState(false)
 
   useEffect(() => {
-    if (!nodeUuid) return
+    if (!nodeUuid) {
+      setMediaData([])
+      setLoadingMedia(false)
+      return undefined
+    }
+    const controller = new AbortController()
+    setMediaData([])
     setLoadingMedia(true)
     const fetchPath = `/api/public/nodes/${encodeURIComponent(nodeUuid)}/media`
-    fetch(fetchPath, { credentials: 'same-origin' })
+    fetch(fetchPath, { credentials: 'same-origin', signal: controller.signal })
       .then((res) => {
         if (!res.ok) {
-          return fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/media`, { credentials: 'same-origin' })
+          return fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/media`, { credentials: 'same-origin', signal: controller.signal })
         }
         return res
       })
       .then((res) => (res.ok ? res.json() : []))
       .then((list) => {
-        if (Array.isArray(list)) setMediaData(list)
+        if (!controller.signal.aborted && Array.isArray(list)) setMediaData(list)
       })
-      .catch(() => {})
-      .finally(() => setLoadingMedia(false))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') setMediaData([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingMedia(false)
+      })
+    return () => controller.abort()
   }, [nodeUuid])
 
   const unlockedMediaCount = POPULAR_MEDIA.filter(
