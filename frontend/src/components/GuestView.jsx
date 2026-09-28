@@ -187,7 +187,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         // the last measured rate instead of replacing it with zero.
         next[name] = previous.rate
       }
-      if (rx !== null && tx !== null) telemetryRef.current.set(name, { rx, tx, sampleAt, rate: next[name] || previous?.rate || null })
+      if (rx !== null && tx !== null) {
+        const rate = next[name] || (previous && sampleAt === previous.sampleAt ? previous.rate : null)
+        telemetryRef.current.set(name, { rx, tx, sampleAt, rate })
+      }
     })
     setLiveRates(next)
   }, [telemetryByName, effectiveStatus?.generated_at])

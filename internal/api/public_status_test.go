@@ -83,12 +83,15 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	body := response.Body.String()
 	for _, leaked := range []string{
 		onlineNode.ID, onlineNode.UUID, quietNode.ID, quietNode.UUID,
-		"secret-host", "cpu_percent", "memory_used_bytes", "public-target",
+		"secret-host", "public-target",
 		"192.0.2.10", "uuid", "node_id", "target_id", "detector_id", "token", "resource", "alert",
 	} {
 		if strings.Contains(body, leaked) {
 			t.Fatalf("public status body leaked %q: %s", leaked, body)
 		}
+	}
+	if !strings.Contains(body, "\"cpu_percent\":12.5") || !strings.Contains(body, "\"network_rx_bytes\"") {
+		t.Fatalf("public status body omitted allow-listed live telemetry: %s", body)
 	}
 }
 

@@ -569,7 +569,8 @@ export function App() {
         // measured rate while the same agent sample is being displayed.
         next[key] = prev.rate
       }
-      counterRef.current.set(key, { rx: node.rx, tx: node.tx, sampleAt, rate: next[key] || prev?.rate || null })
+      const rate = next[key] || (prev && sampleAt === prev.sampleAt ? prev.rate : null)
+      counterRef.current.set(key, { rx: node.rx, tx: node.tx, sampleAt, rate })
     })
     return next
   }, [])
