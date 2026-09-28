@@ -463,7 +463,7 @@ export function NodeDetailPage({
   const arch = node?.arch || resource.arch || customMeta.arch || 'kvm'
   const os = node?.os || resource.os || customMeta.os || 'Linux'
   const kernel = node?.kernel || resource.kernel || customMeta.kernel || '—'
-  const ispText = customMeta.merchant || customMeta.isp || node?.region || 'China Mobile / AS31972'
+  const ispText = customMeta.merchant || customMeta.isp || node?.region || '—'
 
   // Dynamic ticking uptime
   const startedAt = numeric(node?.startedAt) ?? numeric(resource.started_at)
@@ -498,10 +498,10 @@ export function NodeDetailPage({
   const rawTcp = numeric(resource.tcp_conn_count)
   const rawUdp = numeric(resource.udp_conn_count)
   const rawProc = numeric(resource.process_count)
-  const tcpCount = (rawTcp !== null && rawTcp > 0) ? rawTcp : (isOnline ? 24 : 0)
-  const udpCount = (rawUdp !== null && rawUdp > 0) ? rawUdp : (isOnline ? 5 : 0)
+  const tcpCount = rawTcp !== null && rawTcp >= 0 ? rawTcp : 0
+  const udpCount = rawUdp !== null && rawUdp >= 0 ? rawUdp : 0
   const totalConnections = tcpCount + udpCount
-  const processCount = (rawProc !== null && rawProc > 0) ? rawProc : (isOnline ? 119 : 0)
+  const processCount = rawProc !== null && rawProc >= 0 ? rawProc : 0
 
   const gpuPercent = numeric(resource.gpu_percent) || 0
   const hasGpu = Boolean(node?.gpu || resource.gpu_name || (numeric(resource.gpu_percent) && numeric(resource.gpu_percent) > 0))
@@ -568,16 +568,8 @@ export function NodeDetailPage({
       const disks = history.map((h) => Number(h.disk ?? 0))
       const downs = history.map((h) => Number(h.downRate ?? 0))
       const ups = history.map((h) => Number(h.upRate ?? 0))
-      const conns = history.map((h, idx) => {
-        const val = Number(h.conn ?? (h.tcp + h.udp) ?? 0)
-        if (val > 0) return val
-        return Math.max(1, Math.round(liveConn * (0.92 + 0.16 * Math.sin(idx * 0.7))))
-      })
-      const procs = history.map((h, idx) => {
-        const val = Number(h.proc ?? 0)
-        if (val > 0) return val
-        return Math.max(1, Math.round(liveProc * (0.97 + 0.06 * Math.cos(idx * 0.4))))
-      })
+      const conns = history.map((h) => Number(h.conn ?? ((h.tcp ?? 0) + (h.udp ?? 0)) ?? 0))
+      const procs = history.map((h) => Number(h.proc ?? 0))
       const gpus = history.map((h) => Number(h.gpu ?? 0))
       const temps = history.map((h) => Number(h.temp ?? (liveTemp > 0 ? liveTemp : 0)))
       const diskReads = history.map((h) => Number(h.diskReadRate ?? 0))
@@ -618,37 +610,22 @@ export function NodeDetailPage({
 
     // Anchor on live metrics if historical reporting points are not yet cached
     const count = 16
-    const cpus = Array.from({ length: count }, (_, i) => Math.max(0, +(liveCpu * (0.9 + 0.2 * Math.sin(i * 0.7))).toFixed(1)))
-    cpus[count - 1] = liveCpu
-
-    const mems = Array.from({ length: count }, (_, i) => Math.max(0, +(liveMemRatio * (0.98 + 0.04 * Math.cos(i * 0.5))).toFixed(1)))
-    mems[count - 1] = liveMemRatio
+    const cpus = Array.from({ length: count }, () => liveCpu)
+    const mems = Array.from({ length: count }, () => liveMemRatio)
 
     const swaps = Array.from({ length: count }, () => liveSwapRatio)
     const disks = Array.from({ length: count }, () => liveDiskRatio)
 
-    const downs = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDown * (0.8 + 0.4 * Math.sin(i * 0.9)))))
-    downs[count - 1] = liveDown
-
-    const ups = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveUp * (0.8 + 0.4 * Math.sin(i * 0.9)))))
-    ups[count - 1] = liveUp
-
-    const conns = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveConn * (0.9 + 0.2 * Math.sin(i * 0.5)))))
-    conns[count - 1] = liveConn
-
-    const procs = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveProc * (0.97 + 0.06 * Math.cos(i * 0.4)))))
-    procs[count - 1] = liveProc
+    const downs = Array.from({ length: count }, () => liveDown)
+    const ups = Array.from({ length: count }, () => liveUp)
+    const conns = Array.from({ length: count }, () => liveConn)
+    const procs = Array.from({ length: count }, () => liveProc)
 
     const gpus = Array.from({ length: count }, () => liveGpu)
 
-    const temps = Array.from({ length: count }, (_, i) => Math.max(0, +(liveTemp * (0.98 + 0.04 * Math.sin(i * 0.6))).toFixed(1)))
-    temps[count - 1] = liveTemp
-
-    const diskReads = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDiskRead * (0.8 + 0.4 * Math.sin(i * 0.7)))))
-    diskReads[count - 1] = liveDiskRead
-
-    const diskWrites = Array.from({ length: count }, (_, i) => Math.max(0, Math.round(liveDiskWrite * (0.8 + 0.4 * Math.cos(i * 0.7)))))
-    diskWrites[count - 1] = liveDiskWrite
+    const temps = Array.from({ length: count }, () => liveTemp)
+    const diskReads = Array.from({ length: count }, () => liveDiskRead)
+    const diskWrites = Array.from({ length: count }, () => liveDiskWrite)
 
     return {
       cpus,
@@ -706,24 +683,24 @@ export function NodeDetailPage({
 
   // Dynamic Ping Targets mapped directly from checksSummary API
   const pingTargets = useMemo(() => {
-    if (Array.isArray(checksSummary) && checksSummary.length > 0) {
+    if (Array.isArray(checksSummary)) {
       return checksSummary.map((item, idx) => {
         const color = TARGET_COLORS[idx % TARGET_COLORS.length]
         const id = item.target_id || `target-${idx}`
         const name = item.name || item.host || `目标 ${idx + 1}`
         const latencyAvg = item.latency_avg_ms !== undefined && item.latency_avg_ms !== null ? item.latency_avg_ms : null
         const latency = latencyAvg !== null ? `${Math.round(latencyAvg)}ms` : '—'
-        const lossRate = item.loss_rate !== undefined && item.loss_rate !== null ? item.loss_rate * 100 : 0
-        const loss = `${lossRate.toFixed(2)}%`
-        const lossColor = lossRate > 5 ? 'text-rose' : lossRate > 0 ? 'text-amber' : 'text-mint'
-        const jitter = item.jitter_ms || (latencyAvg ? latencyAvg * 0.05 : 1)
-        const lastChecked = item.last_checked_at ? relativeHeartbeat(item.last_checked_at) : '刚刚'
+        const lossRate = item.loss_rate !== undefined && item.loss_rate !== null ? item.loss_rate * 100 : null
+        const loss = lossRate === null ? '—' : `${lossRate.toFixed(2)}%`
+        const lossColor = lossRate === null ? 'text-muted' : lossRate > 5 ? 'text-rose' : lossRate > 0 ? 'text-amber' : 'text-mint'
+        const jitter = item.jitter_ms ?? null
+        const lastChecked = item.last_checked_at ? relativeHeartbeat(item.last_checked_at) : '等待采样'
         return {
           id,
           name,
           host: item.host || item.target || item.name || '',
           latency,
-          latencyVal: latencyAvg || 100,
+          latencyVal: latencyAvg ?? 0,
           loss,
           lossVal: lossRate,
           lossColor,
@@ -734,14 +711,7 @@ export function NodeDetailPage({
       })
     }
 
-    return [
-      { id: 'cq_ct', name: '重庆电信', host: 'cq-ct-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#f43f5e', jitter: 0.0, lastChecked: '刚刚' },
-      { id: 'sc_ct', name: '四川电信', host: 'sc-ct-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#2dd4bf', jitter: 0.0, lastChecked: '刚刚' },
-      { id: 'cq_cu', name: '重庆联通', host: 'cq-cu-dualstack.ip.zstaticcdn.com', latencyVal: 162, latency: '162ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#a855f7', jitter: 0.0, lastChecked: '刚刚' },
-      { id: 'sc_cu', name: '四川联通', host: 'sc-cu-dualstack.ip.zstaticcdn.com', latencyVal: 161, latency: '161ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#38bdf8', jitter: 0.0, lastChecked: '刚刚' },
-      { id: 'cq_cm', name: '重庆移动', host: 'cq-cm-dualstack.ip.zstaticcdn.com', latencyVal: 162, latency: '162ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#f59e0b', jitter: 0.0, lastChecked: '刚刚' },
-      { id: 'sc_cm', name: '四川移动', host: 'sc-cm-dualstack.ip.zstaticcdn.com', latencyVal: 163, latency: '163ms', loss: '0.00%', lossVal: 0, lossColor: 'text-mint', color: '#ec4899', jitter: 0.0, lastChecked: '刚刚' },
-    ]
+    return []
   }, [checksSummary])
 
   // Select all targets by default
@@ -805,6 +775,16 @@ export function NodeDetailPage({
     const targetPaths = []
     const targetPointsMap = {}
 
+    // checks/summary provides the latest aggregate only. Do not fabricate a
+    // historical curve from one sample; render the chart only when real
+    // history is available.
+    if (!Array.isArray(history) || history.length === 0 || !history.some((item) => Array.isArray(item?.checks) || item?.target_id)) {
+      return {
+        width, height, paddingLeft, paddingRight, paddingTop, paddingBottom, plotW, plotH,
+        yUpper, yTicks, pointsCount, pointsTimes, pointsFullTimes, targetPaths: [], targetPointsMap: {}, displayedXMarks: [],
+      }
+    }
+
     pingTargets.forEach((t) => {
       let seed = 0
       for (let c = 0; c < t.id.length; c++) {
@@ -812,7 +792,7 @@ export function NodeDetailPage({
       }
 
       const pts = []
-      const jitterAmp = Math.min(Math.max(Number(t.jitter) || 1.0, 0.4), 2.2) * (smoothPeaks ? 0.35 : 1.0)
+      const jitterAmp = Number.isFinite(Number(t.jitter)) ? Math.min(Math.max(Number(t.jitter), 0), 2.2) * (smoothPeaks ? 0.35 : 1.0) : 0
 
       for (let i = 0; i < pointsCount; i++) {
         const x = paddingLeft + (i / (pointsCount - 1)) * plotW
@@ -821,9 +801,6 @@ export function NodeDetailPage({
         const phase2 = (i * 0.85) + (seed % 31)
         const naturalNoise = Math.sin(phase1) * 0.55 + Math.cos(phase2) * 0.45
         let val = t.latencyVal + naturalNoise * jitterAmp
-        if (!smoothPeaks && (i + seed) % 13 === 5) {
-          val += 2.6
-        }
         val = Math.max(0.5, +val.toFixed(2))
 
         const norm = Math.min(1, Math.max(0, val / yUpper))
@@ -2252,7 +2229,9 @@ export function NodeDetailPage({
         <div className="komari-targets-grid">
           {pingTargets.map((t) => {
             const isChecked = Boolean(selectedTargets[t.id])
-            const jitterText = typeof t.jitter === 'number' ? t.jitter.toFixed(2) : (numeric(t.jitter) || 0).toFixed(2)
+            const jitterText = t.jitter === null || t.jitter === undefined || t.jitter === ''
+              ? '—'
+              : `${Number(t.jitter).toFixed(2)} ms`
             return (
               <div
                 key={t.id}

@@ -431,21 +431,17 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                   const calc = calculateRemainingValue(billing)
                   const isSelected = selectedNodeIds.has(id)
 
-                  // IPs (Safe documentation RFC 5737 fallback if none)
+                  // 仅显示探针真实上报的地址，缺失时保持为空。
                   const v4Ip =
                     node.ipv4 ||
                     node.ip ||
                     node.resource?.ipv4 ||
                     node.resource?.ip ||
-                    (node.id
-                      ? `198.51.100.${(Array.from(node.id).reduce((a, c) => a + c.charCodeAt(0), 10) % 200) + 10}`
-                      : '198.51.100.12')
+                    '—'
                   const v6Ip =
                     node.ipv6 ||
                     node.resource?.ipv6 ||
-                    (node.id
-                      ? `2001:db8::${(Array.from(node.id).reduce((a, c) => a + c.charCodeAt(0), 1) % 900) + 100}`
-                      : null)
+                    '—'
 
                   // Quota
                   const quotaInfo = formatQuotaInfo(node, customMeta)
@@ -455,7 +451,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
 
                   // Agent Version calculation
                   const rawAgentVer = node.resource?.agent_version || node.agentVersion || ''
-                  const agentVersion = rawAgentVer ? (rawAgentVer.startsWith('v') ? rawAgentVer : `v${rawAgentVer}`) : 'v0.5.6'
+                  const agentVersion = rawAgentVer ? (rawAgentVer.startsWith('v') ? rawAgentVer : `v${rawAgentVer}`) : '—'
                   const isOldAgent = rawAgentVer && !rawAgentVer.includes('0.5.6')
 
                   return (
