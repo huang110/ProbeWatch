@@ -364,7 +364,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="hero-uptime-indicator">
             <span className="uptime-label">全网可用率</span>
-            <b className="uptime-value mono">{successRate !== null ? `${successRate}%` : '99.9%'}</b>
+            <b className="uptime-value mono">{successRate !== null ? `${successRate}%` : '—'}</b>
           </div>
         </div>
 
@@ -375,7 +375,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             <div className="stat-main mono">
               {online !== null && total !== null ? `${online} / ${total}` : '—'}
             </div>
-            <div className="stat-sub">{online === total ? '全部正常' : '部分异常'}</div>
+            <div className="stat-sub">
+              {online !== null && total !== null ? (online === total ? '全部正常' : '部分异常') : '等待节点数据'}
+            </div>
           </div>
 
           <div className="guest-stat-box">
