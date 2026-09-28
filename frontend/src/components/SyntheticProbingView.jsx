@@ -158,11 +158,12 @@ export default function SyntheticProbingView() {
 
   // Summary Metrics
   const metrics = useMemo(() => {
-    const total = overview?.total_targets || targets.length || 0
-    const passing = overview?.passing_targets || 0
-    const degraded = overview?.degraded_targets || 0
-    const failing = overview?.failing_targets || 0
-    const passRate = total > 0 ? Math.round((passing / total) * 100) : 100
+    const total = overview?.total_targets ?? targets.length ?? 0
+    const passing = overview?.passing_targets ?? 0
+    const degraded = overview?.degraded_targets ?? 0
+    const failing = overview?.failing_targets ?? 0
+    const hasSamples = (overview?.targets || []).some((item) => (item.total_nodes || 0) > 0)
+    const passRate = total > 0 && hasSamples ? Math.round((passing / total) * 100) : null
 
     let totalTTFB = 0
     let ttfbCount = 0
@@ -174,9 +175,9 @@ export default function SyntheticProbingView() {
         }
       })
     }
-    const fleetAvgTTFB = ttfbCount > 0 ? Math.round(totalTTFB / ttfbCount) : 0
+    const fleetAvgTTFB = ttfbCount > 0 ? Math.round(totalTTFB / ttfbCount) : null
 
-    return { total, passing, degraded, failing, passRate, fleetAvgTTFB }
+    return { total, passing, degraded, failing, passRate, fleetAvgTTFB, hasSamples }
   }, [overview, targets])
 
   const handleDelete = async (id) => {
@@ -260,9 +261,11 @@ export default function SyntheticProbingView() {
             <span className="text-xs font-semibold uppercase tracking-wider">SLA 达标率</span>
             <ShieldCheck size={18} className="text-emerald-400" />
           </div>
-          <div className="synthetic-metric-value is-green">{metrics.passRate}%</div>
+          <div className="synthetic-metric-value is-green">{metrics.passRate == null ? '等待采样' : `${metrics.passRate}%`}</div>
           <div className="synthetic-metric-detail">
-            {metrics.passing} 契约正常 · {metrics.failing} 失败 · {metrics.degraded} 降级
+            {metrics.hasSamples
+              ? `${metrics.passing} 契约正常 · ${metrics.failing} 失败 · ${metrics.degraded} 降级`
+              : '尚未收到有效探针回传'}
           </div>
         </div>
 
@@ -272,7 +275,7 @@ export default function SyntheticProbingView() {
             <WarningCircle size={18} className={metrics.failing > 0 ? 'text-rose-400' : 'text-slate-400'} />
           </div>
           <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>
-            {metrics.failing > 0 ? `${metrics.failing} 失活` : '全网稳态'}
+            {metrics.failing > 0 ? `${metrics.failing} 失活` : metrics.hasSamples ? '全网稳态' : '暂无样本'}
           </div>
           <div className="synthetic-metric-detail">多 ISP 交叉校验过滤偶发抖动</div>
         </div>
@@ -282,7 +285,7 @@ export default function SyntheticProbingView() {
             <span className="text-xs font-semibold uppercase tracking-wider">全网平均首包 (TTFB)</span>
             <Lightning size={18} className="text-amber-400" />
           </div>
-          <div className="synthetic-metric-value is-amber">{metrics.fleetAvgTTFB} ms</div>
+          <div className="synthetic-metric-value is-amber">{metrics.fleetAvgTTFB == null ? '—' : `${metrics.fleetAvgTTFB} ms`}</div>
           <div className="synthetic-metric-detail">DNS+TCP+TLS 全链路网络瀑布流</div>
         </div>
       </div>

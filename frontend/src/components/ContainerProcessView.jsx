@@ -102,20 +102,27 @@ export function ContainerProcessView({ initialNodeId = '' }) {
         if (!controller.signal.aborted) setOverview(overData || {})
       } else {
         // Specific node mode
-        const [cData, pData] = await Promise.all([
-          fetchNodeContainers(selectedNode, controller.signal).catch(() => ({
-            node_id: selectedNode,
-            containers: [],
-            docker_available: false,
-          })),
-          fetchNodeProcesses(selectedNode, controller.signal).catch(() => ({
-            node_id: selectedNode,
-            top_processes: [],
-          })),
+        const [cResult, pResult] = await Promise.all([
+          fetchNodeContainers(selectedNode, controller.signal)
+            .then((data) => ({ data, error: null }))
+            .catch((err) => {
+              if (err?.name === 'AbortError') throw err
+              return { data: null, error: err }
+            }),
+          fetchNodeProcesses(selectedNode, controller.signal)
+            .then((data) => ({ data, error: null }))
+            .catch((err) => {
+              if (err?.name === 'AbortError') throw err
+              return { data: null, error: err }
+            }),
         ])
         if (!controller.signal.aborted) {
-          setNodeContainersData(cData || {})
-          setNodeProcessesData(pData || {})
+          if (cResult.data) setNodeContainersData(cResult.data)
+          if (pResult.data) setNodeProcessesData(pResult.data)
+          const requestErrors = [cResult.error, pResult.error].filter(Boolean)
+          if (requestErrors.length > 0) {
+            setError(requestErrors.map((item) => item.message || '节点工作负载接口请求失败').join('；'))
+          }
         }
       }
     } catch (err) {
@@ -129,6 +136,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
   }, [selectedNode])
 
   useEffect(() => {
+    setLoading(true)
     setOverview({ total_nodes: 0, nodes_with_docker: 0, total_containers: 0, running_containers: 0, stopped_containers: 0, unhealthy_containers: 0, top_cpu_containers: [], top_memory_containers: [] })
     setNodeContainersData({ node_id: selectedNode || '', node_name: '', docker_available: false, docker_version: '', containers_total: 0, containers_running: 0, containers_stopped: 0, containers: [] })
     setNodeProcessesData({ node_id: selectedNode || '', node_name: '', top_processes: [], reported_at: 0 })
@@ -139,6 +147,11 @@ export function ContainerProcessView({ initialNodeId = '' }) {
       requestRef.current?.abort()
     }
   }, [loadData])
+
+  const unhealthyCount = selectedNode
+    ? (nodeContainersData.containers || []).filter((container) => container.health === 'unhealthy').length
+    : overview.unhealthy_containers
+  const metricsUnavailable = loading || Boolean(error)
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text)
@@ -247,12 +260,12 @@ export function ContainerProcessView({ initialNodeId = '' }) {
             <Cube size={16} color="#5e6ad2" />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '8px' }}>
-            {selectedNode ? nodeContainersData.containers_total : overview.total_containers}
+            {metricsUnavailable ? '—' : selectedNode ? nodeContainersData.containers_total : overview.total_containers}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
             {selectedNode
-              ? (nodeContainersData.docker_available ? `Docker v${nodeContainersData.docker_version || 'active'}` : '未安装或无 Docker Socket')
-              : `${overview.nodes_with_docker} / ${overview.total_nodes} 节点启用 Docker`}
+              ? (metricsUnavailable ? '等待节点回传' : nodeContainersData.docker_available ? `Docker v${nodeContainersData.docker_version || 'active'}` : '未安装或无 Docker Socket')
+              : (metricsUnavailable ? '等待机群回传' : `${overview.nodes_with_docker} / ${overview.total_nodes} 节点启用 Docker`)}
           </div>
         </div>
 
@@ -262,7 +275,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
             <Play size={16} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#10b981', marginTop: '8px' }}>
-            {selectedNode ? nodeContainersData.containers_running : overview.running_containers}
+            {metricsUnavailable ? '—' : selectedNode ? nodeContainersData.containers_running : overview.running_containers}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
             正常提供服务
@@ -275,7 +288,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
             <Stop size={16} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#94a3b8', marginTop: '8px' }}>
-            {selectedNode ? nodeContainersData.containers_stopped : overview.stopped_containers}
+            {metricsUnavailable ? '—' : selectedNode ? nodeContainersData.containers_stopped : overview.stopped_containers}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
             休眠或历史任务
@@ -283,15 +296,15 @@ export function ContainerProcessView({ initialNodeId = '' }) {
         </div>
 
         <div className="panel" style={{ padding: '16px', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: overview.unhealthy_containers > 0 ? '#ef4444' : '#10b981', fontSize: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: unhealthyCount > 0 ? '#ef4444' : 'var(--text-muted)', fontSize: '12px' }}>
             <span>健康检查异常</span>
             <Warning size={16} />
           </div>
-          <div style={{ fontSize: '24px', fontWeight: 700, color: overview.unhealthy_containers > 0 ? '#ef4444' : '#10b981', marginTop: '8px' }}>
-            {overview.unhealthy_containers}
+          <div style={{ fontSize: '24px', fontWeight: 700, color: unhealthyCount > 0 ? '#ef4444' : 'var(--text-primary)', marginTop: '8px' }}>
+            {metricsUnavailable ? '—' : unhealthyCount}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {overview.unhealthy_containers > 0 ? '检测到容器不健康' : '全网容器运行正常'}
+            {metricsUnavailable ? '等待健康状态回传' : unhealthyCount > 0 ? '检测到容器不健康' : '当前快照未发现异常'}
           </div>
         </div>
       </div>
