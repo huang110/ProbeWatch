@@ -79,12 +79,19 @@ export function ContainerProcessView({ initialNodeId = '' }) {
 
   // Load nodes list once
   useEffect(() => {
-    fetchNodes()
+    const controller = new AbortController()
+    fetchNodes(controller.signal)
       .then((data) => {
+        if (controller.signal.aborted) return
         const list = Array.isArray(data) ? data : data.nodes || []
         setNodes(list)
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+          setError(err.message || '加载节点列表失败')
+        }
+      })
+    return () => controller.abort()
   }, [])
 
   // Main data loader
