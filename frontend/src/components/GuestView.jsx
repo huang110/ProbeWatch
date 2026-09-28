@@ -12,7 +12,7 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
   const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta?.flag || '🌐')
   const displayName = custom.customName || name
-  const os = custom.os || 'Ubuntu 24.04 LTS'
+  const os = custom.os || '—'
   const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
   const cpuPercent = numeric(telemetry.cpu_percent)
   const memoryUsed = numeric(telemetry.memory_used_bytes)
@@ -29,8 +29,8 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
     customName: displayName,
     flag: displayFlag,
     os: os,
-    arch: custom.arch || 'kvm (x86_64)',
-    kernel: custom.kernel || '6.8.0-31-generic',
+    arch: custom.arch || '—',
+    kernel: custom.kernel || '—',
     uptime: uptimeText,
     startedAt: numeric(telemetry.started_at),
     cpu: cpuPercent,
@@ -39,7 +39,7 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
     diskUsed,
     diskTotal,
     swapUsed: 0,
-    swapTotal: 2147483648,
+    swapTotal: null,
     rx: numeric(telemetry.network_rx_bytes),
     tx: numeric(telemetry.network_tx_bytes),
     resource: {
@@ -692,7 +692,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{formatLatency(cuLatency)}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency || 0)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -703,7 +703,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{formatLatency(ctLatency)}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency || 0)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -714,7 +714,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{formatLatency(cmLatency)}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency || 0)} />
+                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
                           </div>
                         </div>
 
@@ -733,7 +733,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{cuLoss !== null ? `${cuLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(cuLoss || 0)} />
+                            <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -744,7 +744,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{ctLoss !== null ? `${ctLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(ctLoss || 0)} />
+                            <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
                           </div>
 
                           <div className="vps-isp-track-item">
@@ -755,7 +755,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                               </span>
                               <span className="vps-isp-val mono">{cmLoss !== null ? `${cmLoss.toFixed(1)}%` : '—'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLossBlocks(cmLoss || 0)} />
+                            <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
                           </div>
                         </div>
                       </div>

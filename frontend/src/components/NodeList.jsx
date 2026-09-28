@@ -420,7 +420,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{cuIsp.latency !== null ? `${cuIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(cuIsp.latency || 0)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(cuIsp.latency)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -431,7 +431,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{ctIsp.latency !== null ? `${ctIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(ctIsp.latency || 0)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(ctIsp.latency)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -442,7 +442,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{cmIsp.latency !== null ? `${cmIsp.latency} ms` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLatencyBlocks(cmIsp.latency || 0)} />
+                      <VpsDotTrack blocks={getLatencyBlocks(cmIsp.latency)} />
                     </div>
                   </div>
 
@@ -461,7 +461,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{cuIsp.loss !== null ? `${cuIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(cuIsp.loss || 0)} />
+                      <VpsDotTrack blocks={getLossBlocks(cuIsp.loss)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -472,7 +472,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{ctIsp.loss !== null ? `${ctIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(ctIsp.loss || 0)} />
+                      <VpsDotTrack blocks={getLossBlocks(ctIsp.loss)} />
                     </div>
 
                     <div className="vps-isp-track-item">
@@ -483,7 +483,7 @@ export function NodeTable({
                         </span>
                         <span className="vps-isp-val mono">{cmIsp.loss !== null ? `${cmIsp.loss.toFixed(1)}%` : '—'}</span>
                       </div>
-                      <VpsDotTrack blocks={getLossBlocks(cmIsp.loss || 0)} />
+                      <VpsDotTrack blocks={getLossBlocks(cmIsp.loss)} />
                     </div>
                   </div>
                 </div>

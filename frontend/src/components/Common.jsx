@@ -95,6 +95,7 @@ export function VpsDotTrack({ blocks = [], className = '' }) {
 }
 
 export function getLatencyBlocks(latencyMs) {
+  if (latencyMs === null || latencyMs === undefined || latencyMs === '') return Array(16).fill('#64748b')
   const val = Number(latencyMs) || 0
   if (val <= 0) return Array(16).fill('#34d399')
   if (val < 65) return Array(16).fill('#34d399')
@@ -112,6 +113,7 @@ export function getLatencyBlocks(latencyMs) {
 }
 
 export function getLossBlocks(lossPercent) {
+  if (lossPercent === null || lossPercent === undefined || lossPercent === '') return Array(16).fill('#64748b')
   const lossNum = parseFloat(lossPercent) || 0
   if (lossNum <= 0) return Array(16).fill('#34d399')
   if (lossNum > 35) {

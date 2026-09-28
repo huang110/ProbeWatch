@@ -235,9 +235,9 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
     const rx = numeric(node.rx) || 0
     const tx = numeric(node.tx) || 0
     const usedBytes = rx + tx
-    const quotaStr = customMeta.trafficQuota || '500.00 GB'
+    const quotaStr = customMeta.trafficQuota || ''
     if (!quotaStr || quotaStr === '0 B' || quotaStr === '无限制') {
-      return { text: `${formatBytes(usedBytes)} / ∞`, pct: 8 }
+      return { text: `${formatBytes(usedBytes)} / ${quotaStr === '无限制' ? '∞' : '未配置'}`, pct: null }
     }
     let quotaBytes = 500 * 1024 * 1024 * 1024
     const match = quotaStr.match(/([\d.]+)\s*(GB|TB|MB)?/i)
@@ -572,10 +572,12 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                         <div className="space-y-1.5 pr-2">
                           <span className="text-[11px] mono text-muted block">{quotaInfo.text}</span>
                           <div className="quota-track">
-                            <div
-                              className={`quota-fill ${quotaInfo.pct > 90 ? 'quota-fill-danger' : quotaInfo.pct > 75 ? 'quota-fill-warning' : 'quota-fill-normal'}`}
-                              style={{ width: `${quotaInfo.pct}%` }}
-                            />
+                            {quotaInfo.pct !== null && (
+                              <div
+                                className={`quota-fill ${quotaInfo.pct > 90 ? 'quota-fill-danger' : quotaInfo.pct > 75 ? 'quota-fill-warning' : 'quota-fill-normal'}`}
+                                style={{ width: `${quotaInfo.pct}%` }}
+                              />
+                            )}
                           </div>
                         </div>
                       </td>

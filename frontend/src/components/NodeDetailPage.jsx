@@ -56,7 +56,9 @@ import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
-  if (!points || points.length === 0) return { line: '', area: '' }
+  const validPoints = (points || []).filter((value) => typeof value === 'number' && Number.isFinite(value))
+  if (validPoints.length === 0) return { line: '', area: '' }
+  points = validPoints
   const plotWidth = width - padding * 2
   const plotHeight = height - padding * 2
 
@@ -381,18 +383,18 @@ export function NodeDetailPage({
   const resource = node?.resource || {}
   const rate = rates[nodeUuid] || {}
 
-  const memUsed = node?.memUsed ?? numeric(resource.memory_used_bytes) ?? 0
-  const memTotal = node?.memTotal ?? numeric(resource.memory_total_bytes) ?? 0
-  const swapUsed = node?.swapUsed ?? numeric(resource.swap_used_bytes) ?? 0
-  const swapTotal = node?.swapTotal ?? numeric(resource.swap_total_bytes) ?? 0
-  const diskUsed = node?.diskUsed ?? numeric(resource.filesystem_used_bytes) ?? 0
-  const diskTotal = node?.diskTotal ?? numeric(resource.filesystem_total_bytes) ?? 0
+  const memUsed = node?.memUsed ?? numeric(resource.memory_used_bytes)
+  const memTotal = node?.memTotal ?? numeric(resource.memory_total_bytes)
+  const swapUsed = node?.swapUsed ?? numeric(resource.swap_used_bytes)
+  const swapTotal = node?.swapTotal ?? numeric(resource.swap_total_bytes)
+  const diskUsed = node?.diskUsed ?? numeric(resource.filesystem_used_bytes)
+  const diskTotal = node?.diskTotal ?? numeric(resource.filesystem_total_bytes)
 
-  const rawTx = numeric(node?.tx) ?? numeric(resource.network_tx_bytes) ?? 0
-  const rawRx = numeric(node?.rx) ?? numeric(resource.network_rx_bytes) ?? 0
-  const totalTraffic = (rawTx + rawRx)
+  const rawTx = numeric(node?.tx) ?? numeric(resource.network_tx_bytes)
+  const rawRx = numeric(node?.rx) ?? numeric(resource.network_rx_bytes)
+  const totalTraffic = rawTx !== null || rawRx !== null ? (rawTx || 0) + (rawRx || 0) : null
 
-  const cpuPercent = numeric(node?.cpu) ?? numeric(resource.cpu_percent) ?? 0.0
+  const cpuPercent = numeric(node?.cpu) ?? numeric(resource.cpu_percent)
   const cpuModel = resource.cpu_name || resource.cpu_model || node?.cpuModel || customMeta.cpuModel || '—'
   const cleanedCpuModel = (cpuModel || '')
     .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
@@ -407,7 +409,7 @@ export function NodeDetailPage({
   const interfaces = Array.isArray(node?.interfaces) && node.interfaces.length > 0
     ? node.interfaces
     : (Array.isArray(resource.interfaces) ? resource.interfaces : [])
-  const cores = resource.cpu_cores || node?.cpu_cores || 1
+  const cores = numeric(resource.cpu_cores) ?? numeric(node?.cpu_cores)
   const cpuMhz = numeric(resource.cpu_mhz) || numeric(node?.cpu_mhz) || null
   const cpuTempC = numeric(resource.cpu_temp_c) ?? numeric(node?.cpu_temp_c) ?? null
   const sensors = Array.isArray(resource.sensors) ? resource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
@@ -498,19 +500,19 @@ export function NodeDetailPage({
   const rawTcp = numeric(resource.tcp_conn_count)
   const rawUdp = numeric(resource.udp_conn_count)
   const rawProc = numeric(resource.process_count)
-  const tcpCount = rawTcp !== null && rawTcp >= 0 ? rawTcp : 0
-  const udpCount = rawUdp !== null && rawUdp >= 0 ? rawUdp : 0
-  const totalConnections = tcpCount + udpCount
-  const processCount = rawProc !== null && rawProc >= 0 ? rawProc : 0
+  const tcpCount = rawTcp !== null && rawTcp >= 0 ? rawTcp : null
+  const udpCount = rawUdp !== null && rawUdp >= 0 ? rawUdp : null
+  const totalConnections = tcpCount !== null || udpCount !== null ? (tcpCount || 0) + (udpCount || 0) : null
+  const processCount = rawProc !== null && rawProc >= 0 ? rawProc : null
 
-  const gpuPercent = numeric(resource.gpu_percent) || 0
+  const gpuPercent = numeric(resource.gpu_percent)
   const hasGpu = Boolean(node?.gpu || resource.gpu_name || (numeric(resource.gpu_percent) && numeric(resource.gpu_percent) > 0))
 
-  const trafficQuotaBytes = customMeta.trafficQuotaBytes || 1024 * 1024 * 1024 * 1024 // 1 TB default
-  const trafficQuotaText = customMeta.trafficQuota || '1.00 TB'
-  const trafficPercent = trafficQuotaBytes > 0
+  const trafficQuotaBytes = numeric(customMeta.trafficQuotaBytes)
+  const trafficQuotaText = customMeta.trafficQuota || '未配置'
+  const trafficPercent = trafficQuotaBytes > 0 && totalTraffic !== null
     ? Math.min(100, Math.max(0, ((totalTraffic / trafficQuotaBytes) * 100))).toFixed(1)
-    : '0.0'
+    : null
 
   // Top metric values
   const priceDisplay = billing.price ? `${calc.symbol || '$'}${billing.price}` : '—'
@@ -523,7 +525,7 @@ export function NodeDetailPage({
   const dayTx = traffic?.tx_bytes !== undefined && traffic?.tx_bytes !== null ? traffic.tx_bytes : null
   const dailyTrafficText = (dayRx !== null || dayTx !== null)
     ? `~ ${formatBytes(dayRx || 0)} · ~ ${formatBytes(dayTx || 0)}`
-    : `~ ${formatRate(rate?.down || 0)} · ~ ${formatRate(rate?.up || 0)}`
+    : `~ ${formatRate(rate?.down)} · ~ ${formatRate(rate?.up)}`
 
   // Dynamic telemetry series mapped directly from history & anchored on live ticking timeline
   const telemetrySeries = useMemo(() => {
@@ -547,33 +549,34 @@ export function NodeDetailPage({
     })
 
     const liveCpu = cpuPercent
-    const liveMemRatio = memTotal > 0 ? (memUsed / memTotal) * 100 : 0
-    const liveSwapRatio = swapTotal > 0 ? (swapUsed / swapTotal) * 100 : 0
-    const liveDiskRatio = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0
-    const liveDown = rate?.down || 0
-    const liveUp = rate?.up || 0
+    const liveMemRatio = memTotal > 0 && memUsed !== null ? (memUsed / memTotal) * 100 : null
+    const liveSwapRatio = swapTotal > 0 && swapUsed !== null ? (swapUsed / swapTotal) * 100 : null
+    const liveDiskRatio = diskTotal > 0 && diskUsed !== null ? (diskUsed / diskTotal) * 100 : null
+    const liveDown = numeric(rate?.down)
+    const liveUp = numeric(rate?.up)
     const liveConn = totalConnections
     const liveProc = processCount
     const liveGpu = gpuPercent
-    const liveTemp = cpuTempC !== null && cpuTempC > 0 ? cpuTempC : 0
+    const liveTemp = cpuTempC !== null && cpuTempC > 0 ? cpuTempC : null
     const liveDiskRead = totalDiskReadRate
     const liveDiskWrite = totalDiskWriteRate
 
     const hasHistory = Array.isArray(history) && history.length > 0
 
     if (hasHistory) {
-      const cpus = history.map((h) => Number(h.cpu ?? 0))
-      const mems = history.map((h) => Number(h.mem ?? 0))
-      const swaps = history.map((h) => Number(h.swap ?? 0))
-      const disks = history.map((h) => Number(h.disk ?? 0))
-      const downs = history.map((h) => Number(h.downRate ?? 0))
-      const ups = history.map((h) => Number(h.upRate ?? 0))
-      const conns = history.map((h) => Number(h.conn ?? ((h.tcp ?? 0) + (h.udp ?? 0)) ?? 0))
-      const procs = history.map((h) => Number(h.proc ?? 0))
-      const gpus = history.map((h) => Number(h.gpu ?? 0))
-      const temps = history.map((h) => Number(h.temp ?? (liveTemp > 0 ? liveTemp : 0)))
-      const diskReads = history.map((h) => Number(h.diskReadRate ?? 0))
-      const diskWrites = history.map((h) => Number(h.diskWriteRate ?? 0))
+      const valueOrNull = (value) => value === null || value === undefined ? null : Number(value)
+      const cpus = history.map((h) => valueOrNull(h.cpu))
+      const mems = history.map((h) => valueOrNull(h.mem))
+      const swaps = history.map((h) => valueOrNull(h.swap))
+      const disks = history.map((h) => valueOrNull(h.disk))
+      const downs = history.map((h) => valueOrNull(h.downRate))
+      const ups = history.map((h) => valueOrNull(h.upRate))
+      const conns = history.map((h) => valueOrNull(h.conn ?? (h.tcp !== undefined || h.udp !== undefined ? (h.tcp || 0) + (h.udp || 0) : null)))
+      const procs = history.map((h) => valueOrNull(h.proc))
+      const gpus = history.map((h) => valueOrNull(h.gpu))
+      const temps = history.map((h) => valueOrNull(h.temp))
+      const diskReads = history.map((h) => valueOrNull(h.diskReadRate))
+      const diskWrites = history.map((h) => valueOrNull(h.diskWriteRate))
 
       // Ensure the latest point seamlessly connects to live current metrics
       if (cpus.length > 0) {
@@ -610,22 +613,22 @@ export function NodeDetailPage({
 
     // Anchor on live metrics if historical reporting points are not yet cached
     const count = 16
-    const cpus = Array.from({ length: count }, () => liveCpu)
-    const mems = Array.from({ length: count }, () => liveMemRatio)
+    const cpus = liveCpu === null ? [] : Array.from({ length: count }, () => liveCpu)
+    const mems = liveMemRatio === null ? [] : Array.from({ length: count }, () => liveMemRatio)
 
-    const swaps = Array.from({ length: count }, () => liveSwapRatio)
-    const disks = Array.from({ length: count }, () => liveDiskRatio)
+    const swaps = liveSwapRatio === null ? [] : Array.from({ length: count }, () => liveSwapRatio)
+    const disks = liveDiskRatio === null ? [] : Array.from({ length: count }, () => liveDiskRatio)
 
-    const downs = Array.from({ length: count }, () => liveDown)
-    const ups = Array.from({ length: count }, () => liveUp)
-    const conns = Array.from({ length: count }, () => liveConn)
-    const procs = Array.from({ length: count }, () => liveProc)
+    const downs = liveDown === null ? [] : Array.from({ length: count }, () => liveDown)
+    const ups = liveUp === null ? [] : Array.from({ length: count }, () => liveUp)
+    const conns = liveConn === null ? [] : Array.from({ length: count }, () => liveConn)
+    const procs = liveProc === null ? [] : Array.from({ length: count }, () => liveProc)
 
-    const gpus = Array.from({ length: count }, () => liveGpu)
+    const gpus = liveGpu === null ? [] : Array.from({ length: count }, () => liveGpu)
 
-    const temps = Array.from({ length: count }, () => liveTemp)
-    const diskReads = Array.from({ length: count }, () => liveDiskRead)
-    const diskWrites = Array.from({ length: count }, () => liveDiskWrite)
+    const temps = liveTemp === null ? [] : Array.from({ length: count }, () => liveTemp)
+    const diskReads = liveDiskRead === null ? [] : Array.from({ length: count }, () => liveDiskRead)
+    const diskWrites = liveDiskWrite === null ? [] : Array.from({ length: count }, () => liveDiskWrite)
 
     return {
       cpus,
@@ -1083,7 +1086,7 @@ export function NodeDetailPage({
             <ChartPieSlice size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono">
-            {trafficPercent} <small className="text-muted">%</small>
+            {trafficPercent === null ? '—' : trafficPercent} {trafficPercent !== null && <small className="text-muted">%</small>}
           </div>
         </div>
 
@@ -1105,7 +1108,7 @@ export function NodeDetailPage({
             <ShareNetwork size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono">
-            {totalConnections}
+            {totalConnections === null ? '—' : totalConnections}
           </div>
         </div>
       </div>
@@ -1143,7 +1146,7 @@ export function NodeDetailPage({
               <span className="komari-info-label">
                 <Desktop size={14} /> 物理核心
               </span>
-              <span className="komari-info-val mono">{cores} 核</span>
+              <span className="komari-info-val mono">{cores === null ? '—' : `${cores} 核`}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
@@ -1309,7 +1312,7 @@ export function NodeDetailPage({
                 <ArrowsClockwise size={14} /> 实时网络速率
               </span>
               <span className="komari-info-val mono">
-                ^ {formatRate(rate?.up || 0)} · v {formatRate(rate?.down || 0)}
+                ^ {formatRate(rate?.up)} · v {formatRate(rate?.down)}
               </span>
             </div>
           </div>
@@ -2067,7 +2070,7 @@ export function NodeDetailPage({
           <KomariChartCard
             title="CPU 与负载"
             icon="🔴"
-            badgeText={`${cpuPercent.toFixed(1)}%`}
+            badgeText={cpuPercent === null ? '—' : `${cpuPercent.toFixed(1)}%`}
             series={telemetrySeries.cpus}
             strokeColor="#f97316"
             yMax="100%"
@@ -2085,7 +2088,7 @@ export function NodeDetailPage({
             strokeColor="#38bdf8"
             dualSeries={{ data: telemetrySeries.swaps, color: '#f59e0b' }}
             yMax={`${formatBytes(memTotal)}`}
-            yMid={`${formatBytes(memTotal / 2)}`}
+            yMid={memTotal === null ? '—' : formatBytes(memTotal / 2)}
             yMin="0 B"
             timeLabels={telemetrySeries.times}
           />
@@ -2098,7 +2101,7 @@ export function NodeDetailPage({
             series={telemetrySeries.disks}
             strokeColor="#10b981"
             yMax={`${formatBytes(diskTotal)}`}
-            yMid={`${formatBytes(diskTotal / 2)}`}
+            yMid={diskTotal === null ? '—' : formatBytes(diskTotal / 2)}
             yMin="0 B"
             timeLabels={telemetrySeries.times}
           />
@@ -2107,7 +2110,7 @@ export function NodeDetailPage({
           <KomariChartCard
             title="实时网络"
             icon="🔵"
-            badgeText={`^ ${formatRate(rate?.up || 0)}  v ${formatRate(rate?.down || 0)}`}
+            badgeText={`^ ${formatRate(rate?.up)}  v ${formatRate(rate?.down)}`}
             series={telemetrySeries.downs}
             strokeColor="#0284c7"
             dualSeries={{ data: telemetrySeries.ups, color: '#a855f7' }}
@@ -2122,7 +2125,7 @@ export function NodeDetailPage({
             <KomariChartCard
               title="GPU 利用率"
               icon="🟢"
-              badgeText={`${gpuPercent.toFixed(1)}%`}
+            badgeText={gpuPercent === null ? '—' : `${gpuPercent.toFixed(1)}%`}
               series={telemetrySeries.gpus}
               strokeColor="#10b981"
               yMax="100%"
@@ -2136,7 +2139,7 @@ export function NodeDetailPage({
           <KomariChartCard
             title="网络连接"
             icon="🔴"
-            badgeText={`TCP: ${tcpCount}  UDP: ${udpCount}`}
+            badgeText={`TCP: ${tcpCount === null ? '—' : tcpCount}  UDP: ${udpCount === null ? '—' : udpCount}`}
             series={telemetrySeries.conns}
             strokeColor="#ef4444"
             yMax={`${connYMax}`}
@@ -2149,7 +2152,7 @@ export function NodeDetailPage({
           <KomariChartCard
             title="进程"
             icon="🔵"
-            badgeText={`${processCount}`}
+            badgeText={processCount === null ? '—' : `${processCount}`}
             series={telemetrySeries.procs}
             strokeColor="#6366f1"
             yMax={`${procYMax}`}
