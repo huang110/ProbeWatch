@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowsClockwise,
   CheckCircle,
@@ -35,25 +35,35 @@ export function MeshMatrixView() {
   const [editTags, setEditTags] = useState('')
   const [savingNode, setSavingNode] = useState(false)
   const [saveError, setSaveError] = useState(null)
+  const requestRef = useRef(null)
 
   const loadData = useCallback(async (isManual = false) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     if (isManual) setRefreshing(true)
     setError(null)
     try {
-      const res = await fetchMeshMatrix()
-      setData(res || { nodes: [], matrix: [], relays: [], stats: {} })
+      const res = await fetchMeshMatrix(controller.signal)
+      if (!controller.signal.aborted) setData(res || { nodes: [], matrix: [], relays: [], stats: {} })
     } catch (err) {
-      setError(err.message || '加载全球互联延迟网格失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载全球互联延迟网格失败')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!controller.signal.aborted) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [])
 
   useEffect(() => {
+    setData({ nodes: [], matrix: [], relays: [], stats: {} })
     loadData()
     const timer = setInterval(() => loadData(false), 30000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      requestRef.current?.abort()
+    }
   }, [loadData])
 
   // Extract all unique tags

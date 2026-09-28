@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import {
   ArrowsClockwise,
   Cpu,
@@ -75,6 +75,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [stateFilter, setStateFilter] = useState('all') // 'all' | 'running' | 'stopped' | 'unhealthy'
   const [processSortBy, setProcessSortBy] = useState('memory') // 'memory' | 'cpu'
+  const requestRef = useRef(null)
 
   // Load nodes list once
   useEffect(() => {
@@ -88,42 +89,55 @@ export function ContainerProcessView({ initialNodeId = '' }) {
 
   // Main data loader
   const loadData = useCallback(async (isManual = false) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     if (isManual) setRefreshing(true)
     setError(null)
 
     try {
       if (!selectedNode) {
         // Fleet overview mode
-        const overData = await fetchFleetContainerOverview()
-        setOverview(overData || {})
+        const overData = await fetchFleetContainerOverview(controller.signal)
+        if (!controller.signal.aborted) setOverview(overData || {})
       } else {
         // Specific node mode
         const [cData, pData] = await Promise.all([
-          fetchNodeContainers(selectedNode).catch(() => ({
+          fetchNodeContainers(selectedNode, controller.signal).catch(() => ({
             node_id: selectedNode,
             containers: [],
             docker_available: false,
           })),
-          fetchNodeProcesses(selectedNode).catch(() => ({
+          fetchNodeProcesses(selectedNode, controller.signal).catch(() => ({
             node_id: selectedNode,
             top_processes: [],
           })),
         ])
-        setNodeContainersData(cData || {})
-        setNodeProcessesData(pData || {})
+        if (!controller.signal.aborted) {
+          setNodeContainersData(cData || {})
+          setNodeProcessesData(pData || {})
+        }
       }
     } catch (err) {
-      setError(err.message || '加载工作负载数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载工作负载数据失败')
     } finally {
-      setLoading(false)
-      if (isManual) setRefreshing(false)
+      if (!controller.signal.aborted) {
+        setLoading(false)
+        if (isManual) setRefreshing(false)
+      }
     }
   }, [selectedNode])
 
   useEffect(() => {
+    setOverview({ total_nodes: 0, nodes_with_docker: 0, total_containers: 0, running_containers: 0, stopped_containers: 0, unhealthy_containers: 0, top_cpu_containers: [], top_memory_containers: [] })
+    setNodeContainersData({ node_id: selectedNode || '', node_name: '', docker_available: false, docker_version: '', containers_total: 0, containers_running: 0, containers_stopped: 0, containers: [] })
+    setNodeProcessesData({ node_id: selectedNode || '', node_name: '', top_processes: [], reported_at: 0 })
     loadData()
     const timer = setInterval(() => loadData(), 15000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      requestRef.current?.abort()
+    }
   }, [loadData])
 
   const copyToClipboard = (text, id) => {
