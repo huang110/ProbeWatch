@@ -223,18 +223,20 @@ export function DashboardView({
   // 3. 数据库物理存储体积
   const databaseStats = useMemo(() => {
     const db = overview?.database || {}
-    const totalBytes = Number(db.total_bytes || 17.52 * 1024 * 1024)
-    const fileBytes = Number(db.file_bytes || 15.27 * 1024 * 1024)
-    const walBytes = Number(db.wal_bytes || 2.25 * 1024 * 1024)
-    const shmBytes = Number(db.shm_bytes || 0)
+    const totalBytes = db.total_bytes === null || db.total_bytes === undefined ? null : Number(db.total_bytes)
+    const fileBytes = db.file_bytes === null || db.file_bytes === undefined ? null : Number(db.file_bytes)
+    const walBytes = db.wal_bytes === null || db.wal_bytes === undefined ? null : Number(db.wal_bytes)
+    const shmBytes = db.shm_bytes === null || db.shm_bytes === undefined ? null : Number(db.shm_bytes)
+    const formatMaybeBytes = (value) => value === null || !Number.isFinite(value) ? '—' : formatBytes(value)
+    const walShmBytes = walBytes === null || shmBytes === null ? null : walBytes + shmBytes
     return {
       totalBytes,
       fileBytes,
       walBytes,
       shmBytes,
-      formattedTotal: formatBytes(totalBytes),
-      formattedFile: formatBytes(fileBytes),
-      formattedWalShm: formatBytes(walBytes + shmBytes),
+      formattedTotal: formatMaybeBytes(totalBytes),
+      formattedFile: formatMaybeBytes(fileBytes),
+      formattedWalShm: formatMaybeBytes(walShmBytes),
     }
   }, [overview])
 
@@ -503,17 +505,6 @@ export function DashboardView({
             pct: Math.min(100, Math.max(10, Math.round((lat / 400) * 100))),
           })
         }
-      })
-    } else if (targets && targets.length > 0) {
-      targets.forEach((t) => {
-        const lat = 15.0 + ((t.host?.length || 5) % 30)
-        list.push({
-          name: nodeName,
-          isp: t.name || t.host || '网络目标',
-          latency: `${lat.toFixed(1)} ms`,
-          latVal: lat,
-          pct: Math.min(100, Math.max(10, Math.round((lat / 400) * 100))),
-        })
       })
     }
 

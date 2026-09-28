@@ -1160,13 +1160,13 @@ export function SpeedtestBenchmarkView() {
                       <td style={{ padding: '12px 8px', fontWeight: 600 }}>{h.node_name || h.node_id}</td>
                       <td style={{ padding: '12px 8px' }}>{h.task_name || '默认测速'}</td>
                       <td style={{ padding: '12px 8px', fontWeight: 600, color: '#2563eb' }}>
-                        {h.download_speed_mbps || 0} Mbps
+                        {h.download_speed_mbps === null || h.download_speed_mbps === undefined ? '—' : h.download_speed_mbps} Mbps
                       </td>
                       <td style={{ padding: '12px 8px', fontWeight: 600, color: '#10b981' }}>
-                        {h.upload_speed_mbps || 0} Mbps
+                        {h.upload_speed_mbps === null || h.upload_speed_mbps === undefined ? '—' : h.upload_speed_mbps} Mbps
                       </td>
-                      <td style={{ padding: '12px 8px' }}>{h.latency_ms || 0} ms</td>
-                      <td style={{ padding: '12px 8px' }}>{h.jitter_ms || 0} ms</td>
+                      <td style={{ padding: '12px 8px' }}>{h.latency_ms === null || h.latency_ms === undefined ? '—' : h.latency_ms} ms</td>
+                      <td style={{ padding: '12px 8px' }}>{h.jitter_ms === null || h.jitter_ms === undefined ? '—' : h.jitter_ms} ms</td>
                       <td style={{ padding: '12px 8px' }}>
                         {h.status === 'ok' ? (
                           <span
