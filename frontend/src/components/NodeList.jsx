@@ -144,8 +144,8 @@ export function NodeTable({
             const l15 = numeric(node.load15)
 
             // Bandwidth
-            const upRate = rate?.up ?? 0
-            const downRate = rate?.down ?? 0
+            const upRate = rate?.up ?? null
+            const downRate = rate?.down ?? null
 
             // Connections (TCP / UDP)
             const tcpCount = numeric(node.tcpCount) ?? numeric(node.tcp_conn) ?? numeric(node.resource?.socket_stats?.tcp_total)
@@ -194,8 +194,8 @@ export function NodeTable({
             const trafficPercent = quotaStr ? Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100)) : null
             const trafficSub = quotaStr ? `${formatBytes(totalTransfer)} / ${quotaStr}` : '流量配额未配置'
 
-            const upRateText = formatRate(upRate)
-            const downRateText = formatRate(downRate)
+            const upRateText = upRate === null ? '等待采样' : formatRate(upRate)
+            const downRateText = downRate === null ? '等待采样' : formatRate(downRate)
             const totalTxText = formatBytes(node.tx || 0)
             const totalRxText = formatBytes(node.rx || 0)
             const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : null

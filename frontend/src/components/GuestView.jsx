@@ -522,8 +522,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const trafficPercent = null
                   const trafficSub = totalRx !== null || totalTx !== null ? `↑ ${formatBytes(totalTx || 0)} · ↓ ${formatBytes(totalRx || 0)}` : '暂无实时数据'
                   const nodeRate = liveRates[name] || {}
-                  const upRateText = nodeRate.up !== undefined ? formatRate(nodeRate.up) : '等待下一次采样'
-                  const downRateText = nodeRate.down !== undefined ? formatRate(nodeRate.down) : '等待下一次采样'
+                  const upRateText = nodeRate.up !== undefined ? formatRate(nodeRate.up) : '等待采样'
+                  const downRateText = nodeRate.down !== undefined ? formatRate(nodeRate.down) : '等待采样'
                   const totalTxText = totalTx !== null ? formatBytes(totalTx) : '—'
                   const totalRxText = totalRx !== null ? formatBytes(totalRx) : '—'
                   const costText = custom.costText || '账单未配置'
