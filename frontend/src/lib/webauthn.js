@@ -193,9 +193,10 @@ export async function loginWithPasskey() {
 /**
  * Fetch all registered passkeys for the current user.
  */
-export async function listPasskeys() {
+export async function listPasskeys(signal) {
   const res = await fetch('/api/webauthn/credentials', {
     credentials: 'same-origin',
+    signal,
   })
   if (!res.ok) {
     throw new Error(`获取通行密钥列表失败 (${res.status})`)

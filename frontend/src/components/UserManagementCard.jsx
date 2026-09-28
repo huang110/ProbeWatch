@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   Users,
   UserPlus,
@@ -28,6 +28,7 @@ export function UserManagementCard({ currentUser, nodes = [] }) {
   const [error, setError] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState(null) // { kind: 'success' | 'error', text: '' }
+  const usersRequestRef = useRef(null)
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -53,10 +54,13 @@ export function UserManagementCard({ currentUser, nodes = [] }) {
   const isAdmin = currentUser?.is_admin || currentUser?.role === 'admin'
 
   const loadUsers = async () => {
+    usersRequestRef.current?.abort()
+    const controller = new AbortController()
+    usersRequestRef.current = controller
     setLoading(true)
     setError('')
     try {
-      const data = await fetchUsers()
+      const data = await fetchUsers(controller.signal)
       if (Array.isArray(data)) {
         setUsers(data)
       } else if (Array.isArray(data?.users)) {
@@ -65,14 +69,15 @@ export function UserManagementCard({ currentUser, nodes = [] }) {
         setUsers([])
       }
     } catch (err) {
-      setError(err?.message || '无法获取团队成员列表')
+      if (err?.name !== 'AbortError') setError(err?.message || '无法获取团队成员列表')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadUsers()
+    return () => usersRequestRef.current?.abort()
   }, [])
 
   // Count active admins to prevent deleting/demoting last admin

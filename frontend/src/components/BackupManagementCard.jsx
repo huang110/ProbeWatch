@@ -56,6 +56,8 @@ export function BackupManagementCard() {
   const [verifyingFile, setVerifyingFile] = useState(null)
   const [verifyModal, setVerifyModal] = useState(null)
   const fileInputRef = useRef(null)
+  const listRequestRef = useRef(null)
+  const configRequestRef = useRef(null)
 
   // Cloud & Schedule Config State
   const [configLoading, setConfigLoading] = useState(false)
@@ -88,21 +90,27 @@ export function BackupManagementCard() {
   })
 
   const loadList = async () => {
+    listRequestRef.current?.abort()
+    const controller = new AbortController()
+    listRequestRef.current = controller
     try {
       setError('')
-      const list = await fetchBackups()
+      const list = await fetchBackups(controller.signal)
       setBackups(Array.isArray(list) ? list : [])
     } catch (err) {
-      setError(err?.message || '无法加载备份列表')
+      if (err?.name !== 'AbortError') setError(err?.message || '无法加载备份列表')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   const loadConfig = async () => {
+    configRequestRef.current?.abort()
+    const controller = new AbortController()
+    configRequestRef.current = controller
     setConfigLoading(true)
     try {
-      const cfg = await fetchBackupConfig()
+      const cfg = await fetchBackupConfig(controller.signal)
       if (cfg) {
         setCloudConfig({
           enabled: !!cfg.enabled,
@@ -125,15 +133,19 @@ export function BackupManagementCard() {
         })
       }
     } catch (err) {
-      setStatus({ kind: 'error', message: `加载备份配置失败: ${err.message}` })
+      if (err?.name !== 'AbortError') setStatus({ kind: 'error', message: `加载备份配置失败: ${err.message}` })
     } finally {
-      setConfigLoading(false)
+      if (!controller.signal.aborted) setConfigLoading(false)
     }
   }
 
   useEffect(() => {
     loadList()
     loadConfig()
+    return () => {
+      listRequestRef.current?.abort()
+      configRequestRef.current?.abort()
+    }
   }, [])
 
   const handleCreate = async () => {

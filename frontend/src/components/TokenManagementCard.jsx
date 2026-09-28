@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   Key,
   Plus,
@@ -28,6 +28,7 @@ export function TokenManagementCard({ currentUser, nodes = [] }) {
   const [error, setError] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [statusMsg, setStatusMsg] = useState(null)
+  const tokensRequestRef = useRef(null)
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -47,20 +48,24 @@ export function TokenManagementCard({ currentUser, nodes = [] }) {
   const isAdmin = currentUser?.is_admin || currentUser?.role === 'admin'
 
   const loadTokens = async () => {
+    tokensRequestRef.current?.abort()
+    const controller = new AbortController()
+    tokensRequestRef.current = controller
     setLoading(true)
     setError('')
     try {
-      const data = await fetchTokens(!isAdmin)
+      const data = await fetchTokens(!isAdmin, controller.signal)
       setTokens(Array.isArray(data) ? data : [])
     } catch (err) {
-      setError(err?.message || '获取令牌列表失败')
+      if (err?.name !== 'AbortError') setError(err?.message || '获取令牌列表失败')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadTokens()
+    return () => tokensRequestRef.current?.abort()
   }, [])
 
   const openCreateModal = () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Clock, Palette, ShieldCheck } from '@phosphor-icons/react'
 import { safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
@@ -24,9 +24,13 @@ export function TOTPSettingsCard({ interval = 30, onIntervalChange, theme = 'sys
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(null)
+  const setupRequestRef = useRef(null)
 
   const refreshSetup = async () => {
-    const response = await fetch('/api/totp/setup', { credentials: 'same-origin' })
+    setupRequestRef.current?.abort()
+    const controller = new AbortController()
+    setupRequestRef.current = controller
+    const response = await fetch('/api/totp/setup', { credentials: 'same-origin', signal: controller.signal })
     if (response.status === 401) throw new Error('auth')
     if (!response.ok) throw new Error('setup')
     const json = await response.json()
@@ -35,15 +39,12 @@ export function TOTPSettingsCard({ interval = 30, onIntervalChange, theme = 'sys
   }
 
   useEffect(() => {
-    let cancelled = false
     refreshSetup().catch((error) => {
-      if (!cancelled) {
+      if (error?.name !== 'AbortError') {
         setLoadError(error?.message === 'auth' ? '需要登录后才能管理两步验证。' : '无法加载两步验证状态，请稍后重试。')
       }
     })
-    return () => {
-      cancelled = true
-    }
+    return () => setupRequestRef.current?.abort()
   }, [])
 
   const submit = async (action) => {

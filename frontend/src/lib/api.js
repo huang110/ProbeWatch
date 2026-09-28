@@ -242,8 +242,8 @@ export async function fetchFlappingAlerts() {
   return await res.json()
 }
 
-export async function fetchBackups() {
-  const res = await fetch('/api/system/backups', { credentials: 'same-origin' })
+export async function fetchBackups(signal) {
+  const res = await fetch('/api/system/backups', { credentials: 'same-origin', signal })
   if (!res.ok) throw new Error('Failed to fetch backups')
   return await res.json()
 }
@@ -309,8 +309,8 @@ export async function uploadBackupFile(file) {
   return await res.json()
 }
 
-export async function fetchBackupConfig() {
-  const res = await fetch('/api/system/backups/config', { credentials: 'same-origin' })
+export async function fetchBackupConfig(signal) {
+  const res = await fetch('/api/system/backups/config', { credentials: 'same-origin', signal })
   if (!res.ok) throw new Error('Failed to fetch backup config')
   return await res.json()
 }
@@ -530,8 +530,8 @@ export async function execTerminalCommand({ nodeId, command, timeoutSec = 30 }) 
   return await res.json()
 }
 
-export async function fetchUsers() {
-  const res = await fetch('/api/users', { credentials: 'same-origin' })
+export async function fetchUsers(signal) {
+  const res = await fetch('/api/users', { credentials: 'same-origin', signal })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'Failed to fetch users')
@@ -583,9 +583,9 @@ export async function deleteUser(id) {
   return await res.json()
 }
 
-export async function fetchTokens(mineOnly = false) {
+export async function fetchTokens(mineOnly = false, signal) {
   const url = mineOnly ? '/api/tokens?mine=true' : '/api/tokens'
-  const res = await fetch(url, { credentials: 'same-origin' })
+  const res = await fetch(url, { credentials: 'same-origin', signal })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'Failed to fetch tokens')

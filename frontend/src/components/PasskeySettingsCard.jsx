@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   Fingerprint,
   Plus,
@@ -49,22 +49,27 @@ export function PasskeySettingsCard() {
   const [newPasskeyName, setNewPasskeyName] = useState('')
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
+  const listRequestRef = useRef(null)
 
   const supported = isWebAuthnSupported()
 
   const refreshList = async () => {
+    listRequestRef.current?.abort()
+    const controller = new AbortController()
+    listRequestRef.current = controller
     try {
-      const data = await listPasskeys()
+      const data = await listPasskeys(controller.signal)
       setPasskeys(Array.isArray(data) ? data : [])
     } catch (err) {
-      console.error('Failed to load passkeys:', err)
+      if (err?.name !== 'AbortError') console.error('Failed to load passkeys:', err)
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     refreshList()
+    return () => listRequestRef.current?.abort()
   }, [])
 
   const handleRegister = async (e) => {
