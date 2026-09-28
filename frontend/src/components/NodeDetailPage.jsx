@@ -297,17 +297,6 @@ export function NodeDetailPage({
   const [targetInfoModal, setTargetInfoModal] = useState(null)
   const [showTrafficModal, setShowTrafficModal] = useState(false)
   const [hoverData, setHoverData] = useState(null)
-  const [visitorIp, setVisitorIp] = useState('')
-
-  useEffect(() => {
-    fetch('https://api.ipify.org?format=json')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.ip) setVisitorIp(data.ip)
-      })
-      .catch(() => {})
-  }, [])
-
   // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
@@ -2486,10 +2475,10 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 访问者/节点公网IP胶囊栏 */}
+        {/* 节点公网 IP 胶囊栏 */}
         <div className="komari-visitor-ip-bar">
           <span className="komari-visitor-ip-pill mono">
-            🌐 Your IP: {visitorIp || publicIp} | {ispText}
+            🌐 节点公网 IP: {publicIp} | {ispText}
           </span>
         </div>
       </div>
