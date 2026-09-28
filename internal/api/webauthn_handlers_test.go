@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -74,7 +75,7 @@ func TestWebAuthnFullFlow(t *testing.T) {
 	handler := NewServer(cfg, service).Handler()
 
 	// 1. Create admin user & session
-	ctx := t.Context()
+	ctx := context.Background()
 	now := time.Now().UTC()
 	admin, err := store.UpsertAdminUser(ctx, "local", "admin", "admin", now)
 	if err != nil {
