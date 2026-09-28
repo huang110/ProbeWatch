@@ -180,6 +180,7 @@ export default function TerminalView({ initialNodeId = null }) {
   const wsRef = useRef(null)
   const termEndRef = useRef(null)
   const inputRef = useRef(null)
+  const statusRequestRef = useRef(null)
 
   // Command Runner State
   const [customCmd, setCustomCmd] = useState('')
@@ -199,9 +200,13 @@ export default function TerminalView({ initialNodeId = null }) {
 
   // Fetch node terminal statuses
   const loadStatus = useCallback(async () => {
+    statusRequestRef.current?.abort()
+    const controller = new AbortController()
     try {
       setLoading(true)
-      const data = await fetchTerminalStatus()
+      statusRequestRef.current = controller
+      const data = await fetchTerminalStatus(controller.signal)
+      if (controller.signal.aborted) return
       setNodes(data.nodes || [])
       if (selectedNodeId) {
         const matchingNode = (data.nodes || []).find((node) => node.id === selectedNodeId || node.uuid === selectedNodeId)
@@ -218,21 +223,25 @@ export default function TerminalView({ initialNodeId = null }) {
       })
       setError(null)
     } catch (err) {
-      setError(err.message)
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message)
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [selectedNodeId])
 
   useEffect(() => {
     loadStatus()
+    return () => statusRequestRef.current?.abort()
   }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') loadStatus()
     }, 8000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(timer)
+      statusRequestRef.current?.abort()
+    }
   }, [loadStatus])
 
   // Auto-scroll terminal output

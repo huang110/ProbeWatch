@@ -63,6 +63,10 @@ export function LogStreamingView({ nodes = [] }) {
 
   // Copy helper
   const [copiedId, setCopiedId] = useState(null)
+  const overviewRequestRef = useRef(null)
+  const eventsRequestRef = useRef(null)
+  const auditRequestRef = useRef(null)
+  const logsRequestRef = useRef(null)
   const copyText = (text, id) => {
     if (!text) return
     navigator.clipboard.writeText(text)
@@ -72,19 +76,25 @@ export function LogStreamingView({ nodes = [] }) {
 
   // 1. Fetch overview
   const loadOverview = async () => {
+    overviewRequestRef.current?.abort()
+    const controller = new AbortController()
+    overviewRequestRef.current = controller
     try {
       setLoadingOverview(true)
-      const data = await fetchEventsOverview()
-      setOverview(data)
+      const data = await fetchEventsOverview(controller.signal)
+      if (!controller.signal.aborted) setOverview(data)
     } catch (e) {
-      console.error('Failed to load events overview:', e)
+      if (e?.name !== 'AbortError') console.error('Failed to load events overview:', e)
     } finally {
-      setLoadingOverview(false)
+      if (!controller.signal.aborted) setLoadingOverview(false)
     }
   }
 
   // 2. Fetch events
   const loadEvents = async () => {
+    eventsRequestRef.current?.abort()
+    const controller = new AbortController()
+    eventsRequestRef.current = controller
     try {
       setLoadingEvents(true)
       let data
@@ -95,26 +105,29 @@ export function LogStreamingView({ nodes = [] }) {
           category: selectedCategory,
           severity: selectedSeverity,
           limit: 150,
-        })
-        setEvents(data.events || [])
+        }, controller.signal)
+        if (!controller.signal.aborted) setEvents(data.events || [])
       } else {
         data = await fetchFleetEvents({
           category: selectedCategory,
           severity: selectedSeverity,
           limit: 150,
-        })
-        setEvents(data.events || [])
+        }, controller.signal)
+        if (!controller.signal.aborted) setEvents(data.events || [])
       }
     } catch (e) {
-      console.error('Failed to load events:', e)
+      if (e?.name !== 'AbortError') console.error('Failed to load events:', e)
     } finally {
-      setLoadingEvents(false)
+      if (!controller.signal.aborted) setLoadingEvents(false)
     }
   }
 
   // 3. Query logs
   const handleQueryLogs = async () => {
     if (!streamNodeUuid) return
+    logsRequestRef.current?.abort()
+    const controller = new AbortController()
+    logsRequestRef.current = controller
     try {
       setLoadingStream(true)
       const res = await queryNodeLogs(streamNodeUuid, {
@@ -123,25 +136,28 @@ export function LogStreamingView({ nodes = [] }) {
         grep: streamGrep,
         lines: streamLines,
         since: streamSince,
-      })
-      setStreamOutput(res.lines || [])
+      }, controller.signal)
+      if (!controller.signal.aborted) setStreamOutput(res.lines || [])
     } catch (e) {
-      setStreamOutput([`[错误] 日志查询失败: ${e.message}`])
+      if (e?.name !== 'AbortError') setStreamOutput([`[错误] 日志查询失败: ${e.message}`])
     } finally {
-      setLoadingStream(false)
+      if (!controller.signal.aborted) setLoadingStream(false)
     }
   }
 
   // 4. Fetch audit logs
   const loadAuditLogs = async () => {
+    auditRequestRef.current?.abort()
+    const controller = new AbortController()
+    auditRequestRef.current = controller
     try {
       setLoadingAudit(true)
-      const res = await fetchAuditLogs({ limit: 100 })
-      setAuditLogs(res.logs || [])
+      const res = await fetchAuditLogs({ limit: 100 }, controller.signal)
+      if (!controller.signal.aborted) setAuditLogs(res.logs || [])
     } catch (e) {
-      console.error('Failed to load audit logs:', e)
+      if (e?.name !== 'AbortError') console.error('Failed to load audit logs:', e)
     } finally {
-      setLoadingAudit(false)
+      if (!controller.signal.aborted) setLoadingAudit(false)
     }
   }
 
@@ -150,6 +166,12 @@ export function LogStreamingView({ nodes = [] }) {
     loadOverview()
     loadEvents()
     loadAuditLogs()
+    return () => {
+      overviewRequestRef.current?.abort()
+      eventsRequestRef.current?.abort()
+      auditRequestRef.current?.abort()
+      logsRequestRef.current?.abort()
+    }
   }, [])
 
   // Auto select default node for streaming if available

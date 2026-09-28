@@ -509,8 +509,8 @@ export async function fetchMCPConfig() {
   return await res.json()
 }
 
-export async function fetchTerminalStatus() {
-  const res = await fetch('/api/admin/terminal/status', { credentials: 'same-origin' })
+export async function fetchTerminalStatus(signal) {
+  const res = await fetch('/api/admin/terminal/status', { credentials: 'same-origin', signal })
   if (!res.ok) throw new Error('Failed to fetch terminal status')
   return await res.json()
 }
@@ -637,13 +637,13 @@ export async function deleteToken(id) {
   return await res.json()
 }
 
-export async function fetchAuditLogs({ limit = 50, offset = 0, action = '' } = {}) {
+export async function fetchAuditLogs({ limit = 50, offset = 0, action = '' } = {}, signal) {
   const params = new URLSearchParams()
   if (limit) params.set('limit', String(limit))
   if (offset) params.set('offset', String(offset))
   if (action) params.set('action', action)
 
-  const res = await fetch(`/api/audit-logs?${params.toString()}`, { credentials: 'same-origin' })
+  const res = await fetch(`/api/audit-logs?${params.toString()}`, { credentials: 'same-origin', signal })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'Failed to fetch audit logs')
