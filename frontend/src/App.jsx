@@ -675,20 +675,29 @@ export function App() {
   }, [loadCore, loadOverview])
 
   useEffect(() => {
-    const id = setInterval(() => { if (document.visibilityState === 'visible') loadCore(false) }, LIVE_CORE_INTERVAL_MS)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible' && activeNav !== 'node-detail' && !(guestPreview || apiState.kind === 'guest')) loadCore(false)
+    }, LIVE_CORE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [loadCore])
+  }, [loadCore, activeNav, guestPreview, apiState.kind])
 
   useEffect(() => {
-    const id = setInterval(() => { if (document.visibilityState === 'visible') loadOverview() }, OVERVIEW_INTERVAL_MS)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible' && !(guestPreview || apiState.kind === 'guest')) loadOverview()
+    }, OVERVIEW_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [loadOverview])
+  }, [loadOverview, guestPreview, apiState.kind])
 
   useEffect(() => {
-    const onVisibility = () => { if (document.visibilityState === 'visible') { loadCore(false); loadOverview() } }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && !(guestPreview || apiState.kind === 'guest')) {
+        loadCore(false)
+        loadOverview()
+      }
+    }
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [loadCore, loadOverview])
+  }, [loadCore, loadOverview, guestPreview, apiState.kind])
 
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000)
@@ -896,18 +905,6 @@ export function App() {
     return () => controller.abort()
   }, [analyticsUuid, trafficPeriod, lastSync])
 
-  // 当处于 node-detail 页面时，按 10s 周期自驱刷新节点实时状态
-  useEffect(() => {
-    if (activeNav !== 'node-detail') return undefined
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadCore(false)
-        if (guestPreview || apiState.kind === 'guest') refreshGuest()
-      }
-    }, 10000)
-    return () => clearInterval(interval)
-  }, [activeNav, loadCore, refreshGuest, guestPreview, apiState.kind])
-
   const ackAlert = async (id) => {
     setAckingId(id)
     try {
@@ -962,7 +959,9 @@ export function App() {
     }
   }, [guestPreview, apiState.kind, refreshGuest, activeNav])
 
-  // Fast 3-second real-time polling when viewing node-detail in admin mode
+  // Fast 3-second real-time polling when viewing node-detail in admin mode.
+  // The normal core interval is skipped in guest mode, so this remains the
+  // only extra admin request while the detail page is open.
   useEffect(() => {
     if (activeNav === 'node-detail' && !(guestPreview || apiState.kind === 'guest')) {
       const timer = setInterval(() => {
