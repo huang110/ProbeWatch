@@ -553,17 +553,23 @@ export function App() {
   const markSync = () => setLastSync(Date.now())
 
   const computeRates = useCallback((nodes) => {
-    const now = Date.now()
     const next = {}
     nodes.forEach((node) => {
       const key = node.uuid || node.id
       if (!key || node.rx === null || node.tx === null) return
+      const now = Date.now()
+      const reportedAt = node.lastReportedAt ? Date.parse(node.lastReportedAt) : NaN
+      const sampleAt = Number.isFinite(reportedAt) ? reportedAt : now
       const prev = counterRef.current.get(key)
-      if (prev && now > prev.t && node.rx >= prev.rx && node.tx >= prev.tx) {
-        const seconds = (now - prev.t) / 1000
+      if (prev && sampleAt > prev.sampleAt && node.rx >= prev.rx && node.tx >= prev.tx) {
+        const seconds = (sampleAt - prev.sampleAt) / 1000
         if (seconds >= 1) next[key] = { down: (node.rx - prev.rx) / seconds, up: (node.tx - prev.tx) / seconds }
+      } else if (prev?.rate && sampleAt === prev.sampleAt && node.status === 'online' && now - sampleAt <= 30000) {
+        // The console polls faster than the agent reports. Keep the latest
+        // measured rate while the same agent sample is being displayed.
+        next[key] = prev.rate
       }
-      counterRef.current.set(key, { rx: node.rx, tx: node.tx, t: now })
+      counterRef.current.set(key, { rx: node.rx, tx: node.tx, sampleAt, rate: next[key] || prev?.rate || null })
     })
     return next
   }, [])

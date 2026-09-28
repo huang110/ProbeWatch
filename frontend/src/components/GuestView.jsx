@@ -169,19 +169,25 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   }, [nodes.telemetry])
 
   useEffect(() => {
-    const now = Date.now()
     const next = {}
     telemetryByName.forEach((item, name) => {
       const rx = numeric(item.network_rx_bytes)
       const tx = numeric(item.network_tx_bytes)
+      const now = Date.now()
+      const reportedAt = item.last_reported_at ? Date.parse(item.last_reported_at) : NaN
+      const sampleAt = Number.isFinite(reportedAt) ? reportedAt : now
       const previous = telemetryRef.current.get(name)
-      if (previous && rx !== null && tx !== null && now > previous.at) {
-        const seconds = (now - previous.at) / 1000
+      if (previous && rx !== null && tx !== null && sampleAt > previous.sampleAt) {
+        const seconds = (sampleAt - previous.sampleAt) / 1000
         if (seconds >= 1 && seconds < 120 && rx >= previous.rx && tx >= previous.tx) {
           next[name] = { down: (rx - previous.rx) / seconds, up: (tx - previous.tx) / seconds }
         }
+      } else if (previous?.rate && sampleAt === previous.sampleAt && item.status === 'online' && now - sampleAt <= 30000) {
+        // Public status is polled more often than the agent reports. Reuse
+        // the last measured rate instead of replacing it with zero.
+        next[name] = previous.rate
       }
-      if (rx !== null && tx !== null) telemetryRef.current.set(name, { rx, tx, at: now })
+      if (rx !== null && tx !== null) telemetryRef.current.set(name, { rx, tx, sampleAt, rate: next[name] || previous?.rate || null })
     })
     setLiveRates(next)
   }, [telemetryByName, effectiveStatus?.generated_at])
