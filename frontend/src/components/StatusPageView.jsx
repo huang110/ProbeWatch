@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import {
   CheckCircle,
   WarningCircle,
@@ -27,26 +27,36 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
   const [pastIncidents, setPastIncidents] = useState([])
   const [showPastArchive, setShowPastArchive] = useState(false)
   const [expandedPastIncidents, setExpandedPastIncidents] = useState({})
+  const requestRef = useRef(null)
+  const mountedRef = useRef(true)
 
   const loadData = async (isManual = false) => {
+    if (!isManual && document.visibilityState !== 'visible') return
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     if (isManual) setLoading(true)
     try {
-      const res = await fetchPublicStatusPage()
+      const res = await fetchPublicStatusPage(controller.signal)
+      if (controller.signal.aborted || !mountedRef.current) return
       setData(res)
       setLastRefreshed(new Date())
       setCountdown(30)
       setError(null)
     } catch (err) {
+      if (err?.name === 'AbortError' || controller.signal.aborted || !mountedRef.current) return
       console.error('Failed to load status page:', err)
       setError('无法获取服务状态数据，请稍后重试')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted && mountedRef.current) setLoading(false)
     }
   }
 
   useEffect(() => {
+    mountedRef.current = true
     loadData()
     const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
       setCountdown((prev) => {
         if (prev <= 1) {
           loadData()
@@ -55,7 +65,19 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
         return prev - 1
       })
     }, 1000)
-    return () => clearInterval(timer)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData()
+        setCountdown(30)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      mountedRef.current = false
+      requestRef.current?.abort()
+      document.removeEventListener('visibilitychange', onVisibility)
+      clearInterval(timer)
+    }
   }, [])
 
   // Load past resolved incidents
