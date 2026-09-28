@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowsClockwise,
   Broadcast,
@@ -24,22 +24,16 @@ import { fetchCsrfToken } from '../lib/api.js'
 import { safeArray, safeText } from '../lib/format.js'
 
 // 官方 6 大预置骨干探针目标 (RFC 5737 文档保留地址，完全契合安全契约)
-const DEFAULT_PRESET_TARGETS = [
-  { id: 't-cq-ct', name: '重庆电信', kind: 'icmp', host: '198.51.100.230', isp: 'telecom', enabled: true },
-  { id: 't-sc-ct', name: '四川电信', kind: 'icmp', host: '198.51.100.69', isp: 'telecom', enabled: true },
-  { id: 't-cq-cu', name: '重庆联通', kind: 'icmp', host: '198.51.100.207', isp: 'unicom', enabled: true },
-  { id: 't-sc-cu', name: '四川联通', kind: 'icmp', host: '198.51.100.119', isp: 'unicom', enabled: true },
-  { id: 't-cq-cm', name: '重庆移动', kind: 'icmp', host: '198.51.100.231', isp: 'mobile', enabled: true },
-  { id: 't-sc-cm', name: '四川移动', kind: 'icmp', host: '198.51.100.218', isp: 'mobile', enabled: true },
-]
-
 export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'latency', onNavigate }) {
   const [activeTab, setActiveTab] = useState(initialTab) // 'latency' | 'route' | 'gfw'
   const [latencyViewMode, setLatencyViewMode] = useState('tasks') // 'tasks' | 'servers'
   const [routeSubTab, setRouteSubTab] = useState('tasks') // 'tasks' | 'records' | 'rules'
 
   // 延迟监测相关状态
-  const [targets, setTargets] = useState(DEFAULT_PRESET_TARGETS)
+  const [targets, setTargets] = useState([])
+  const [liveChecks, setLiveChecks] = useState([])
+  const [liveMtrResults, setLiveMtrResults] = useState([])
+  const liveRequestRef = useRef(null)
   const [latencySearch, setLatencySearch] = useState('')
   const [showAddLatencyModal, setShowAddLatencyModal] = useState(false)
   const [selectedServerForLatency, setSelectedServerForLatency] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
@@ -92,6 +86,46 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     fetchTargets()
     return () => controller.abort()
   }, [])
+
+  // 读取当前探测源的真实延迟汇总和 MTR 最新结果，避免页面展示演示数据。
+  useEffect(() => {
+    liveRequestRef.current?.abort()
+    const controller = new AbortController()
+    liveRequestRef.current = controller
+    setLiveChecks([])
+    setLiveMtrResults([])
+
+    async function loadLiveResults() {
+      if (!selectedServerForLatency) return
+      try {
+        const [checksResponse, mtrResponse] = await Promise.all([
+          fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }),
+          fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/mtr`, { credentials: 'same-origin', signal: controller.signal }),
+        ])
+        if (controller.signal.aborted) return
+        if (checksResponse.ok) {
+          const checks = await checksResponse.json()
+          if (Array.isArray(checks)) setLiveChecks(checks)
+        }
+        if (mtrResponse.ok) {
+          const mtr = await mtrResponse.json()
+          if (Array.isArray(mtr)) setLiveMtrResults(mtr)
+        }
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          setLiveChecks([])
+          setLiveMtrResults([])
+        }
+      }
+    }
+
+    loadLiveResults()
+    const timer = window.setInterval(loadLiveResults, 15000)
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [selectedServerForLatency])
 
   // 默认选中首个服务器
   useEffect(() => {
@@ -166,36 +200,39 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
       .filter((n) => !/国内|中国|大陆/.test(n.name))
       .map((node) => {
         const isDown = node.status !== 'online'
-        const id = node.uuid || node.id
-        const hash = Array.from(id).reduce((a, c) => a + c.charCodeAt(0), 0)
-        const simulatedLoss = isDown ? 1.0 : hash % 10 === 0 ? 0.95 : 0
-
-        let status = 'normal'
-        let statusText = '双向连通正常'
-        let badgeTone = 'mint'
-
-        if (simulatedLoss >= 0.9) {
-          status = 'suspicious_high'
-          statusText = '高置信度疑似被墙 (三网截断+全丢包)'
-          badgeTone = 'rose'
-        } else if (simulatedLoss > 0.5) {
-          status = 'suspicious'
-          statusText = '疑似被墙 (双运营商截断+高丢包)'
-          badgeTone = 'amber'
-        }
+        const status = isDown ? 'offline' : 'pending'
+        const statusText = isDown ? '节点离线，无法判定' : '等待三网交叉采样'
+        const badgeTone = isDown ? 'rose' : 'gray'
 
         return {
           node,
           status,
           statusText,
           badgeTone,
-          telecomLoss: simulatedLoss >= 0.5 ? 98 : 0,
-          unicomLoss: simulatedLoss >= 0.5 ? 96 : 0,
-          mobileLoss: simulatedLoss >= 0.9 ? 100 : 0,
-          baseline: '已建立正常路由指纹基线',
+          telecomLoss: null,
+          unicomLoss: null,
+          mobileLoss: null,
+          baseline: isDown ? '节点离线' : '尚无真实三网交叉样本',
         }
       })
   }, [nodes])
+
+  const liveCheckByTargetId = useMemo(
+    () => new Map(liveChecks.map((item) => [item.target_id, {
+      checked_at: item.last_checked_at,
+      result: {
+        status: item.loss_rate == null || Number(item.loss_rate) < 1 ? 'success' : 'failure',
+        latency_ms: item.latency_avg_ms,
+        jitter_ms: item.jitter_ms,
+        error: item.failure > 0 ? `${item.failure} 次失败` : '',
+      },
+    }])),
+    [liveChecks]
+  )
+  const liveMtrByTargetId = useMemo(
+    () => new Map(liveMtrResults.map((item) => [item.target_id || item.id, item])),
+    [liveMtrResults]
+  )
 
   return (
     <div className="monitor-view-container">
@@ -454,7 +491,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
               <div className="bg-subtle p-3 rounded-lg border border-subtle">
                 <NetworkLatencyLines
                   targets={targets}
-                  resultsByTargetId={new Map()}
+                  resultsByTargetId={liveCheckByTargetId}
                   history={[]}
                   selectedNodeName={nodes.find((n) => (n.uuid || n.id) === selectedServerForLatency)?.name || ''}
                 />
@@ -463,16 +500,17 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
               {/* 延迟详情网格 */}
               <div className="dash-row-grid-6">
                 {targets.map((t) => {
-                  const hash = Array.from(t.name + selectedServerForLatency).reduce(
-                    (a, c) => a + c.charCodeAt(0),
-                    0
-                  )
-                  const simLat = 22 + (hash % 110)
+                  const check = liveCheckByTargetId.get(t.id)
+                  const hasLatency = Number.isFinite(Number(check?.latency_avg_ms))
+                  const latency = hasLatency ? Number(check.latency_avg_ms) : null
+                  const loss = Number.isFinite(Number(check?.loss_rate)) ? Number(check.loss_rate) * 100 : null
                   return (
                     <div key={t.id} className="bg-surface p-3 rounded-lg border border-subtle">
                       <div className="text-xs text-muted mb-1">{t.name}</div>
-                      <div className="text-lg font-bold mono text-blue">{simLat} ms</div>
-                      <div className="text-xs text-mint mt-1">丢包 0% · 抖动 ±1.2ms</div>
+                      <div className="text-lg font-bold mono text-blue">{latency === null ? '等待采样' : `${latency.toFixed(1)} ms`}</div>
+                      <div className="text-xs text-mint mt-1">
+                        丢包 {loss === null ? '—' : `${loss.toFixed(1)}%`} · 抖动 {check?.jitter_ms == null ? '—' : `±${Number(check.jitter_ms).toFixed(1)}ms`}
+                      </div>
                     </div>
                   )
                 })}
@@ -675,7 +713,13 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRouteTasks.map((task) => (
+                      {filteredRouteTasks.map((task) => {
+                        const report = liveMtrByTargetId.get(task.id)
+                        const result = report?.result || {}
+                        const hasSample = Boolean(report)
+                        const routeStatus = !hasSample ? '等待采样' : result.reached === false || result.error ? '异常' : '正常'
+                        const statusTone = routeStatus === '正常' ? 'badge-mint' : routeStatus === '异常' ? 'badge-rose' : 'badge-gray'
+                        return (
                         <tr key={task.id}>
                           <td>
                             <input type="checkbox" />
@@ -693,13 +737,13 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                             </span>
                           </td>
                           <td>
-                            <span className="badge badge-blue font-bold mono">
-                              {task.expectedRoute || 'BGP直连'}
+                            <span className={`badge ${hasSample ? 'badge-blue' : 'badge-gray'} font-bold mono`}>
+                              {hasSample ? (result.fingerprint || '已采样') : '等待采样'}
                             </span>
                           </td>
                           <td>
-                            <span className="badge badge-mint flex items-center gap-1" style={{ width: 'fit-content' }}>
-                              <CheckCircle size={12} /> 正常
+                            <span className={`badge ${statusTone} flex items-center gap-1`} style={{ width: 'fit-content' }}>
+                              {routeStatus === '正常' ? <CheckCircle size={12} /> : <Clock size={12} />} {routeStatus}
                             </span>
                           </td>
                           <td>
@@ -725,7 +769,8 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -734,6 +779,12 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
               {/* 逐跳跳数波形与 MTR 详情展示 */}
               {selectedRouteTask && (
                 <div className="panel p-5 space-y-4">
+                  {(() => {
+                    const report = liveMtrByTargetId.get(selectedRouteTask.id)
+                    const result = report?.result || {}
+                    const hops = Array.isArray(result.hops) ? result.hops : []
+                    return (
+                      <>
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-bold text-base flex items-center gap-2">
@@ -755,18 +806,15 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
 
                   <div className="bg-subtle p-3 rounded-lg border border-subtle">
                     <MTRHopLatencyLine
-                      hops={[
-                        { ttl: 1, ip: '10.0.0.1', latency_ms: 1.2 },
-                        { ttl: 2, ip: '198.51.100.10', latency_ms: 4.8 },
-                        { ttl: 3, ip: '198.51.100.11', latency_ms: 12.4 },
-                        { ttl: 4, ip: '198.51.100.12', latency_ms: 32.1 },
-                        { ttl: 5, ip: '198.51.100.13', latency_ms: 58.7 },
-                        { ttl: 6, ip: selectedRouteTask.host, latency_ms: 61.2 },
-                      ]}
-                      isReached={true}
+                      hops={hops}
+                      isReached={result.reached === true}
                       destination={selectedRouteTask.host}
                     />
+                    {!hops.length && <div className="text-xs text-muted">暂无该目标的真实 MTR 采样，等待探针上报。</div>}
                   </div>
+                      </>
+                    )
+                  })()}
                 </div>
               )}
             </div>
@@ -848,9 +896,9 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                       <td>
                         <span className={`badge badge-${item.badgeTone}`}>{item.statusText}</span>
                       </td>
-                      <td className="mono">{item.telecomLoss}%</td>
-                      <td className="mono">{item.unicomLoss}%</td>
-                      <td className="mono">{item.mobileLoss}%</td>
+                      <td className="mono">{item.telecomLoss == null ? '—' : `${item.telecomLoss}%`}</td>
+                      <td className="mono">{item.unicomLoss == null ? '—' : `${item.unicomLoss}%`}</td>
+                      <td className="mono">{item.mobileLoss == null ? '—' : `${item.mobileLoss}%`}</td>
                       <td className="text-muted">{item.baseline}</td>
                       <td className="text-right">
                         <button
