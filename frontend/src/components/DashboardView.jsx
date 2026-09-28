@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   HardDrives,
   ArrowUpRight,
@@ -71,6 +71,7 @@ export function DashboardView({
   const [checkSummaries, setCheckSummaries] = useState([])
   const [dayTrafficSeries, setDayTrafficSeries] = useState([])
   const [monthTrafficSeries, setMonthTrafficSeries] = useState([])
+  const metricsRequestRef = useRef(null)
 
   useEffect(() => {
     const id = setInterval(() => setCurrentTime(formatTimeOfDay(new Date())), 1000)
@@ -89,37 +90,42 @@ export function DashboardView({
 
   // 异步拉取真实数据
   useEffect(() => {
-    let cancelled = false
+    metricsRequestRef.current?.abort()
+    const controller = new AbortController()
+    metricsRequestRef.current = controller
+    setDayTrafficSeries([])
+    setMonthTrafficSeries([])
+    setCheckSummaries([])
 
     async function loadMetrics() {
       try {
-        const res = await fetch('/api/targets', { credentials: 'same-origin' })
+        const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
         if (res.ok) {
           const list = await res.json()
-          if (!cancelled && Array.isArray(list)) setTargets(list)
+          if (!controller.signal.aborted && Array.isArray(list)) setTargets(list)
         }
       } catch {}
 
       if (primaryNodeUuid) {
         try {
           const [dayRes, monthRes, checksRes] = await Promise.allSettled([
-            fetch(`/api/nodes/${primaryNodeUuid}/traffic?period=day`, { credentials: 'same-origin' }),
-            fetch(`/api/nodes/${primaryNodeUuid}/traffic?period=month`, { credentials: 'same-origin' }),
-            fetch(`/api/nodes/${primaryNodeUuid}/checks/summary`, { credentials: 'same-origin' }),
+            fetch(`/api/nodes/${encodeURIComponent(primaryNodeUuid)}/traffic?period=day`, { credentials: 'same-origin', signal: controller.signal }),
+            fetch(`/api/nodes/${encodeURIComponent(primaryNodeUuid)}/traffic?period=month`, { credentials: 'same-origin', signal: controller.signal }),
+            fetch(`/api/nodes/${encodeURIComponent(primaryNodeUuid)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }),
           ])
 
-          if (!cancelled) {
+          if (!controller.signal.aborted) {
             if (dayRes.status === 'fulfilled' && dayRes.value.ok) {
               const d = await dayRes.value.json()
-              if (Array.isArray(d.series)) setDayTrafficSeries(d.series)
+              if (!controller.signal.aborted && Array.isArray(d.series)) setDayTrafficSeries(d.series)
             }
             if (monthRes.status === 'fulfilled' && monthRes.value.ok) {
               const m = await monthRes.value.json()
-              if (Array.isArray(m.series)) setMonthTrafficSeries(m.series)
+              if (!controller.signal.aborted && Array.isArray(m.series)) setMonthTrafficSeries(m.series)
             }
             if (checksRes.status === 'fulfilled' && checksRes.value.ok) {
               const c = await checksRes.value.json()
-              if (Array.isArray(c)) setCheckSummaries(c)
+              if (!controller.signal.aborted && Array.isArray(c)) setCheckSummaries(c)
             }
           }
         } catch {}
@@ -127,9 +133,7 @@ export function DashboardView({
     }
 
     loadMetrics()
-    return () => {
-      cancelled = true
-    }
+    return () => controller.abort()
   }, [primaryNodeUuid, refreshInterval])
 
   // 1. 服务器状态汇总 (仅统计真实探针服务器)

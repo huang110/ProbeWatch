@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRight, Broadcast, CheckCircle, CircleNotch, Clock, FlowArrow, Globe, Plus, Sparkle, Trash, WarningCircle } from '@phosphor-icons/react'
 import { formatTimeOfDay, numeric, safeArray, safeObject, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
@@ -235,6 +235,7 @@ export function MTRRouteView({ nodes = [] }) {
   const [newTarget, setNewTarget] = useState({ id: '', name: '', host: '', maxHops: '20' })
   const [formError, setFormError] = useState('')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const requestRef = useRef(null)
 
   // Keep selected node updated
   useEffect(() => {
@@ -246,12 +247,15 @@ export function MTRRouteView({ nodes = [] }) {
   // Fetch MTR results and configured targets
   const fetchMtr = useCallback(async () => {
     if (!selectedNodeUuid) return
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     setLoading(true)
     try {
-      fetch('/api/targets', { credentials: 'same-origin' })
+      fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
         .then((res) => (res.ok ? res.json() : []))
         .then((list) => {
-          if (Array.isArray(list)) {
+          if (!controller.signal.aborted && Array.isArray(list)) {
             setConfiguredTargets(list.filter((t) => t.kind === 'mtr'))
           }
         })
@@ -259,26 +263,33 @@ export function MTRRouteView({ nodes = [] }) {
 
       const res = await fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/mtr`, {
         credentials: 'same-origin',
+        signal: controller.signal,
       })
       if (!res.ok) throw new Error('mtr-failed')
       const json = await res.json()
-      if (Array.isArray(json)) {
+      if (!controller.signal.aborted && Array.isArray(json)) {
         setMtrData(json)
         if (json.length > 0 && !selectedTargetId) {
           setSelectedTargetId(json[0].target_id || json[0].id || json[0]?.result?.host)
         }
       }
-    } catch {
-      setMtrData([])
+    } catch (error) {
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) setMtrData([])
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [selectedNodeUuid, selectedTargetId])
 
   useEffect(() => {
+    setMtrData([])
+    setConfiguredTargets([])
+    setSelectedTargetId(null)
     fetchMtr()
     const timer = setInterval(fetchMtr, 30000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      requestRef.current?.abort()
+    }
   }, [fetchMtr, refreshTrigger])
 
   const handleDeleteTarget = async (tId) => {

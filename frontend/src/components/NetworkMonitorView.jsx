@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, CheckCircle, CircleNotch, Clock, Globe, Plus, ShieldCheck, Sparkle, Timer, Trash, WarningCircle, WifiHigh } from '@phosphor-icons/react'
 import { formatTimeOfDay, numeric, safeArray, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
@@ -329,16 +329,20 @@ export function NetworkMonitorView({ nodes = [] }) {
   })
   const [formError, setFormError] = useState('')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const requestRef = useRef(null)
 
   // Fetch targets and node results
   const loadData = useCallback(async () => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     setLoading(true)
     try {
       // 1. Fetch all targets
-      const tRes = await fetch('/api/targets', { credentials: 'same-origin' })
+      const tRes = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
       if (tRes.ok) {
         const tJson = await tRes.json()
-        if (Array.isArray(tJson)) setTargets(tJson)
+        if (!controller.signal.aborted && Array.isArray(tJson)) setTargets(tJson)
       }
 
       // 2. Fetch network results and history from selected node
@@ -346,31 +350,39 @@ export function NetworkMonitorView({ nodes = [] }) {
         const [nRes, hRes] = await Promise.all([
           fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/network`, {
             credentials: 'same-origin',
+            signal: controller.signal,
           }),
           fetch(`/api/nodes/${encodeURIComponent(selectedNodeUuid)}/network/history?limit=60`, {
             credentials: 'same-origin',
+            signal: controller.signal,
           }),
         ])
-        if (nRes.ok) {
+        if (!controller.signal.aborted && nRes.ok) {
           const nJson = await nRes.json()
           if (Array.isArray(nJson)) setResults(nJson)
         }
-        if (hRes.ok) {
+        if (!controller.signal.aborted && hRes.ok) {
           const hJson = await hRes.json()
           if (Array.isArray(hJson)) setHistory(hJson)
         }
       }
-    } catch {
+    } catch (error) {
+      if (error?.name === 'AbortError') return
       // Ignored
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [selectedNodeUuid])
 
   useEffect(() => {
+    setResults([])
+    setHistory([])
     loadData()
     const timer = setInterval(loadData, 30000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      requestRef.current?.abort()
+    }
   }, [loadData, refreshTrigger])
 
   // Handle adding preset
