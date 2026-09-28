@@ -183,35 +183,35 @@ export default function SyntheticProbingView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="synthetic-page">
       {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-md p-6 rounded-2xl border border-slate-800 shadow-xl">
+      <div className="synthetic-page-header">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 rounded-xl border border-indigo-500/30 text-indigo-400">
+          <div className="synthetic-page-title-wrap">
+            <div className="synthetic-page-icon">
               <Pulse size={26} weight="duotone" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+              <h1 className="synthetic-page-title">
                 全景合成监控与 SLA 契约引擎
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
+                <span className="synthetic-page-version">
                   v0.8.2
                 </span>
               </h1>
-              <p className="text-sm text-slate-400 mt-0.5">
+              <p className="synthetic-page-description">
                 支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="synthetic-page-actions">
           <button
             onClick={() => {
               setTestTarget(null)
               setIsTestModalOpen(true)
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition"
+            className="synthetic-button synthetic-button-secondary"
           >
             <Play size={16} weight="bold" className="text-emerald-400" />
             实时模拟拨测
@@ -221,7 +221,7 @@ export default function SyntheticProbingView() {
               setEditingTarget(null)
               setIsModalOpen(true)
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 transition"
+            className="synthetic-button synthetic-button-primary"
           >
             <Plus size={16} weight="bold" />
             新建监控契约
@@ -229,7 +229,7 @@ export default function SyntheticProbingView() {
           <button
             onClick={() => loadData(true)}
             disabled={refreshing}
-            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition"
+            className="synthetic-icon-button"
             title="刷新数据"
           >
             <ArrowsClockwise size={18} className={refreshing ? 'animate-spin text-indigo-400' : ''} />
@@ -238,51 +238,51 @@ export default function SyntheticProbingView() {
       </div>
 
       {/* Metric Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
+      <div className="synthetic-metrics-grid">
+        <div className="synthetic-metric-card">
+          <div className="synthetic-metric-head">
             <span className="text-xs font-semibold uppercase tracking-wider">监测契约总数</span>
             <Globe size={18} className="text-indigo-400" />
           </div>
-          <div className="text-3xl font-bold text-white tracking-tight">{metrics.total}</div>
-          <div className="text-xs text-slate-500 mt-1">跨边缘探针节点分布式运行</div>
+          <div className="synthetic-metric-value">{metrics.total}</div>
+          <div className="synthetic-metric-detail">跨边缘探针节点分布式运行</div>
         </div>
 
-        <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
+        <div className="synthetic-metric-card">
+          <div className="synthetic-metric-head">
             <span className="text-xs font-semibold uppercase tracking-wider">SLA 达标率</span>
             <ShieldCheck size={18} className="text-emerald-400" />
           </div>
-          <div className="text-3xl font-bold text-emerald-400 tracking-tight">{metrics.passRate}%</div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="synthetic-metric-value is-green">{metrics.passRate}%</div>
+          <div className="synthetic-metric-detail">
             {metrics.passing} 契约正常 · {metrics.failing} 失败 · {metrics.degraded} 降级
           </div>
         </div>
 
-        <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
+        <div className="synthetic-metric-card">
+          <div className="synthetic-metric-head">
             <span className="text-xs font-semibold uppercase tracking-wider">多节点共识告警</span>
             <WarningCircle size={18} className={metrics.failing > 0 ? 'text-rose-400' : 'text-slate-400'} />
           </div>
-          <div className={`text-3xl font-bold tracking-tight ${metrics.failing > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+          <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>
             {metrics.failing > 0 ? `${metrics.failing} 失活` : '全网稳态'}
           </div>
-          <div className="text-xs text-slate-500 mt-1">多 ISP 交叉校验过滤偶发抖动</div>
+          <div className="synthetic-metric-detail">多 ISP 交叉校验过滤偶发抖动</div>
         </div>
 
-        <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
+        <div className="synthetic-metric-card">
+          <div className="synthetic-metric-head">
             <span className="text-xs font-semibold uppercase tracking-wider">全网平均首包 (TTFB)</span>
             <Lightning size={18} className="text-amber-400" />
           </div>
-          <div className="text-3xl font-bold text-amber-400 tracking-tight">{metrics.fleetAvgTTFB} ms</div>
-          <div className="text-xs text-slate-500 mt-1">DNS+TCP+TLS 全链路网络瀑布流</div>
+          <div className="synthetic-metric-value is-amber">{metrics.fleetAvgTTFB} ms</div>
+          <div className="synthetic-metric-detail">DNS+TCP+TLS 全链路网络瀑布流</div>
         </div>
       </div>
 
       {/* Protocol Tabs & Search */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 rounded-xl border border-slate-800 overflow-x-auto w-full sm:w-auto">
+      <div className="synthetic-toolbar">
+        <div className="synthetic-protocol-tabs">
           {[
             { id: 'all', label: '全部协议' },
             { id: 'https', label: 'HTTP / HTTPS' },
@@ -293,10 +293,10 @@ export default function SyntheticProbingView() {
             <button
               key={tab.id}
               onClick={() => setActiveProtocolTab(tab.id)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+              className={`synthetic-protocol-tab ${
                 activeProtocolTab === tab.id
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  ? 'is-active'
+                  : ''
               }`}
             >
               {tab.label}
@@ -304,29 +304,29 @@ export default function SyntheticProbingView() {
           ))}
         </div>
 
-        <div className="relative w-full sm:w-72">
+        <div className="synthetic-search-box">
           <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索契约名称、URL 或协议..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+            className="synthetic-search-input"
           />
         </div>
       </div>
 
       {/* Targets List */}
       {loading ? (
-        <div className="p-16 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
+        <div className="synthetic-loading-state">
           <ArrowsClockwise size={28} className="animate-spin mx-auto text-indigo-400 mb-3" />
           正在加载合成拨测契约与节点回传时延...
         </div>
       ) : filteredTargets.length === 0 ? (
-        <div className="p-16 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
+        <div className="synthetic-empty-state">
           <Globe size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="text-base font-semibold text-slate-300">暂无匹配的合成拨测目标</h3>
-          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+          <h3 className="synthetic-empty-title">暂无匹配的合成拨测目标</h3>
+          <p className="synthetic-empty-description">
             您可以点击右上角“新建监控契约”或使用预设模版快速创建多协议合成探针。
           </p>
         </div>
@@ -426,8 +426,8 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) 
   const avgTiming = results.length > 0 ? results[0] : null
 
   return (
-    <div className="bg-slate-900/60 rounded-2xl border border-slate-800 hover:border-slate-700/80 p-5 shadow-sm transition">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+    <div className="synthetic-target-card">
+      <div className="synthetic-target-header">
         <div className="flex items-start sm:items-center gap-3">
           <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${protoStyle.color} uppercase tracking-wider`}>
             {protoStyle.label}
