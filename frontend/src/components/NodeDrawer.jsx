@@ -151,10 +151,13 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   // 扩展诊断数据状态：网络检测、MTR 路由、流媒体
   const [checksData, setChecksData] = useState([])
   const [loadingChecks, setLoadingChecks] = useState(false)
+  const [checksError, setChecksError] = useState(null)
   const [mtrData, setMtrData] = useState([])
   const [loadingMtr, setLoadingMtr] = useState(false)
+  const [mtrError, setMtrError] = useState(null)
   const [mediaData, setMediaData] = useState([])
   const [loadingMedia, setLoadingMedia] = useState(false)
+  const [mediaError, setMediaError] = useState(null)
 
   const key = safeText(node?.uuid) || safeText(node?.id) || ''
 
@@ -179,41 +182,44 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
 
     // 1. 网络检测概览
     setLoadingChecks(true)
+    setChecksError(null)
     fetch(buildNodePath(['checks', 'summary'].join('/')), {
       credentials: 'same-origin',
       signal: controller.signal,
     })
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => { if (!res.ok) throw new Error('网络检测数据暂不可用'); return res.json() })
       .then((list) => {
         if (Array.isArray(list)) setChecksData(list)
       })
-      .catch(() => {})
+      .catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setChecksError(error.message) })
       .finally(() => setLoadingChecks(false))
 
     // 2. MTR 骨干路由追踪
     setLoadingMtr(true)
+    setMtrError(null)
     fetch(buildNodePath('mtr'), {
       credentials: 'same-origin',
       signal: controller.signal,
     })
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => { if (!res.ok) throw new Error('MTR 路由数据暂不可用'); return res.json() })
       .then((list) => {
         if (Array.isArray(list)) setMtrData(list)
       })
-      .catch(() => {})
+      .catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setMtrError(error.message) })
       .finally(() => setLoadingMtr(false))
 
     // 3. 全球流媒体解锁
     setLoadingMedia(true)
+    setMediaError(null)
     fetch(buildNodePath('media'), {
       credentials: 'same-origin',
       signal: controller.signal,
     })
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => { if (!res.ok) throw new Error('流媒体检测数据暂不可用'); return res.json() })
       .then((list) => {
         if (Array.isArray(list)) setMediaData(list)
       })
-      .catch(() => {})
+      .catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setMediaError(error.message) })
       .finally(() => setLoadingMedia(false))
 
     return () => controller.abort()
@@ -607,6 +613,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <CircleNotch size={16} className="spin text-mint" />
                 <span>正在检测三网与链路数据…</span>
               </div>
+            ) : checksError ? (
+              <div className="drawer-empty-sub text-rose">{checksError}</div>
             ) : checksData.length > 0 ? (
               <>
                 <DrawerChecksLatencyLine checks={checksData} />
@@ -619,7 +627,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                   const loss =
                     item.loss_rate !== null && item.loss_rate !== undefined
                       ? Number(item.loss_rate * 100).toFixed(1)
-                      : '0.0'
+                      : null
                   const jitter =
                     item.jitter_ms !== null && item.jitter_ms !== undefined
                       ? Number(item.jitter_ms).toFixed(0)
@@ -662,7 +670,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                           <span
                             className={`mono ${Number(loss) > 0 ? 'text-rose font-bold' : 'text-muted'}`}
                           >
-                            {loss}%
+                            {loss === null ? '—' : `${loss}%`}
                           </span>
                         </div>
                         {jitter !== null && (
@@ -719,6 +727,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <CircleNotch size={16} className="spin text-blue" />
                 <span>正在追踪骨干网路由跳数…</span>
               </div>
+            ) : mtrError ? (
+              <div className="drawer-empty-sub text-rose">{mtrError}</div>
             ) : activeMtrReport ? (
               <div className="drawer-mtr-body">
                 <div className="drawer-mtr-meta-strip">
@@ -824,7 +834,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <span>全球流媒体与 AI 解锁能力</span>
               </div>
               <span className="drawer-count-badge mono">
-                {unlockedMediaCount}/{POPULAR_MEDIA.length} 解锁
+                {mediaData.length > 0 ? `${unlockedMediaCount}/${POPULAR_MEDIA.length} 解锁` : `—/${POPULAR_MEDIA.length} 待测`}
               </span>
             </div>
 
@@ -833,6 +843,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                 <CircleNotch size={16} className="spin text-amber" />
                 <span>正在检测流媒体与 AI 解锁状态…</span>
               </div>
+            ) : mediaError ? (
+              <div className="drawer-empty-sub text-rose">{mediaError}</div>
             ) : (
               <div className="drawer-media-grid">
                 {POPULAR_MEDIA.map((p) => {
