@@ -25,7 +25,13 @@ export function BillingCenter({ nodes = [] }) {
   const [currency, setCurrency] = useState('CNY')
   const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'monthly' | 'yearly'
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [nowTick, setNowTick] = useState(() => Date.now())
   const [selectedNodeForBilling, setSelectedNodeForBilling] = useState(null)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 60000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // Filters
   const [regionFilter, setRegionFilter] = useState('all')
@@ -34,7 +40,7 @@ export function BillingCenter({ nodes = [] }) {
   const [searchTerm, setSearchTerm] = useState('')
 
   // Current timestamp string: e.g. 2026/09/25 10:02
-  const now = new Date()
+  const now = new Date(nowTick)
   const dateFormatted = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const timeFormatted = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 

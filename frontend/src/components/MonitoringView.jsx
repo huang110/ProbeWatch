@@ -61,13 +61,13 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
 
   // 从 API 加载检测目标
   useEffect(() => {
-    let isMounted = true
+    const controller = new AbortController()
     async function fetchTargets() {
       try {
-        const res = await fetch('/api/targets', { credentials: 'same-origin' })
+        const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
         if (res.ok) {
           const list = await res.json()
-          if (Array.isArray(list) && list.length > 0 && isMounted) {
+          if (Array.isArray(list) && list.length > 0 && !controller.signal.aborted) {
             const mtrList = list.filter((t) => t.kind === 'mtr')
             const netList = list.filter((t) => t.kind !== 'mtr')
             if (mtrList.length > 0) setRouteTasks(mtrList)
@@ -85,12 +85,12 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
             }
           }
         }
-      } catch {}
+      } catch (error) {
+        if (error?.name !== 'AbortError') return
+      }
     }
     fetchTargets()
-    return () => {
-      isMounted = false
-    }
+    return () => controller.abort()
   }, [])
 
   // 默认选中首个服务器

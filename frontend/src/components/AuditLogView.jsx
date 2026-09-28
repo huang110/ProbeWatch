@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   ShieldCheck,
   ArrowClockwise,
@@ -24,9 +24,13 @@ export function AuditLogView() {
   const [error, setError] = useState('')
   const [actionFilter, setActionFilter] = useState('')
   const [offset, setOffset] = useState(0)
+  const requestRef = useRef(null)
   const limit = 25
 
   const loadLogs = async () => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     setLoading(true)
     setError('')
     try {
@@ -34,18 +38,19 @@ export function AuditLogView() {
         limit,
         offset,
         action: actionFilter.trim(),
-      })
+      }, controller.signal)
       setLogs(Array.isArray(res?.logs) ? res.logs : [])
       setTotal(typeof res?.total === 'number' ? res.total : 0)
     } catch (err) {
-      setError(err?.message || '获取安全审计日志失败')
+      if (err?.name !== 'AbortError') setError(err?.message || '获取安全审计日志失败')
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     loadLogs()
+    return () => requestRef.current?.abort()
   }, [offset])
 
   const handleSearchSubmit = (e) => {
