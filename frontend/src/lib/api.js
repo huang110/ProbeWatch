@@ -810,8 +810,8 @@ export async function updateNode(id, payload) {
   return await res.json()
 }
 
-export async function fetchSpeedtestTasks() {
-  const res = await fetch('/api/speedtest/tasks', { credentials: 'same-origin' })
+export async function fetchSpeedtestTasks(signal) {
+  const res = await fetch('/api/speedtest/tasks', { credentials: 'same-origin', signal })
   if (!res.ok) throw new Error('Failed to fetch speedtest tasks')
   return await res.json()
 }

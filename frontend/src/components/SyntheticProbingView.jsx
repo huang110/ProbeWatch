@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowsClockwise,
   CheckCircle,
@@ -108,30 +108,37 @@ export default function SyntheticProbingView() {
   const [isTestModalOpen, setIsTestModalOpen] = useState(false)
   const [testTarget, setTestTarget] = useState(null)
   const [historyTarget, setHistoryTarget] = useState(null)
+  const requestRef = useRef(null)
 
   const loadData = useCallback(async (isRefresh = false) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     if (isRefresh) setRefreshing(true)
     try {
       const [overviewData, targetsData] = await Promise.all([
-        fetchSyntheticResults().catch(() => null),
-        fetchSyntheticTargets().catch(() => []),
+        fetchSyntheticResults(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
+        fetchSyntheticTargets(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return [] }),
       ])
-      if (overviewData) setOverview(overviewData)
-      if (Array.isArray(targetsData)) setTargets(targetsData)
-      setError(null)
+      if (!controller.signal.aborted) {
+        if (overviewData) setOverview(overviewData)
+        if (Array.isArray(targetsData)) setTargets(targetsData)
+        setError(null)
+      }
     } catch (err) {
-      console.error('Failed to load synthetic monitoring data:', err)
-      setError(err.message || '加载合成监控数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+        console.error('Failed to load synthetic monitoring data:', err)
+        setError(err.message || '加载合成监控数据失败')
+      }
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
   useEffect(() => {
     loadData()
     const timer = setInterval(() => loadData(true), 15000)
-    return () => clearInterval(timer)
+    return () => { clearInterval(timer); requestRef.current?.abort() }
   }, [loadData])
 
   // Filter targets

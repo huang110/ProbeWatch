@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, CheckCircle, CircleNotch, FilmStrip, Play, Sparkle, Warning, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
@@ -65,10 +65,13 @@ export function MediaMatrix({ nodes = [] }) {
   const [addingPreset, setAddingPreset] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const requestRef = useRef(null)
 
   // Fetch media reports from all nodes
   const fetchAllMedia = useCallback(() => {
+    requestRef.current?.abort()
     const controller = new AbortController()
+    requestRef.current = controller
     setState((prev) => ({ ...prev, loading: true }))
     const targets = safeArray(nodes).map((node, index) => {
       const source = safeObject(node)
@@ -117,9 +120,9 @@ export function MediaMatrix({ nodes = [] }) {
   }, [nodes])
 
   useEffect(() => {
-    fetchAllMedia()
+    const cleanup = fetchAllMedia()
     const timer = setInterval(fetchAllMedia, 45000)
-    return () => clearInterval(timer)
+    return () => { clearInterval(timer); cleanup?.(); requestRef.current?.abort() }
   }, [fetchAllMedia, refreshTrigger])
 
   // Handle adding preset media targets via atomic backend seed

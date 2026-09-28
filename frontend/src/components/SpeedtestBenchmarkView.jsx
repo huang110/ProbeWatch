@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowsClockwise,
   ArrowDown,
@@ -116,6 +116,8 @@ export function SpeedtestBenchmarkView() {
   })
   const [savingTask, setSavingTask] = useState(false)
   const [taskModalError, setTaskModalError] = useState(null)
+  const dataRequestRef = useRef(null)
+  const historyRequestRef = useRef(null)
 
   const showToast = (msg) => {
     setSuccessToast(msg)
@@ -124,50 +126,57 @@ export function SpeedtestBenchmarkView() {
 
   // Load results and tasks
   const loadData = useCallback(async (isManual = false) => {
+    dataRequestRef.current?.abort()
+    const controller = new AbortController()
+    dataRequestRef.current = controller
     if (isManual) setRefreshing(true)
     setError(null)
     try {
       const [resData, tasksData] = await Promise.all([
-        fetchSpeedtestResults().catch(() => null),
-        fetchSpeedtestTasks().catch(() => []),
+        fetchSpeedtestResults(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
+        fetchSpeedtestTasks(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return [] }),
       ])
-      if (resData) {
+      if (!controller.signal.aborted && resData) {
         setResultsData(resData)
       }
-      if (Array.isArray(tasksData)) {
+      if (!controller.signal.aborted && Array.isArray(tasksData)) {
         setTasks(tasksData)
       }
     } catch (err) {
-      setError(err.message || '加载测速与基准数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载测速与基准数据失败')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
   // Load history
   const loadHistory = useCallback(async (nodeId = '') => {
+    historyRequestRef.current?.abort()
+    const controller = new AbortController()
+    historyRequestRef.current = controller
     setHistoryLoading(true)
     try {
-      const hist = await fetchSpeedtestHistory(nodeId === 'all' ? '' : nodeId, '', 100)
-      setHistory(Array.isArray(hist) ? hist : [])
-    } catch {
+      const hist = await fetchSpeedtestHistory(nodeId === 'all' ? '' : nodeId, '', 100, controller.signal)
+      if (!controller.signal.aborted) setHistory(Array.isArray(hist) ? hist : [])
+    } catch (error) {
       // Ignore background history errors
     } finally {
-      setHistoryLoading(false)
+      if (!controller.signal.aborted) setHistoryLoading(false)
     }
   }, [])
 
   useEffect(() => {
     loadData()
     const timer = setInterval(() => loadData(false), 30000)
-    return () => clearInterval(timer)
+    return () => { clearInterval(timer); dataRequestRef.current?.abort(); historyRequestRef.current?.abort() }
   }, [loadData])
 
   useEffect(() => {
     if (activeTab === 'history') {
+      setHistory([])
       loadHistory(historyFilterNode)
     }
+    return () => historyRequestRef.current?.abort()
   }, [activeTab, historyFilterNode, loadHistory])
 
   // Trigger immediate speedtest benchmark

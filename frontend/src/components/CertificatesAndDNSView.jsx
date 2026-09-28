@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowsClockwise,
   Certificate,
@@ -32,29 +32,34 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
   const [dnsData, setDnsData] = useState({ total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] })
   const [dnsFilter, setDnsFilter] = useState('all') // 'all' | 'divergent' | 'consistent'
   const [dnsSearch, setDnsSearch] = useState('')
+  const requestRef = useRef(null)
 
   const loadData = useCallback(async (isManual = false) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     if (isManual) setRefreshing(true)
     setError(null)
     try {
       const [certs, dns] = await Promise.all([
-        fetchCertificates().catch(() => ({ total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] })),
-        fetchDNSMatrix().catch(() => ({ total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] })),
+        fetchCertificates(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return { total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] } }),
+        fetchDNSMatrix(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return { total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] } }),
       ])
-      setCertData(certs || { total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] })
-      setDnsData(dns || { total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] })
+      if (!controller.signal.aborted) {
+        setCertData(certs || { total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] })
+        setDnsData(dns || { total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] })
+      }
     } catch (err) {
-      setError(err.message || '加载合成探针数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载合成探针数据失败')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
   useEffect(() => {
     loadData()
     const timer = setInterval(() => loadData(false), 30000)
-    return () => clearInterval(timer)
+    return () => { clearInterval(timer); requestRef.current?.abort() }
   }, [loadData])
 
   // Filtered certificates
