@@ -186,8 +186,8 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
   return (
     <div className="status-page min-h-screen bg-[#090a0f] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
       {/* Top Navbar */}
-      <header className="border-b border-white/5 bg-[#0f111a]/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <header className="status-public-header">
+        <div className="status-public-header-inner max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
               <Broadcast size={20} weight="bold" className="text-white" />
@@ -227,7 +227,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-8">
+      <main className="status-public-main flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-8">
         {/* Top Announcement Banner (if configured) */}
         {data?.config?.announcement && (
           <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-200 flex items-start gap-3 shadow-lg">
@@ -237,7 +237,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
         )}
 
         {/* Hero System Status Banner */}
-        <div className={`p-6 sm:p-8 rounded-2xl border transition-all ${hero.bgClass} flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-xl`}>
+          <div className={`status-public-hero p-6 sm:p-8 rounded-2xl border transition-all ${hero.bgClass} flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-xl`}>
           <div className="flex items-center gap-4">
             <div className="shrink-0">{hero.icon}</div>
             <div>
@@ -320,7 +320,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
 
         {/* Monitored Components & 90-Day SLA Bars */}
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+          <div className="status-public-components-heading flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
             <div>
               <h2 className="text-lg font-bold text-white tracking-tight">各服务节点与关键链路健康度</h2>
               <p className="text-xs text-slate-400 mt-0.5">展示过去 {data?.config?.show_uptime_days || 90} 天内各服务的每日可用率心跳记录</p>
@@ -334,21 +334,21 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
           </div>
 
           {Object.entries(groupedComponents).map(([groupName, comps]) => (
-            <div key={groupName} className="space-y-3">
+            <div key={groupName} className="status-public-group space-y-3">
               <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                 <span className="w-1.5 h-3.5 bg-indigo-500 rounded-full"></span>
                 <span>{groupName}</span>
                 <span className="text-xs text-slate-500 normal-case font-normal">({comps.length} 个监测项)</span>
               </h3>
 
-              <div className="divide-y divide-white/5 rounded-2xl bg-[#0f111a] border border-white/5 overflow-hidden shadow-xl">
+              <div className="status-public-component-list divide-y divide-white/5 rounded-2xl bg-[#0f111a] border border-white/5 overflow-hidden shadow-xl">
                 {comps.map((item) => {
                   const comp = item.component
                   const daily = item.daily_uptimes || []
                   const daysCount = daily.length
 
                   return (
-                    <div key={comp.id} className="p-4 sm:p-5 hover:bg-white/[0.02] transition-colors space-y-3">
+                    <div key={comp.id} className="status-public-component-row p-4 sm:p-5 hover:bg-white/[0.02] transition-colors space-y-3">
                       {/* Component header */}
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
@@ -426,10 +426,10 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
         )}
 
         {/* Historical Incidents Archive */}
-        <div className="border-t border-white/5 pt-6 space-y-4">
+        <div className="status-public-archive border-t border-white/5 pt-6 space-y-4">
           <button
             onClick={togglePastArchive}
-            className="flex items-center gap-2 text-sm font-bold text-slate-300 hover:text-white transition-colors"
+            className="status-public-archive-button flex items-center gap-2 text-sm font-bold text-slate-300 hover:text-white transition-colors"
           >
             {showPastArchive ? <CaretDown size={16} /> : <CaretRight size={16} />}
             <span>查看已解决历史事件归档</span>
