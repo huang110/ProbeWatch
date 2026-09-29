@@ -147,12 +147,14 @@ func (s *Store) GetNodeBillingSettings(ctx context.Context, nodeID string) (Node
 		&b.Merchant, &b.Price, &b.Currency, &b.Cycle, &b.StartDate, &b.DueDate, &autoRenewInt, &updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Default settings for unconfigured node
+		// Return neutral settings for an unconfigured node. A quota must be
+		// explicitly configured; using a synthetic default here makes reports
+		// claim that an unconfigured node has capacity it does not have.
 		return NodeBillingSettings{
 			NodeID:             nodeID,
 			ResetDay:           1,
 			ResetTime:          "00:00:00",
-			TrafficQuotaBytes:  1000 * 1024 * 1024 * 1024, // 1TB default
+			TrafficQuotaBytes:  0,
 			AccountingMethod:   "total",
 			IncludedInterfaces: "*",
 			Currency:           "CNY",

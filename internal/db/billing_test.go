@@ -59,6 +59,9 @@ func TestNodeBillingCRUDAndCycleTraffic(t *testing.T) {
 	if settings.ResetDay != 1 || settings.AccountingMethod != "total" {
 		t.Fatalf("unexpected default settings: %+v", settings)
 	}
+	if settings.TrafficQuotaBytes != 0 || settings.BonusQuotaBytes != 0 {
+		t.Fatalf("unconfigured node must not have a synthetic quota: %+v", settings)
+	}
 
 	// 2. Upsert custom settings
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
