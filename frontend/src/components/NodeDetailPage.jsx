@@ -382,7 +382,17 @@ export function NodeDetailPage({
   ).length
 
   const resource = node?.resource || {}
-  const rate = rates[nodeUuid] || {}
+  const suppliedRate = rates[nodeUuid] || {}
+  const latestHistoryRate = Array.isArray(history) && history.length > 0
+    ? history[history.length - 1]
+    : null
+  // Public/guest detail pages do not receive the management console's live
+  // rate map. Reuse the newest historical sample so the summary and charts
+  // do not disagree while the next live sample is pending.
+  const rate = {
+    down: numeric(suppliedRate.down) ?? numeric(latestHistoryRate?.downRate),
+    up: numeric(suppliedRate.up) ?? numeric(latestHistoryRate?.upRate),
+  }
 
   const memUsed = node?.memUsed ?? numeric(resource.memory_used_bytes)
   const memTotal = node?.memTotal ?? numeric(resource.memory_total_bytes)
