@@ -440,6 +440,7 @@ export function App() {
   const [lastSync, setLastSync] = useState(null)
   const [apiState, setApiState] = useState({ kind: 'loading', message: '正在加载 API 数据…' })
   const [apiVersion, setApiVersion] = useState('')
+  const [latestAgentVersion, setLatestAgentVersion] = useState('')
   const [me, setMe] = useState(null)
   const [publicStatus, setPublicStatus] = useState(null)
   const [guestPreview, setGuestPreview] = useState(false)
@@ -460,9 +461,11 @@ export function App() {
         if (!active) return
         const serverVersion = typeof version?.server_version === 'string' ? version.server_version.trim() : ''
         setApiVersion(serverVersion)
+        setLatestAgentVersion(typeof version?.latest_agent_version === 'string' ? version.latest_agent_version.trim() : '')
       })
       .catch(() => {
         if (active) setApiVersion('')
+        if (active) setLatestAgentVersion('')
       })
     return () => { active = false }
   }, [])
@@ -1276,6 +1279,7 @@ export function App() {
             rates={rates}
             lossRates={lossRates}
             onSelectNode={setSelectedNode}
+            latestAgentVersion={latestAgentVersion}
           />
         ) : activeNav === 'terminal' ? (
           <TerminalView initialNodeId={selectedNode?.id || selectedNode?.uuid} />
@@ -1363,11 +1367,12 @@ export function App() {
             onThemeChange={setTheme}
             overview={overview}
             onRefresh={refreshAll}
+            latestAgentVersion={latestAgentVersion}
           />
         )}
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>
-    {selectedNode && <NodeDrawer node={selectedNode} rates={rates} onClose={() => setSelectedNode(null)} onOpenDetails={(node) => { setSelectedNode(null); setDetailNode(node); navigate('node-detail', { uuid: node.uuid || node.id }) }} onNavigate={navigate} />}
+    {selectedNode && <NodeDrawer node={selectedNode} rates={rates} latestAgentVersion={latestAgentVersion} onClose={() => setSelectedNode(null)} onOpenDetails={(node) => { setSelectedNode(null); setDetailNode(node); navigate('node-detail', { uuid: node.uuid || node.id }) }} onNavigate={navigate} />}
   </div>
 }

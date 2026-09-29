@@ -41,6 +41,7 @@ export function SubPage({
   onThemeChange,
   overview = null,
   onRefresh,
+  latestAgentVersion = '',
 }) {
   const pages = {
     dashboard: ['仪表盘', '值守巡检中枢：异常Top排行榜、今日与30天流量、回程与被墙监测、成本中心与主控健康。'],
@@ -118,6 +119,7 @@ export function SubPage({
           nodes={data}
           rates={rates}
           lossRates={lossRates}
+          latestAgentVersion={latestAgentVersion}
           onSelectNode={onSelectNode}
         />
       ) : page === 'billing' ? (

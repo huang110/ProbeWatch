@@ -4,6 +4,23 @@ export const safeArray = (value) => Array.isArray(value) ? value : []
 export const dash = (value, suffix = '') => value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`
 export const numeric = (value) => typeof value === 'number' && Number.isFinite(value) ? value : null
 
+export const compareVersions = (left, right) => {
+  const a = String(left || '').trim().replace(/^v/i, '').split('.')
+  const b = String(right || '').trim().replace(/^v/i, '').split('.')
+  const length = Math.max(a.length, b.length)
+  for (let i = 0; i < length; i += 1) {
+    const av = Number.parseInt(a[i] || '0', 10) || 0
+    const bv = Number.parseInt(b[i] || '0', 10) || 0
+    if (av !== bv) return av > bv ? 1 : -1
+  }
+  return 0
+}
+
+export const isVersionOutdated = (current, latest) => {
+  if (!current || !latest) return false
+  return compareVersions(current, latest) < 0
+}
+
 export const ratio = (used, total) => {
   const u = numeric(used)
   const t = numeric(total)

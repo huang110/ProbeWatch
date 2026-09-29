@@ -30,6 +30,7 @@ import {
   relativeHeartbeat,
   safeText,
   statusLabel,
+  isVersionOutdated,
 } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { ProgressBar, StatusDot } from './Common.jsx'
@@ -140,7 +141,7 @@ function DrawerChecksLatencyLine({ checks = [] }) {
   )
 }
 
-export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigate }) {
+export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose, onOpenDetails, onNavigate }) {
   const closeButtonRef = useRef(null)
   const [showBillingModal, setShowBillingModal] = useState(false)
   const [billingVersion, setBillingVersion] = useState(0)
@@ -400,9 +401,9 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                   <span className="text-mint font-semibold">
                     {node.resource?.agent_version ? `v${node.resource.agent_version}` : node.agentVersion || node.version || '—'}
                   </span>
-                  {node.resource?.agent_version && !node.resource.agent_version.includes('0.5.6') && (
-                    <span className="badge badge-warning text-[10px]" title="服务端已发布 v0.5.6，支持热更新自升级">
-                      可更新至 v0.5.6
+                  {isVersionOutdated(node.resource?.agent_version || node.agentVersion || node.version, latestAgentVersion) && (
+                    <span className="badge badge-warning text-[10px]" title="服务端已发布最新 Agent 版本，支持热更新自升级">
+                      可更新至 v{latestAgentVersion}
                     </span>
                   )}
                 </div>

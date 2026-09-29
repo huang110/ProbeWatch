@@ -32,10 +32,10 @@ import {
   parseColoredTags,
   saveNodeCustomMeta,
 } from '../lib/billing.js'
-import { formatBytes, numeric, safeText } from '../lib/format.js'
+import { formatBytes, numeric, safeText, isVersionOutdated } from '../lib/format.js'
 import { fetchCsrfToken } from '../lib/api.js'
 
-export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSelectNode }) {
+export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, latestAgentVersion = '', onSelectNode }) {
   const [showEnroll, setShowEnroll] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all') // 'all' | 'online' | 'offline'
@@ -452,7 +452,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                   // Agent Version calculation
                   const rawAgentVer = node.resource?.agent_version || node.agentVersion || ''
                   const agentVersion = rawAgentVer ? (rawAgentVer.startsWith('v') ? rawAgentVer : `v${rawAgentVer}`) : '—'
-                  const isOldAgent = rawAgentVer && !rawAgentVer.includes('0.5.6')
+                  const isOldAgent = isVersionOutdated(rawAgentVer, latestAgentVersion)
 
                   return (
                     <tr
@@ -556,8 +556,8 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, onSel
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="mono text-xs block text-foreground font-semibold">{agentVersion}</span>
                             {isOldAgent && (
-                              <span className="badge badge-warning text-[9px] px-1 py-0 cursor-help" title="可自升级至最新 v0.5.6">
-                                ↑可更新
+                              <span className="badge badge-warning text-[9px] px-1 py-0 cursor-help" title="可自升级至最新 Agent 版本">
+                                ↑可更新至 v{latestAgentVersion}
                               </span>
                             )}
                           </div>
