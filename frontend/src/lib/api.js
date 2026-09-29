@@ -670,6 +670,7 @@ export async function fetchPublicIncidents({ limit = 20, offset = 0 } = {}) {
 
 export async function fetchAdminStatusPageConfig() {
   const res = await fetch('/api/admin/status-page', { credentials: 'same-origin' })
+  if (res.status === 401) throw new Error('auth')
   if (!res.ok) throw new Error('Failed to fetch status page config')
   return await res.json()
 }
@@ -696,6 +697,7 @@ export async function fetchAdminIncidents({ all = true, limit = 50, offset = 0 }
   if (offset) params.set('offset', String(offset))
 
   const res = await fetch(`/api/admin/incidents?${params.toString()}`, { credentials: 'same-origin' })
+  if (res.status === 401) throw new Error('auth')
   if (!res.ok) throw new Error('Failed to fetch incidents')
   return await res.json()
 }

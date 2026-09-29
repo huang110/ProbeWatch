@@ -68,8 +68,12 @@ export function StatusPageAdminCard({ nodes = [] }) {
       setConfig(cfgRes)
       setIncidents(incRes.incidents || [])
     } catch (err) {
-      console.error('Failed to load status page admin data:', err)
-      setMsg({ type: 'error', text: '加载状态页数据失败: ' + err.message })
+      if (err?.message === 'auth') {
+        setMsg({ type: 'info', text: '管理员登录后可管理状态页配置和事件。' })
+      } else {
+        console.error('Failed to load status page admin data:', err)
+        setMsg({ type: 'error', text: '加载状态页数据失败: ' + err.message })
+      }
     } finally {
       setLoading(false)
     }
