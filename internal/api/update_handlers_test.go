@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/probewatch/probewatch/internal/version"
@@ -45,6 +46,9 @@ func TestUpdateEndpoints(t *testing.T) {
 	}
 	if checkResp.LatestAgentVersion != version.AgentVersion {
 		t.Fatalf("latest agent version = %s, want %s", checkResp.LatestAgentVersion, version.AgentVersion)
+	}
+	if checkResp.ReleaseNotes == "" || !strings.Contains(checkResp.ReleaseNotes, version.AgentVersion) {
+		t.Fatalf("release notes do not describe current agent version: %q", checkResp.ReleaseNotes)
 	}
 
 	// 3. GET /api/agent/v1/update/download with invalid OS -> 400

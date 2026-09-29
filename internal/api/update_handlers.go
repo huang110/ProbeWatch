@@ -48,7 +48,7 @@ func (s *Server) agentUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		ServerVersion:      version.ServerVersion,
 		LatestAgentVersion: version.AgentVersion,
 		MinAgentVersion:    version.MinAgentVersion,
-		ReleaseNotes:       "ProbeWatch v0.5.6: Custom Alert Rule Engine & Remote Agent Auto-Update System",
+		ReleaseNotes:       fmt.Sprintf("ProbeWatch Agent v%s: current stable agent release", version.AgentVersion),
 		DownloadURL:        downloadURL,
 		ChecksumSHA256:     checksum,
 	}
