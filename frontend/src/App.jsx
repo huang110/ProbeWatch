@@ -767,11 +767,11 @@ export function App() {
         const diskUsed = numeric(resource.filesystem_used_bytes)
         const swapTotal = numeric(resource.swap_total_bytes)
         const swapUsed = numeric(resource.swap_used_bytes)
-        const rx = numeric(resource.network_rx_bytes) || 0
-        const tx = numeric(resource.network_tx_bytes) || 0
-        const tcp = numeric(resource.tcp_conn_count) || 0
-        const udp = numeric(resource.udp_conn_count) || 0
-        const proc = numeric(resource.process_count) || 0
+        const rx = numeric(resource.network_rx_bytes)
+        const tx = numeric(resource.network_tx_bytes)
+        const tcp = numeric(resource.tcp_conn_count)
+        const udp = numeric(resource.udp_conn_count)
+        const proc = numeric(resource.process_count)
         const rawTime = item?.reported_at || item?.recorded_at || item?.time
         let timeIso = null
         if (typeof rawTime === 'string') {
@@ -782,20 +782,20 @@ export function App() {
           timeIso = new Date(ms).toISOString()
         }
 
-        let downRate = 0
-        let upRate = 0
+        let downRate = null
+        let upRate = null
         if (index > 0) {
           const prev = arr[index - 1]
           const prevRes = prev?.resource || {}
-          const prevRx = numeric(prevRes.network_rx_bytes) || 0
-          const prevTx = numeric(prevRes.network_tx_bytes) || 0
+          const prevRx = numeric(prevRes.network_rx_bytes)
+          const prevTx = numeric(prevRes.network_tx_bytes)
           const prevRawTime = prev?.reported_at || prev?.recorded_at || prev?.time
           const curMs = timeIso ? new Date(timeIso).getTime() : 0
           const prevMs = typeof prevRawTime === 'string' ? new Date(prevRawTime).getTime() : (typeof prevRawTime === 'number' ? (prevRawTime > 1e14 ? prevRawTime / 1e6 : prevRawTime * 1000) : 0)
           const dt = (curMs - prevMs) / 1000
           if (dt >= 1 && dt <= 7200) {
-            if (rx >= prevRx) downRate = Math.round((rx - prevRx) / dt)
-            if (tx >= prevTx) upRate = Math.round((tx - prevTx) / dt)
+            if (rx !== null && prevRx !== null && rx >= prevRx) downRate = Math.round((rx - prevRx) / dt)
+            if (tx !== null && prevTx !== null && tx >= prevTx) upRate = Math.round((tx - prevTx) / dt)
           }
         }
 
@@ -810,12 +810,12 @@ export function App() {
 
         return {
           time: timeIso,
-          cpu: numeric(resource.cpu_percent) ?? 0,
+          cpu: numeric(resource.cpu_percent),
           temp: cpuTemp,
           diskReadRate,
           diskWriteRate,
           mem: memoryUsed !== null && memoryTotal !== null && memoryTotal > 0 ? Math.round((memoryUsed / memoryTotal) * 1000) / 10 : null,
-          swap: swapUsed !== null && swapTotal !== null && swapTotal > 0 ? Math.round((swapUsed / swapTotal) * 1000) / 10 : 0,
+          swap: swapUsed !== null && swapTotal !== null && swapTotal > 0 ? Math.round((swapUsed / swapTotal) * 1000) / 10 : null,
           disk: diskUsed !== null && diskTotal !== null && diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 1000) / 10 : null,
           rx,
           tx,

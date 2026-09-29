@@ -23,7 +23,9 @@ import {
 } from '../lib/api.js'
 
 function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B'
+  if (bytes === null || bytes === undefined || bytes === '' || !Number.isFinite(Number(bytes)) || Number(bytes) < 0) return '—'
+  if (Number(bytes) === 0) return '0 B'
+  bytes = Number(bytes)
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
@@ -449,16 +451,16 @@ export function ContainerProcessView({ initialNodeId = '' }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
             {filteredContainers.map((c) => {
               const isRunning = c.state === 'running'
-              const memPercent = c.mem_percent || 0
-              const cpuPercent = c.cpu_percent || 0
+              const memPercent = Number.isFinite(Number(c.mem_percent)) ? Number(c.mem_percent) : null
+              const cpuPercent = Number.isFinite(Number(c.cpu_percent)) ? Number(c.cpu_percent) : null
 
               let memBarColor = '#10b981'
-              if (memPercent > 80) memBarColor = '#f59e0b'
-              if (memPercent > 90) memBarColor = '#ef4444'
+              if (memPercent !== null && memPercent > 80) memBarColor = '#f59e0b'
+              if (memPercent !== null && memPercent > 90) memBarColor = '#ef4444'
 
               let cpuBarColor = '#5e6ad2'
-              if (cpuPercent > 50) cpuBarColor = '#f59e0b'
-              if (cpuPercent > 80) cpuBarColor = '#ef4444'
+              if (cpuPercent !== null && cpuPercent > 50) cpuBarColor = '#f59e0b'
+              if (cpuPercent !== null && cpuPercent > 80) cpuBarColor = '#ef4444'
 
               return (
                 <div
@@ -541,10 +543,10 @@ export function ContainerProcessView({ initialNodeId = '' }) {
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
                         <span>CPU 负载</span>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{cpuPercent.toFixed(1)}%</span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{cpuPercent === null ? '—' : `${cpuPercent.toFixed(1)}%`}</span>
                       </div>
                       <div style={{ height: '4px', width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${Math.min(cpuPercent, 100)}%`, background: cpuBarColor, transition: 'width 0.3s' }} />
+                        <div style={{ height: '100%', width: `${Math.min(cpuPercent === null ? 0 : cpuPercent, 100)}%`, background: cpuBarColor, transition: 'width 0.3s' }} />
                       </div>
                     </div>
 
@@ -555,7 +557,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
                         <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{formatBytes(c.mem_usage_bytes)}</span>
                       </div>
                       <div style={{ height: '4px', width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${Math.min(memPercent, 100)}%`, background: memBarColor, transition: 'width 0.3s' }} />
+                        <div style={{ height: '100%', width: `${Math.min(memPercent === null ? 0 : memPercent, 100)}%`, background: memBarColor, transition: 'width 0.3s' }} />
                       </div>
                     </div>
                   </div>
@@ -630,7 +632,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
                       </span>
                     </td>
                     <td style={{ padding: '0 16px', color: p.cpu_percent > 20 ? '#f59e0b' : 'var(--text-primary)' }}>
-                      {(p.cpu_percent || 0).toFixed(1)}%
+                      {Number.isFinite(Number(p.cpu_percent)) ? `${Number(p.cpu_percent).toFixed(1)}%` : '—'}
                     </td>
                     <td style={{ padding: '0 16px', color: 'var(--text-primary)' }}>
                       {formatBytes(p.memory_rss_bytes)}
@@ -640,7 +642,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{p.threads || 1}</td>
+                    <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{Number.isFinite(Number(p.threads)) ? p.threads : '—'}</td>
                     <td style={{ padding: '0 16px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '11px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.command_line || p.name}
                     </td>
