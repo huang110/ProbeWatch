@@ -146,9 +146,9 @@ export function DashboardView({
 
   // 2. 流量与成本汇总计算 (基于真实探针与账单配置)
   const trafficMetrics = useMemo(() => {
-    let todayUploadBytes = 0
-    let todayDownloadBytes = 0
-    let todayBilledBytes = 0
+    let todayUploadBytes = null
+    let todayDownloadBytes = null
+    let todayBilledBytes = null
     let monthTotalCostCNY = 0
     let yearTotalCostCNY = 0
     let totalResidualCNY = 0
@@ -158,6 +158,7 @@ export function DashboardView({
       let up = 0
       let down = 0
       let billed = 0
+      let sampled = false
       let monthCost = 0
       let yearCost = 0
       let residual = 0
@@ -167,15 +168,16 @@ export function DashboardView({
       nodes.forEach((node) => {
         const id = node.uuid || node.id
         const b = billingData[id] || {}
-        const rx = numeric(node.rx) || 0
-        const tx = numeric(node.tx) || 0
+        const rx = numeric(node.rx)
+        const tx = numeric(node.tx)
         const offset = Number(b.trafficOffsetBytes || 0)
 
-        up += tx
-        down += rx
+        if (rx !== null || tx !== null) sampled = true
+        up += tx || 0
+        down += rx || 0
 
         const method = b.accountingMethod || 'total'
-        let effective = rx + tx
+        let effective = (rx || 0) + (tx || 0)
         if (method === 'tx') effective = tx
         else if (method === 'rx') effective = rx
         else if (method === 'max') effective = Math.max(tx, rx)
@@ -200,9 +202,11 @@ export function DashboardView({
         }
       })
 
-      todayUploadBytes = up
-      todayDownloadBytes = down
-      todayBilledBytes = billed > 0 ? billed : (up + down)
+      if (sampled) {
+        todayUploadBytes = up
+        todayDownloadBytes = down
+        todayBilledBytes = billed > 0 ? billed : (up + down)
+      }
       monthTotalCostCNY = monthCost
       yearTotalCostCNY = yearCost
       totalResidualCNY = residual
@@ -321,8 +325,8 @@ export function DashboardView({
     }
 
     const hours = ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00']
-    const up = trafficMetrics.todayUploadBytes
-    const down = trafficMetrics.todayDownloadBytes
+    const up = trafficMetrics.todayUploadBytes || 0
+    const down = trafficMetrics.todayDownloadBytes || 0
     const maxVal = Math.max(up, down, 1024 * 1024)
 
     const uploadPts = hours.map((_, i) => ({
@@ -380,7 +384,7 @@ export function DashboardView({
 
     const list = []
     const now = new Date()
-    const todayBytes = trafficMetrics.todayBilledBytes
+    const todayBytes = trafficMetrics.todayBilledBytes || 0
     const maxVal = Math.max(todayBytes, 1024 * 1024 * 1024)
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 86400000)
@@ -448,15 +452,15 @@ export function DashboardView({
 
     const realItems = nodes.map((n) => ({
       name: n.name || '探针',
-      cpu: typeof n.cpu === 'number' ? n.cpu : (numeric(n.cpu) || 0),
-      mem: typeof n.memory === 'number' ? n.memory : (numeric(n.memory ?? n.mem) || 0),
-      disk: typeof n.disk === 'number' ? n.disk : (numeric(n.disk) || 0),
+      cpu: typeof n.cpu === 'number' ? n.cpu : numeric(n.cpu),
+      mem: typeof n.memory === 'number' ? n.memory : numeric(n.memory ?? n.mem),
+      disk: typeof n.disk === 'number' ? n.disk : numeric(n.disk),
       node: n,
     }))
 
-    const cpuRank = [...realItems].sort((a, b) => b.cpu - a.cpu).slice(0, 5)
-    const memRank = [...realItems].sort((a, b) => b.mem - a.mem).slice(0, 5)
-    const diskRank = [...realItems].sort((a, b) => b.disk - a.disk).slice(0, 5)
+    const cpuRank = realItems.filter((item) => item.cpu !== null).sort((a, b) => b.cpu - a.cpu).slice(0, 5)
+    const memRank = realItems.filter((item) => item.mem !== null).sort((a, b) => b.mem - a.mem).slice(0, 5)
+    const diskRank = realItems.filter((item) => item.disk !== null).sort((a, b) => b.disk - a.disk).slice(0, 5)
 
     return { cpuRank, memRank, diskRank }
   }, [nodes])
