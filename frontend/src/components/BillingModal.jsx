@@ -13,10 +13,10 @@ export function BillingModal({ node, onClose, onSaved }) {
   const nodeId = safeText(node?.uuid || node?.id)
   const initial = getNodeBilling(nodeId, node?.name)
 
-  const [price, setPrice] = useState(initial.price !== undefined ? initial.price : 39.9)
+  const [price, setPrice] = useState(initial.price !== null && initial.price !== undefined ? initial.price : '')
   const [currency, setCurrency] = useState(initial.currency || '$')
   const [cycle, setCycle] = useState(initial.cycle || 'annual')
-  const [dueDate, setDueDate] = useState(initial.dueDate || '2026-12-22')
+  const [dueDate, setDueDate] = useState(initial.dueDate || '')
   const [autoRenew, setAutoRenew] = useState(initial.autoRenew !== undefined ? initial.autoRenew : true)
 
   const [showCalculator, setShowCalculator] = useState(false)
@@ -35,7 +35,7 @@ export function BillingModal({ node, onClose, onSaved }) {
 
   const currentBilling = {
     merchant: initial.merchant || '云服务器',
-    price: Number(price) || 0,
+    price: price === '' ? null : Number(price),
     currency: currency.trim() || '$',
     cycle,
     dueDate,

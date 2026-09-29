@@ -563,7 +563,9 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
                   <strong className="meta-val mono">
                     {billing.cycle === 'free'
                       ? '永久免费传家宝'
-                      : `${calc.symbol}${billing.price} / ${billing.cycle === 'monthly' ? '月' : billing.cycle === 'quarterly' ? '季' : billing.cycle === 'semi_annual' ? '半年' : billing.cycle === 'annual' ? '年' : `${billing.cycle}年`}`}
+                      : billing.price !== null && billing.price !== undefined && billing.cycle
+                        ? `${calc.symbol}${billing.price} / ${billing.cycle === 'monthly' ? '月' : billing.cycle === 'quarterly' ? '季' : billing.cycle === 'semi_annual' ? '半年' : billing.cycle === 'annual' ? '年' : `${billing.cycle}年`}`
+                        : '账单未配置'}
                   </strong>
                 </div>
 

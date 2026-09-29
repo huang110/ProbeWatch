@@ -587,11 +587,13 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                         <div className="flex flex-wrap gap-1 items-center">
                           {billing.cycle === 'free' ? (
                             <span className="badge badge-quiet text-[10px]">免费传家宝</span>
-                          ) : (
+                          ) : billing.price !== null && billing.price !== undefined && billing.cycle ? (
                             <span className="badge badge-blue text-[10px]">
                               {calc.symbol}
                               {billing.price}/{billing.cycle === 'annual' ? '年' : billing.cycle === 'month' ? '月' : '期'}
                             </span>
+                          ) : (
+                            <span className="badge badge-quiet text-[10px]">账单未配置</span>
                           )}
                           <span
                             className={`badge ${calc.isUrgent ? 'badge-rose' : 'badge-mint'} text-[10px]`}

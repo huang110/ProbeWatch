@@ -173,7 +173,7 @@ export function NodeTable({
 
             const uptimeDays = node.uptime || '—'
             const expireDays = calc.statusText || '账单未配置'
-            const priceDisplay = billing.cycle === 'free' ? '免费传家宝' : `${calc.symbol}${billing.price}/${billing.cycle}`
+            const priceDisplay = billing.cycle === 'free' ? '免费传家宝' : (billing.price !== null && billing.price !== undefined && billing.cycle ? `${calc.symbol}${billing.price}/${billing.cycle}` : '账单未配置')
 
             const uptimeText = uptimeDays
             const priceText = priceDisplay
@@ -198,8 +198,8 @@ export function NodeTable({
             const downRateText = downRate === null ? '等待采样' : formatRate(downRate)
             const totalTxText = formatBytes(node.tx)
             const totalRxText = formatBytes(node.rx)
-            const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : null
-            const costText = billing.price !== undefined ? `${calc.symbol || '¥'}${billing.price}` : '账单未配置'
+            const remainDays = calc.daysRemaining !== null && calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : null
+            const costText = billing.price !== null && billing.price !== undefined ? `${calc.symbol || '¥'}${billing.price}` : '账单未配置'
 
             const cuIsp = ispData.find((d) => d.name === '联通') || { latency: null, loss: null }
             const ctIsp = ispData.find((d) => d.name === '电信') || { latency: null, loss: null }

@@ -520,9 +520,9 @@ export function NodeDetailPage({
     : null
 
   // Top metric values
-  const priceDisplay = billing.price ? `${calc.symbol || '$'}${billing.price}` : '—'
-  const monthlyExpense = billing.price ? `${calc.symbol || '$'}${((billing.price || 0) / (billing.cycle === 'annual' ? 12 : 1)).toFixed(2)}` : '—'
-  const remainingDays = calc.daysRemaining !== undefined ? calc.daysRemaining : '—'
+  const priceDisplay = billing.price !== null && billing.price !== undefined ? `${calc.symbol || '$'}${billing.price}` : '—'
+  const monthlyExpense = billing.price !== null && billing.price !== undefined && billing.cycle ? `${calc.symbol || '$'}${((billing.price || 0) / (billing.cycle === 'annual' ? 12 : 1)).toFixed(2)}` : '—'
+  const remainingDays = calc.daysRemaining !== null && calc.daysRemaining !== undefined ? calc.daysRemaining : '—'
   const remainingValue = calc.remainingValueCNY !== undefined ? `¥${calc.remainingValueCNY.toFixed(2)}` : '—'
 
   // Daily traffic

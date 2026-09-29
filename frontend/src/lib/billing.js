@@ -108,17 +108,19 @@ export const saveNodeBillingData = (nodeId, data) => {
 export const getNodeBilling = (nodeId, defaultName = '') => {
   const all = getStoredBillingData()
   const found = all[nodeId] || {}
-  
-  // Default values if not yet customized
+
+  // Keep an unconfigured node empty. Synthetic prices and dates make the
+  // monitoring UI look like it has billing data when it does not.
   return {
-    merchant: found.merchant || '云服务器',
-    price: found.price !== undefined ? Number(found.price) : 99,
+    merchant: found.merchant || '',
+    price: found.price !== undefined && found.price !== '' ? Number(found.price) : null,
     currency: found.currency || 'CNY',
-    cycle: found.cycle || 'annual',
-    startDate: found.startDate || '2026-01-01',
-    dueDate: found.dueDate || '2027-01-01',
-    autoRenew: found.autoRenew !== undefined ? Boolean(found.autoRenew) : true,
+    cycle: found.cycle || '',
+    startDate: found.startDate || '',
+    dueDate: found.dueDate || '',
+    autoRenew: found.autoRenew !== undefined ? Boolean(found.autoRenew) : false,
     notes: found.notes || '',
+    configured: Object.keys(found).length > 0,
   }
 }
 
@@ -129,7 +131,7 @@ export const getNodeCustomMeta = (nodeId, defaultNode = {}) => {
     customName: found.customName || defaultNode?.name || '',
     customFlag: found.customFlag || defaultNode?.flag || '自动识别',
     tags: found.tags || (defaultNode?.tag ? `${defaultNode.tag}<blue>;` : '电信CN2GIA<Red>;联通9929<blue>;移动CMIN2<Green>;'),
-    bandwidth: found.bandwidth || '500 Mbps',
+    bandwidth: found.bandwidth || '',
     group: found.group || '',
     privateNote: found.privateNote || '',
     publicNote: found.publicNote || '',
@@ -138,7 +140,7 @@ export const getNodeCustomMeta = (nodeId, defaultNode = {}) => {
     resetDay: found.resetDay !== undefined ? found.resetDay : 22,
     resetTime: found.resetTime || '00:00:00',
     trafficCalculation: found.trafficCalculation || 'sum',
-    trafficQuota: found.trafficQuota || '500.00 GB',
+    trafficQuota: found.trafficQuota || '',
     resetAllowance: found.resetAllowance || '0 B',
   }
 }
@@ -169,7 +171,7 @@ export const parseColoredTags = (tagString = '') => {
 
 // 核心：计算剩余天数与剩余价值 (折合人民币 CNY)
 export const calculateRemainingValue = (billing) => {
-  if (!billing || billing.cycle === 'free') {
+  if (billing?.cycle === 'free') {
     return {
       daysRemaining: 9999,
       isExpired: false,
@@ -179,9 +181,22 @@ export const calculateRemainingValue = (billing) => {
       annualCostCNY: 0,
       statusTone: 'free',
       statusText: '永久免费',
+      symbol: resolveCurrency(billing?.currency).symbol,
     }
   }
-
+  if (!billing || !billing.cycle || billing.price === null || billing.price === undefined || !billing.dueDate) {
+    return {
+      daysRemaining: null,
+      isExpired: false,
+      remainingValueOriginal: 0,
+      remainingValueCNY: 0,
+      dailyCostCNY: 0,
+      annualCostCNY: 0,
+      statusTone: 'unknown',
+      statusText: '账单未配置',
+      symbol: resolveCurrency(billing?.currency).symbol,
+    }
+  }
   const now = new Date()
   const due = new Date(billing.dueDate)
   const diffMs = due.getTime() - now.getTime()
