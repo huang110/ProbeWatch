@@ -794,18 +794,39 @@ export function App() {
         let downRate = null
         let upRate = null
         if (index > 0) {
-          const prev = arr[index - 1]
+          let prevIndex = index - 1
+          const currentMs = timeIso ? new Date(timeIso).getTime() : 0
+          while (prevIndex >= 0) {
+            const candidateRawTime = arr[prevIndex]?.reported_at || arr[prevIndex]?.recorded_at || arr[prevIndex]?.time
+            const candidateMs = typeof candidateRawTime === 'string'
+              ? new Date(candidateRawTime).getTime()
+              : (typeof candidateRawTime === 'number' ? (candidateRawTime > 1e14 ? candidateRawTime / 1e6 : candidateRawTime * 1000) : 0)
+            if (candidateMs < currentMs) break
+            prevIndex -= 1
+          }
+          const prev = prevIndex >= 0 ? arr[prevIndex] : null
           const prevRes = prev?.resource || {}
           const prevRx = numeric(prevRes.network_rx_bytes)
           const prevTx = numeric(prevRes.network_tx_bytes)
           const prevRawTime = prev?.reported_at || prev?.recorded_at || prev?.time
-          const curMs = timeIso ? new Date(timeIso).getTime() : 0
+          const curMs = currentMs
           const prevMs = typeof prevRawTime === 'string' ? new Date(prevRawTime).getTime() : (typeof prevRawTime === 'number' ? (prevRawTime > 1e14 ? prevRawTime / 1e6 : prevRawTime * 1000) : 0)
           const dt = (curMs - prevMs) / 1000
           if (dt >= 1 && dt <= 7200) {
             if (rx !== null && prevRx !== null && rx >= prevRx) downRate = Math.round((rx - prevRx) / dt)
             if (tx !== null && prevTx !== null && tx >= prevTx) upRate = Math.round((tx - prevTx) / dt)
           }
+        }
+        // Some public history responses contain duplicate timestamps. If the
+        // timestamp delta is zero, use the current agent sample's explicit
+        // byte deltas when available instead of leaving the rate blank.
+        if (downRate === null) {
+          const rxDelta = numeric(resource.network_rx_bytes_delta)
+          if (rxDelta !== null) downRate = rxDelta
+        }
+        if (upRate === null) {
+          const txDelta = numeric(resource.network_tx_bytes_delta)
+          if (txDelta !== null) upRate = txDelta
         }
 
         const cpuTemp = numeric(resource.cpu_temp_c) ?? null
