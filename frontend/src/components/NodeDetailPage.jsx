@@ -383,8 +383,8 @@ export function NodeDetailPage({
 
   const resource = node?.resource || {}
   const suppliedRate = rates[nodeUuid] || {}
-  const latestHistoryRate = Array.isArray(history) && history.length > 0
-    ? history[history.length - 1]
+  const latestHistoryRate = Array.isArray(history)
+    ? [...history].reverse().find((sample) => numeric(sample?.downRate) !== null || numeric(sample?.upRate) !== null) || null
     : null
   // Public/guest detail pages do not receive the management console's live
   // rate map. Reuse the newest historical sample so the summary and charts
