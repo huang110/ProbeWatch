@@ -260,6 +260,7 @@ export function NodeDetailPage({
   historyTimeRange = '实时',
   onHistoryTimeRangeChange,
   checksSummary = null,
+  pingHistory = [],
   checksLoading = false,
   pingTimeRange = '1小时',
   onPingTimeRangeChange,
@@ -785,7 +786,7 @@ export function NodeDetailPage({
     // checks/summary provides the latest aggregate only. Do not fabricate a
     // historical curve from one sample; render the chart only when real
     // history is available.
-    if (!Array.isArray(history) || history.length === 0 || !history.some((item) => Array.isArray(item?.checks) || item?.target_id)) {
+    if (!Array.isArray(pingHistory) || pingHistory.length === 0) {
       return {
         width, height, paddingLeft, paddingRight, paddingTop, paddingBottom, plotW, plotH,
         yUpper, yTicks, pointsCount, pointsTimes, pointsFullTimes, targetPaths: [], targetPointsMap: {}, displayedXMarks: [],
@@ -793,28 +794,23 @@ export function NodeDetailPage({
     }
 
     pingTargets.forEach((t) => {
-      let seed = 0
-      for (let c = 0; c < t.id.length; c++) {
-        seed = (seed * 31 + t.id.charCodeAt(c)) & 0xfffff
-      }
+      const samples = pingHistory
+        .filter((item) => (item.target_id || item.id) === t.id)
+        .sort((a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0))
+        .map((item) => {
+          const result = item.result || {}
+          const value = numeric(result.latency_ms ?? item.latency_ms ?? item.latency)
+          return value !== null && value >= 0 ? { value, time: item.checked_at } : null
+        })
+        .filter(Boolean)
+      if (!samples.length) return
 
-      const pts = []
-      const jitterAmp = Number.isFinite(Number(t.jitter)) ? Math.min(Math.max(Number(t.jitter), 0), 2.2) * (smoothPeaks ? 0.35 : 1.0) : 0
-
-      for (let i = 0; i < pointsCount; i++) {
-        const x = paddingLeft + (i / (pointsCount - 1)) * plotW
-
-        const phase1 = (i * 0.45) + (seed % 19)
-        const phase2 = (i * 0.85) + (seed % 31)
-        const naturalNoise = Math.sin(phase1) * 0.55 + Math.cos(phase2) * 0.45
-        let val = t.latencyVal + naturalNoise * jitterAmp
-        val = Math.max(0.5, +val.toFixed(2))
-
-        const norm = Math.min(1, Math.max(0, val / yUpper))
+      const pts = samples.map((sample, i) => {
+        const x = paddingLeft + (i / Math.max(samples.length - 1, 1)) * plotW
+        const norm = Math.min(1, Math.max(0, sample.value / yUpper))
         const y = paddingTop + plotH - norm * plotH
-
-        pts.push({ x, y, val, time: pointsTimes[i], fullTime: pointsFullTimes[i] })
-      }
+        return { x, y, val: sample.value, time: sample.time ? new Date(sample.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : pointsTimes[i] || '—', fullTime: sample.time ? new Date(sample.time).toLocaleString('zh-CN', { hour12: false }) : pointsFullTimes[i] || '—' }
+      })
 
       targetPointsMap[t.id] = pts
 
@@ -877,7 +873,7 @@ export function NodeDetailPage({
       targetPointsMap,
       displayedXMarks,
     }
-  }, [pingTargets, selectedTargets, pingRangeConfig, smoothPeaks, nowTick])
+  }, [pingTargets, pingHistory, selectedTargets, pingRangeConfig, smoothPeaks, nowTick])
 
   const handleChartMouseMove = (e) => {
     if (!pingChartData) return
@@ -2417,6 +2413,10 @@ export function NodeDetailPage({
                 </g>
               )}
             </svg>
+
+            {pingChartData.targetPaths.length === 0 && (
+              <div className="komari-ping-empty-state">暂无真实延迟历史采样，等待探针回传后显示曲线</div>
+            )}
 
             {/* 浮动实时 Tooltip 悬浮框 */}
             {hoverData && (

@@ -431,6 +431,7 @@ export function App() {
   const historyAbortRef = useRef(null)
   const [checksSummary, setChecksSummary] = useState(null)
   const [checksLoading, setChecksLoading] = useState(false)
+  const [pingHistory, setPingHistory] = useState([])
   const checksAbortRef = useRef(null)
   const [traffic, setTraffic] = useState(null)
   const [trafficLoading, setTrafficLoading] = useState(false)
@@ -837,7 +838,7 @@ export function App() {
   const analyticsNode = selectedNode || detailNode
   const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
   useEffect(() => {
-    if (!analyticsUuid) { setChecksSummary(null); setChecksLoading(false); return undefined }
+    if (!analyticsUuid) { setChecksSummary(null); setPingHistory([]); setChecksLoading(false); return undefined }
     checksAbortRef.current?.abort()
     const controller = new AbortController()
     checksAbortRef.current = controller
@@ -863,11 +864,23 @@ export function App() {
       return response.json()
     }
 
-    fetchChecksFromApi().then((json) => {
-      if (!Array.isArray(json)) throw new Error('checks:invalid-json')
-      if (!controller.signal.aborted) setChecksSummary(json)
+    const fetchPingHistory = async () => {
+      const response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
+      if (!response.ok) throw new Error(`network-history:${response.status}`)
+      return response.json()
+    }
+
+    Promise.allSettled([fetchChecksFromApi(), fetchPingHistory()]).then(([checksResult, historyResult]) => {
+      if (controller.signal.aborted) return
+      if (checksResult.status === 'fulfilled' && Array.isArray(checksResult.value)) setChecksSummary(checksResult.value)
+      else setChecksSummary(null)
+      if (historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)) setPingHistory(historyResult.value)
+      else setPingHistory([])
     }).catch((error) => {
-      if (error?.name !== 'AbortError' && !controller.signal.aborted) setChecksSummary(null)
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) {
+        setChecksSummary(null)
+        setPingHistory([])
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setChecksLoading(false)
     })
@@ -1143,6 +1156,7 @@ export function App() {
               historyTimeRange={historyTimeRange}
               onHistoryTimeRangeChange={setHistoryTimeRange}
               checksSummary={checksSummary}
+              pingHistory={pingHistory}
               checksLoading={checksLoading}
               pingTimeRange={pingTimeRange}
               onPingTimeRangeChange={setPingTimeRange}
@@ -1262,6 +1276,7 @@ export function App() {
             historyTimeRange={historyTimeRange}
             onHistoryTimeRangeChange={setHistoryTimeRange}
             checksSummary={checksSummary}
+            pingHistory={pingHistory}
             checksLoading={checksLoading}
             pingTimeRange={pingTimeRange}
             onPingTimeRangeChange={setPingTimeRange}

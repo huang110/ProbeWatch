@@ -12232,3 +12232,11 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .status-page > footer { margin-top: 36px !important; padding: 20px 0 !important; border-color: var(--border) !important; background: var(--bg-panel) !important; }
 .status-page > footer .text-slate-500, .status-page > footer .text-slate-400 { color: var(--text-3) !important; }
 @media (max-width: 700px) { .status-public-header-inner { height: auto; min-height: 58px; padding: 10px 16px; } .status-public-main { padding: 18px 16px 0; } .status-public-hero { min-height: 0; padding: 18px !important; } .status-public-component-row { padding: 14px !important; } }
+.komari-ping-empty-state {
+  position: absolute;
+  inset: 42% 0 auto;
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  font: 12px var(--font-mono, monospace);
+  pointer-events: none;
+}
