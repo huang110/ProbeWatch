@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -482,6 +483,9 @@ func writeRateLimitError(w http.ResponseWriter) {
 func (s *Server) installScriptHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	_, _ = w.Write(deploy.InstallScript)
+	// Shell scripts must use LF line endings. Normalise at the HTTP boundary so
+	// a Windows checkout or release archive can never break bash consumers.
+	script := bytes.ReplaceAll(deploy.InstallScript, []byte("\r\n"), []byte("\n"))
+	_, _ = w.Write(script)
 }
 
