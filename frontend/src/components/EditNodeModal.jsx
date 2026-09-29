@@ -30,7 +30,7 @@ export function EditNodeModal({ node, onClose, onSaved }) {
   const [name, setName] = useState(initial.customName || node?.name || '')
   const [flag, setFlag] = useState(initial.customFlag || '自动识别')
   const [tags, setTags] = useState(initial.tags || '电信CN2GIA<Red>;联通9929<blue>;移动CMIN2<Green>;')
-  const [bandwidth, setBandwidth] = useState(initial.bandwidth || '500 Mbps')
+  const [bandwidth, setBandwidth] = useState(initial.bandwidth || '')
   const [group, setGroup] = useState(initial.group || '')
   const [privateNote, setPrivateNote] = useState(initial.privateNote || '')
   const [publicNote, setPublicNote] = useState(initial.publicNote || '')
@@ -40,7 +40,7 @@ export function EditNodeModal({ node, onClose, onSaved }) {
   const [resetDay, setResetDay] = useState(initial.resetDay !== undefined ? String(initial.resetDay) : '22')
   const [resetTime, setResetTime] = useState(initial.resetTime || '00:00:00')
   const [trafficCalculation, setTrafficCalculation] = useState(initial.trafficCalculation || 'sum')
-  const [trafficQuota, setTrafficQuota] = useState(initial.trafficQuota || '500.00 GB')
+  const [trafficQuota, setTrafficQuota] = useState(initial.trafficQuota || '')
   const [resetAllowance, setResetAllowance] = useState(initial.resetAllowance || '0 B')
 
   const [saveSuccess, setSaveSuccess] = useState(false)
@@ -69,7 +69,7 @@ export function EditNodeModal({ node, onClose, onSaved }) {
       resetDay: Number(resetDay) || 0,
       resetTime: resetTime.trim() || '00:00:00',
       trafficCalculation,
-      trafficQuota: trafficQuota.trim() || '500.00 GB',
+      trafficQuota: trafficQuota.trim(),
       resetAllowance: resetAllowance.trim() || '0 B',
     }
 
@@ -322,8 +322,8 @@ export function EditNodeModal({ node, onClose, onSaved }) {
 
                 <div className="edit-traffic-calc-box">
                   <div className="calc-formula">
-                    原限额 {trafficQuota || '500.00 GB'} + 重置流量 {resetAllowance || '0 B'} = 本周期总限额{' '}
-                    <b>{trafficQuota || '500.00 GB'}</b>
+                    原限额 {trafficQuota || '未配置'} + 重置流量 {resetAllowance || '0 B'} = 本周期总限额{' '}
+                    <b>{trafficQuota || '未配置'}</b>
                   </div>
                   <div className="calc-explain">
                     这里只调整本周期额度，不会清零或修改真实流量，日、周、月报仍按实际产生的流量统计。
