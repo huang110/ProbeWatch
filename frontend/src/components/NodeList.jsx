@@ -136,7 +136,7 @@ export function NodeTable({
           {rows.map(({ node, key, rate, loss, billing, calc, customMeta, coloredTags }) => {
             const isSelected = selectedId && selectedId === key
             const isOnline = node.status === 'online'
-            const totalTransfer = (node.rx || 0) + (node.tx || 0)
+            const totalTransfer = node.rx !== null || node.tx !== null ? (node.rx || 0) + (node.tx || 0) : null
             const os = node.os || 'Linux'
             const cores = node.cores || node.cpuCores || 1
             const l1 = numeric(node.load1)
@@ -191,13 +191,13 @@ export function NodeTable({
             } else if (quotaStr.includes('TB')) {
               quotaBytes = parseFloat(quotaStr) * 1024 * 1024 * 1024 * 1024
             }
-            const trafficPercent = quotaStr ? Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100)) : null
+            const trafficPercent = quotaStr && totalTransfer !== null ? Math.min(100, Math.max(0, (totalTransfer / (quotaBytes || 1)) * 100)) : null
             const trafficSub = quotaStr ? `${formatBytes(totalTransfer)} / ${quotaStr}` : '流量配额未配置'
 
             const upRateText = upRate === null ? '等待采样' : formatRate(upRate)
             const downRateText = downRate === null ? '等待采样' : formatRate(downRate)
-            const totalTxText = formatBytes(node.tx || 0)
-            const totalRxText = formatBytes(node.rx || 0)
+            const totalTxText = formatBytes(node.tx)
+            const totalRxText = formatBytes(node.rx)
             const remainDays = calc.daysRemaining !== undefined && calc.daysRemaining < 9999 ? calc.daysRemaining : null
             const costText = billing.price !== undefined ? `${calc.symbol || '¥'}${billing.price}` : '账单未配置'
 
@@ -612,7 +612,7 @@ export function NodeTable({
                     <span className="rate-down-text">↓ {formatRate(rate?.down ?? null)}</span>
                     <span className="rate-up-text">↑ {formatRate(rate?.up ?? null)}</span>
                   </td>
-                  <td className="mono">{formatBytes((node.rx || 0) + (node.tx || 0))}</td>
+                  <td className="mono">{formatBytes(totalTransfer)}</td>
                   <td className="mono">{loss !== null && loss !== undefined ? `${loss}%` : '0%'}</td>
                   <td>
                     <span className="mono text-mint" style={{ fontWeight: 700 }}>

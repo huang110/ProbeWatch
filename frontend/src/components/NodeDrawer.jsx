@@ -232,7 +232,7 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
   const calc = calculateRemainingValue(billing)
   const customMeta = getNodeCustomMeta(key, node)
   const coloredTags = parseColoredTags(customMeta.tags)
-  const totalTransfer = (node.rx || 0) + (node.tx || 0)
+  const totalTransfer = node.rx !== null || node.tx !== null ? (node.rx || 0) + (node.tx || 0) : null
   const isWindows = (node.os || '').toLowerCase().includes('windows')
 
   const interfaces = Array.isArray(node.interfaces) && node.interfaces.length > 0
@@ -477,12 +477,12 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
             <div className="drawer-transfer-row">
               <div className="transfer-stat">
                 <span className="transfer-label">累计入站 (Rx)</span>
-                <b className="transfer-val mono">{formatBytes(node.rx || 0)}</b>
+                <b className="transfer-val mono">{formatBytes(node.rx)}</b>
               </div>
               <div className="transfer-divider" />
               <div className="transfer-stat">
                 <span className="transfer-label">累计出站 (Tx)</span>
-                <b className="transfer-val mono">{formatBytes(node.tx || 0)}</b>
+                <b className="transfer-val mono">{formatBytes(node.tx)}</b>
               </div>
               <div className="transfer-divider" />
               <div className="transfer-stat">
@@ -517,8 +517,8 @@ export function NodeDrawer({ node, rates = {}, onClose, onOpenDetails, onNavigat
                         )}
                       </div>
                       <div className="mono text-2xs text-secondary flex items-center gap-2">
-                        <span>v {formatBytes(iface.rx_bytes || 0)}</span>
-                        <span>^ {formatBytes(iface.tx_bytes || 0)}</span>
+                        <span>v {formatBytes(iface.rx_bytes)}</span>
+                        <span>^ {formatBytes(iface.tx_bytes)}</span>
                       </div>
                     </div>
                   ))}
