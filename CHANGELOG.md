@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## [v0.8.13] - 2026-09-29
+
+### 修复跨平台部署回归测试
+
+- Compose 结构测试统一处理 LF 与 CRLF 换行，避免 Windows 工作区或归档解包后误报缺少 `probewatch` 服务。
+- 重新执行全量 Go 测试，`deploy` 与 `tests` 包均通过。
+- Server 版本升级到 v0.8.13，Agent 继续使用 v0.8.10。
+
 ## [v0.8.12] - 2026-09-29
 
 ### 优化未登录状态页错误处理
