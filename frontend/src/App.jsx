@@ -865,7 +865,10 @@ export function App() {
     }
 
     const fetchPingHistory = async () => {
-      const response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
+      let response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
+      if (response.status === 401 || response.status === 404) {
+        response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
+      }
       if (!response.ok) throw new Error(`network-history:${response.status}`)
       return response.json()
     }

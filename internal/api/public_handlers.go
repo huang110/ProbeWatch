@@ -321,6 +321,13 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeNodeHistory(w, r, node.ID, "resource")
 		return
 	}
+	if len(parts) == 6 && parts[4] == "network" && parts[5] == "history" {
+		// Network history is read-only telemetry used by the public node detail
+		// page. Keep the same window and limit validation as the authenticated
+		// endpoint, while exposing only the already-available probe results.
+		s.writeNodeHistory(w, r, node.ID, "network")
+		return
+	}
 	if len(parts) == 6 && parts[4] == "checks" && parts[5] == "summary" {
 		s.nodeChecksSummary(w, r, uuid)
 		return
