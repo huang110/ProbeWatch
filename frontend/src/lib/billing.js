@@ -64,6 +64,41 @@ export const COMMON_MERCHANTS = [
 
 const STORAGE_KEY = 'probewatch_node_billing_v1'
 
+// Convert a human readable traffic value (for example `500 GB` or `1 TB`)
+// to bytes. Empty and invalid values intentionally return null so callers can
+// distinguish an unconfigured quota from a real zero-byte quota.
+export const parseTrafficBytes = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null
+  const text = String(value).trim().replace(/,/g, '')
+  if (!text) return null
+  const match = text.match(/^(-?\d+(?:\.\d+)?)\s*(b|kb|kib|mb|mib|gb|gib|tb|tib|pb|pib)?$/i)
+  if (!match) return null
+  const amount = Number(match[1])
+  if (!Number.isFinite(amount) || amount < 0) return null
+  const unit = (match[2] || 'b').toLowerCase()
+  const powers = { b: 0, kb: 1, kib: 1, mb: 2, mib: 2, gb: 3, gib: 3, tb: 4, tib: 4, pb: 5, pib: 5 }
+  return amount * (1024 ** (powers[unit] ?? 0))
+}
+
+export const getNodeTrafficConfig = (nodeId) => {
+  const all = getStoredBillingData()
+  const found = all[nodeId] || {}
+  const quota = found.trafficQuota ?? (found.trafficQuotaGB !== undefined ? `${found.trafficQuotaGB} GB` : '')
+  const allowance = found.resetAllowance ?? (found.bonusQuotaGB !== undefined ? `${found.bonusQuotaGB} GB` : '0 B')
+  const rawMethod = found.trafficCalculation || ({ total: 'sum', tx: 'out', rx: 'in' }[found.accountingMethod] || found.accountingMethod || 'sum')
+  const method = ({ sum: 'total', in: 'rx', out: 'tx' }[rawMethod] || rawMethod)
+  const offset = Number(found.trafficOffsetBytes ?? found.txOffsetBytes ?? 0)
+  return {
+    quotaText: String(quota || '').trim(),
+    allowanceText: String(allowance || '0 B').trim(),
+    quotaBytes: parseTrafficBytes(quota),
+    allowanceBytes: parseTrafficBytes(allowance) || 0,
+    method,
+    offsetBytes: Number.isFinite(offset) ? offset : 0,
+  }
+}
+
 const getStore = () => {
   try {
     const k = ['local', 'Storage'].join('')
@@ -115,9 +150,9 @@ export const getNodeBilling = (nodeId, defaultName = '') => {
     merchant: found.merchant || '',
     price: found.price !== undefined && found.price !== '' ? Number(found.price) : null,
     currency: found.currency || 'CNY',
-    cycle: found.cycle || '',
+    cycle: found.cycle || found.billingCycle || '',
     startDate: found.startDate || '',
-    dueDate: found.dueDate || '',
+    dueDate: found.dueDate || found.expiresAt || '',
     autoRenew: found.autoRenew !== undefined ? Boolean(found.autoRenew) : false,
     notes: found.notes || '',
     configured: Object.keys(found).length > 0,

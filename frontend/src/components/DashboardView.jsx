@@ -28,8 +28,8 @@ import {
   Timer,
   Check,
 } from '@phosphor-icons/react'
-import { formatBytes, formatRate, formatPercent, numeric, safeText, formatTimeOfDay } from '../lib/format.js'
-import { getStoredBillingData, convertCNYToCurrency, BILLING_CYCLES } from '../lib/billing.js'
+import { formatBytes, formatRate, formatPercent, numeric, safeText, formatTimeOfDay, calcEffectiveTraffic } from '../lib/format.js'
+import { getNodeBilling, getNodeTrafficConfig, convertCNYToCurrency, BILLING_CYCLES } from '../lib/billing.js'
 
 // 平滑贝塞尔曲线生成算法 (Catmull-Rom -> Cubic Bezier)
 function pointsToSmoothPath(points) {
@@ -77,8 +77,6 @@ export function DashboardView({
     const id = setInterval(() => setCurrentTime(formatTimeOfDay(new Date())), 1000)
     return () => clearInterval(id)
   }, [])
-
-  const billingData = useMemo(() => getStoredBillingData(), [])
 
   // 主探针节点识别
   const primaryNode = useMemo(() => {
@@ -167,34 +165,28 @@ export function DashboardView({
 
       nodes.forEach((node) => {
         const id = node.uuid || node.id
-        const b = billingData[id] || {}
+        const billing = getNodeBilling(id)
+        const traffic = getNodeTrafficConfig(id)
         const rx = numeric(node.rx)
         const tx = numeric(node.tx)
-        const offset = Number(b.trafficOffsetBytes || 0)
+        const offset = traffic.offsetBytes
 
         if (rx !== null || tx !== null) sampled = true
         up += tx || 0
         down += rx || 0
 
-        const method = b.accountingMethod || 'total'
-        let effective = (rx || 0) + (tx || 0)
-        if (method === 'tx') effective = tx
-        else if (method === 'rx') effective = rx
-        else if (method === 'max') effective = Math.max(tx, rx)
-        else if (method === 'min') effective = Math.min(tx, rx)
+        billed += calcEffectiveTraffic(rx, tx, traffic.method, offset).effective
 
-        billed += Math.max(0, effective + offset)
-
-        const price = Number(b.price || 0)
-        if (price > 0 && b.billingCycle !== 'free') {
-          const cycle = BILLING_CYCLES.find((c) => c.id === (b.billingCycle || 'annual')) || { days: 365 }
+        const price = Number(billing.price || 0)
+        if (price > 0 && billing.cycle !== 'free') {
+          const cycle = BILLING_CYCLES.find((c) => c.id === (billing.cycle || 'annual')) || { days: 365 }
           const days = cycle.days || 365
           const daily = price / days
           monthCost += daily * 30.4
           yearCost += daily * 365
 
-          if (b.expiresAt) {
-            const expTime = new Date(b.expiresAt).getTime()
+          if (billing.dueDate) {
+            const expTime = new Date(billing.dueDate).getTime()
             const remainingDays = Math.max(0, Math.ceil((expTime - now) / 86400000))
             if (remainingDays <= 30 && remainingDays > 0) exp += 1
             residual += Math.max(0, remainingDays * daily)
@@ -222,7 +214,7 @@ export function DashboardView({
       totalResidualCNY,
       expiringCount,
     }
-  }, [nodes, billingData])
+  }, [nodes])
 
   // 3. 数据库物理存储体积
   const databaseStats = useMemo(() => {

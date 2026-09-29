@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Info, ArrowClockwise, Check, WarningCircle } from '@phosphor-icons/react'
 import { numeric, safeText } from '../lib/format.js'
-import { getStoredBillingData, saveNodeBillingData, getNodeCustomMeta } from '../lib/billing.js'
+import { getStoredBillingData, saveNodeBillingData, getNodeCustomMeta, parseTrafficBytes } from '../lib/billing.js'
 import { fetchNodeBilling, saveNodeBilling, resetNodeBilling } from '../lib/api.js'
 
 // Format bytes with 2 decimal places when >= MB/GB
@@ -123,9 +123,12 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
 
   // Backend Billing States
   const [resetDay, setResetDay] = useState(nodeMeta?.resetDay ?? 1)
-  const [accountingMethod, setAccountingMethod] = useState('total')
-  const [trafficQuotaGB, setTrafficQuotaGB] = useState('1000')
-  const [bonusQuotaGB, setBonusQuotaGB] = useState('0')
+  const quotaBytesFromMeta = parseTrafficBytes(nodeMeta?.trafficQuota)
+  const allowanceBytesFromMeta = parseTrafficBytes(nodeMeta?.resetAllowance) || 0
+  const bytesToGB = (value) => value === null || value === undefined ? '' : String(Math.round((Number(value) / (1024 ** 3)) * 100) / 100)
+  const [accountingMethod, setAccountingMethod] = useState(({ sum: 'total', in: 'rx', out: 'tx' }[nodeMeta?.trafficCalculation] || nodeMeta?.trafficCalculation || 'total'))
+  const [trafficQuotaGB, setTrafficQuotaGB] = useState(bytesToGB(quotaBytesFromMeta))
+  const [bonusQuotaGB, setBonusQuotaGB] = useState(bytesToGB(allowanceBytesFromMeta) || '0')
   const [includedInterfaces, setIncludedInterfaces] = useState('*')
   const [merchant, setMerchant] = useState('')
   const [serverCycleInfo, setServerCycleInfo] = useState(null)
@@ -154,7 +157,7 @@ export function TrafficCalibrationModal({ node, onClose, onSaveSuccess }) {
         if (data.reset_day) setResetDay(data.reset_day)
         if (data.accounting_method) setAccountingMethod(data.accounting_method)
         if (data.traffic_quota_bytes !== undefined) {
-          setTrafficQuotaGB((Number(data.traffic_quota_bytes) / (1024 * 1024 * 1024)).toFixed(0))
+          setTrafficQuotaGB(Number(data.traffic_quota_bytes) > 0 ? (Number(data.traffic_quota_bytes) / (1024 * 1024 * 1024)).toFixed(2) : '')
         }
         if (data.bonus_quota_bytes !== undefined) {
           setBonusQuotaGB((Number(data.bonus_quota_bytes) / (1024 * 1024 * 1024)).toFixed(0))

@@ -11,8 +11,8 @@ import {
   Clock,
   Sparkle
 } from '@phosphor-icons/react'
-import { formatBytes, formatPercent, numeric } from '../lib/format.js'
-import { getStoredBillingData, saveNodeBillingData } from '../lib/billing.js'
+import { formatBytes, formatPercent, numeric, calcEffectiveTraffic } from '../lib/format.js'
+import { getNodeTrafficConfig, saveNodeBillingData } from '../lib/billing.js'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 
 export function TrafficReportView({ nodes = [], onSelectNode }) {
@@ -20,8 +20,6 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [calibratingNode, setCalibratingNode] = useState(null)
   const [sentReportToast, setSentReportToast] = useState(false)
-
-  const billingData = useMemo(() => getStoredBillingData(), [])
 
   // 1. 汇总全网流量与有效额度
   const trafficOverview = useMemo(() => {
@@ -33,29 +31,20 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
 
     nodes.forEach((node) => {
       const id = node.uuid || node.id
-      const b = billingData[id] || {}
+      const traffic = getNodeTrafficConfig(id)
       const rx = numeric(node.rx) || 0
       const tx = numeric(node.tx) || 0
-      const offset = Number(b.trafficOffsetBytes || 0)
+      const offset = traffic.offsetBytes
 
       totalRawUploadBytes += tx
       totalRawDownloadBytes += rx
 
       // 额度
-      const baseQuotaGB = Number(b.trafficQuotaGB || 1000)
-      const bonusQuotaGB = Number(b.bonusQuotaGB || 0)
-      totalBaseQuotaBytes += baseQuotaGB * 1024 * 1024 * 1024
-      totalBonusQuotaBytes += bonusQuotaGB * 1024 * 1024 * 1024
+      if (traffic.quotaBytes !== null) totalBaseQuotaBytes += traffic.quotaBytes
+      totalBonusQuotaBytes += traffic.allowanceBytes
 
       // 口径计算
-      const method = b.accountingMethod || 'total'
-      let effective = rx + tx
-      if (method === 'tx') effective = tx
-      else if (method === 'rx') effective = rx
-      else if (method === 'max') effective = Math.max(tx, rx)
-      else if (method === 'min') effective = Math.min(tx, rx)
-
-      totalEffectiveUsedBytes += Math.max(0, effective + offset)
+      totalEffectiveUsedBytes += calcEffectiveTraffic(rx, tx, traffic.method, offset).effective
     })
 
     const totalQuotaBytes = totalBaseQuotaBytes + totalBonusQuotaBytes
@@ -70,7 +59,7 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
       totalRawDownloadBytes,
       percent: Math.min(100, percent),
     }
-  }, [nodes, billingData])
+  }, [nodes])
 
   const handleSendReportNow = () => {
     setSentReportToast(true)
@@ -118,7 +107,7 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
             <span className="stat-label">本周期有效总额度</span>
             <strong className="stat-val mono text-blue">{formatBytes(trafficOverview.totalQuotaBytes)}</strong>
             <span className="text-[11px] text-muted">
-              基础 {formatBytes(trafficOverview.totalBaseQuotaBytes)} + 临时追加 {formatBytes(trafficOverview.totalBonusQuotaBytes)}
+              基础 {trafficOverview.totalBaseQuotaBytes > 0 ? formatBytes(trafficOverview.totalBaseQuotaBytes) : '未配置'} + 临时追加 {formatBytes(trafficOverview.totalBonusQuotaBytes)}
             </span>
           </div>
 
@@ -133,9 +122,9 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
           <div className="stat-card">
             <span className="stat-label">剩余可用总流量</span>
             <strong className="stat-val mono text-mint">
-              {formatBytes(Math.max(0, trafficOverview.totalQuotaBytes - trafficOverview.totalEffectiveUsedBytes))}
+              {trafficOverview.totalQuotaBytes > 0 ? formatBytes(Math.max(0, trafficOverview.totalQuotaBytes - trafficOverview.totalEffectiveUsedBytes)) : '未配置'}
             </strong>
-            <span className="text-[11px] text-muted">全网综合配额富余充足</span>
+            <span className="text-[11px] text-muted">{trafficOverview.totalQuotaBytes === 0 ? '暂无已配置配额' : trafficOverview.percent >= 85 ? '配额即将耗尽' : '配额富余'}</span>
           </div>
 
           <div className="stat-card">
@@ -220,20 +209,13 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
                 })
                 .map((node) => {
                   const id = node.uuid || node.id
-                  const b = billingData[id] || {}
+                  const traffic = getNodeTrafficConfig(id)
                   const rx = numeric(node.rx) || 0
                   const tx = numeric(node.tx) || 0
-                  const offset = Number(b.trafficOffsetBytes || 0)
-                  const method = b.accountingMethod || 'total'
-                  const quotaGB = (Number(b.trafficQuotaGB || 1000) + Number(b.bonusQuotaGB || 0))
-                  const quotaBytes = quotaGB * 1024 * 1024 * 1024
-
-                  let effective = rx + tx
-                  if (method === 'tx') effective = tx
-                  else if (method === 'rx') effective = rx
-                  else if (method === 'max') effective = Math.max(tx, rx)
-                  else if (method === 'min') effective = Math.min(tx, rx)
-                  effective = Math.max(0, effective + offset)
+                  const offset = traffic.offsetBytes
+                  const method = traffic.method
+                  const quotaBytes = traffic.quotaBytes === null ? traffic.allowanceBytes : traffic.quotaBytes + traffic.allowanceBytes
+                  const effective = calcEffectiveTraffic(rx, tx, method, offset).effective
 
                   const pct = quotaBytes > 0 ? (effective / quotaBytes) * 100 : 0
 
@@ -267,16 +249,16 @@ export function TrafficReportView({ nodes = [], onSelectNode }) {
                         )}
                       </td>
                       <td className="mono font-bold text-blue">{formatBytes(effective)}</td>
-                      <td className="mono text-muted">{formatBytes(quotaBytes)}</td>
+                      <td className="mono text-muted">{quotaBytes > 0 ? formatBytes(quotaBytes) : '未配置'}</td>
                       <td>
                         <div className="flex items-center gap-1.5">
-                          <span className="mono text-xs w-10">{formatPercent(pct)}</span>
-                          <div className="progress-bar-track w-16">
+                          <span className="mono text-xs w-10">{quotaBytes > 0 ? formatPercent(pct) : '—'}</span>
+                          {quotaBytes > 0 && <div className="progress-bar-track w-16">
                             <div
                               className={`progress-bar-fill ${pct > 90 ? 'bg-rose' : pct > 75 ? 'bg-amber' : 'bg-mint'}`}
                               style={{ width: `${Math.min(100, pct)}%` }}
                             />
-                          </div>
+                          </div>}
                         </div>
                       </td>
                       <td className="text-right">
