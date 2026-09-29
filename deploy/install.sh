@@ -215,28 +215,31 @@ if [ "$INIT_SYSTEM" = "openwrt" ]; then
     BIN_PATH="/usr/bin/probewatch-agent"
 fi
 
-if [ ! -f "$BIN_PATH" ] && [ ! -f "./probewatch-agent" ]; then
+if [ ! -f "./probewatch-agent" ]; then
     # 尝试从主控下载对应架构的二进制
     SERVER_BASE="${ENDPOINT%/api/agent/v1}"
     DOWNLOAD_URL="${SERVER_BASE}/api/agent/v1/update/download?os=linux&arch=${TARGET_ARCH}"
     info "正在从主控下载 ProbeWatch Agent 二进制 (${TARGET_ARCH})..."
     
+    BIN_TMP="${BIN_PATH}.tmp.$$"
+    rm -f "$BIN_TMP"
     DOWNLOAD_SUCCESS=0
     if command -v curl >/dev/null 2>&1; then
-        if curl -sSL -k -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_PATH" "$DOWNLOAD_URL"; then
+        if curl -fsSL -k -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_TMP" "$DOWNLOAD_URL"; then
             DOWNLOAD_SUCCESS=1
         fi
     elif command -v wget >/dev/null 2>&1; then
-        if wget -qO "$BIN_PATH" --header="Authorization: Bearer ${NODE_TOKEN}" "$DOWNLOAD_URL"; then
+        if wget -qO "$BIN_TMP" --header="Authorization: Bearer ${NODE_TOKEN}" "$DOWNLOAD_URL"; then
             DOWNLOAD_SUCCESS=1
         fi
     fi
 
-    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ -s "$BIN_PATH" ]; then
-        chmod 0755 "$BIN_PATH"
+    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ -s "$BIN_TMP" ] && "$BIN_TMP" --version >/dev/null 2>&1; then
+        chmod 0755 "$BIN_TMP"
+        mv -f "$BIN_TMP" "$BIN_PATH"
         ok "Agent 二进制下载成功: $BIN_PATH"
     else
-        rm -f "$BIN_PATH"
+        rm -f "$BIN_TMP"
         warn "从主控自动下载二进制未完成，请确认网络或手动放置 agent 到 $BIN_PATH"
     fi
 elif [ -f "./probewatch-agent" ]; then
@@ -255,10 +258,12 @@ fi
 
 # 7. 写入配置文件
 cat > /etc/probewatch/agent.env <<EOF
-PROBEWATCH_ENV=production
+PROBEWATCH_ENV=development
+PROBEWATCH_PUBLIC_BASE_URL=${SERVER_BASE:-${ENDPOINT%/api/agent/v1}}
 PROBEWATCH_AGENT_ENDPOINT=${ENDPOINT}
 PROBEWATCH_AGENT_NODE_UUID=${NODE_UUID}
 PROBEWATCH_AGENT_NODE_TOKEN=${NODE_TOKEN}
+AGENT_NODE_TOKEN_TTL=8760h
 PROBEWATCH_AGENT_DATA=${DATA_DIR}
 EOF
 chmod 0600 /etc/probewatch/agent.env
