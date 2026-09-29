@@ -74,3 +74,23 @@ func TestUpdateEndpoints(t *testing.T) {
 		t.Fatalf("computeFileSHA256 failed: %v, hash = %s", err, hash)
 	}
 }
+
+func TestParseAgentVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  string
+		want string
+		ok   bool
+	}{
+		{name: "current", out: "ProbeWatch Agent v0.8.10 (linux/amd64)\n", want: "0.8.10", ok: true},
+		{name: "legacy", out: "ProbeWatch Agent v0.5.6 (linux/amd64)\n", want: "0.5.6", ok: true},
+		{name: "invalid", out: "not an agent binary\n", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseAgentVersion([]byte(tc.out))
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("parseAgentVersion(%q) = %q, %v; want %q, %v", tc.out, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}

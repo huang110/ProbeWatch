@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/version"
 )
@@ -129,12 +133,54 @@ func (s *Server) findAgentBinaryPath(osName, archName string) string {
 		"./probewatch-agent",
 		"./cmd/probewatch-agent/probewatch-agent",
 	}
+
+	// On Linux the server can inspect the candidate's embedded version. This
+	// prevents an old staged artifact from being advertised while the running
+	// canonical binary is current (or the reverse). Other target platforms
+	// cannot be executed on the server, so they retain the deterministic path
+	// order above.
+	if osName == "linux" && archName == "amd64" {
+		for _, path := range candidates {
+			if isUsableAgentBinary(path) && agentBinaryMatchesVersion(path, version.AgentVersion) {
+				return path
+			}
+		}
+		// Never serve an unverified Linux/amd64 artifact. An old staged file
+		// must not be advertised with the current release metadata.
+		return ""
+	}
 	for _, path := range candidates {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Size() > 1024*1024 {
+		if isUsableAgentBinary(path) {
 			return path
 		}
 	}
 	return ""
+}
+
+func isUsableAgentBinary(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Size() > 1024*1024
+}
+
+var agentVersionPattern = regexp.MustCompile(`ProbeWatch Agent v([0-9]+(?:\.[0-9]+){0,2})`)
+
+func agentBinaryMatchesVersion(path, expected string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil || ctx.Err() != nil {
+		return false
+	}
+	actual, ok := parseAgentVersion(out)
+	return ok && version.Compare(actual, expected) == 0
+}
+
+func parseAgentVersion(output []byte) (string, bool) {
+	m := agentVersionPattern.FindSubmatch(output)
+	if len(m) != 2 {
+		return "", false
+	}
+	return string(m[1]), true
 }
 
 func computeFileSHA256(filePath string) (string, error) {
