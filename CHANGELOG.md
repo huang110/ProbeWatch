@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## v0.8.21
+
+- 前端导航页面改为按需加载，减少首屏 JavaScript 体积。
+- 增加统一的页面加载状态，避免切换页面时出现空白。
+- 修复懒加载改造过程中暴露的 CSS 根变量块结构问题。
+
 ## v0.8.20
 
 - 修复 Agent 下载接口可能将 Linux/amd64 通用二进制错误提供给 arm64、Windows 或 macOS 节点的问题。

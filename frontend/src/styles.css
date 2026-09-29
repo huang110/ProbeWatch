@@ -36,6 +36,16 @@
   --sidebar-narrow: 64px;
 }
 
+.page-loading {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted, #8b949e);
+  font-size: 13px;
+}
+
 /* Dashboard presentation: light operations console layout */
 .dashboard-lite-container {
   --dash-bg: #f6f8fb;
@@ -11940,6 +11950,7 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 /* ==========================================================================
    Page shell normalization and legacy token bridge
    ========================================================================== */
+
 :root {
   --bg-card: var(--bg-panel);
   --bg-surface: var(--bg-panel);

@@ -1,29 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, formatUptime, safeArray, detectRegionAndFlag } from './lib/format.js'
 import { fetchCsrfToken, fetchGuestStatus, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
-import { NodeDetailPage } from './components/NodeDetailPage.jsx'
-import { OverviewPage } from './components/OverviewPage.jsx'
-import { SubPage } from './components/SubPage.jsx'
 import { GuestView } from './components/GuestView.jsx'
 import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
-import { BillingCenter } from './components/BillingCenter.jsx'
-import { DashboardView } from './components/DashboardView.jsx'
-import { ServerManageView } from './components/ServerManageView.jsx'
-import { MonitoringView } from './components/MonitoringView.jsx'
-import { TrafficReportView } from './components/TrafficReportView.jsx'
-import { AlertCenterView } from './components/AlertCenterView.jsx'
-import { LogsView } from './components/LogsView.jsx'
-import { AICopilotView } from './components/AICopilotView.jsx'
-import { CertificatesAndDNSView } from './components/CertificatesAndDNSView.jsx'
-import { MeshMatrixView } from './components/MeshMatrixView.jsx'
-import { SpeedtestBenchmarkView } from './components/SpeedtestBenchmarkView.jsx'
-import SyntheticProbingView from './components/SyntheticProbingView.jsx'
-import TerminalView from './components/TerminalView.jsx'
-import { ContainerProcessView } from './components/ContainerProcessView.jsx'
+
+const NodeDetailPage = lazy(() => import('./components/NodeDetailPage.jsx').then((m) => ({ default: m.NodeDetailPage })))
+const OverviewPage = lazy(() => import('./components/OverviewPage.jsx').then((m) => ({ default: m.OverviewPage })))
+const BillingCenter = lazy(() => import('./components/BillingCenter.jsx').then((m) => ({ default: m.BillingCenter })))
+const DashboardView = lazy(() => import('./components/DashboardView.jsx').then((m) => ({ default: m.DashboardView })))
+const ServerManageView = lazy(() => import('./components/ServerManageView.jsx').then((m) => ({ default: m.ServerManageView })))
+const MonitoringView = lazy(() => import('./components/MonitoringView.jsx').then((m) => ({ default: m.MonitoringView })))
+const TrafficReportView = lazy(() => import('./components/TrafficReportView.jsx').then((m) => ({ default: m.TrafficReportView })))
+const AlertCenterView = lazy(() => import('./components/AlertCenterView.jsx').then((m) => ({ default: m.AlertCenterView })))
+const LogsView = lazy(() => import('./components/LogsView.jsx').then((m) => ({ default: m.LogsView })))
+const AICopilotView = lazy(() => import('./components/AICopilotView.jsx').then((m) => ({ default: m.AICopilotView })))
+const CertificatesAndDNSView = lazy(() => import('./components/CertificatesAndDNSView.jsx').then((m) => ({ default: m.CertificatesAndDNSView })))
+const MeshMatrixView = lazy(() => import('./components/MeshMatrixView.jsx').then((m) => ({ default: m.MeshMatrixView })))
+const SpeedtestBenchmarkView = lazy(() => import('./components/SpeedtestBenchmarkView.jsx').then((m) => ({ default: m.SpeedtestBenchmarkView })))
+const SyntheticProbingView = lazy(() => import('./components/SyntheticProbingView.jsx'))
+const TerminalView = lazy(() => import('./components/TerminalView.jsx'))
+const ContainerProcessView = lazy(() => import('./components/ContainerProcessView.jsx').then((m) => ({ default: m.ContainerProcessView })))
+const SubPage = lazy(() => import('./components/SubPage.jsx').then((m) => ({ default: m.SubPage })))
 import { ThemeToggle } from './components/ThemeToggle.jsx'
 import {
   GlobeHemisphereWest,
@@ -231,6 +232,10 @@ function getInitialNav() {
   const fromCookie = getCookieNav()
   if (fromCookie) return fromCookie
   return { page: 'overview', nodeUuid: null }
+}
+
+function PageLoadingFallback() {
+  return <div className="page-loading" role="status" aria-live="polite"><span className="status-dot status-online" />正在加载页面…</div>
 }
 
 function Topbar({ activeNav, clockText, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
@@ -1145,7 +1150,8 @@ export function App() {
           </header>
 
           <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '16px 20px 48px' }}>
-            <NodeDetailPage
+            <Suspense fallback={<PageLoadingFallback />}>
+              <NodeDetailPage
               node={currentDetailNode}
               nodes={guestNodesList}
               onSelectNode={(node) => {
@@ -1173,7 +1179,8 @@ export function App() {
                 navigate('overview')
               }}
               rates={rates}
-            />
+              />
+            </Suspense>
           </div>
         </main>
       )
@@ -1238,6 +1245,7 @@ export function App() {
         onThemeChange={setTheme}
       />
       <div className="content-wrap">
+        <Suspense fallback={<PageLoadingFallback />}>
         {activeNav === 'overview' || activeNav === 'dashboard' ? (
           <DashboardView
             nodes={data}
@@ -1388,6 +1396,7 @@ export function App() {
             latestAgentVersion={latestAgentVersion}
           />
         )}
+        </Suspense>
         <footer className="content-footer"><span><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? '数据来自实时 API · 资源与历史统计独立刷新' : apiState.message}</span><span className="footer-divider" /><span>资源字段缺失时显示 —</span></footer>
       </div>
     </main>
