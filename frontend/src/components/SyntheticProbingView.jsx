@@ -577,18 +577,28 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) 
 }
 
 function WaterfallBar({ timing }) {
-  const dns = Math.max(0, timing.dns_ms || 0)
-  const connect = Math.max(0, timing.connect_ms || 0)
-  const tls = Math.max(0, timing.tls_ms || 0)
-  const ttfb = Math.max(0, timing.ttfb_ms || 0)
-  const total = Math.max(1, timing.total_ms || dns + connect + tls + ttfb)
-  const transfer = Math.max(0, total - (dns + connect + tls + ttfb))
+  const asDuration = (value) => {
+    const number = Number(value)
+    return Number.isFinite(number) && number >= 0 ? number : null
+  }
+  const dns = asDuration(timing.dns_ms)
+  const connect = asDuration(timing.connect_ms)
+  const tls = asDuration(timing.tls_ms)
+  const ttfb = asDuration(timing.ttfb_ms)
+  const knownStages = [dns, connect, tls, ttfb].filter((value) => value !== null)
+  const totalValue = asDuration(timing.total_ms)
+  const total = totalValue ?? (knownStages.length > 0 ? knownStages.reduce((sum, value) => sum + value, 0) : null)
+  if (total === null) {
+    return <div className="text-xs text-slate-500 font-mono">暂无时延分解数据</div>
+  }
+  const scaleTotal = Math.max(total, 1)
+  const transfer = Math.max(0, total - knownStages.reduce((sum, value) => sum + value, 0))
 
-  const pDNS = (dns / total) * 100
-  const pConnect = (connect / total) * 100
-  const pTLS = (tls / total) * 100
-  const pTTFB = (ttfb / total) * 100
-  const pTransfer = (transfer / total) * 100
+  const pDNS = dns === null ? 0 : (dns / scaleTotal) * 100
+  const pConnect = connect === null ? 0 : (connect / scaleTotal) * 100
+  const pTLS = tls === null ? 0 : (tls / scaleTotal) * 100
+  const pTTFB = ttfb === null ? 0 : (ttfb / scaleTotal) * 100
+  const pTransfer = (transfer > 0 && totalValue !== null) ? (transfer / scaleTotal) * 100 : 0
 
   return (
     <div className="space-y-1.5">
@@ -641,21 +651,21 @@ function WaterfallBar({ timing }) {
       </div>
 
       <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
-        <span className="flex items-center gap-1">
+        {dns !== null && <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded bg-purple-500 inline-block" /> DNS {dns}ms
-        </span>
-        <span className="flex items-center gap-1">
+        </span>}
+        {connect !== null && <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded bg-blue-500 inline-block" /> TCP {connect}ms
-        </span>
-        <span className="flex items-center gap-1">
+        </span>}
+        {tls !== null && <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded bg-amber-500 inline-block" /> TLS {tls}ms
-        </span>
-        <span className="flex items-center gap-1">
+        </span>}
+        {ttfb !== null && <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded bg-emerald-500 inline-block" /> TTFB {ttfb}ms
-        </span>
-        <span className="flex items-center gap-1">
+        </span>}
+        {totalValue !== null && transfer > 0 && <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded bg-indigo-500 inline-block" /> 传输 {transfer}ms
-        </span>
+        </span>}
       </div>
     </div>
   )
@@ -1218,7 +1228,7 @@ function LiveTestModal({ initialTarget, onClose }) {
                   </span>
                 </div>
                 <div className="text-xs text-slate-400 font-mono">
-                  总用时: <strong className="text-white">{result.timing?.total_duration_ms || 0} ms</strong>
+                  总用时: <strong className="text-white">{result.timing?.total_duration_ms === null || result.timing?.total_duration_ms === undefined ? '—' : result.timing.total_duration_ms + ' ms'}</strong>
                 </div>
               </div>
 

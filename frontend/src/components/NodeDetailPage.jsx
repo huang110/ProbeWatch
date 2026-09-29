@@ -441,19 +441,23 @@ export function NodeDetailPage({
     return list
   }, [listeningPorts, portFilter, portSearch])
 
-  const tcpTotal = numeric(socketStats.tcp_total) || 0
-  const tcpEstablished = numeric(socketStats.tcp_established) || 0
-  const tcpListen = numeric(socketStats.tcp_listen) || 0
-  const tcpTimeWait = numeric(socketStats.tcp_time_wait) || 0
-  const tcpCloseWait = numeric(socketStats.tcp_close_wait) || 0
-  const udpTotal = numeric(socketStats.udp_total) || 0
-  const sumSockets = tcpEstablished + tcpListen + tcpTimeWait + tcpCloseWait + udpTotal || (tcpTotal + udpTotal) || 0
+  const tcpTotal = numeric(socketStats.tcp_total)
+  const tcpEstablished = numeric(socketStats.tcp_established)
+  const tcpListen = numeric(socketStats.tcp_listen)
+  const tcpTimeWait = numeric(socketStats.tcp_time_wait)
+  const tcpCloseWait = numeric(socketStats.tcp_close_wait)
+  const udpTotal = numeric(socketStats.udp_total)
+  const socketDisplay = (value) => value === null ? '—' : value
+  const knownSocketStates = [tcpEstablished, tcpListen, tcpTimeWait, tcpCloseWait].every((value) => value !== null)
+  const sumSockets = knownSocketStates && udpTotal !== null
+    ? tcpEstablished + tcpListen + tcpTimeWait + tcpCloseWait + udpTotal
+    : (tcpTotal !== null && udpTotal !== null ? tcpTotal + udpTotal : null)
 
-  const estPct = sumSockets > 0 ? (tcpEstablished / sumSockets) * 100 : 0
-  const listenPct = sumSockets > 0 ? (tcpListen / sumSockets) * 100 : 0
-  const twPct = sumSockets > 0 ? (tcpTimeWait / sumSockets) * 100 : 0
-  const cwPct = sumSockets > 0 ? (tcpCloseWait / sumSockets) * 100 : 0
-  const udpPct = sumSockets > 0 ? (udpTotal / sumSockets) * 100 : 0
+  const estPct = sumSockets > 0 && tcpEstablished !== null ? (tcpEstablished / sumSockets) * 100 : 0
+  const listenPct = sumSockets > 0 && tcpListen !== null ? (tcpListen / sumSockets) * 100 : 0
+  const twPct = sumSockets > 0 && tcpTimeWait !== null ? (tcpTimeWait / sumSockets) * 100 : 0
+  const cwPct = sumSockets > 0 && tcpCloseWait !== null ? (tcpCloseWait / sumSockets) * 100 : 0
+  const udpPct = sumSockets > 0 && udpTotal !== null ? (udpTotal / sumSockets) * 100 : 0
 
   const totalDiskReadRate = disks.reduce((sum, d) => sum + (numeric(d.read_bytes_per_sec) || 0), 0)
   const totalDiskWriteRate = disks.reduce((sum, d) => sum + (numeric(d.write_bytes_per_sec) || 0), 0)
@@ -557,7 +561,7 @@ export function NodeDetailPage({
     const liveConn = totalConnections
     const liveProc = processCount
     const liveGpu = gpuPercent
-    const liveTemp = cpuTempC !== null && cpuTempC > 0 ? cpuTempC : null
+    const liveTemp = cpuTempC
     const liveDiskRead = totalDiskReadRate
     const liveDiskWrite = totalDiskWriteRate
 
@@ -1355,16 +1359,16 @@ export function NodeDetailPage({
                       )}
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--mint, #10b981)' }}>
-                      {formatBytes(iface.rx_bytes || 0)}
+                      {formatBytes(iface.rx_bytes)}
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--blue, #38bdf8)' }}>
-                      {formatBytes(iface.tx_bytes || 0)}
+                      {formatBytes(iface.tx_bytes)}
                     </td>
                     <td style={{ padding: '8px 12px', color: 'var(--text-muted, #94a3b8)' }}>
-                      {Number(iface.rx_packets || 0).toLocaleString()} / {Number(iface.tx_packets || 0).toLocaleString()}
+                      {iface.rx_packets === null || iface.rx_packets === undefined ? '—' : Number(iface.rx_packets).toLocaleString()} / {iface.tx_packets === null || iface.tx_packets === undefined ? '—' : Number(iface.tx_packets).toLocaleString()}
                     </td>
                     <td style={{ padding: '8px 12px', color: (iface.rx_errors || iface.tx_errors) ? 'var(--danger, #ef4444)' : 'var(--text-muted, #94a3b8)' }}>
-                      {(iface.rx_errors || 0) + (iface.tx_errors || 0)}
+                      {iface.rx_errors === null || iface.rx_errors === undefined || iface.tx_errors === null || iface.tx_errors === undefined ? '—' : Number(iface.rx_errors) + Number(iface.tx_errors)}
                     </td>
                   </tr>
                 ))}
@@ -1398,8 +1402,8 @@ export function NodeDetailPage({
               </thead>
               <tbody>
                 {mounts.map((m) => {
-                  const usedPct = m.used_percent ?? 0
-                  const inodePct = m.inodes_percent ?? 0
+                  const usedPct = numeric(m.used_percent)
+                  const inodePct = numeric(m.inodes_percent)
                   return (
                     <tr key={m.mount_point} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
                       <td style={{ padding: '8px 12px', fontWeight: 600, color: 'var(--primary, #0284c7)' }}>
@@ -1416,20 +1420,20 @@ export function NodeDetailPage({
                       <td style={{ padding: '8px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ width: `${Math.min(100, usedPct)}%`, height: '100%', background: usedPct > 90 ? '#ef4444' : usedPct > 75 ? '#f59e0b' : '#10b981', borderRadius: '3px' }} />
+                            <div style={{ width: `${usedPct === null ? 0 : Math.min(100, usedPct)}%`, height: '100%', background: usedPct !== null && usedPct > 90 ? '#ef4444' : usedPct !== null && usedPct > 75 ? '#f59e0b' : '#10b981', borderRadius: '3px' }} />
                           </div>
-                          <span style={{ fontSize: '11px', minWidth: '75px', textAlign: 'right', color: usedPct > 90 ? '#ef4444' : '#cbd5e1' }}>
-                            {formatBytes(m.used_bytes)} ({usedPct.toFixed(1)}%)
+                          <span style={{ fontSize: '11px', minWidth: '75px', textAlign: 'right', color: usedPct !== null && usedPct > 90 ? '#ef4444' : '#cbd5e1' }}>
+                            {formatBytes(m.used_bytes)} ({usedPct === null ? '—' : usedPct.toFixed(1) + '%'})
                           </span>
                         </div>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ width: `${Math.min(100, inodePct)}%`, height: '100%', background: inodePct > 90 ? '#ef4444' : inodePct > 80 ? '#f59e0b' : '#38bdf8', borderRadius: '3px' }} />
+                            <div style={{ width: `${inodePct === null ? 0 : Math.min(100, inodePct)}%`, height: '100%', background: inodePct !== null && inodePct > 90 ? '#ef4444' : inodePct !== null && inodePct > 80 ? '#f59e0b' : '#38bdf8', borderRadius: '3px' }} />
                           </div>
-                          <span style={{ fontSize: '11px', minWidth: '70px', textAlign: 'right', color: inodePct > 85 ? '#ef4444' : 'var(--text-muted, #94a3b8)' }}>
-                            {inodePct.toFixed(1)}% {inodePct > 85 ? '⚠️ 告警' : ''}
+                          <span style={{ fontSize: '11px', minWidth: '70px', textAlign: 'right', color: inodePct !== null && inodePct > 85 ? '#ef4444' : 'var(--text-muted, #94a3b8)' }}>
+                            {inodePct === null ? '—' : inodePct.toFixed(1) + '%'} {inodePct !== null && inodePct > 85 ? '⚠️ 告警' : ''}
                           </span>
                         </div>
                       </td>
@@ -1504,7 +1508,7 @@ export function NodeDetailPage({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-              活跃通信 {socketStats.tcp_established ?? 0}
+              活跃通信 {socketDisplay(tcpEstablished)}
             </span>
             <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
               开放监听 {listeningPorts.length}
@@ -1518,7 +1522,7 @@ export function NodeDetailPage({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #cbd5e1)' }}>TCP/UDP 网络套接字状态分布</span>
             <span className="mono text-xs text-muted">
-              总计 {(socketStats.tcp_total ?? 0) + (socketStats.udp_total ?? 0)} 套接字 (TCP {socketStats.tcp_total ?? 0} · UDP {socketStats.udp_total ?? 0})
+              总计 {sumSockets === null ? '—' : sumSockets} 套接字 (TCP {socketDisplay(tcpTotal)} · UDP {socketDisplay(udpTotal)})
             </span>
           </div>
 
@@ -1536,27 +1540,27 @@ export function NodeDetailPage({
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#10b981' }} />
               <span className="text-muted">已建立通信 (ESTABLISHED):</span>
-              <strong className="mono" style={{ color: '#10b981' }}>{socketStats.tcp_established ?? 0}</strong>
+              <strong className="mono" style={{ color: '#10b981' }}>{socketDisplay(tcpEstablished)}</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#06b6d4' }} />
               <span className="text-muted">服务监听 (LISTEN):</span>
-              <strong className="mono" style={{ color: '#06b6d4' }}>{socketStats.tcp_listen ?? 0}</strong>
+              <strong className="mono" style={{ color: '#06b6d4' }}>{socketDisplay(tcpListen)}</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#f59e0b' }} />
               <span className="text-muted">等待回收 (TIME_WAIT):</span>
-              <strong className="mono" style={{ color: '#f59e0b' }}>{socketStats.tcp_time_wait ?? 0}</strong>
+              <strong className="mono" style={{ color: '#f59e0b' }}>{socketDisplay(tcpTimeWait)}</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#f43f5e' }} />
               <span className="text-muted">被动关闭 (CLOSE_WAIT):</span>
-              <strong className="mono" style={{ color: '#f43f5e' }}>{socketStats.tcp_close_wait ?? 0}</strong>
+              <strong className="mono" style={{ color: '#f43f5e' }}>{socketDisplay(tcpCloseWait)}</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#a855f7' }} />
               <span className="text-muted">UDP 套接字:</span>
-              <strong className="mono" style={{ color: '#a855f7' }}>{socketStats.udp_total ?? 0}</strong>
+              <strong className="mono" style={{ color: '#a855f7' }}>{socketDisplay(udpTotal)}</strong>
             </div>
           </div>
         </div>
@@ -2162,11 +2166,11 @@ export function NodeDetailPage({
           />
 
           {/* 8. CPU 温度遥测 */}
-          {(cpuTempC > 0 || (telemetrySeries.temps && telemetrySeries.temps.some((t) => t > 0))) && (
+          {(cpuTempC !== null || (telemetrySeries.temps && telemetrySeries.temps.some((t) => typeof t === 'number' && Number.isFinite(t)))) && (
             <KomariChartCard
               title="CPU 实时温度"
               icon="🌡️"
-              badgeText={`${cpuTempC ? cpuTempC.toFixed(1) : (telemetrySeries.temps[telemetrySeries.temps.length - 1] || 0).toFixed(1)} °C`}
+              badgeText={`${cpuTempC !== null ? cpuTempC.toFixed(1) : (() => { const values = (telemetrySeries.temps || []).filter((value) => typeof value === 'number' && Number.isFinite(value)); const last = values[values.length - 1]; return last === undefined ? '—' : last.toFixed(1) })()} °C`}
               series={telemetrySeries.temps}
               strokeColor="#f59e0b"
               yMax={`${Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10)} °C`}

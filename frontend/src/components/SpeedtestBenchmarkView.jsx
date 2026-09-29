@@ -733,8 +733,12 @@ export function SpeedtestBenchmarkView() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {filteredRankings.map((item) => {
-                const dlPct = Math.min(100, Math.round(((item.download_speed_mbps || 0) / maxDlValue) * 100))
-                const ulPct = Math.min(100, Math.round(((item.upload_speed_mbps || 0) / maxUlValue) * 100))
+                const dlValue = Number(item.download_speed_mbps)
+                const ulValue = Number(item.upload_speed_mbps)
+                const hasDl = Number.isFinite(dlValue)
+                const hasUl = Number.isFinite(ulValue)
+                const dlPct = hasDl ? Math.min(100, Math.round((dlValue / maxDlValue) * 100)) : 0
+                const ulPct = hasUl ? Math.min(100, Math.round((ulValue / maxUlValue) * 100)) : 0
 
                 const rankBadgeColor =
                   item.rank === 1
@@ -822,7 +826,7 @@ export function SpeedtestBenchmarkView() {
                               fontWeight: 600,
                             }}
                           >
-                            延迟 {item.latency_ms} ms · 抖动 {item.jitter_ms} ms
+                            延迟 {item.latency_ms === null || item.latency_ms === undefined ? '—' : item.latency_ms + ' ms'} · 抖动 {item.jitter_ms === null || item.jitter_ms === undefined ? '—' : item.jitter_ms + ' ms'}
                           </span>
                         </div>
                         <button
@@ -855,7 +859,7 @@ export function SpeedtestBenchmarkView() {
                             <DownloadSimple size={14} /> 下行吞吐 (Download)
                           </span>
                           <span style={{ fontWeight: 700, color: '#2563eb' }}>
-                            {item.download_speed_mbps} <span style={{ fontWeight: 400, fontSize: '11px' }}>Mbps</span>
+                            {hasDl ? dlValue : '—'} <span style={{ fontWeight: 400, fontSize: '11px' }}>Mbps</span>
                           </span>
                         </div>
                         <div
@@ -869,7 +873,7 @@ export function SpeedtestBenchmarkView() {
                         >
                           <div
                             style={{
-                              width: `${Math.max(2, dlPct)}%`,
+                              width: `${hasDl ? Math.max(2, dlPct) : 0}%`,
                               height: '100%',
                               background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
                               borderRadius: '4px',
@@ -893,7 +897,7 @@ export function SpeedtestBenchmarkView() {
                             <UploadSimple size={14} /> 上行吞吐 (Upload)
                           </span>
                           <span style={{ fontWeight: 700, color: '#10b981' }}>
-                            {item.upload_speed_mbps} <span style={{ fontWeight: 400, fontSize: '11px' }}>Mbps</span>
+                            {hasUl ? ulValue : '—'} <span style={{ fontWeight: 400, fontSize: '11px' }}>Mbps</span>
                           </span>
                         </div>
                         <div
@@ -907,7 +911,7 @@ export function SpeedtestBenchmarkView() {
                         >
                           <div
                             style={{
-                              width: `${Math.max(2, ulPct)}%`,
+                              width: `${hasUl ? Math.max(2, ulPct) : 0}%`,
                               height: '100%',
                               background: 'linear-gradient(90deg, #34d399, #10b981)',
                               borderRadius: '4px',
