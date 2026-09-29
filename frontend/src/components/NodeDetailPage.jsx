@@ -1971,7 +1971,7 @@ export function NodeDetailPage({
         ) : (
           <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted, #94a3b8)', fontSize: '12px' }}>
             <p style={{ margin: '0 0 6px' }}>尚未接收到该节点的系统健康诊断快照。</p>
-            <p className="mono text-xs" style={{ margin: 0 }}>请确保客户端已升级至 ProbeWatch Agent v0.8.9+，健康引擎将在下次采集时自动生效。</p>
+            <p className="mono text-xs" style={{ margin: 0 }}>请确保客户端已升级至 ProbeWatch Agent v0.8.10+，健康引擎将在下次采集时自动生效。</p>
           </div>
         )}
       </div>
