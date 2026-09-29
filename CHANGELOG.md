@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning (语义化版本 2.0.0)](https://semver.org/lang/zh-CN/) 规范。
 
+## v0.8.20
+
+- 修复 Agent 下载接口可能将 Linux/amd64 通用二进制错误提供给 arm64、Windows 或 macOS 节点的问题。
+- 非 Linux/amd64 目标现在只从明确标注操作系统和架构的发布文件中选择二进制。
+- 增加错误架构下载回归测试。
+
 ## [v0.8.18] - 2026-09-29
 
 ### 修复 Agent 更新提示版本说明

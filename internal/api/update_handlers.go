@@ -127,11 +127,18 @@ func (s *Server) findAgentBinaryPath(osName, archName string) string {
 		// Specific arch release naming
 		filepath.Join("/opt/probewatch/downloads", fmt.Sprintf("probewatch-agent-%s-%s", osName, archName)),
 		filepath.Join("/var/lib/probewatch/releases", fmt.Sprintf("probewatch-agent-%s-%s", osName, archName)),
-		filepath.Join("/opt/probewatch-agent", "probewatch-agent"),
-		filepath.Join("/opt/probewatch", "probewatch-agent"),
-		filepath.Join("/usr/local/bin", "probewatch-agent"),
-		"./probewatch-agent",
-		"./cmd/probewatch-agent/probewatch-agent",
+	}
+	// Generic install locations do not encode their target platform. They are
+	// safe fallbacks only for the server's native Linux/amd64 release; using
+	// them for another target could serve an incompatible executable.
+	if osName == "linux" && archName == "amd64" {
+		candidates = append(candidates,
+			filepath.Join("/opt/probewatch-agent", "probewatch-agent"),
+			filepath.Join("/opt/probewatch", "probewatch-agent"),
+			filepath.Join("/usr/local/bin", "probewatch-agent"),
+			"./probewatch-agent",
+			"./cmd/probewatch-agent/probewatch-agent",
+		)
 	}
 
 	// On Linux the server can inspect the candidate's embedded version. This

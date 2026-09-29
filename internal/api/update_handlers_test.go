@@ -59,6 +59,15 @@ func TestUpdateEndpoints(t *testing.T) {
 		t.Fatalf("bad os code = %d, want 400", badOSRec.Code)
 	}
 
+	// A generic installed Linux/amd64 binary must never be served for another
+	// target architecture when no explicitly staged artifact exists.
+	wrongArchReq := httptest.NewRequest(http.MethodGet, "/api/agent/v1/update/download?os=linux&arch=arm64", nil)
+	wrongArchRec := httptest.NewRecorder()
+	handler.ServeHTTP(wrongArchRec, wrongArchReq)
+	if wrongArchRec.Code != http.StatusNotFound {
+		t.Fatalf("wrong arch code = %d, want 404", wrongArchRec.Code)
+	}
+
 	// 4. Staged binary test: create fake staged binary and download
 	tmpDir := t.TempDir()
 	stagedPath := filepath.Join(tmpDir, "probewatch-agent-linux-amd64")
