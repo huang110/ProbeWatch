@@ -15,6 +15,10 @@ func TestLocalComposeKeepsHostLoopbackAndContainerListenSeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	compose := string(contents)
+	// Git archives may materialize text files with CRLF on Windows. Normalize
+	// line endings so the structural contract checks the Compose content rather
+	// than the checkout's platform-specific newline encoding.
+	compose = strings.ReplaceAll(compose, "\r\n", "\n")
 
 	if !strings.Contains(compose, "services:\n  probewatch:\n") {
 		t.Fatal("compose is missing the probewatch service")
