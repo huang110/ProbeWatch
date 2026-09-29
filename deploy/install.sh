@@ -79,8 +79,56 @@ fi
 
 info "检测到系统服务管理器: $INIT_SYSTEM"
 
-# 3. 运行角色选择 (agent 或 uninstall-agent)
-ACTION="${1:-agent}"
+# 3. 解析命令行参数
+# 支持后台页面生成的无人值守安装命令：
+#   --endpoint URL --uuid UUID --token TOKEN
+# 同时保留交互式安装和卸载入口。
+ACTION="agent"
+CLI_ENDPOINT=""
+CLI_UUID=""
+CLI_TOKEN=""
+CLI_REG_TOKEN=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --endpoint)
+            [ "$#" -ge 2 ] || { error "--endpoint 缺少参数"; exit 2; }
+            CLI_ENDPOINT="$2"
+            shift 2
+            ;;
+        --uuid)
+            [ "$#" -ge 2 ] || { error "--uuid 缺少参数"; exit 2; }
+            CLI_UUID="$2"
+            shift 2
+            ;;
+        --token)
+            [ "$#" -ge 2 ] || { error "--token 缺少参数"; exit 2; }
+            CLI_TOKEN="$2"
+            shift 2
+            ;;
+        --registration-token|--reg-token)
+            [ "$#" -ge 2 ] || { error "$1 缺少参数"; exit 2; }
+            CLI_REG_TOKEN="$2"
+            shift 2
+            ;;
+        uninstall|uninstall-agent)
+            ACTION="uninstall-agent"
+            shift
+            ;;
+        agent)
+            ACTION="agent"
+            shift
+            ;;
+        -h|--help)
+            printf '%s\n' "用法: install.sh [--endpoint URL --uuid UUID --token TOKEN] [--registration-token TOKEN]"
+            printf '%s\n' "      install.sh uninstall-agent"
+            exit 0
+            ;;
+        *)
+            error "未知参数: $1"
+            exit 2
+            ;;
+    esac
+done
 
 if [ "$ACTION" = "uninstall-agent" ] || [ "$ACTION" = "uninstall" ]; then
     info "准备卸载 ProbeWatch Agent..."
@@ -108,10 +156,10 @@ if [ "$ACTION" = "uninstall-agent" ] || [ "$ACTION" = "uninstall" ]; then
 fi
 
 # 4. Agent 接入配置处理
-ENDPOINT="${PROBEWATCH_AGENT_ENDPOINT:-}"
-NODE_UUID="${PROBEWATCH_AGENT_NODE_UUID:-}"
-NODE_TOKEN="${PROBEWATCH_AGENT_NODE_TOKEN:-}"
-REG_TOKEN="${PROBEWATCH_AGENT_REGISTRATION_TOKEN:-}"
+ENDPOINT="${CLI_ENDPOINT:-${PROBEWATCH_AGENT_ENDPOINT:-}}"
+NODE_UUID="${CLI_UUID:-${PROBEWATCH_AGENT_NODE_UUID:-}}"
+NODE_TOKEN="${CLI_TOKEN:-${PROBEWATCH_AGENT_NODE_TOKEN:-}}"
+REG_TOKEN="${CLI_REG_TOKEN:-${PROBEWATCH_AGENT_REGISTRATION_TOKEN:-}}"
 
 if [ -z "$ENDPOINT" ]; then
     printf "请输入主控上报地址 (例如 https://monitor.example.com/api/agent/v1): "
