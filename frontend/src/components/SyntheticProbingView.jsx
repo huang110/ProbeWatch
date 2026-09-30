@@ -186,7 +186,7 @@ export default function SyntheticProbingView() {
       await deleteSyntheticTarget(id)
       loadData(true)
     } catch (err) {
-      alert('删除失败: ' + err.message)
+      setError('删除失败: ' + err.message)
     }
   }
 
@@ -244,6 +244,14 @@ export default function SyntheticProbingView() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="inline-feedback inline-feedback-error" role="alert" style={{ marginBottom: '16px' }}>
+          <WarningCircle size={18} />
+          <span>{error}</span>
+          <button type="button" className="inline-feedback-dismiss" onClick={() => setError(null)} aria-label="关闭提示">×</button>
+        </div>
+      )}
 
       {/* Metric Stat Cards */}
       <div className="synthetic-metrics-grid">

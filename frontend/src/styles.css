@@ -12251,3 +12251,34 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   font: 12px var(--font-mono, monospace);
   pointer-events: none;
 }
+
+/* 统一页面内操作反馈，避免原生弹窗打断工作流 */
+.inline-feedback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.inline-feedback-error {
+  color: var(--danger, #fb7185);
+  background: color-mix(in srgb, var(--danger, #fb7185) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #fb7185) 28%, transparent);
+}
+.inline-feedback-dismiss {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.inline-feedback-dismiss:hover { background: color-mix(in srgb, currentColor 12%, transparent); }

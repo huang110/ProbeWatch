@@ -65,6 +65,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsSuccess, setSettingsSuccess] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   // Load initial report
   useEffect(() => {
@@ -115,13 +116,14 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
     e.preventDefault()
     setSettingsSaving(true)
     setSettingsSuccess(false)
+    setActionError('')
     try {
       await saveAISettings(settings)
       setSettingsSuccess(true)
       setTimeout(() => setSettingsSuccess(false), 3000)
       loadSettings()
     } catch (err) {
-      alert(err.message || '保存设置失败')
+      setActionError(err.message || '保存设置失败')
     } finally {
       setSettingsSaving(false)
     }
@@ -130,6 +132,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
   async function handleRegenerateToken() {
     if (!window.confirm('确定要重新生成 MCP 访问 Token 吗？已连接的外部客户端需要同步更新该密钥。')) return
     setRegeneratingToken(true)
+    setActionError('')
     try {
       const res = await regenerateMCPToken()
       if (res?.token && mcpConfig) {
@@ -140,7 +143,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
         }))
       }
     } catch (err) {
-      alert(err.message || '重新生成密钥失败')
+      setActionError(err.message || '重新生成密钥失败')
     } finally {
       setRegeneratingToken(false)
     }
@@ -217,6 +220,13 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
 
   return (
     <div className="subpage-view ai-copilot-view" style={{ maxWidth: '1440px', margin: '0 auto', padding: '16px 20px 48px' }}>
+      {actionError && (
+        <div className="inline-feedback inline-feedback-error" role="alert" style={{ marginBottom: '16px' }}>
+          <WarningCircle size={18} />
+          <span>{actionError}</span>
+          <button type="button" className="inline-feedback-dismiss" onClick={() => setActionError('')} aria-label="关闭提示">×</button>
+        </div>
+      )}
       {/* 顶部标题区 */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>

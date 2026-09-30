@@ -158,7 +158,7 @@ export function StatusPageAdminCard({ nodes = [] }) {
       })
       await loadAll()
     } catch (err) {
-      alert('发布失败: ' + err.message)
+      setMsg({ type: 'error', text: '发布失败: ' + err.message })
     } finally {
       setCreateLoading(false)
     }
@@ -177,7 +177,7 @@ export function StatusPageAdminCard({ nodes = [] }) {
       setUpdateMessage('')
       await loadAll()
     } catch (err) {
-      alert('追加更新失败: ' + err.message)
+      setMsg({ type: 'error', text: '追加更新失败: ' + err.message })
     } finally {
       setUpdateLoading(false)
     }
@@ -189,7 +189,7 @@ export function StatusPageAdminCard({ nodes = [] }) {
       await deleteAdminIncident(id)
       await loadAll()
     } catch (err) {
-      alert('删除失败: ' + err.message)
+      setMsg({ type: 'error', text: '删除失败: ' + err.message })
     }
   }
 
