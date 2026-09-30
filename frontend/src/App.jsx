@@ -605,7 +605,7 @@ export function App() {
     }
   }, [])
 
-  // 实时数据轮询：节点 / 告警 / 会话，固定 5 秒自动同步。
+  // 实时数据轮询：节点、告警和会话在页面可见时持续同步。
   const loadCore = useCallback(async (manual = false) => {
     const current = ++coreRequestRef.current
     coreAbortRef.current?.abort()

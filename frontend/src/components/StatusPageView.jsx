@@ -22,7 +22,6 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastRefreshed, setLastRefreshed] = useState(new Date())
-  const [countdown, setCountdown] = useState(30)
   const [hoveredDay, setHoveredDay] = useState(null)
   const [pastIncidents, setPastIncidents] = useState([])
   const [showPastArchive, setShowPastArchive] = useState(false)
@@ -41,7 +40,6 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
       if (controller.signal.aborted || !mountedRef.current) return
       setData(res)
       setLastRefreshed(new Date())
-      setCountdown(30)
       setError(null)
     } catch (err) {
       if (err?.name === 'AbortError' || controller.signal.aborted || !mountedRef.current) return
@@ -56,19 +54,11 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
     mountedRef.current = true
     loadData()
     const timer = setInterval(() => {
-      if (document.visibilityState !== 'visible') return
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          loadData()
-          return 30
-        }
-        return prev - 1
-      })
-    }, 1000)
+      if (document.visibilityState === 'visible') loadData()
+    }, 5000)
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         loadData()
-        setCountdown(30)
       }
     }
     document.addEventListener('visibilitychange', onVisibility)
@@ -226,7 +216,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
               <Clock size={13} className="text-slate-400" />
-              <span>{countdown}s 后自动刷新</span>
+              <span>实时同步</span>
             </div>
             <button
               onClick={() => loadData(true)}
