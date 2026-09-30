@@ -61,22 +61,20 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
         const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
         if (res.ok) {
           const list = await res.json()
-          if (Array.isArray(list) && list.length > 0 && !controller.signal.aborted) {
+          if (Array.isArray(list) && !controller.signal.aborted) {
             const mtrList = list.filter((t) => t.kind === 'mtr')
             const netList = list.filter((t) => t.kind !== 'mtr')
-            if (mtrList.length > 0) setRouteTasks(mtrList)
-            if (netList.length > 0) {
-              setTargets(
-                netList.map((t) => ({
-                  id: t.id,
-                  name: t.name,
-                  kind: t.kind,
-                  host: t.host,
-                  enabled: t.enabled !== false,
-                  isp: /电信/.test(t.name) ? 'telecom' : /联通/.test(t.name) ? 'unicom' : /移动/.test(t.name) ? 'mobile' : 'other',
-                }))
-              )
-            }
+            setRouteTasks(mtrList)
+            setTargets(
+              netList.map((t) => ({
+                id: t.id,
+                name: t.name,
+                kind: t.kind,
+                host: t.host,
+                enabled: t.enabled !== false,
+                isp: /电信/.test(t.name) ? 'telecom' : /联通/.test(t.name) ? 'unicom' : /移动/.test(t.name) ? 'mobile' : 'other',
+              }))
+            )
           }
         }
       } catch (error) {
@@ -84,7 +82,18 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
       }
     }
     fetchTargets()
-    return () => controller.abort()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') fetchTargets()
+    }, 15000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchTargets()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      controller.abort()
+    }
   }, [])
 
   // 读取当前探测源的真实延迟汇总和 MTR 最新结果，避免页面展示演示数据。
