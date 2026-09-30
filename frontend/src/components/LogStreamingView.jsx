@@ -190,9 +190,16 @@ export function LogStreamingView({ nodes = [] }) {
   useEffect(() => {
     if (!streamAutoPoll || activeTab !== 'stream') return
     const timer = setInterval(() => {
-      handleQueryLogs()
+      if (document.visibilityState === 'visible') handleQueryLogs()
     }, 5000)
-    return () => clearInterval(timer)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') handleQueryLogs()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [streamAutoPoll, activeTab, streamNodeUuid, streamUnit, streamPriority, streamGrep, streamLines, streamSince])
 
   // Filtered events

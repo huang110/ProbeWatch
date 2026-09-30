@@ -121,8 +121,19 @@ export function MediaMatrix({ nodes = [] }) {
 
   useEffect(() => {
     const cleanup = fetchAllMedia()
-    const timer = setInterval(fetchAllMedia, 45000)
-    return () => { clearInterval(timer); cleanup?.(); requestRef.current?.abort() }
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchAllMedia()
+    }, 45000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchAllMedia()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      cleanup?.()
+      requestRef.current?.abort()
+    }
   }, [fetchAllMedia, refreshTrigger])
 
   // Handle adding preset media targets via atomic backend seed

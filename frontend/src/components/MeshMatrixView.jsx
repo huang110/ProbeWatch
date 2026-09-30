@@ -59,9 +59,16 @@ export function MeshMatrixView() {
   useEffect(() => {
     setData({ nodes: [], matrix: [], relays: [], stats: {} })
     loadData()
-    const timer = setInterval(() => loadData(false), 30000)
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadData(false)
+    }, 30000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData(false)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       requestRef.current?.abort()
     }
   }, [loadData])

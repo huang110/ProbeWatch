@@ -285,9 +285,16 @@ export function MTRRouteView({ nodes = [] }) {
     setConfiguredTargets([])
     setSelectedTargetId(null)
     fetchMtr()
-    const timer = setInterval(fetchMtr, 30000)
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchMtr()
+    }, 30000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchMtr()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       requestRef.current?.abort()
     }
   }, [fetchMtr, refreshTrigger])

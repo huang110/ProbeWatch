@@ -150,9 +150,16 @@ export function ContainerProcessView({ initialNodeId = '' }) {
     setNodeContainersData({ node_id: selectedNode || '', node_name: '', docker_available: false, docker_version: '', containers_total: 0, containers_running: 0, containers_stopped: 0, containers: [] })
     setNodeProcessesData({ node_id: selectedNode || '', node_name: '', top_processes: [], reported_at: 0 })
     loadData()
-    const timer = setInterval(() => loadData(), 15000)
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadData()
+    }, 15000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       requestRef.current?.abort()
     }
   }, [loadData])
