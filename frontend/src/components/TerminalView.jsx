@@ -654,7 +654,7 @@ export default function TerminalView({ initialNodeId = null }) {
       {activeTab === 'runner' && (
         <div className="ssh-runner-page">
           <section className="ssh-runner-card ssh-command-section">
-            <div className="ssh-section-heading"><div><span className="ssh-eyebrow">COMMAND RUNNER</span><h3>远程执行</h3><p>通过受控 Agent 通道向选中的节点执行命令，结果会逐节点返回并写入审计记录。</p></div><span className="ssh-live-badge"><span /> 状态每 8 秒自动同步</span></div>
+             <div className="ssh-section-heading"><div><span className="ssh-eyebrow">COMMAND RUNNER</span><h3>远程执行</h3><p>通过受控 Agent 通道向选中的节点执行命令，结果会逐节点返回并写入审计记录。</p></div><span className="ssh-live-badge"><span /> 状态自动同步</span></div>
             <textarea value={customCmd} onChange={(e) => setCustomCmd(e.target.value)} placeholder="输入要执行的 Shell 命令，例如：docker ps 或 systemctl status probewatch" className="ssh-command-editor" rows={4} />
             <div className="ssh-command-meta"><div className="ssh-preset-list">{QUICK_PRESETS.slice(0, 4).map((preset) => { const Icon = preset.icon; return <button key={preset.id} type="button" className="ssh-preset-chip" onClick={() => setCustomCmd(preset.cmd)} title={preset.desc}><Icon size={14} /> {preset.title}</button> })}</div><label className="ssh-timeout-control">超时<select value={timeoutSec} onChange={(e) => setTimeoutSec(Number(e.target.value))}><option value={10}>10 秒</option><option value={30}>30 秒</option><option value={60}>60 秒</option><option value={120}>120 秒</option></select></label></div>
           </section>

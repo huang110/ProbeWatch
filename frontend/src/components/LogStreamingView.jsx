@@ -711,7 +711,7 @@ export function LogStreamingView({ nodes = [] }) {
                   checked={streamAutoPoll}
                   onChange={(e) => setStreamAutoPoll(e.target.checked)}
                 />
-                <span>实时轮询 (5s)</span>
+                 <span>实时轮询</span>
               </label>
 
               <button
