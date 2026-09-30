@@ -1047,6 +1047,12 @@ export function App() {
       return !meta?.hidden
     })
     const targetUuid = parseRouteFromHash()?.nodeUuid
+    // The public status payload intentionally stays compact.  When the detail
+    // route is open, reuse the newest resource snapshot already fetched for the
+    // charts so the node object itself also has complete hardware metadata.
+    const latestGuestResource = Array.isArray(history)
+      ? [...history].reverse().find((sample) => sample?.resource && typeof sample.resource === 'object')?.resource || {}
+      : {}
 
     const guestNodesList = visibleGuestNames.map((name) => {
       if (data.length > 0) {
@@ -1059,7 +1065,7 @@ export function App() {
       const meta = detectRegionAndFlag(name, '')
       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
-      const os = custom.os || 'Ubuntu 24.04 LTS'
+       const os = latestGuestResource.os || custom.os || 'Ubuntu 24.04 LTS'
       // The public status contract intentionally omits UUIDs. When a public
       // detail link contains a UUID and there is only one visible node, bind
       // that URL UUID to the live telemetry row so the detail page can load
@@ -1081,8 +1087,8 @@ export function App() {
         customName: displayName,
         flag: displayFlag,
         os: os,
-        arch: custom.arch || 'kvm (x86_64)',
-        kernel: custom.kernel || '6.8.0-31-generic',
+         arch: latestGuestResource.arch || custom.arch || 'kvm (x86_64)',
+         kernel: latestGuestResource.kernel || custom.kernel || '6.8.0-31-generic',
         uptime: uptimeText,
         cpu: cpuPercent,
         memUsed,
@@ -1093,14 +1099,14 @@ export function App() {
         swapTotal: 2147483648,
         rx: numeric(telemetry.network_rx_bytes),
         tx: numeric(telemetry.network_tx_bytes),
-        resource: {
-          cpu_name: custom.cpuModel || '—',
-          cpu_cores: 1,
-          ip: '',
-          process_count: null,
-          tcp_conn_count: null,
-          udp_conn_count: null,
-        },
+         resource: {
+           ...latestGuestResource,
+           cpu_name: latestGuestResource.cpu_name || latestGuestResource.cpu_model || custom.cpuModel || '—',
+           cpu_cores: latestGuestResource.cpu_cores || 1,
+           process_count: latestGuestResource.process_count ?? null,
+           tcp_conn_count: latestGuestResource.tcp_conn_count ?? null,
+           udp_conn_count: latestGuestResource.udp_conn_count ?? null,
+         },
       }
     })
 

@@ -424,7 +424,10 @@ export function NodeDetailPage({
   const cpuBenchmarkUrl = cpuModel !== '—'
     ? `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
     : 'https://www.cpubenchmark.net/cpu_lookup.php'
-  const publicIp = detailResource.ip || node?.hostname || customMeta.ip || '—'
+  // Agent snapshots commonly expose the address as ipv4 while the compact
+  // public node row leaves ip empty. Prefer either address before falling
+  // back to the custom metadata so every public IP label stays consistent.
+  const publicIp = detailResource.ip || detailResource.ipv4 || node?.hostname || customMeta.ip || '—'
   const nodeIPv4 = node?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
   const nodeIPv6 = node?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
   const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
