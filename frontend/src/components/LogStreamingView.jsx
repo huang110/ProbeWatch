@@ -84,7 +84,7 @@ export function LogStreamingView({ nodes = [] }) {
       const data = await fetchEventsOverview(controller.signal)
       if (!controller.signal.aborted) setOverview(data)
     } catch (e) {
-      if (e?.name !== 'AbortError') console.error('Failed to load events overview:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load events overview:', e)
     } finally {
       if (!controller.signal.aborted) setLoadingOverview(false)
     }
@@ -116,7 +116,7 @@ export function LogStreamingView({ nodes = [] }) {
         if (!controller.signal.aborted) setEvents(data.events || [])
       }
     } catch (e) {
-      if (e?.name !== 'AbortError') console.error('Failed to load events:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load events:', e)
     } finally {
       if (!controller.signal.aborted) setLoadingEvents(false)
     }
@@ -155,7 +155,7 @@ export function LogStreamingView({ nodes = [] }) {
       const res = await fetchAuditLogs({ limit: 100 }, controller.signal)
       if (!controller.signal.aborted) setAuditLogs(res.logs || [])
     } catch (e) {
-      if (e?.name !== 'AbortError') console.error('Failed to load audit logs:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load audit logs:', e)
     } finally {
       if (!controller.signal.aborted) setLoadingAudit(false)
     }

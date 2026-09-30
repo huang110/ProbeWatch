@@ -644,6 +644,7 @@ export async function fetchAuditLogs({ limit = 50, offset = 0, action = '' } = {
   if (action) params.set('action', action)
 
   const res = await fetch(`/api/audit-logs?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (res.status === 401) throw new Error('auth')
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.error || 'Failed to fetch audit logs')
@@ -1034,6 +1035,7 @@ export async function fetchEventsOverview(signal) {
   const res = await fetch('/api/events/overview', { credentials: 'same-origin', signal })
   if (!res.ok) {
     const pubRes = await fetch('/api/public/events/overview', { credentials: 'same-origin', signal })
+    if (res.status === 401 || pubRes.status === 401) throw new Error('auth')
     if (!pubRes.ok) throw new Error('Failed to fetch events overview')
     return await pubRes.json()
   }
@@ -1047,6 +1049,7 @@ export async function fetchFleetEvents({ category = '', severity = '', nodeId = 
   if (nodeId) params.set('node_id', nodeId)
   if (limit) params.set('limit', String(limit))
   const res = await fetch(`/api/events?${params.toString()}`, { credentials: 'same-origin', signal })
+  if (res.status === 401) throw new Error('auth')
   if (!res.ok) throw new Error('Failed to fetch fleet events')
   return await res.json()
 }
