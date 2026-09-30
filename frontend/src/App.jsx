@@ -855,6 +855,7 @@ export function App() {
           proc,
           downRate,
           upRate,
+          resource,
         }
       })
     }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })

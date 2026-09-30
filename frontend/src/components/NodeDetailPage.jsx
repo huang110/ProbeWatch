@@ -383,6 +383,12 @@ export function NodeDetailPage({
   ).length
 
   const resource = node?.resource || {}
+  // Public detail responses expose compact status rows. Reuse the newest historical
+  // resource snapshot so hardware and network cards stay aligned with live charts.
+  const latestHistoryResource = Array.isArray(history)
+    ? [...history].reverse().find((sample) => sample?.resource && typeof sample.resource === 'object')?.resource || {}
+    : {}
+  const detailResource = { ...latestHistoryResource, ...resource }
   const suppliedRate = rates[nodeUuid] || {}
   const latestHistoryRate = Array.isArray(history)
     ? [...history].reverse().find((sample) => numeric(sample?.downRate) !== null || numeric(sample?.upRate) !== null) || null
@@ -395,41 +401,41 @@ export function NodeDetailPage({
     up: numeric(suppliedRate.up) ?? numeric(latestHistoryRate?.upRate),
   }
 
-  const memUsed = node?.memUsed ?? numeric(resource.memory_used_bytes)
-  const memTotal = node?.memTotal ?? numeric(resource.memory_total_bytes)
-  const swapUsed = node?.swapUsed ?? numeric(resource.swap_used_bytes)
-  const swapTotal = node?.swapTotal ?? numeric(resource.swap_total_bytes)
-  const diskUsed = node?.diskUsed ?? numeric(resource.filesystem_used_bytes)
-  const diskTotal = node?.diskTotal ?? numeric(resource.filesystem_total_bytes)
+  const memUsed = node?.memUsed ?? numeric(detailResource.memory_used_bytes)
+  const memTotal = node?.memTotal ?? numeric(detailResource.memory_total_bytes)
+  const swapUsed = node?.swapUsed ?? numeric(detailResource.swap_used_bytes)
+  const swapTotal = node?.swapTotal ?? numeric(detailResource.swap_total_bytes)
+  const diskUsed = node?.diskUsed ?? numeric(detailResource.filesystem_used_bytes)
+  const diskTotal = node?.diskTotal ?? numeric(detailResource.filesystem_total_bytes)
 
-  const rawTx = numeric(node?.tx) ?? numeric(resource.network_tx_bytes)
-  const rawRx = numeric(node?.rx) ?? numeric(resource.network_rx_bytes)
+  const rawTx = numeric(node?.tx) ?? numeric(detailResource.network_tx_bytes)
+  const rawRx = numeric(node?.rx) ?? numeric(detailResource.network_rx_bytes)
   const totalTraffic = rawTx !== null || rawRx !== null ? (rawTx || 0) + (rawRx || 0) : null
 
-  const cpuPercent = numeric(node?.cpu) ?? numeric(resource.cpu_percent)
-  const cpuModel = resource.cpu_name || resource.cpu_model || node?.cpuModel || customMeta.cpuModel || '—'
+  const cpuPercent = numeric(node?.cpu) ?? numeric(detailResource.cpu_percent)
+  const cpuModel = detailResource.cpu_name || detailResource.cpu_model || node?.cpuModel || customMeta.cpuModel || '—'
   const cleanedCpuModel = (cpuModel || '')
     .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
     .trim()
   const cpuBenchmarkUrl = cpuModel !== '—'
     ? `https://www.cpubenchmark.net/cpu_lookup.php?cpu=${encodeURIComponent(cleanedCpuModel || cpuModel)}`
     : 'https://www.cpubenchmark.net/cpu_lookup.php'
-  const publicIp = resource.ip || node?.hostname || customMeta.ip || '—'
-  const nodeIPv4 = node?.ipv4 || resource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
-  const nodeIPv6 = node?.ipv6 || resource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
+  const publicIp = detailResource.ip || node?.hostname || customMeta.ip || '—'
+  const nodeIPv4 = node?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
+  const nodeIPv6 = node?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
   const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
   const interfaces = Array.isArray(node?.interfaces) && node.interfaces.length > 0
     ? node.interfaces
-    : (Array.isArray(resource.interfaces) ? resource.interfaces : [])
-  const cores = numeric(resource.cpu_cores) ?? numeric(node?.cpu_cores)
-  const cpuMhz = numeric(resource.cpu_mhz) || numeric(node?.cpu_mhz) || null
-  const cpuTempC = numeric(resource.cpu_temp_c) ?? numeric(node?.cpu_temp_c) ?? null
-  const sensors = Array.isArray(resource.sensors) ? resource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
-  const disks = Array.isArray(resource.disks) ? resource.disks : (Array.isArray(node?.disks) ? node.disks : [])
-  const mounts = Array.isArray(resource.mounts) ? resource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
-  const socketStats = resource.socket_stats || node?.socketStats || node?.socket_stats || {}
-  const listeningPorts = Array.isArray(resource.listening_ports) ? resource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
-  const healthInfo = resource.health_info || node?.healthInfo || node?.health_info || null
+    : (Array.isArray(detailResource.interfaces) ? detailResource.interfaces : [])
+  const cores = numeric(detailResource.cpu_cores) ?? numeric(node?.cpu_cores)
+  const cpuMhz = numeric(detailResource.cpu_mhz) || numeric(node?.cpu_mhz) || null
+  const cpuTempC = numeric(detailResource.cpu_temp_c) ?? numeric(node?.cpu_temp_c) ?? null
+  const sensors = Array.isArray(detailResource.sensors) ? detailResource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
+  const disks = Array.isArray(detailResource.disks) ? detailResource.disks : (Array.isArray(node?.disks) ? node.disks : [])
+  const mounts = Array.isArray(detailResource.mounts) ? detailResource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
+  const socketStats = detailResource.socket_stats || node?.socketStats || node?.socket_stats || {}
+  const listeningPorts = Array.isArray(detailResource.listening_ports) ? detailResource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
+  const healthInfo = detailResource.health_info || node?.healthInfo || node?.health_info || null
 
   const [portFilter, setPortFilter] = useState('all')
   const [portSearch, setPortSearch] = useState('')
