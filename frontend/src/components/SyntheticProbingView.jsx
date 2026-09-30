@@ -203,7 +203,7 @@ export default function SyntheticProbingView() {
               <h1 className="synthetic-page-title">
                 全景合成监控与 SLA 契约引擎
                 <span className="synthetic-page-version">
-                  v0.8.2
+                  v0.8.35
                 </span>
               </h1>
               <p className="synthetic-page-description">
