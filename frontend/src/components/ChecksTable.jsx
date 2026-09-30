@@ -22,6 +22,7 @@ import {
   formatNumber,
   formatAlertTime,
   formatTimeOfDay,
+  cleanTargetLabel,
 } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 
@@ -105,7 +106,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
       const matched = targets.find(
         (t) => t.key?.startsWith(item.target_id) || t.name === item.target_id || t.target_id === item.target_id
       )
-      const targetName = matched?.name || item.target_id || 'TCP 探测目标'
+      const targetName = cleanTargetLabel(matched?.name || item.target_id, 'TCP 探测目标')
       const targetKind = (matched?.kind || 'TCP').toUpperCase()
 
       return {
@@ -332,7 +333,7 @@ export function ChecksSummaryPanel({ rows, loading = false, networkHistory = [] 
       const source = safeObject(row)
       return {
         key: `${safeText(source.target_id)}-${index}`,
-        name: safeText(source.name) || safeText(source.target_id) || '—',
+        name: cleanTargetLabel(source.name || source.target_id, '—'),
         kind: safeText(source.kind) || '—',
         total: numeric(source.total),
         success: numeric(source.success),

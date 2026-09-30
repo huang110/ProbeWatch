@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, CheckCircle, CircleNotch, Clock, Globe, Plus, ShieldCheck, Sparkle, Timer, Trash, WarningCircle, WifiHigh } from '@phosphor-icons/react'
-import { formatTimeOfDay, numeric, safeArray, safeText } from '../lib/format.js'
+import { cleanTargetLabel, formatTimeOfDay, numeric, safeArray, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
 
@@ -85,7 +85,7 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
       const y = baselineY - Math.min((effectiveLat / headroomLat) * plotHeight, plotHeight)
       const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
       const matched = targets.find((t) => t.id === h.target_id || t.name === h.target_id)
-      const targetName = matched?.name || h.target_id || 'TCP 探测目标'
+      const targetName = cleanTargetLabel(matched?.name || h.target_id, 'TCP 探测目标')
       const targetKind = (matched?.kind || 'TCP').toUpperCase()
 
       return {

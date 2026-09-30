@@ -1,6 +1,13 @@
 export const safeText = (value, fallback = '') => typeof value === 'string' || typeof value === 'number' ? String(value) : fallback
 export const safeObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 export const safeArray = (value) => Array.isArray(value) ? value : []
+// Normalize labels returned by older seeded targets. Some deployments stored
+// a literal "??" suffix as a placeholder; showing it makes otherwise valid
+// public checks look corrupted. Keep meaningful operator labels untouched.
+export const cleanTargetLabel = (value, fallback = '') => {
+  const text = safeText(value, fallback).trim()
+  return text.replace(/\s*\?\?\s*$/u, '').trim() || fallback
+}
 export const dash = (value, suffix = '') => value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`
 export const numeric = (value) => typeof value === 'number' && Number.isFinite(value) ? value : null
 

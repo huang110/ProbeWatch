@@ -44,6 +44,7 @@ import {
   safeText,
   formatLoad,
   numeric,
+  cleanTargetLabel,
 } from '../lib/format.js'
 import {
   calculateRemainingValue,
@@ -705,7 +706,7 @@ export function NodeDetailPage({
       return checksSummary.map((item, idx) => {
         const color = TARGET_COLORS[idx % TARGET_COLORS.length]
         const id = item.target_id || `target-${idx}`
-        const name = item.name || item.host || `目标 ${idx + 1}`
+        const name = cleanTargetLabel(item.name || item.host, `目标 ${idx + 1}`)
         const latencyAvg = item.latency_avg_ms !== undefined && item.latency_avg_ms !== null ? item.latency_avg_ms : null
         const latency = latencyAvg !== null ? `${Math.round(latencyAvg)}ms` : '—'
         const lossRate = item.loss_rate !== undefined && item.loss_rate !== null ? item.loss_rate * 100 : null
@@ -716,7 +717,7 @@ export function NodeDetailPage({
         return {
           id,
           name,
-          host: item.host || item.target || item.name || '',
+          host: item.host || item.target || cleanTargetLabel(item.name) || '',
           latency,
           latencyVal: latencyAvg ?? 0,
           loss,
