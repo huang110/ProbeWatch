@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/version"
 )
 
 const (
@@ -139,7 +140,7 @@ func (m *SyntheticMonitor) executeHTTP(ctx context.Context, task protocol.CheckT
 		req.Header.Set(k, v)
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "ProbeWatch-Synthetic-Probe/0.8.2")
+		req.Header.Set("User-Agent", "ProbeWatch-Synthetic-Probe/"+version.ServerVersion)
 	}
 
 	// Trace network waterfall events
@@ -289,7 +290,7 @@ func (m *SyntheticMonitor) executeWebSocket(ctx context.Context, task protocol.C
 	if path == "" {
 		path = "/"
 	}
-	reqStr := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: ProbeWatch-Synthetic/0.8.2\r\n\r\n", path, u.Host, wsKey)
+	reqStr := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: ProbeWatch-Synthetic/%s\r\n\r\n", path, u.Host, wsKey, version.ServerVersion)
 	if _, err := netConn.Write([]byte(reqStr)); err != nil {
 		res.Status = "error"
 		res.Passed = false

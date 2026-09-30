@@ -18,7 +18,14 @@ func (s *Server) openAPIJSONHandler(w http.ResponseWriter, r *http.Request) {
 		spec := buildOpenAPISpec()
 		data, err := json.MarshalIndent(spec, "", "  ")
 		if err != nil {
-			openapiJSON = []byte(`{"openapi":"3.0.3","info":{"title":"ProbeWatch API","version":"0.6.2"}}`)
+			fallback := map[string]interface{}{
+				"openapi": "3.0.3",
+				"info": map[string]string{
+					"title":   "ProbeWatch API",
+					"version": version.ServerVersion,
+				},
+			}
+			openapiJSON, _ = json.Marshal(fallback)
 			return
 		}
 		openapiJSON = data
