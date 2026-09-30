@@ -58,8 +58,18 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
 
   useEffect(() => {
     loadData()
-    const timer = setInterval(() => loadData(false), 30000)
-    return () => { clearInterval(timer); requestRef.current?.abort() }
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadData(false)
+    }, 30000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData(false)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      requestRef.current?.abort()
+    }
   }, [loadData])
 
   // Filtered certificates

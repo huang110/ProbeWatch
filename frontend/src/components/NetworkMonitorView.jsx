@@ -378,9 +378,16 @@ export function NetworkMonitorView({ nodes = [] }) {
     setResults([])
     setHistory([])
     loadData()
-    const timer = setInterval(loadData, 30000)
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadData()
+    }, 30000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       requestRef.current?.abort()
     }
   }, [loadData, refreshTrigger])

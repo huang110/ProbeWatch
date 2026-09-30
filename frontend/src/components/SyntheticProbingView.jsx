@@ -137,8 +137,18 @@ export default function SyntheticProbingView() {
 
   useEffect(() => {
     loadData()
-    const timer = setInterval(() => loadData(true), 15000)
-    return () => { clearInterval(timer); requestRef.current?.abort() }
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadData(true)
+    }, 15000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData(true)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      requestRef.current?.abort()
+    }
   }, [loadData])
 
   // Filter targets
