@@ -37,6 +37,10 @@ import {
   ShieldCheck,
   ShieldWarning,
 } from '@phosphor-icons/react'
+
+// Favorites are session-only by design. Node identifiers must not be written
+// to browser storage, and this keeps the preference private to this tab.
+const inMemoryFavoriteNodes = new Set()
 import {
   formatBytes,
   formatRate,
@@ -327,22 +331,16 @@ export function NodeDetailPage({
     }
   }
 
-  // Favorite toggle stored in localStorage
+  // Keep the favorite state in memory for the current console session.
   useEffect(() => {
-    if (!nodeUuid) return
-    try {
-      const favs = JSON.parse(localStorage.getItem('probewatch_favorites') || '[]')
-      setIsFavorite(favs.includes(nodeUuid))
-    } catch {}
+    setIsFavorite(Boolean(nodeUuid && inMemoryFavoriteNodes.has(nodeUuid)))
   }, [nodeUuid])
 
   const toggleFavorite = () => {
-    try {
-      const favs = JSON.parse(localStorage.getItem('probewatch_favorites') || '[]')
-      const nextFavs = isFavorite ? favs.filter((id) => id !== nodeUuid) : [...favs, nodeUuid]
-      localStorage.setItem('probewatch_favorites', JSON.stringify(nextFavs))
-      setIsFavorite(!isFavorite)
-    } catch {}
+    if (!nodeUuid) return
+    if (isFavorite) inMemoryFavoriteNodes.delete(nodeUuid)
+    else inMemoryFavoriteNodes.add(nodeUuid)
+    setIsFavorite(inMemoryFavoriteNodes.has(nodeUuid))
   }
 
   const [mediaData, setMediaData] = useState([])

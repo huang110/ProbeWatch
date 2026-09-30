@@ -41,14 +41,14 @@ const PRESET_TARGETS = [
   {
     name: 'Cloudflare Trace (HTTP/HTTPS)',
     protocol: 'https',
-    target_url: 'https://1.1.1.1/cdn-cgi/trace',
+    target_url: 'https://cloudflare.com/cdn-cgi/trace',
     method: 'GET',
     interval_seconds: 30,
     timeout_ms: 3000,
     consensus_nodes: 1,
     assertions: [
       { source: 'status_code', operator: 'equals', target: '200' },
-      { source: 'body_regex', operator: 'contains', target: 'h=1.1.1.1' },
+      { source: 'body_regex', operator: 'contains', target: 'h=' },
       { source: 'max_latency_ms', operator: 'less_than', target: '1000' },
     ],
   },
@@ -1059,7 +1059,7 @@ function TargetModal({ target, onClose, onSaved }) {
 
 function LiveTestModal({ initialTarget, onClose }) {
   const [protocol, setProtocol] = useState(initialTarget?.protocol || 'https')
-  const [targetURL, setTargetURL] = useState(initialTarget?.target_url || 'https://1.1.1.1/cdn-cgi/trace')
+  const [targetURL, setTargetURL] = useState(initialTarget?.target_url || 'https://cloudflare.com/cdn-cgi/trace')
   const [method, setMethod] = useState(initialTarget?.method || 'GET')
   const [assertionsText, setAssertionsText] = useState(() => {
     if (initialTarget?.assertions) {
