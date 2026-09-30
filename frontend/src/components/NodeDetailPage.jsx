@@ -388,7 +388,11 @@ export function NodeDetailPage({
   const latestHistoryResource = Array.isArray(history)
     ? [...history].reverse().find((sample) => sample?.resource && typeof sample.resource === 'object')?.resource || {}
     : {}
-  const detailResource = { ...latestHistoryResource, ...resource }
+  const detailResource = { ...latestHistoryResource }
+  Object.entries(resource).forEach(([key, value]) => {
+    const usable = value !== null && value !== undefined && value !== '' && value !== '—' && !(Array.isArray(value) && value.length === 0)
+    if (usable) detailResource[key] = value
+  })
   const suppliedRate = rates[nodeUuid] || {}
   const latestHistoryRate = Array.isArray(history)
     ? [...history].reverse().find((sample) => numeric(sample?.downRate) !== null || numeric(sample?.upRate) !== null) || null
