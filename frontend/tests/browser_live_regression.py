@@ -16,6 +16,7 @@ NODE = {
     "last_reported_at": "2026-09-20T00:00:00Z",
     "resource": {"cpu_percent": 12.5, "memory_total_bytes": 100, "memory_used_bytes": 50},
 }
+NODE_TWO = {**NODE, "id": "node-2", "uuid": "uuid-2", "name": "备用节点"}
 
 
 def install_api(page, *, guest=False, fail_overview=False):
@@ -26,14 +27,18 @@ def install_api(page, *, guest=False, fail_overview=False):
         "generated_at": "2026-09-20T00:00:01Z",
     }
 
+    request_urls = []
+    page._probewatch_request_urls = request_urls
+
     def route(request):
         url = request.url
+        request_urls.append(url)
         if "/api/me" in url:
             return {"status": 401 if guest else 200, "body": "{}" if guest else json.dumps({"login": "admin", "role": "admin"})}
         if "/api/public/status" in url:
             return {"status": 200, "body": json.dumps(public)}
         if url.endswith("/api/nodes"):
-            return {"status": 200, "body": json.dumps([] if guest else [NODE])}
+            return {"status": 200, "body": json.dumps([] if guest else [NODE, NODE_TWO])}
         if "/api/alerts" in url:
             return {"status": 200, "body": "[]"}
         if "/api/overview" in url:
@@ -53,7 +58,7 @@ def install_api(page, *, guest=False, fail_overview=False):
                 return {"status": 200, "body": "[]"}
             return {"status": 200, "body": "{}"}
         if "/api/admin/terminal" in url:
-            return {"status": 200, "body": json.dumps({"nodes": []})}
+            return {"status": 200, "body": json.dumps({"enabled": True, "nodes": [{"id": NODE["id"], "uuid": NODE["uuid"], "name": NODE["name"], "terminal_online": False}]})}
         return {"status": 200, "body": "{}"}
 
     def fulfill(route_obj):
@@ -98,6 +103,7 @@ def run():
         page.locator(".nav-item", has_text="远程终端").click()
         page.locator(".terminal-page").wait_for()
         assert page.locator(".terminal-connection-pill").count() == 1
+        assert page.locator(".terminal-offline-banner").count() == 1
 
         page.locator(".nav-item", has_text="监测").click()
         page.locator(".monitor-view-container").wait_for()
@@ -106,6 +112,9 @@ def run():
         page.goto(f"{BASE_URL}#/node-detail?uuid=uuid-1", wait_until="networkidle")
         page.locator(".komari-detail-page").wait_for()
         assert page.locator(".komari-detail-page").count() == 1
+        page.goto(f"{BASE_URL}#/node-detail?uuid=uuid-2", wait_until="networkidle")
+        page.locator(".komari-detail-page").wait_for()
+        assert any("/api/nodes/uuid-2" in url for url in page._probewatch_request_urls)
 
         page.set_viewport_size({"width": 390, "height": 844})
         page.locator(".nav-item", has_text="仪表盘").first.click(force=True)
