@@ -151,6 +151,7 @@ const VALID_NAV_PAGES = [
   'servers',
   'nodes',
   'terminal',
+  'ai-copilot',
   'billing',
   'monitoring',
   'latency',
