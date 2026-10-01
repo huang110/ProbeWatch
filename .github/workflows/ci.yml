@@ -6,6 +6,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -73,6 +74,32 @@ jobs:
         run: npm run build
       - name: Verify frontend bundle
         run: npm run test:smoke
+
+  real-browser:
+    name: Real browser regression (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --upgrade pip playwright
+          python -m playwright install --with-deps chromium
+      - name: Run real browser regression
+        working-directory: frontend
+        env:
+          PROBEWATCH_REAL_BASE_URL: ${{ secrets.PROBEWATCH_REAL_BASE_URL }}
+          PROBEWATCH_TEST_USERNAME: ${{ secrets.PROBEWATCH_TEST_USERNAME }}
+          PROBEWATCH_TEST_PASSWORD: ${{ secrets.PROBEWATCH_TEST_PASSWORD }}
+          PROBEWATCH_TEST_NODE_UUID: ${{ secrets.PROBEWATCH_TEST_NODE_UUID }}
+          PROBEWATCH_EXPECT_ROLE: ${{ secrets.PROBEWATCH_EXPECT_ROLE }}
+        run: python tests/browser_real_regression.py
 
 
   release:
