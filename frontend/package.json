@@ -1,11 +1,12 @@
 {
   "name": "probewatch-console",
   "private": true,
-  "version": "0.8.51",
+  "version": "0.8.52",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:smoke": "node tests/smoke.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

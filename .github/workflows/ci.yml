@@ -68,6 +68,8 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - name: Build frontend
         run: npm run build
+      - name: Verify frontend bundle
+        run: npm run test:smoke
 
 
   release:
