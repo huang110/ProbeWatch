@@ -108,6 +108,22 @@ jobs:
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "release/probewatch-agent-$1-$2" ./cmd/probewatch-agent
           done
           sha256sum release/* > release/SHA256SUMS
+      - name: Verify release versions and assets
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          server_version=$(sed -n 's/^[[:space:]]*ServerVersion[[:space:]]*= ["'"'"']\([0-9.]*\)["'"'"]$/\1/p' internal/version/version.go)
+          frontend_version=$(node -p "require('./frontend/package.json').version")
+          test "$tag_version" = "$server_version"
+          test "$tag_version" = "$frontend_version"
+          test -f "release/probewatch-server-linux-amd64"
+          test -f "release/probewatch-server-linux-arm64"
+          test -f "release/probewatch-agent-linux-amd64"
+          test -f "release/probewatch-agent-linux-arm64"
+          test -f "release/probewatch-frontend-${GITHUB_REF_NAME}.tar.gz"
+          test -f release/SHA256SUMS
+          (cd release && sha256sum -c SHA256SUMS)
+          grep -q "## v$tag_version" CHANGELOG.md
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
