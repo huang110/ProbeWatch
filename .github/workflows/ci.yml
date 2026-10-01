@@ -79,6 +79,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build frontend release asset
+        working-directory: frontend
+        run: |
+          mkdir -p ../release
+          npm ci
+          npm run build
+          tar -czf "../release/probewatch-frontend-${GITHUB_REF_NAME}.tar.gz" -C dist .
       - name: Build release assets
         shell: bash
         run: |
