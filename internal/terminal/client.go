@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Client handles the agent-side reverse tunnel to the ProbeWatch server.
@@ -87,8 +89,10 @@ func (c *Client) buildWebSocketURL() string {
 
 func (c *Client) connectAndServe(ctx context.Context, wsURL string) error {
 	header := make(http.Header)
+	header.Set("Authorization", "Bearer "+c.nodeToken)
 	header.Set("X-Node-UUID", c.nodeUUID)
-	header.Set("X-Node-Token", c.nodeToken)
+	header.Set("X-Probe-Timestamp", fmt.Sprintf("%d", time.Now().UTC().Unix()))
+	header.Set("X-Probe-Request-ID", uuid.NewString())
 
 	conn, err := Dial(ctx, wsURL, header)
 	if err != nil {

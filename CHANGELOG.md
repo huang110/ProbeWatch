@@ -609,3 +609,7 @@
 - 修复 Agent 终端隧道重复拼接 `/api/agent/v1` 导致 WebSocket 404、终端始终断开的严重问题。
 - Agent 版本提升至 0.8.11。
 
+## v0.8.70
+- 修复 Agent 终端 WebSocket 握手未携带统一 Bearer、时间戳和请求 ID，导致正确路径仍返回 401 的问题。
+- Agent 版本提升至 0.8.12。
+
