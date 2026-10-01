@@ -69,13 +69,20 @@ func (c *Client) Run(ctx context.Context) {
 
 func (c *Client) buildWebSocketURL() string {
 	ep := strings.TrimRight(c.endpoint, "/")
+	// AgentEndpoint normally already includes /api/agent/v1. Keep that
+	// prefix and append only the tunnel resource; older bare-host endpoints
+	// still receive the complete API path below.
+	path := "/api/agent/v1/terminal/tunnel"
+	if strings.HasSuffix(ep, "/api/agent/v1") {
+		path = "/terminal/tunnel"
+	}
 	if strings.HasPrefix(ep, "https://") {
-		return "wss://" + strings.TrimPrefix(ep, "https://") + "/api/agent/v1/terminal/tunnel"
+		return "wss://" + strings.TrimPrefix(ep, "https://") + path
 	}
 	if strings.HasPrefix(ep, "http://") {
-		return "ws://" + strings.TrimPrefix(ep, "http://") + "/api/agent/v1/terminal/tunnel"
+		return "ws://" + strings.TrimPrefix(ep, "http://") + path
 	}
-	return "ws://" + ep + "/api/agent/v1/terminal/tunnel"
+	return "ws://" + ep + path
 }
 
 func (c *Client) connectAndServe(ctx context.Context, wsURL string) error {
