@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:smoke": "node tests/smoke.mjs",
+    "test:browser:live": "python tests/browser_live_regression.py",
     "preview": "vite preview"
   },
   "dependencies": {

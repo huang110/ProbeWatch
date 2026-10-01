@@ -9,6 +9,18 @@ npm install
 npm run dev
 ```
 
+## 浏览器回归测试
+
+构建后启动预览服务，再使用已安装的 Chromium 运行当前页面结构回归：
+
+```powershell
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
+$env:PROBEWATCH_CHROMIUM="C:\Users\黄\AppData\Local\Chromium\Application\chrome.exe"
+$env:PROBEWATCH_BASE_URL="http://127.0.0.1:4173/"
+npm run test:browser:live
+```
+
 ## 当前页面
 
 - 中文监控总览
