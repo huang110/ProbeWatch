@@ -15,6 +15,7 @@ import {
   XCircle,
 } from '@phosphor-icons/react'
 import { fetchCertificates, fetchDNSMatrix } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
   const [activeTab, setActiveTab] = useState(initialTab) // 'certificates' | 'dns'
@@ -42,35 +43,23 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
     setError(null)
     try {
       const [certs, dns] = await Promise.all([
-        fetchCertificates(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return { total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] } }),
-        fetchDNSMatrix(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return { total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] } }),
+        fetchCertificates(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
+        fetchDNSMatrix(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
       ])
       if (!controller.signal.aborted) {
-        setCertData(certs || { total: 0, valid_count: 0, expiring_soon: 0, expired_count: 0, certificates: [] })
-        setDnsData(dns || { total_targets: 0, consistent_count: 0, divergent_count: 0, matrix: [] })
+        if (certs) setCertData(certs)
+        if (dns) setDnsData(dns)
+        if (!certs && !dns) throw new Error('证书与 DNS 数据暂时不可用，将自动重试')
       }
     } catch (err) {
-      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载合成探针数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) { setError(err.message || '加载证书与 DNS 数据失败'); return false }
     } finally {
       if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
     }
   }, [])
 
-  useEffect(() => {
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }, 30000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [loadData])
+  useEffect(() => () => requestRef.current?.abort(), [])
+  useLivePolling(loadData, { interval: 30000 })
 
   // Filtered certificates
   const filteredCerts = (certData.certificates || []).filter((cert) => {

@@ -21,6 +21,7 @@ import {
   fetchNodeProcesses,
   fetchNodes,
 } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 function formatBytes(bytes) {
   if (bytes === null || bytes === undefined || bytes === '' || !Number.isFinite(Number(bytes)) || Number(bytes) < 0) return '—'
@@ -149,20 +150,9 @@ export function ContainerProcessView({ initialNodeId = '' }) {
     setOverview({ total_nodes: 0, nodes_with_docker: 0, total_containers: 0, running_containers: 0, stopped_containers: 0, unhealthy_containers: 0, top_cpu_containers: [], top_memory_containers: [] })
     setNodeContainersData({ node_id: selectedNode || '', node_name: '', docker_available: false, docker_version: '', containers_total: 0, containers_running: 0, containers_stopped: 0, containers: [] })
     setNodeProcessesData({ node_id: selectedNode || '', node_name: '', top_processes: [], reported_at: 0 })
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData()
-    }, 15000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [loadData])
+    return () => requestRef.current?.abort()
+  }, [selectedNode, loadData])
+  useLivePolling(loadData, { interval: 15000 })
 
   const unhealthyCount = selectedNode
     ? (nodeContainersData.containers || []).filter((container) => container.health === 'unhealthy').length

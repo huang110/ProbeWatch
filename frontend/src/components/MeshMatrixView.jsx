@@ -16,6 +16,7 @@ import {
   XCircle,
 } from '@phosphor-icons/react'
 import { fetchMeshMatrix, updateNode } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 export function MeshMatrixView() {
   const [data, setData] = useState({ nodes: [], matrix: [], relays: [], stats: {} })
@@ -56,22 +57,8 @@ export function MeshMatrixView() {
     }
   }, [])
 
-  useEffect(() => {
-    setData({ nodes: [], matrix: [], relays: [], stats: {} })
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }, 30000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [loadData])
+  useEffect(() => () => requestRef.current?.abort(), [])
+  useLivePolling(loadData, { interval: 30000 })
 
   // Extract all unique tags
   const allTags = useMemo(() => {
