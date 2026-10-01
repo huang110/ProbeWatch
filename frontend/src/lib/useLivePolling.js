@@ -1,16 +1,17 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // Keeps live pages responsive without polling hidden tabs or waiting for the
 // next interval after the browser reconnects to the network.
-export function useLivePolling(load, { interval = 15000, enabled = true } = {}) {
+export function useLivePolling(load, { interval = 15000, enabled = true, restartKey = '' } = {}) {
   const loadRef = useRef(load)
+  const [status, setStatus] = useState(enabled ? 'connecting' : 'paused')
 
   useEffect(() => {
     loadRef.current = load
   }, [load])
 
   useEffect(() => {
-    if (!enabled) return undefined
+    if (!enabled) { setStatus('paused'); return undefined }
     let timer
     let disposed = false
     let inFlight = false
@@ -19,11 +20,13 @@ export function useLivePolling(load, { interval = 15000, enabled = true } = {}) 
     const run = async (manual = false) => {
       if (!isActive() || inFlight) return
       inFlight = true
+      setStatus('loading')
       try {
         const result = await loadRef.current(manual)
-        failures = result === false ? Math.min(failures + 1, 4) : 0
+        if (result === false) { failures = Math.min(failures + 1, 4); setStatus('retrying') }
+        else { failures = 0; setStatus('online') }
       } catch (error) {
-        if (error?.name !== 'AbortError') failures = Math.min(failures + 1, 4)
+        if (error?.name !== 'AbortError') { failures = Math.min(failures + 1, 4); setStatus('retrying') }
       } finally {
         inFlight = false
         schedule()
@@ -41,14 +44,14 @@ export function useLivePolling(load, { interval = 15000, enabled = true } = {}) 
         failures = 0
         window.clearTimeout(timer)
         run(false)
-      } else window.clearTimeout(timer)
+      } else { window.clearTimeout(timer); setStatus('paused') }
     }
     const onOnline = () => {
       failures = 0
       window.clearTimeout(timer)
       run(false)
     }
-    const onOffline = () => window.clearTimeout(timer)
+    const onOffline = () => { window.clearTimeout(timer); setStatus('offline') }
     run(false)
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('online', onOnline)
@@ -60,5 +63,6 @@ export function useLivePolling(load, { interval = 15000, enabled = true } = {}) 
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
     }
-  }, [interval, enabled])
+  }, [interval, enabled, restartKey])
+  return status
 }

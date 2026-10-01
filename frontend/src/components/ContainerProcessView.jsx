@@ -155,7 +155,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
     setNodeProcessesData({ node_id: selectedNode || '', node_name: '', top_processes: [], reported_at: 0 })
     return () => requestRef.current?.abort()
   }, [selectedNode, loadData])
-  useLivePolling(loadData, { interval: 15000 })
+  useLivePolling(loadData, { interval: 15000, restartKey: selectedNode })
 
   const unhealthyCount = selectedNode
     ? (nodeContainersData.containers || []).filter((container) => container.health === 'unhealthy').length

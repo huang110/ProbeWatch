@@ -234,7 +234,7 @@ export default function TerminalView({ initialNodeId = null }) {
   }, [selectedNodeId])
 
   useEffect(() => () => statusRequestRef.current?.abort(), [])
-  useLivePolling(loadStatus, { interval: 8000 })
+  useLivePolling(loadStatus, { interval: 8000, restartKey: selectedNodeId })
 
   // Auto-scroll terminal output
   useEffect(() => {

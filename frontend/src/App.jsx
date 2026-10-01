@@ -239,7 +239,7 @@ function PageLoadingFallback() {
   return <div className="page-loading" role="status" aria-live="polite"><span className="status-dot status-online" />正在加载页面…</div>
 }
 
-function Topbar({ activeNav, clockText, lastSyncText, apiState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
+function Topbar({ activeNav, clockText, lastSyncText, apiState, liveState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {
   return <header className="topbar">
     <div className="topbar-left">
       <button className="icon-button mobile-menu" aria-label="打开导航菜单" onClick={onOpenMobileNav}><List size={19} /></button>
@@ -264,7 +264,7 @@ function Topbar({ activeNav, clockText, lastSyncText, apiState, me, onNavigate, 
       </button>
       <span className="guest-live-indicator" title="节点、告警和概览数据会自动同步"><span className="status-dot status-online" />实时同步</span>
       <span className="last-sync">最后同步 <b>{lastSyncText}</b></span>
-      <span className="sync-state"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : 'attention'}`} />{apiState.kind === 'ok' ? 'API 已连接' : 'API 状态未知'}</span>
+      <span className="sync-state"><span className={`status-dot status-${liveState === 'online' ? 'online' : liveState === 'offline' ? 'offline' : 'attention'}`} />{liveState === 'online' ? '实时连接中' : liveState === 'retrying' ? '重试中' : liveState === 'offline' ? '网络离线' : liveState === 'paused' ? '页面已暂停' : '正在同步'}</span>
       <button className="icon-button" aria-label="查看告警" onClick={() => onNavigate('alerts')}><Bell size={19} /></button>
       <button type="button" className="button button-quiet btn-sm text-rose top-logout-btn" onClick={onLogout} title="退出当前管理员登录">
         <SignOut size={15} />
@@ -445,6 +445,7 @@ export function App() {
   const trafficAbortRef = useRef(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
+  const [liveState, setLiveState] = useState('connecting')
   const [apiState, setApiState] = useState({ kind: 'loading', message: '正在加载 API 数据…' })
   const [apiVersion, setApiVersion] = useState('')
   const [latestAgentVersion, setLatestAgentVersion] = useState('')
@@ -688,10 +689,12 @@ export function App() {
   useLivePolling(loadCore, {
     interval: activeNav === 'node-detail' ? 3000 : LIVE_CORE_INTERVAL_MS,
     enabled: !(guestPreview || apiState.kind === 'guest'),
+    onStatusChange: setLiveState,
   })
   useLivePolling(loadOverview, {
     interval: OVERVIEW_INTERVAL_MS,
     enabled: !(guestPreview || apiState.kind === 'guest'),
+    onStatusChange: setLiveState,
   })
 
   useEffect(() => {
@@ -1228,6 +1231,7 @@ export function App() {
         clockText={clockText}
         lastSyncText={lastSyncText}
         apiState={apiState}
+        liveState={liveState}
         me={me}
         onNavigate={navigate}
         onOpenMobileNav={() => setMobileNavOpen(true)}

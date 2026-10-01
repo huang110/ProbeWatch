@@ -380,7 +380,7 @@ export function NetworkMonitorView({ nodes = [] }) {
     setHistory([])
     return () => requestRef.current?.abort()
   }, [selectedNodeUuid, refreshTrigger])
-  useLivePolling(loadData, { interval: 30000 })
+  useLivePolling(loadData, { interval: 30000, restartKey: `${selectedNodeUuid}:${refreshTrigger}` })
 
   // Handle adding preset
   const handleAddPreset = async (preset) => {

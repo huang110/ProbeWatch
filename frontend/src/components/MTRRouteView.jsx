@@ -287,7 +287,7 @@ export function MTRRouteView({ nodes = [] }) {
     setSelectedTargetId(null)
     return () => requestRef.current?.abort()
   }, [refreshTrigger, selectedNodeUuid])
-  useLivePolling(fetchMtr, { interval: 30000, enabled: Boolean(selectedNodeUuid) })
+  useLivePolling(fetchMtr, { interval: 30000, enabled: Boolean(selectedNodeUuid), restartKey: `${selectedNodeUuid}:${selectedTargetId || ''}` })
 
   const handleDeleteTarget = async (tId) => {
     if (!tId) return
