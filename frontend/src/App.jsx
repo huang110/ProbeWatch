@@ -150,6 +150,7 @@ const VALID_NAV_PAGES = [
   'dashboard',
   'servers',
   'nodes',
+  'terminal',
   'billing',
   'monitoring',
   'latency',
