@@ -85,7 +85,10 @@ export function LogStreamingView({ nodes = [] }) {
       const data = await fetchEventsOverview(controller.signal)
       if (!controller.signal.aborted) setOverview(data)
     } catch (e) {
-      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load events overview:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') {
+        console.error('Failed to load events overview:', e)
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) setLoadingOverview(false)
     }
@@ -117,7 +120,10 @@ export function LogStreamingView({ nodes = [] }) {
         if (!controller.signal.aborted) setEvents(data.events || [])
       }
     } catch (e) {
-      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load events:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') {
+        console.error('Failed to load events:', e)
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) setLoadingEvents(false)
     }
@@ -140,7 +146,10 @@ export function LogStreamingView({ nodes = [] }) {
       }, controller.signal)
       if (!controller.signal.aborted) setStreamOutput(res.lines || [])
     } catch (e) {
-      if (e?.name !== 'AbortError') setStreamOutput([`[错误] 日志查询失败: ${e.message}`])
+      if (e?.name !== 'AbortError') {
+        setStreamOutput([`[错误] 日志查询失败: ${e.message}`])
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) setLoadingStream(false)
     }
@@ -156,7 +165,10 @@ export function LogStreamingView({ nodes = [] }) {
       const res = await fetchAuditLogs({ limit: 100 }, controller.signal)
       if (!controller.signal.aborted) setAuditLogs(res.logs || [])
     } catch (e) {
-      if (e?.name !== 'AbortError' && e?.message !== 'auth') console.error('Failed to load audit logs:', e)
+      if (e?.name !== 'AbortError' && e?.message !== 'auth') {
+        console.error('Failed to load audit logs:', e)
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) setLoadingAudit(false)
     }

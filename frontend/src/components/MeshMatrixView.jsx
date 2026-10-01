@@ -48,7 +48,10 @@ export function MeshMatrixView() {
       const res = await fetchMeshMatrix(controller.signal)
       if (!controller.signal.aborted) setData(res || { nodes: [], matrix: [], relays: [], stats: {} })
     } catch (err) {
-      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载全球互联延迟网格失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+        setError(err.message || '加载全球互联延迟网格失败')
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) {
         setLoading(false)

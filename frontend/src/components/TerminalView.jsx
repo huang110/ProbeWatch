@@ -224,7 +224,10 @@ export default function TerminalView({ initialNodeId = null }) {
       })
       setError(null)
     } catch (err) {
-      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message)
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+        setError(err.message)
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }

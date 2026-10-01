@@ -369,7 +369,7 @@ export function NetworkMonitorView({ nodes = [] }) {
       }
     } catch (error) {
       if (error?.name === 'AbortError') return
-      // Ignored
+      return false
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }
