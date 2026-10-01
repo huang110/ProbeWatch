@@ -117,6 +117,8 @@ export function TokenManagementCard({ currentUser, nodes = [] }) {
   }
 
   const handleToggleDisabled = async (token) => {
+    const action = token.disabled ? '启用' : '停用'
+    if (!await window.probewatchConfirm(`确定要${action}令牌【${token.name}】吗？${token.disabled ? '' : '停用后，使用此令牌的自动化脚本将立即失效。'}`)) return
     setActionBusy(true)
     setStatusMsg(null)
     try {

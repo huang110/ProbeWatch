@@ -394,6 +394,8 @@ export default function TerminalView({ initialNodeId = null }) {
     const targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : (selectedNode ? [selectedNode.id] : [])
     const targetNodes = targetIds.map((id) => nodes.find((node) => node.id === id || node.uuid === id)).filter(Boolean)
     if (!toRun.trim() || targetNodes.length === 0) return
+    const targetNames = targetNodes.map((node) => node.name || node.uuid || node.id).join('、')
+    if (!await window.probewatchConfirm(`将在 ${targetNodes.length} 个节点执行命令：\n\n${toRun.trim()}\n\n目标：${targetNames}\n\n继续执行吗？`, { danger: true })) return
 
     setExecuting(true)
     setExecResult(null)
