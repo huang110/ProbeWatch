@@ -275,7 +275,7 @@ export function MTRRouteView({ nodes = [] }) {
         }
       }
     } catch (error) {
-      if (error?.name !== 'AbortError' && !controller.signal.aborted) setMtrData([])
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) return false
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }

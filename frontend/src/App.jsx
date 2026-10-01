@@ -7,6 +7,7 @@ import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { GuestView } from './components/GuestView.jsx'
 import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
+import { useLivePolling } from './lib/useLivePolling.js'
 
 const NodeDetailPage = lazy(() => import('./components/NodeDetailPage.jsx').then((m) => ({ default: m.NodeDetailPage })))
 const OverviewPage = lazy(() => import('./components/OverviewPage.jsx').then((m) => ({ default: m.OverviewPage })))
@@ -637,7 +638,7 @@ export function App() {
       setApiState(normalized.length ? { kind: 'ok', message: '' } : { kind: 'empty', message: 'API 返回空节点数组，暂无节点数据。' })
     } catch (error) {
       if (error?.name === 'AbortError') return
-      if (current === coreRequestRef.current) { setMe(null); setData([]); setApiState({ kind: 'error', message: '无法加载节点数据，请检查网络或稍后重试。' }) }
+      if (current === coreRequestRef.current) { setApiState({ kind: 'error', message: '无法加载节点数据，正在自动重试。' }); return false }
     } finally {
       if (current === coreRequestRef.current) setIsRefreshing(false)
     }
@@ -674,6 +675,7 @@ export function App() {
     } catch (error) {
       if (error?.name === 'AbortError') return
       // overview 失败保持既有卡片数据，静默等待下一轮。
+      return false
     }
   }, [])
 
@@ -683,30 +685,14 @@ export function App() {
     return () => { coreAbortRef.current?.abort(); overviewAbortRef.current?.abort(); historyAbortRef.current?.abort(); checksAbortRef.current?.abort(); trafficAbortRef.current?.abort() }
   }, [loadCore, loadOverview])
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible' && activeNav !== 'node-detail' && !(guestPreview || apiState.kind === 'guest')) loadCore(false)
-    }, LIVE_CORE_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [loadCore, activeNav, guestPreview, apiState.kind])
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible' && !(guestPreview || apiState.kind === 'guest')) loadOverview()
-    }, OVERVIEW_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [loadOverview, guestPreview, apiState.kind])
-
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible' && !(guestPreview || apiState.kind === 'guest')) {
-        loadCore(false)
-        loadOverview()
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [loadCore, loadOverview, guestPreview, apiState.kind])
+  useLivePolling(loadCore, {
+    interval: activeNav === 'node-detail' ? 3000 : LIVE_CORE_INTERVAL_MS,
+    enabled: !(guestPreview || apiState.kind === 'guest'),
+  })
+  useLivePolling(loadOverview, {
+    interval: OVERVIEW_INTERVAL_MS,
+    enabled: !(guestPreview || apiState.kind === 'guest'),
+  })
 
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000)
@@ -1004,20 +990,6 @@ export function App() {
       return () => clearInterval(timer)
     }
   }, [guestPreview, apiState.kind, refreshGuest, activeNav])
-
-  // Fast 3-second real-time polling when viewing node-detail in admin mode.
-  // The normal core interval is skipped in guest mode, so this remains the
-  // only extra admin request while the detail page is open.
-  useEffect(() => {
-    if (activeNav === 'node-detail' && !(guestPreview || apiState.kind === 'guest')) {
-      const timer = setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          loadCore(false)
-        }
-      }, 3000)
-      return () => clearInterval(timer)
-    }
-  }, [activeNav, guestPreview, apiState.kind, loadCore])
 
   const refreshAll = () => { loadCore(true); loadOverview() }
   const lastSyncText = lastSync ? formatTimeOfDay(lastSync) : '—'

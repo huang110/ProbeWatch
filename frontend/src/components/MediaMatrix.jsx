@@ -69,7 +69,7 @@ export function MediaMatrix({ nodes = [] }) {
   const requestRef = useRef(null)
 
   // Fetch media reports from all nodes
-  const fetchAllMedia = useCallback(() => {
+  const fetchAllMedia = useCallback(async () => {
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
@@ -88,10 +88,11 @@ export function MediaMatrix({ nodes = [] }) {
 
     if (!targets.length) {
       setState({ loading: false, entries: [] })
-      return () => controller.abort()
+      return
     }
 
-    Promise.all(
+    try {
+      const entries = await Promise.all(
       targets.map((target) => {
         if (!target.uuid) return Promise.resolve({ ...target, ok: false, reports: [] })
         return fetch(`/api/nodes/${encodeURIComponent(target.uuid)}/media`, {
@@ -109,15 +110,12 @@ export function MediaMatrix({ nodes = [] }) {
             return { ...target, ok: false, reports: [] }
           })
       })
-    )
-      .then((entries) => {
-        if (!controller.signal.aborted) setState({ loading: false, entries })
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setState({ loading: false, entries: [] })
-      })
-
-    return () => controller.abort()
+      )
+      if (!controller.signal.aborted) setState({ loading: false, entries })
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error
+      if (!controller.signal.aborted) return false
+    }
   }, [nodes])
 
   useEffect(() => () => requestRef.current?.abort(), [refreshTrigger])
