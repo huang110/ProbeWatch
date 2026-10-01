@@ -117,6 +117,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		termClient := terminal.NewClient(r.cfg.AgentEndpoint, r.cfg.AgentNodeUUID, r.cfg.AgentNodeToken)
 		go termClient.Run(ctx)
 	}
+	// Publish a resource snapshot before running the first probe batch. Probe
+	// targets may have network timeouts, while the console should show the node
+	// as soon as the agent is reachable.
+	if err := r.reportResources(ctx); err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	// Keep resource and probe freshness aligned with the live console.
 	ticker := time.NewTicker(10 * time.Second)
@@ -300,6 +306,28 @@ func (r *Runner) report(ctx context.Context) error {
 		return err
 	}
 	if err = r.sendReport(ctx, requestID, payload); err == nil {
+		return nil
+	}
+	return r.enqueueReport(queuedReport{RequestID: requestID, Payload: payload, Attempts: 1, NextTry: time.Now().UTC().Add(reportRetryDelay)})
+}
+
+// reportResources sends an immediate resource-only heartbeat. It keeps first
+// paint independent from the latency of configured network probes.
+func (r *Runner) reportResources(ctx context.Context) error {
+	payload, err := json.Marshal(protocol.ReportRequest{
+		NodeUUID:   r.cfg.AgentNodeUUID,
+		ReportedAt: r.now().UTC().Unix(),
+		Resource:   collectResourceWith(r.startedAt, r.cpu, r.hardware, r.disk, r.sockets, r.health),
+		Results:    []protocol.CheckResult{},
+	})
+	if err != nil {
+		return err
+	}
+	requestID, err := newRequestID()
+	if err != nil {
+		return err
+	}
+	if err := r.sendReport(ctx, requestID, payload); err == nil {
 		return nil
 	}
 	return r.enqueueReport(queuedReport{RequestID: requestID, Payload: payload, Attempts: 1, NextTry: time.Now().UTC().Add(reportRetryDelay)})

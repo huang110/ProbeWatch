@@ -172,6 +172,21 @@ func TestReportHonorsIntervalsAndDisabledTasks(t *testing.T) {
 	}
 }
 
+func TestReportResourcesSendsImmediateResourceOnlyHeartbeat(t *testing.T) {
+	stub := &stubControlPlane{}
+	runner := newStubRunner(t, stub)
+	if err := runner.reportResources(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reports := stub.receivedReports()
+	if len(reports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(reports))
+	}
+	if len(reports[0].Results) != 0 {
+		t.Fatalf("resource-only report carried %d results", len(reports[0].Results))
+	}
+}
+
 func TestOutboxPersistsAndReplaysReport(t *testing.T) {
 	dir := t.TempDir()
 	available := false
