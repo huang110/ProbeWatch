@@ -50,6 +50,7 @@ jobs:
           ! grep -n -- "curl .* -k" internal/deploy/install.sh
           sh -n deploy/install.sh
           sh -n internal/deploy/install.sh
+          sh -n deploy/prune-archives.sh
 
   frontend:
     name: Frontend build and audit
