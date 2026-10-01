@@ -38,6 +38,16 @@ function securityHeadersPlugin() {
 
 export default defineConfig({
   plugins: [react(), securityHeadersPlugin()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          phosphor: ['@phosphor-icons/react'],
+        },
+      },
+    },
+  },
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
   },
