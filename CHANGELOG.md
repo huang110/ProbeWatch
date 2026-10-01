@@ -1,3 +1,7 @@
+## v0.8.48
+
+- 自动 Release 增加前端生产静态资源压缩包，便于独立部署和手动替换控制台资源。
+
 ## v0.8.47
 
 - 收紧 GitHub Actions 权限范围，普通 CI 仅使用只读权限，只有通过检查的 Release 任务可写入 GitHub Release。
