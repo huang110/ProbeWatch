@@ -82,16 +82,20 @@ def run():
         assert not errors, errors
 
         page.locator(".nav-item", has_text="系统日志").click()
-        page.locator("text=系统日志").first.wait_for()
-        assert page.locator(".content-wrap").count() == 1
+        page.locator(".log-streaming-view").wait_for()
+        assert page.locator(".log-streaming-view").count() == 1
 
         page.locator(".nav-item", has_text="远程终端").click()
-        page.locator("text=远程终端").first.wait_for()
-        assert page.locator(".content-wrap").count() == 1
+        page.locator(".terminal-page").wait_for()
+        assert page.locator(".terminal-connection-pill").count() == 1
 
         page.locator(".nav-item", has_text="监测").click()
-        page.locator("text=延迟监测").first.wait_for()
-        assert page.locator(".content-wrap").count() == 1
+        page.locator(".monitor-view-container").wait_for()
+        assert page.locator(".monitor-view-container").count() == 1
+
+        page.goto(f"{BASE_URL}#/node-detail?uuid=uuid-1", wait_until="networkidle")
+        page.locator(".komari-detail-page").wait_for()
+        assert page.locator(".komari-detail-page").count() == 1
 
         page.set_viewport_size({"width": 390, "height": 844})
         page.locator(".nav-item", has_text="仪表盘").first.click(force=True)
