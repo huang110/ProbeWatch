@@ -24,3 +24,9 @@ credentials/
 *文本文档*
 singbox*.json
 singbox*.txt
+
+# Local deployment archives and staging directories are generated outside Git.
+# Keep release assets under GitHub Releases instead of the source workspace.
+.deploy-*
+deploy-package.tar.gz
+deploy-package.zip
