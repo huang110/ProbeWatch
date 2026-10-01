@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright
 
 
 BASE_URL = os.environ.get("PROBEWATCH_BASE_URL", "http://127.0.0.1:4173/")
+CHROMIUM_PATH = os.environ.get("PROBEWATCH_CHROMIUM")
 
 
 def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, alerts=None, alerts_status=200, overview=None, overview_status=200, public_status=None, checks=None, checks_status=200, traffic=None, traffic_status=200, media=None, media_status=200, targets=None, targets_status=200, registration=None, csrf_token="contract-csrf-token"):
@@ -107,7 +108,10 @@ def install_api(page, *, me_status=200, nodes_status=200, nodes=None, me=None, a
 
 def run_regressions():
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        launch_options = {"headless": True}
+        if CHROMIUM_PATH:
+            launch_options["executable_path"] = CHROMIUM_PATH
+        browser = playwright.chromium.launch(**launch_options)
         tests = []
         node = {"id": "node-1", "uuid": "uuid-1", "name": "测试节点", "status": "online", "last_reported_at": "2026-09-20T00:00:00Z", "resource": {"cpu_percent": 12.5, "memory_total_bytes": 100, "memory_used_bytes": 50}}
         base_overview = {"nodes": {"online": 1, "total": 1, "resource_reporting": 1}, "checks": {"success_rate": 100, "avg_latency_ms": 42.7}, "resources": {"network_rx_bytes": 10, "network_tx_bytes": 20, "network_rx_bytes_delta": 300, "network_tx_bytes_delta": 100, "network_history": [10, 20], "cpu_percent": 33.5, "memory_used_bytes": 4, "memory_total_bytes": 10}}
