@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ServerVersion   = "0.8.61"
+	ServerVersion   = "0.8.62"
 	AgentVersion    = "0.8.10"
 	MinAgentVersion = "0.5.0"
 )
