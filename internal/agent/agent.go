@@ -29,6 +29,7 @@ const (
 	maxOutboxAttempts = 8
 	maxOutboxAge      = 7 * 24 * time.Hour
 	maxConfigResponseBytes = 2 << 20
+	initialResourceFollowupDelay = 2 * time.Second
 )
 
 // Runner is the outbound-only monitoring agent. It never opens a listener.
@@ -123,6 +124,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.reportResources(ctx); err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
+	// A second early snapshot gives the console two counter points quickly so
+	// it can calculate live network rates without waiting for the regular 10s
+	// heartbeat interval.
+	go func() {
+		timer := time.NewTimer(initialResourceFollowupDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+			_ = r.reportResources(ctx)
+		}
+	}()
 
 	// Keep resource and probe freshness aligned with the live console.
 	ticker := time.NewTicker(10 * time.Second)
