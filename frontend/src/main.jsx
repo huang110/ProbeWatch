@@ -1,6 +1,7 @@
 import { Component, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.jsx'
+import { ConfirmHost } from './components/ConfirmHost.jsx'
 import './styles.css'
 // 优先在模块加载阶段初始化主题，彻底杜绝白屏/黑屏闪烁
 try {
@@ -46,4 +47,4 @@ class ErrorBoundary extends Component {
   }
 }
 
-createRoot(document.getElementById('root')).render(<StrictMode><ErrorBoundary><App /></ErrorBoundary></StrictMode>)
+createRoot(document.getElementById('root')).render(<StrictMode><ErrorBoundary><App /><ConfirmHost /></ErrorBoundary></StrictMode>)

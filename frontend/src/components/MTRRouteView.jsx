@@ -301,7 +301,7 @@ export function MTRRouteView({ nodes = [] }) {
 
   const handleDeleteTarget = async (tId) => {
     if (!tId) return
-    if (!window.confirm(`确定删除 MTR 探测目标 [${tId}] 吗？`)) return
+    if (!await window.probewatchConfirm(`确定删除 MTR 探测目标 [${tId}] 吗？`)) return
     try {
       const csrfToken = await fetchCsrfToken()
       await fetch(`/api/targets/${encodeURIComponent(tId)}`, {

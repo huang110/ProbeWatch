@@ -130,7 +130,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
   }
 
   async function handleRegenerateToken() {
-    if (!window.confirm('确定要重新生成 MCP 访问 Token 吗？已连接的外部客户端需要同步更新该密钥。')) return
+    if (!await window.probewatchConfirm('确定要重新生成 MCP 访问 Token 吗？已连接的外部客户端需要同步更新该密钥。')) return
     setRegeneratingToken(true)
     setActionError('')
     try {

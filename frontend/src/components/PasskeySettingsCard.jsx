@@ -98,7 +98,7 @@ export function PasskeySettingsCard() {
   }
 
   const handleDelete = async (id, name) => {
-    if (!window.confirm(`确定要移除通行密钥「${name}」吗？移除后将无法使用该密钥登录。`)) {
+    if (!await window.probewatchConfirm(`确定要移除通行密钥「${name}」吗？移除后将无法使用该密钥登录。`)) {
       return
     }
     setActionBusy(true)

@@ -412,7 +412,7 @@ export function AlertCenterView({
   }
 
   const handleDeleteRule = async (id, name) => {
-    if (!window.confirm(`确定要删除告警规则「${name}」吗？`)) return
+    if (!await window.probewatchConfirm(`确定要删除告警规则「${name}」吗？`)) return
     try {
       await deleteAlertRule(id)
       setLoadRules((prev) => prev.filter((r) => r.id !== id))
@@ -453,7 +453,7 @@ export function AlertCenterView({
   }
 
   const handleDeleteChannel = async (id, name) => {
-    if (!window.confirm(`确定要删除通知渠道「${name}」吗？`)) return
+    if (!await window.probewatchConfirm(`确定要删除通知渠道「${name}」吗？`)) return
     try {
       await deleteNotificationChannel(id)
       setChannels((prev) => prev.filter((item) => item.id !== id))

@@ -308,7 +308,7 @@ export function SpeedtestBenchmarkView() {
 
   // Delete Task
   const handleDeleteTask = async (task) => {
-    if (!window.confirm(`确定要删除测速任务「${task.name}」吗？`)) return
+    if (!await window.probewatchConfirm(`确定要删除测速任务「${task.name}」吗？`)) return
     try {
       await deleteSpeedtestTask(task.id)
       showToast(`已删除测速任务「${task.name}」`)

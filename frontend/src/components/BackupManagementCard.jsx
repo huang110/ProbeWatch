@@ -192,7 +192,7 @@ export function BackupManagementCard() {
   }
 
   const handleDelete = async (filename) => {
-    if (!window.confirm(`确定要永久删除备份文件 "${filename}" 吗？此操作不可逆。`)) {
+    if (!await window.probewatchConfirm(`确定要永久删除备份文件 "${filename}" 吗？此操作不可逆。`)) {
       return
     }
     setActionBusy(true)

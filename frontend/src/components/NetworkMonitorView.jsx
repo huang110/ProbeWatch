@@ -458,7 +458,7 @@ export function NetworkMonitorView({ nodes = [] }) {
 
   // Handle delete target
   const handleDelete = async (targetId) => {
-    if (!window.confirm(`确定删除探测目标 [${targetId}] 吗？`)) return
+    if (!await window.probewatchConfirm(`确定删除探测目标 [${targetId}] 吗？`)) return
     try {
       const csrfToken = await fetchCsrfToken()
       await fetch(`/api/targets/${encodeURIComponent(targetId)}`, {

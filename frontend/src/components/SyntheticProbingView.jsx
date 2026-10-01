@@ -191,7 +191,7 @@ export default function SyntheticProbingView() {
   }, [overview, targets])
 
   const handleDelete = async (id) => {
-    if (!window.confirm('确认删除此合成监控目标？相关拨测历史将被同时移除。')) return
+    if (!await window.probewatchConfirm('确认删除此合成监控目标？相关拨测历史将被同时移除。')) return
     try {
       await deleteSyntheticTarget(id)
       loadData(true)
