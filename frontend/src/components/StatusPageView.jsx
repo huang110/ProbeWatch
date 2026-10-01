@@ -16,6 +16,7 @@ import {
 } from '@phosphor-icons/react'
 import { fetchPublicStatusPage, fetchPublicIncidents } from '../lib/api.js'
 import { ThemeToggle } from './ThemeToggle.jsx'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
   const [data, setData] = useState(null)
@@ -50,25 +51,11 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
     }
   }
 
-  useEffect(() => {
-    mountedRef.current = true
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData()
-    }, 5000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        loadData()
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      mountedRef.current = false
-      requestRef.current?.abort()
-      document.removeEventListener('visibilitychange', onVisibility)
-      clearInterval(timer)
-    }
+  useEffect(() => () => {
+    mountedRef.current = false
+    requestRef.current?.abort()
   }, [])
+  useLivePolling(loadData, { interval: 5000 })
 
   // Load past resolved incidents
   const loadPastIncidents = async () => {

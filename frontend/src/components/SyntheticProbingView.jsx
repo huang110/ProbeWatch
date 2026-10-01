@@ -28,6 +28,7 @@ import {
   fetchSyntheticHistory,
   testSyntheticTarget,
 } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const PROTOCOL_CONFIG = {
   http: { label: 'HTTP', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
@@ -135,21 +136,8 @@ export default function SyntheticProbingView() {
     }
   }, [])
 
-  useEffect(() => {
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData(true)
-    }, 15000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData(true)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [loadData])
+  useEffect(() => () => requestRef.current?.abort(), [])
+  useLivePolling(loadData, { interval: 15000 })
 
   // Filter targets
   const filteredTargets = useMemo(() => {
