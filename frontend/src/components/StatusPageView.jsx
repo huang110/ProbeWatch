@@ -46,14 +46,18 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
       if (err?.name === 'AbortError' || controller.signal.aborted || !mountedRef.current) return
       console.error('Failed to load status page:', err)
       setError('无法获取服务状态数据，请稍后重试')
+      return false
     } finally {
       if (!controller.signal.aborted && mountedRef.current) setLoading(false)
     }
   }
 
-  useEffect(() => () => {
-    mountedRef.current = false
-    requestRef.current?.abort()
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      requestRef.current?.abort()
+    }
   }, [])
   useLivePolling(loadData, { interval: 5000 })
 

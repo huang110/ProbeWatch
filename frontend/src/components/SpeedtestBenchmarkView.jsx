@@ -30,6 +30,7 @@ import {
   runSpeedtestNow,
   updateSpeedtestTask,
 } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const PRESET_SERVERS = [
   {
@@ -135,7 +136,7 @@ export function SpeedtestBenchmarkView() {
     try {
       const [resData, tasksData] = await Promise.all([
         fetchSpeedtestResults(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
-        fetchSpeedtestTasks(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return [] }),
+        fetchSpeedtestTasks(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
       ])
       if (!controller.signal.aborted && resData) {
         setResultsData(resData)
@@ -143,8 +144,12 @@ export function SpeedtestBenchmarkView() {
       if (!controller.signal.aborted && Array.isArray(tasksData)) {
         setTasks(tasksData)
       }
+      if (!controller.signal.aborted && !resData) throw new Error('加载测速数据失败，将自动重试')
     } catch (err) {
-      if (err?.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || '加载测速与基准数据失败')
+      if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+        setError(err.message || '加载测速与基准数据失败')
+        return false
+      }
     } finally {
       if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
     }
@@ -166,22 +171,11 @@ export function SpeedtestBenchmarkView() {
     }
   }, [])
 
-  useEffect(() => {
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }, 30000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData(false)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      dataRequestRef.current?.abort()
-      historyRequestRef.current?.abort()
-    }
-  }, [loadData])
+  useEffect(() => () => {
+    dataRequestRef.current?.abort()
+    historyRequestRef.current?.abort()
+  }, [])
+  useLivePolling(loadData, { interval: 30000 })
 
   useEffect(() => {
     if (activeTab === 'history') {

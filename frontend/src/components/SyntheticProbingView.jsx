@@ -119,17 +119,19 @@ export default function SyntheticProbingView() {
     try {
       const [overviewData, targetsData] = await Promise.all([
         fetchSyntheticResults(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
-        fetchSyntheticTargets(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return [] }),
+        fetchSyntheticTargets(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
       ])
       if (!controller.signal.aborted) {
         if (overviewData) setOverview(overviewData)
         if (Array.isArray(targetsData)) setTargets(targetsData)
+        if (!overviewData) throw new Error('加载合成监控数据失败，将自动重试')
         setError(null)
       }
     } catch (err) {
       if (err?.name !== 'AbortError' && !controller.signal.aborted) {
         console.error('Failed to load synthetic monitoring data:', err)
         setError(err.message || '加载合成监控数据失败')
+        return false
       }
     } finally {
       if (!controller.signal.aborted) { setLoading(false); setRefreshing(false) }
