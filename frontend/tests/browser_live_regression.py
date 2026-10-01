@@ -53,6 +53,8 @@ def install_api(page, *, guest=False, fail_overview=False):
             return {"status": 200, "body": "[]"}
         if "/api/registration-tokens" in url:
             return {"status": 200, "body": "[]"}
+        if "/logs/query" in url:
+            return {"status": 200, "body": json.dumps({"lines": ["2026-09-20T00:00:00Z probewatch[1]: heartbeat ok", "2026-09-20T00:00:01Z probewatch[1]: telemetry synced"]})}
         if "/api/nodes/" in url:
             if "/checks/summary" in url or "/network" in url or "/traffic" in url or "/media" in url or "/mtr" in url:
                 return {"status": 200, "body": "[]"}
@@ -99,6 +101,10 @@ def run():
         page.locator(".nav-item", has_text="系统日志").click()
         page.locator(".log-streaming-view").wait_for()
         assert page.locator(".log-streaming-view").count() == 1
+        page.get_by_text("实时日志流与终端排障").click()
+        page.get_by_role("button", name="拉取日志").click()
+        page.get_by_text("telemetry synced").wait_for()
+        assert page.get_by_text("heartbeat ok").count() == 1
 
         page.locator(".nav-item", has_text="远程终端").click()
         page.locator(".terminal-page").wait_for()
