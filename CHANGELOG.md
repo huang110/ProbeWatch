@@ -1,3 +1,7 @@
+## v0.8.47
+
+- 收紧 GitHub Actions 权限范围，普通 CI 仅使用只读权限，只有通过检查的 Release 任务可写入 GitHub Release。
+
 ## v0.8.46
 
 - 自动 Release 增加 Linux amd64/arm64 的 Server、Agent 二进制和 SHA256 校验文件，便于手动安装与升级。
