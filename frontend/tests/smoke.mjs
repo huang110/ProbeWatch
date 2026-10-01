@@ -16,4 +16,14 @@ const assetDir = resolve(dist, "assets")
 const assetFiles = readdirSync(assetDir).map((file) => resolve(assetDir, file))
 const bundleText = assetFiles.map((file) => readFileSync(file, "utf8")).join("\n")
 if (!bundleText.includes(expectedVersion)) throw new Error("built assets do not contain frontend version " + expectedVersion)
+const largestAsset = assetFiles.reduce((largest, file) => {
+  const size = readFileSync(file).byteLength
+  return size > largest.size ? { file, size } : largest
+}, { file: "", size: 0 })
+const maxAssetBytes = Number(process.env.PROBEWATCH_MAX_ASSET_BYTES || 450 * 1024)
+if (!Number.isFinite(maxAssetBytes) || maxAssetBytes <= 0) throw new Error("invalid PROBEWATCH_MAX_ASSET_BYTES")
+if (largestAsset.size > maxAssetBytes) {
+  throw new Error("largest frontend asset exceeds budget: " + largestAsset.file + " (" + largestAsset.size + " bytes > " + maxAssetBytes + ")")
+}
+console.log("largest asset: " + largestAsset.file + " (" + largestAsset.size + " bytes)")
 console.log("frontend smoke check passed: v" + expectedVersion + ", " + assetRefs.length + " entry assets")
