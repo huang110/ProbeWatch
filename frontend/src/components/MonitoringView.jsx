@@ -129,9 +129,16 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     }
 
     loadLiveResults()
-    const timer = window.setInterval(loadLiveResults, 15000)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadLiveResults()
+    }, 15000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadLiveResults()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       controller.abort()
     }
   }, [selectedServerForLatency])
