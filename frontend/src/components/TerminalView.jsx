@@ -238,8 +238,13 @@ export default function TerminalView({ initialNodeId = null }) {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') loadStatus()
     }, 8000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadStatus()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
       statusRequestRef.current?.abort()
     }
   }, [loadStatus])
