@@ -1,3 +1,7 @@
+## v0.8.46
+
+- 自动 Release 增加 Linux amd64/arm64 的 Server、Agent 二进制和 SHA256 校验文件，便于手动安装与升级。
+
 ## v0.8.45
 
 - 版本标签通过 CI 检查后自动创建 GitHub Release，统一发布流程。
