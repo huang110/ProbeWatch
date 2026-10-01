@@ -44,8 +44,11 @@ jobs:
         shell: bash
         run: |
           ! grep -n $'\r' deploy/install.sh
+          cmp -s deploy/install.sh internal/deploy/install.sh
           ! grep -n -- "curl .* -k" deploy/install.sh
+          ! grep -n -- "curl .* -k" internal/deploy/install.sh
           sh -n deploy/install.sh
+          sh -n internal/deploy/install.sh
 
   frontend:
     name: Frontend build and audit
