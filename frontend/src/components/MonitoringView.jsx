@@ -22,6 +22,7 @@ import { NewLatencyTargetModal } from './NewLatencyTargetModal.jsx'
 import { NewRouteMonitorModal } from './NewRouteMonitorModal.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
 import { safeArray, safeText } from '../lib/format.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 // 官方 6 大预置骨干探针目标 (RFC 5737 文档保留地址，完全契合安全契约)
 export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'latency', onNavigate }) {
@@ -54,9 +55,11 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
   }, [initialTab])
 
   // 从 API 加载检测目标
-  useEffect(() => {
-    const controller = new AbortController()
-    async function fetchTargets() {
+  const targetsRequestRef = useRef(null)
+  const fetchTargets = async () => {
+      targetsRequestRef.current?.abort()
+      const controller = new AbortController()
+      targetsRequestRef.current = controller
       try {
         const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
         if (res.ok) {
@@ -78,70 +81,32 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
           }
         }
       } catch (error) {
-        if (error?.name !== 'AbortError') return
+        if (error?.name !== 'AbortError') return false
+      } finally {
+        if (!controller.signal.aborted && targetsRequestRef.current === controller) targetsRequestRef.current = null
       }
-    }
-    fetchTargets()
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') fetchTargets()
-    }, 15000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') fetchTargets()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      controller.abort()
-    }
-  }, [])
+  }
+  useLivePolling(fetchTargets, { interval: 15000 })
+  useEffect(() => () => targetsRequestRef.current?.abort(), [])
 
   // 读取当前探测源的真实延迟汇总和 MTR 最新结果，避免页面展示演示数据。
-  useEffect(() => {
+  useLivePolling(async () => {
+    if (!selectedServerForLatency) return
     liveRequestRef.current?.abort()
     const controller = new AbortController()
     liveRequestRef.current = controller
-    setLiveChecks([])
-    setLiveMtrResults([])
-
-    async function loadLiveResults() {
-      if (!selectedServerForLatency) return
-      try {
-        const [checksResponse, mtrResponse] = await Promise.all([
-          fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }),
-          fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/mtr`, { credentials: 'same-origin', signal: controller.signal }),
-        ])
-        if (controller.signal.aborted) return
-        if (checksResponse.ok) {
-          const checks = await checksResponse.json()
-          if (Array.isArray(checks)) setLiveChecks(checks)
-        }
-        if (mtrResponse.ok) {
-          const mtr = await mtrResponse.json()
-          if (Array.isArray(mtr)) setLiveMtrResults(mtr)
-        }
-      } catch (error) {
-        if (error?.name !== 'AbortError') {
-          setLiveChecks([])
-          setLiveMtrResults([])
-        }
-      }
+    try {
+      const [checksResponse, mtrResponse] = await Promise.all([
+        fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/checks/summary`, { credentials: 'same-origin', signal: controller.signal }),
+        fetch(`/api/nodes/${encodeURIComponent(selectedServerForLatency)}/mtr`, { credentials: 'same-origin', signal: controller.signal }),
+      ])
+      if (controller.signal.aborted) return
+      if (checksResponse.ok) { const checks = await checksResponse.json(); if (Array.isArray(checks)) setLiveChecks(checks) }
+      if (mtrResponse.ok) { const mtr = await mtrResponse.json(); if (Array.isArray(mtr)) setLiveMtrResults(mtr) }
+    } catch (error) {
+      if (error?.name !== 'AbortError') return false
     }
-
-    loadLiveResults()
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') loadLiveResults()
-    }, 15000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadLiveResults()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      controller.abort()
-    }
-  }, [selectedServerForLatency])
+  }, { interval: 15000, enabled: Boolean(selectedServerForLatency) })
 
   // 默认选中首个服务器
   useEffect(() => {
