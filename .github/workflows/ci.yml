@@ -40,6 +40,12 @@ jobs:
         run: go test ./...
       - name: Build server
         run: go build ./cmd/probewatch ./cmd/probewatch-agent
+      - name: Validate installer script
+        shell: bash
+        run: |
+          ! grep -n $'\r' deploy/install.sh
+          ! grep -n -- "curl .* -k" deploy/install.sh
+          sh -n deploy/install.sh
 
   frontend:
     name: Frontend build and audit

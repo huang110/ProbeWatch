@@ -178,7 +178,7 @@ if [ -z "$NODE_TOKEN" ] && [ -n "$REG_TOKEN" ]; then
 
     REG_RESP=""
     if command -v curl >/dev/null 2>&1; then
-        REG_RESP=$(curl -sS -k -X POST -H "Content-Type: application/json" -d "$REG_BODY" "${ENDPOINT}/register" 2>/dev/null || true)
+        REG_RESP=$(curl -fsS -X POST -H "Content-Type: application/json" -d "$REG_BODY" "${ENDPOINT}/register" 2>/dev/null || true)
     elif command -v wget >/dev/null 2>&1; then
         REG_RESP=$(wget -qO- --post-data="$REG_BODY" --header="Content-Type: application/json" "${ENDPOINT}/register" 2>/dev/null || true)
     fi
@@ -225,7 +225,7 @@ if [ ! -f "./probewatch-agent" ]; then
     rm -f "$BIN_TMP"
     DOWNLOAD_SUCCESS=0
     if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL -k -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_TMP" "$DOWNLOAD_URL"; then
+        if curl -fsSL -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_TMP" "$DOWNLOAD_URL"; then
             DOWNLOAD_SUCCESS=1
         fi
     elif command -v wget >/dev/null 2>&1; then
