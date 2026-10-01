@@ -24,6 +24,20 @@ ok()    { printf "%b[OK]%b %s\n" "${GREEN}" "${PLAIN}" "$*"; }
 warn()  { printf "%b[WARN]%b %s\n" "${YELLOW}" "${PLAIN}" "$*"; }
 error() { printf "%b[ERROR]%b %s\n" "${RED}" "${PLAIN}" "$*" >&2; }
 
+check_temp_space() {
+    TMP_ROOT="${TMPDIR:-/tmp}"
+    [ -d "$TMP_ROOT" ] || mkdir -p "$TMP_ROOT"
+    AVAILABLE_KB=$(df -Pk "$TMP_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')
+    case "$AVAILABLE_KB" in
+        ''|*[!0-9]*) warn "无法读取临时目录剩余空间: $TMP_ROOT"; return 0 ;;
+    esac
+    if [ "$AVAILABLE_KB" -lt 65536 ]; then
+        error "临时目录 $TMP_ROOT 可用空间不足 64 MiB，请清理后重试"
+        exit 1
+    fi
+    ok "临时目录空间检查通过: $TMP_ROOT ($(awk "BEGIN {printf \"%.0f MiB\", $AVAILABLE_KB/1024}"))"
+}
+
 # 必须以 root 或 sudo 执行
 if [ "$(id -u 2>/dev/null || echo 1)" -ne 0 ]; then
     error "本脚本必须以 root 权限运行，请使用 sudo 或 root 终端执行"
@@ -203,6 +217,8 @@ if [ -z "$ENDPOINT" ] || [ -z "$NODE_UUID" ] || [ -z "$NODE_TOKEN" ]; then
     error "缺少必要的安装参数 (Endpoint, UUID, Token)，安装中止"
     exit 1
 fi
+
+check_temp_space
 
 # 5. 配置目录准备
 mkdir -p /etc/probewatch /var/lib/probewatch
