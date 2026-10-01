@@ -978,18 +978,10 @@ export function App() {
     refreshGuest()
   }, [refreshGuest])
 
-  useEffect(() => {
-    if (guestPreview || apiState.kind === 'guest') {
-      refreshGuest()
-      const interval = activeNav === 'node-detail' ? 3000 : 5000
-      const timer = setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          refreshGuest()
-        }
-      }, interval)
-      return () => clearInterval(timer)
-    }
-  }, [guestPreview, apiState.kind, refreshGuest, activeNav])
+  useLivePolling(refreshGuest, {
+    interval: activeNav === 'node-detail' ? 3000 : 5000,
+    enabled: guestPreview || apiState.kind === 'guest',
+  })
 
   const refreshAll = () => { loadCore(true); loadOverview() }
   const lastSyncText = lastSync ? formatTimeOfDay(lastSync) : '—'
