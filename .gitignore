@@ -30,3 +30,4 @@ singbox*.txt
 .deploy-*
 deploy-package.tar.gz
 deploy-package.zip
+frontend/CHANGELOG.md
