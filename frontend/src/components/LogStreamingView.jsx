@@ -25,6 +25,7 @@ import {
   queryNodeLogs,
   fetchAuditLogs,
 } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 import { formatAlertTime } from '../lib/format.js'
 
 export function LogStreamingView({ nodes = [] }) {
@@ -187,20 +188,7 @@ export function LogStreamingView({ nodes = [] }) {
   }, [selectedNodeId, selectedCategory, selectedSeverity])
 
   // Auto poll for log stream
-  useEffect(() => {
-    if (!streamAutoPoll || activeTab !== 'stream') return
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') handleQueryLogs()
-    }, 5000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') handleQueryLogs()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [streamAutoPoll, activeTab, streamNodeUuid, streamUnit, streamPriority, streamGrep, streamLines, streamSince])
+  useLivePolling(handleQueryLogs, { interval: 5000, enabled: streamAutoPoll && activeTab === 'stream' && Boolean(streamNodeUuid) })
 
   // Filtered events
   const filteredEvents = useMemo(() => {

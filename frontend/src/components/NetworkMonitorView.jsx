@@ -3,6 +3,7 @@ import { Check, CheckCircle, CircleNotch, Clock, Globe, Plus, ShieldCheck, Spark
 import { cleanTargetLabel, formatTimeOfDay, numeric, safeArray, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const PRESET_NETWORK_TARGETS = [
   { id: 'tcp-baidu', name: '百度搜索入口 (TCP:80)', kind: 'tcp', host: 'www.baidu.com', port: 80 },
@@ -377,20 +378,9 @@ export function NetworkMonitorView({ nodes = [] }) {
   useEffect(() => {
     setResults([])
     setHistory([])
-    loadData()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') loadData()
-    }, 30000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [loadData, refreshTrigger])
+    return () => requestRef.current?.abort()
+  }, [selectedNodeUuid, refreshTrigger])
+  useLivePolling(loadData, { interval: 30000 })
 
   // Handle adding preset
   const handleAddPreset = async (preset) => {
