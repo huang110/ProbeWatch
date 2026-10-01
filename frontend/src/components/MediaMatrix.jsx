@@ -3,6 +3,7 @@ import { Check, CheckCircle, CircleNotch, FilmStrip, Play, Sparkle, Warning, X }
 import { numeric, safeArray, safeObject, safeText, formatTimeOfDay } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const POPULAR_STREAMING_PLATFORMS = [
   { id: 'chatgpt', label: 'OpenAI / ChatGPT', category: 'ai', host: 'chatgpt.com', path: '/cdn-cgi/trace', regionRules: [{ region: 'US', contains: 'loc=US' }] },
@@ -119,22 +120,8 @@ export function MediaMatrix({ nodes = [] }) {
     return () => controller.abort()
   }, [nodes])
 
-  useEffect(() => {
-    const cleanup = fetchAllMedia()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchAllMedia()
-    }, 45000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') fetchAllMedia()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      cleanup?.()
-      requestRef.current?.abort()
-    }
-  }, [fetchAllMedia, refreshTrigger])
+  useEffect(() => () => requestRef.current?.abort(), [refreshTrigger])
+  useLivePolling(fetchAllMedia, { interval: 45000 })
 
   // Handle adding preset media targets via atomic backend seed
   const handleAddMediaPresets = async () => {

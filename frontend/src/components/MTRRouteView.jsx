@@ -4,6 +4,7 @@ import { formatTimeOfDay, numeric, safeArray, safeObject, safeText } from '../li
 import { EmptyState } from './Common.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
 import { NewRouteMonitorModal } from './NewRouteMonitorModal.jsx'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const PRESET_MTR_TARGETS = [
   { id: 'mtr-1', name: 'Route 1 (198.51.100.1)', host: '198.51.100.1', max_hops: 20 },
@@ -284,20 +285,9 @@ export function MTRRouteView({ nodes = [] }) {
     setMtrData([])
     setConfiguredTargets([])
     setSelectedTargetId(null)
-    fetchMtr()
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchMtr()
-    }, 30000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') fetchMtr()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      requestRef.current?.abort()
-    }
-  }, [fetchMtr, refreshTrigger])
+    return () => requestRef.current?.abort()
+  }, [refreshTrigger, selectedNodeUuid])
+  useLivePolling(fetchMtr, { interval: 30000, enabled: Boolean(selectedNodeUuid) })
 
   const handleDeleteTarget = async (tId) => {
     if (!tId) return

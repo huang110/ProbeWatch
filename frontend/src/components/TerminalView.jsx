@@ -17,6 +17,7 @@ import {
   StopCircle,
 } from '@phosphor-icons/react'
 import { fetchTerminalStatus, execTerminalCommand } from '../lib/api'
+import { useLivePolling } from '../lib/useLivePolling.js'
 
 const QUICK_PRESETS = [
   {
@@ -229,25 +230,8 @@ export default function TerminalView({ initialNodeId = null }) {
     }
   }, [selectedNodeId])
 
-  useEffect(() => {
-    loadStatus()
-    return () => statusRequestRef.current?.abort()
-  }, [])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') loadStatus()
-    }, 8000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadStatus()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-      statusRequestRef.current?.abort()
-    }
-  }, [loadStatus])
+  useEffect(() => () => statusRequestRef.current?.abort(), [])
+  useLivePolling(loadStatus, { interval: 8000 })
 
   // Auto-scroll terminal output
   useEffect(() => {
