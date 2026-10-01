@@ -18,7 +18,7 @@ NODE = {
 }
 
 
-def install_api(page, *, guest=False):
+def install_api(page, *, guest=False, fail_overview=False):
     public = {
         "nodes": {"online": 1, "total": 1, "names": ["测试节点"]},
         "checks": {"success_rate": 100, "avg_latency_ms": 12.5},
@@ -37,6 +37,8 @@ def install_api(page, *, guest=False):
         if "/api/alerts" in url:
             return {"status": 200, "body": "[]"}
         if "/api/overview" in url:
+            if fail_overview:
+                return {"status": 503, "body": json.dumps({"error": "temporary unavailable"})}
             return {"status": 200, "body": json.dumps({"nodes": {"online": 1, "total": 1}, "checks": {"success_rate": 100, "avg_latency_ms": 12.5}, "resources": {}})}
         if "/api/version" in url:
             return {"status": 200, "body": json.dumps({"version": "0.8.64"})}
@@ -80,6 +82,14 @@ def run():
         assert page.locator(".sync-state").count() == 1
         assert page.locator(".last-sync").count() == 1
         assert not errors, errors
+
+        degraded_page = browser.new_page()
+        install_api(degraded_page, fail_overview=True)
+        degraded_page.goto(BASE_URL, wait_until="networkidle")
+        degraded_page.locator(".dashboard-lite-container").wait_for()
+        assert degraded_page.locator(".dashboard-lite-container").count() == 1
+        assert degraded_page.locator(".sync-state").count() == 1
+        degraded_page.close()
 
         page.locator(".nav-item", has_text="系统日志").click()
         page.locator(".log-streaming-view").wait_for()
