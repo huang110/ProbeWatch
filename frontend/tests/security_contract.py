@@ -88,6 +88,11 @@ def test_https_homepage_security_headers_cover_browser_baseline():
         assert f"add_header {header} \"{value}\" always;" in config
 
 
+def test_backend_referrer_policy_matches_proxy_policy():
+    server_source = (ROOT.parent / "internal" / "api" / "server.go").read_text(encoding="utf-8")
+    assert 'Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")' in server_source
+
+
 def test_openresty_security_snippet_keeps_api_proxy_guidance():
     config = OPENRESTY_CONFIG.read_text(encoding="utf-8")
     assert "API authorization" in config
