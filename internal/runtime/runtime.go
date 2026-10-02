@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,8 +51,6 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("open control-plane store: %w", err)
 	}
-	defer store.Close()
-
 	service := auth.NewService(cfg, store, auth.ProviderEndpoints{
 		AuthorizeURL:              "https://github.com/login/oauth/authorize",
 		TokenURL:                  "https://github.com/login/oauth/access_token",
@@ -60,17 +59,37 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 		OrganizationMembershipURL: "https://api.github.com/user/memberships/orgs/{org}",
 	})
 	cleanupCtx, cleanupCancel := context.WithCancel(ctx)
-	defer cleanupCancel()
-	go runAuthCleanup(cleanupCtx, service)
-	go runLifecycleCleanup(cleanupCtx, store)
-	go runHistoryAggregation(cleanupCtx, store)
-	go runBillingCycleWatcher(cleanupCtx, store)
+	var background sync.WaitGroup
+	defer func() {
+		cleanupCancel()
+		background.Wait()
+		_ = store.Close()
+	}()
+	startBackground := func(fn func(context.Context)) {
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			fn(cleanupCtx)
+		}()
+	}
+	startBackground(func(ctx context.Context) { runAuthCleanup(ctx, service) })
+	startBackground(func(ctx context.Context) { runLifecycleCleanup(ctx, store) })
+	startBackground(func(ctx context.Context) { runHistoryAggregation(ctx, store) })
+	startBackground(func(ctx context.Context) { runBillingCycleWatcher(ctx, store) })
 	notifier := notify.NewNotifier(cfg)
-	go notify.RunAlertDispatcher(cleanupCtx, store, notifier)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		notify.RunAlertDispatcher(cleanupCtx, store, notifier)
+	}()
 	serverInstance := api.NewServer(cfg, service)
 	serverInstance.SetNotifier(notifier)
 	if serverInstance.BackupScheduler() != nil {
-		go serverInstance.BackupScheduler().Start(cleanupCtx)
+		background.Add(1)
+		go func() {
+			defer background.Done()
+			serverInstance.BackupScheduler().Start(cleanupCtx)
+		}()
 	}
 	handler := serverInstance.Handler()
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
