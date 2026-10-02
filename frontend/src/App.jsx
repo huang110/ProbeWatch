@@ -178,6 +178,12 @@ const VALID_NAV_PAGES = [
   'media',
   'targets',
   'settings',
+  'users',
+  'team',
+  'tokens',
+  'keys',
+  'audit',
+  'audit-logs',
   'backups',
   'status',
   'status-page',
@@ -1188,7 +1194,9 @@ export function App() {
         <StatusPageView
           theme={theme}
           onThemeChange={setTheme}
-          onOpenLogin={() => setGuestPreview(true)}
+          onOpenLogin={() => {
+            window.location.href = '/auth/github'
+          }}
         />
       )
     }

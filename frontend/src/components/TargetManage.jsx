@@ -108,7 +108,7 @@ export function TargetTable({ targets, readOnly = false, loading = false, mutati
         <tr><th>ID</th><th>名称</th><th>类型</th><th>主机</th><th>端口</th><th>路径</th><th>间隔</th><th>启用</th>{!readOnly && <th aria-hidden="true" />}</tr>
       </thead>
       <tbody>
-        {targets.map((target, index) => <tr key={target.id || `target-${index}`}>
+        {targets.map((target, index) => <tr key={target.id || `target-${index}`} data-target-id={target.id || undefined}>
           <td>{target.id || '—'}</td>
           <td>{target.name}</td>
           <td><span className="target-kind">{KIND_LABELS[target.kind] || target.kind}</span></td>
@@ -119,7 +119,7 @@ export function TargetTable({ targets, readOnly = false, loading = false, mutati
           <td>{readOnly
             ? <span className="target-state"><span className={`status-dot status-${target.enabled ? 'online' : 'offline'}`} />{target.enabled ? '已启用' : '已停用'}</span>
             : <button type="button" className={`target-toggle ${target.enabled ? 'target-toggle-on' : ''}`} disabled={mutatingId === target.id} aria-pressed={target.enabled} onClick={() => onToggle(target)}>{mutatingId === target.id ? '切换中…' : target.enabled ? '已启用' : '已停用'}</button>}</td>
-          {!readOnly && <td className="target-cell-action"><button type="button" className="text-button target-delete" disabled={mutatingId === target.id} onClick={() => onDelete(target)}>{mutatingId === target.id ? '处理中…' : '删除'}</button></td>}
+          {!readOnly && <td className="target-cell-action"><button type="button" className="text-button target-delete" aria-label={`删除检测目标 ${target.id || target.name}`} disabled={mutatingId === target.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDelete?.(target) }}>{mutatingId === target.id ? '处理中…' : '删除'}</button></td>}
         </tr>)}
       </tbody>
     </table>
@@ -190,9 +190,10 @@ export function TargetManage({ readOnly = false, kinds = null, title = '检测�
   }
 
   const deleteTarget = async (target) => {
+    if (!target?.id) return
     setMutatingId(target.id)
     setError('')
-    setStatus(null)
+    setStatus({ kind: 'info', message: '正在删除检测目标…' })
     try {
       const csrfToken = await fetchCsrfToken()
       const response = await fetch(`/api/targets/${encodeURIComponent(target.id)}`, { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken } })
