@@ -101,6 +101,8 @@ export default function SyntheticProbingView() {
   const [error, setError] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeProtocolTab, setActiveProtocolTab] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [syncState, setSyncState] = useState('loading')
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -116,6 +118,7 @@ export default function SyntheticProbingView() {
     const controller = new AbortController()
     requestRef.current = controller
     if (isRefresh) setRefreshing(true)
+    setSyncState('syncing')
     try {
       const [overviewData, targetsData] = await Promise.all([
         fetchSyntheticResults(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
@@ -126,11 +129,13 @@ export default function SyntheticProbingView() {
         if (Array.isArray(targetsData)) setTargets(targetsData)
         if (!overviewData) throw new Error('加载合成监控数据失败，将自动重试')
         setError(null)
+        setSyncState('ok')
       }
     } catch (err) {
       if (err?.name !== 'AbortError' && !controller.signal.aborted) {
         console.error('Failed to load synthetic monitoring data:', err)
         setError(err.message || '加载合成监控数据失败')
+        setSyncState('retrying')
         return false
       }
     } finally {
@@ -139,7 +144,7 @@ export default function SyntheticProbingView() {
   }, [])
 
   useEffect(() => () => requestRef.current?.abort(), [])
-  useLivePolling(loadData, { interval: 15000 })
+  useLivePolling(loadData, { interval: 10000 })
 
   // Filter targets
   const filteredTargets = useMemo(() => {
@@ -149,15 +154,17 @@ export default function SyntheticProbingView() {
       const matchesSearch =
         (t.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (t.target_url || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (t.protocol || '').toLowerCase().includes(searchQuery.toLowerCase())
+        (t.protocol || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.latest_results || []).some((result) => [result.node_name, result.node_id].filter(Boolean).join(' ').toLowerCase().includes(searchQuery.toLowerCase()))
       const matchesProto =
         activeProtocolTab === 'all' ||
         (activeProtocolTab === 'https'
           ? ['http', 'https'].includes((t.protocol || '').toLowerCase())
           : (t.protocol || '').toLowerCase() === activeProtocolTab)
-      return matchesSearch && matchesProto
+      const matchesStatus = statusFilter === 'all' || item.consensus_status === statusFilter
+      return matchesSearch && matchesProto && matchesStatus
     })
-  }, [overview, searchQuery, activeProtocolTab])
+  }, [overview, searchQuery, activeProtocolTab, statusFilter])
 
   // Summary Metrics
   const metrics = useMemo(() => {
@@ -241,10 +248,16 @@ export default function SyntheticProbingView() {
             <Plus size={16} weight="bold" />
             新建监控
           </button>
-          <span className={`synthetic-sync-status ${refreshing || loading ? 'is-syncing' : ''}`}>
-            <span className="status-dot status-online" />
-            {refreshing || loading ? '同步中' : '自动同步中'}
+          <span className={`synthetic-sync-status ${syncState !== 'ok' ? 'is-syncing' : ''}`}>
+            <span className={`status-dot ${syncState === 'retrying' ? 'status-warning' : 'status-online'}`} />
+            {syncState === 'retrying' ? '同步失败，正在重试' : syncState === 'ok' ? '自动同步中' : '同步中'}
           </span>
+        </div>
+
+        <div className="synthetic-status-filters" aria-label="状态筛选">
+          {[['all', '全部'], ['healthy', '正常'], ['degraded', '降级'], ['failing', '异常'], ['unknown', '待采样']].map(([id, label]) => (
+            <button key={id} type="button" className={`synthetic-status-filter ${statusFilter === id ? 'is-active' : ''}`} onClick={() => setStatusFilter(id)}>{label}</button>
+          ))}
         </div>
       </div>
 
@@ -331,7 +344,7 @@ export default function SyntheticProbingView() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索契约名称、URL 或协议..."
+            placeholder="搜索名称、URL、节点或协议..."
             className="synthetic-search-input"
           />
         </div>
@@ -346,10 +359,13 @@ export default function SyntheticProbingView() {
       ) : filteredTargets.length === 0 ? (
         <div className="synthetic-empty-state">
           <Globe size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="synthetic-empty-title">暂无匹配的合成拨测目标</h3>
+          <h3 className="synthetic-empty-title">{(overview?.total_targets || targets.length) > 0 ? '没有找到匹配的监控目标' : '还没有合成监控目标'}</h3>
           <p className="synthetic-empty-description">
-            您可以点击右上角“新建监控”或使用预设模板快速创建探测目标。
+            {(overview?.total_targets || targets.length) > 0
+              ? '清除筛选条件后重试。'
+              : '创建一个目标后，系统会持续检查网站、接口或 DNS 服务。'}
           </p>
+          {(overview?.total_targets || targets.length) === 0 ? <button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
