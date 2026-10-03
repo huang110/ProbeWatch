@@ -861,7 +861,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         <div className="footer-content">
           <span>ProbeWatch 纯监控探针 · 安全加固出站模式 · 零特权设计</span>
           <span className="footer-dot">·</span>
-          <span>最后检测于 {lastUpdated}</span>
+          <span>实时同步中</span>
         </div>
       </footer>
 
