@@ -271,27 +271,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
   const isAllHealthy = total !== null && total > 0 && online === total
   const hasIssues = total !== null && online !== null && online < total
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  const lastUpdatedAt = effectiveStatus?.last_updated_at ? Date.parse(effectiveStatus.last_updated_at) : NaN
-  const latestReportedAt = safeArray(nodes.telemetry)
-    .map((item) => item?.last_reported_at ? Date.parse(item.last_reported_at) : NaN)
-    .filter((value) => Number.isFinite(value))
-    .reduce((latest, value) => Math.max(latest, value), 0)
-  const formatAge = (timestamp) => {
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return '暂无数据'
-    const seconds = Math.max(0, Math.floor((now - timestamp) / 1000))
-    if (seconds < 2) return '刚刚'
-    if (seconds < 60) return `${seconds}秒前`
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}分钟前`
-    return `${Math.floor(minutes / 60)}小时前`
-  }
-  const lastUpdated = Number.isFinite(lastUpdatedAt) ? formatAge(lastUpdatedAt) : '暂无数据'
-  const telemetryUpdated = formatAge(latestReportedAt || lastUpdatedAt)
+  const telemetryItems = safeArray(nodes.telemetry)
+  const hasTelemetry = telemetryItems.length > 0
+  const syncStatus = (isRefreshing || localRefreshing)
+    ? '同步中'
+    : hasTelemetry
+      ? '实时同步'
+      : '等待数据'
 
   return (
     <main className="guest-shell guest-mjj-shell">
@@ -419,9 +405,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
 
           <div className="guest-stat-box">
-            <div className="stat-head"><Pulse size={18} /><span>最近遥测同步</span></div>
-            <div className="stat-main mono">{lastUpdated}</div>
-            <div className="stat-sub">页面数据 {lastUpdated} · 探针上报 {telemetryUpdated}</div>
+            <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
+            <div className="stat-main mono">{syncStatus}</div>
+            <div className="stat-sub">页面与探针数据持续同步</div>
           </div>
         </div>
       </section>
