@@ -58,6 +58,9 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 		Checks struct {
 			SuccessRate  *float64 `json:"success_rate"`
 			AvgLatencyMs *float64 `json:"avg_latency_ms"`
+			Total        int      `json:"total"`
+			Success      int      `json:"success"`
+			Failure      int      `json:"failure"`
 		} `json:"checks"`
 		LastUpdatedAt *time.Time `json:"last_updated_at"`
 		GeneratedAt   time.Time  `json:"generated_at"`
