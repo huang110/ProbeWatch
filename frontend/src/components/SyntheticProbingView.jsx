@@ -309,7 +309,7 @@ export default function SyntheticProbingView() {
             <span className="text-xs font-semibold uppercase tracking-wider">异常目标</span>
             <WarningCircle size={18} className={metrics.failing > 0 ? 'text-rose-400' : 'text-slate-400'} />
           </div>
-          <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>{metrics.hasSamples ? metrics.failing : '—'}</div>
+          <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>{metrics.hasSamples ? metrics.failing : '未配置'}</div>
           <div className="synthetic-metric-detail">多节点共识失败，需要优先处理</div>
         </div>
       </div>
@@ -548,6 +548,12 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
       </div>
 
       {/* Timing Waterfall & Assertions */}
+      <div className="synthetic-target-summary">
+        <div><span>当前状态</span><strong className={item.consensus_status === 'failing' ? 'is-red' : item.consensus_status === 'degraded' ? 'is-amber' : item.consensus_status === 'healthy' ? 'is-green' : ''}>{item.consensus_status === 'healthy' ? '正常' : item.consensus_status === 'degraded' ? '降级' : item.consensus_status === 'failing' ? '异常' : '待采样'}</strong></div>
+        <div><span>节点通过</span><strong>{item.total_nodes > 0 ? `${item.passing_nodes}/${item.total_nodes}` : '待采样'}</strong></div>
+        <div><span>平均延迟</span><strong>{Number.isFinite(Number(item.avg_latency_ms)) && Number(item.avg_latency_ms) > 0 ? `${Math.round(Number(item.avg_latency_ms))}ms` : '待采样'}</strong></div>
+        <div><span>最近结果</span><strong>{results.length > 0 ? (results[0].passed ? '成功' : '失败') : '待采样'}</strong></div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5 pt-4">
         {/* Timing Waterfall Chart */}
         <div className="md:col-span-7 space-y-2">
@@ -1187,7 +1193,7 @@ function LiveTestModal({ initialTarget, onClose }) {
         <div className="sticky top-0 bg-slate-900/95 backdrop-blur-md px-6 py-4 border-b border-slate-800 flex items-center justify-between z-10">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Play size={20} className="text-emerald-400" />
-            实时合成模拟拨测与断言调试器
+            临时探测
           </h2>
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
             <X size={18} />
@@ -1238,9 +1244,11 @@ function LiveTestModal({ initialTarget, onClose }) {
             </div>
           </div>
 
+          <p className="text-xs text-slate-400">只执行一次，不会保存为监控任务。</p>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-400 font-medium block mb-1">断言规则 (JSON 格式)</label>
+              <label className="text-xs text-slate-400 font-medium block mb-1">成功条件 (JSON 格式)</label>
               <textarea
                 rows={3}
                 value={assertionsText}
