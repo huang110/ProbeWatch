@@ -975,6 +975,21 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   .detail-identity { flex-wrap: wrap; }
   .content-footer { line-height: 1.6; }
 }
+
+/* 手机端顶栏保持在视口内，避免管理员操作区把页面撑出横向滚动。
+   低宽度下保留图标和实时状态，隐藏重复文字与头像；页面内部的协议/筛选条仍可独立横向滑动。 */
+@media (max-width: 560px) {
+  .topbar { min-width: 0; gap: 8px; overflow: hidden; }
+  .topbar-left { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+  .breadcrumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .top-actions { min-width: 0; flex: 0 1 auto; max-width: 58%; gap: 5px; overflow: hidden; }
+  .top-actions .guest-live-indicator,
+  .top-actions .profile-avatar-top,
+  .top-actions .button span { display: none; }
+  .top-actions .button,
+  .top-actions .icon-button { flex: 0 0 34px; width: 34px; min-width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .top-actions .top-logout-btn { display: grid; place-items: center; }
+}
 @media (max-width: 768px) {
   /* 电脑端表格 → 手机端卡片 */
   .node-table-wrap { display: none; }
