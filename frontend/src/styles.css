@@ -1810,6 +1810,7 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .vps-check-action { display: inline-flex; align-items: center; margin-top: 10px; padding: 6px 9px; border: 1px solid rgba(90,216,174,.24); border-radius: 7px; color: var(--mint); background: rgba(90,216,174,.06); font-size: 10px; font-weight: 700; cursor: pointer; }
 .vps-check-action:hover { background: rgba(90,216,174,.12); }
 .guest-primary-issue { color: var(--amber); }
+.guest-check-context { color: var(--text-3); font-family: var(--font-mono); font-size: 10px; }
 [data-theme="light"] .vps-isp-val {
   color: #1e293b;
 }

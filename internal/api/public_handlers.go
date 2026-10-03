@@ -40,6 +40,12 @@ type publicStatusChecks struct {
 	Total        int      `json:"total"`
 	Success      int      `json:"success"`
 	Failure      int      `json:"failure"`
+	CoverageTotal   int      `json:"coverage_total"`
+	CoverageSampled int      `json:"coverage_sampled"`
+	CoverageMissing []string `json:"coverage_missing"`
+	LatencyAlertThresholdMs int `json:"latency_alert_threshold_ms"`
+	RecentFailureStreak int `json:"recent_failure_streak"`
+	WindowHours int `json:"window_hours"`
 }
 
 // publicNodeTelemetry is the allow-listed, read-only data used by the public
@@ -142,6 +148,11 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	checksTotal, checksSuccess, latencyTotal, latencyCount := 0, 0, int64(0), 0
 	telemetryLatencyTotal, telemetryLatencyCount := 0.0, 0
+	const latencyAlertThresholdMs = 200
+	const windowHours = 24
+	coverageLabels := map[string]bool{"联通": false, "电信": false, "移动": false}
+	type checkOutcome struct { at time.Time; ok bool }
+	var outcomes []checkOutcome
 	seenChecks := make(map[string]struct{})
 	var lastUpdated time.Time
 	for _, node := range nodes {
@@ -207,6 +218,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		if summaries, e := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now); e == nil {
 			for _, summary := range summaries {
 				check := publicNodeCheck{Kind: summary.Kind, Label: publicCheckLabel(summary.Name, summary.Kind)}
+				if _, known := coverageLabels[check.Label]; known && summary.HasWindowData { coverageLabels[check.Label] = true }
 				if summary.HasWindowData && summary.LatencyCount > 0 { value := summary.LatencyAvgMS; check.LatencyMS = &value }
 				if summary.HasWindowData && summary.Total > 0 { value := float64(summary.Failure) / float64(summary.Total); check.LossRate = &value }
 				if !summary.LastCheckedAt.IsZero() { value := summary.LastCheckedAt; check.LastCheckedAt = &value }
@@ -234,7 +246,9 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				}
 				if json.Unmarshal(record.Payload, &result) == nil {
 					checksTotal++
-					if ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == ""); ok {
+					ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
+					outcomes = append(outcomes, checkOutcome{at: record.CheckedAt, ok: ok})
+					if ok {
 						checksSuccess++
 					}
 					if result.Latency > 0 {
@@ -259,6 +273,22 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	if response.Checks.AvgLatencyMs == nil && telemetryLatencyCount > 0 {
 		avg := telemetryLatencyTotal / float64(telemetryLatencyCount)
 		response.Checks.AvgLatencyMs = &avg
+	}
+	response.Checks.CoverageTotal = len(coverageLabels)
+	for label, sampled := range coverageLabels {
+		if sampled {
+			response.Checks.CoverageSampled++
+		} else {
+			response.Checks.CoverageMissing = append(response.Checks.CoverageMissing, label)
+		}
+	}
+	sort.Strings(response.Checks.CoverageMissing)
+	response.Checks.LatencyAlertThresholdMs = latencyAlertThresholdMs
+	response.Checks.WindowHours = windowHours
+	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].at.After(outcomes[j].at) })
+	for _, outcome := range outcomes {
+		if outcome.ok { break }
+		response.Checks.RecentFailureStreak++
 	}
 	if !lastUpdated.IsZero() {
 		response.LastUpdatedAt = &lastUpdated

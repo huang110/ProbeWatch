@@ -203,6 +203,11 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const displayPercent = (value) => value === null ? '—' : `${Math.round(Number(value) * 10) / 10}%`
   const successSummary = checksTotal !== null && checksSuccess !== null && checksTotal > 0 ? `${Math.round(checksSuccess)} 次成功 / ${Math.round(checksTotal)} 次探测` : successRate !== null ? '最近 24 小时' : '等待检测样本'
   const failureSummary = checksTotal !== null && checksTotal > 0 ? `失败 ${Math.round(checks.failure ?? Math.max(0, checksTotal - (checksSuccess || 0)))} 次` : ''
+  const coverageTotal = numeric(checks.coverage_total)
+  const coverageSampled = numeric(checks.coverage_sampled)
+  const coverageMissing = safeArray(checks.coverage_missing).map((item) => safeText(item)).filter(Boolean)
+  const latencyAlertThreshold = numeric(checks.latency_alert_threshold_ms) ?? 200
+  const recentFailureStreak = numeric(checks.recent_failure_streak) ?? 0
   const liveLatencies = safeArray(nodes.telemetry)
     .map((item) => numeric(item?.latency_ms))
     .filter((value) => value !== null)
@@ -213,7 +218,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const hasMobileSample = publicCheckRows.some((check) => /移动|mobile|cm/i.test(`${check?.label || ''} ${check?.kind || ''}`) && numeric(check?.latency_ms) !== null)
   const telecomLatency = publicCheckRows.filter((check) => /电信|telecom|ct/i.test(`${check?.label || ''} ${check?.kind || ''}`)).map((check) => numeric(check?.latency_ms)).find((value) => value !== null)
   const primaryIssue = successRate !== null && successRate < 95
-    ? [!hasMobileSample ? '移动线路暂无样本' : '', telecomLatency !== null && telecomLatency >= 200 ? '电信延迟偏高' : ''].filter(Boolean).join(' · ')
+    ? [coverageMissing.length ? `${coverageMissing.join('、')}线路暂无样本` : '', telecomLatency !== null && telecomLatency >= latencyAlertThreshold ? `电信延迟偏高（${formatLatency(telecomLatency)}，阈值 ${latencyAlertThreshold} ms）` : ''].filter(Boolean).join(' · ')
     : ''
   const allCustomMeta = getAllNodeCustomMeta()
   const rawNames = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
@@ -423,6 +428,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             </div>
             <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}${failureSummary ? ` · ${failureSummary}` : ''}` : successSummary}</div>
             {primaryIssue && <div className="stat-sub guest-primary-issue">主要异常：{primaryIssue}</div>}
+            {(coverageTotal !== null || recentFailureStreak > 0) && (
+              <div className="stat-sub guest-check-context">
+                {coverageTotal !== null ? `线路覆盖 ${coverageSampled ?? 0}/${coverageTotal}` : ''}
+                {coverageTotal !== null && recentFailureStreak > 0 ? ' · ' : ''}
+                {recentFailureStreak > 0 ? `连续失败 ${recentFailureStreak} 次` : ''}
+              </div>
+            )}
           </div>
 
           <div className="guest-stat-box">
