@@ -198,6 +198,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const online = numeric(nodes.online)
   const total = numeric(nodes.total)
   const successRate = numeric(checks.success_rate)
+  const displayPercent = (value) => value === null ? '—' : `${Math.round(Number(value) * 10) / 10}%`
   const liveLatencies = safeArray(nodes.telemetry)
     .map((item) => numeric(item?.latency_ms))
     .filter((value) => value !== null)
@@ -269,10 +270,20 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     })
   }, [names, searchQuery, selectedTag, sortKey, allCustomMeta])
 
-  const isAllHealthy = total !== null && total > 0 && online === total
-  const hasIssues = total !== null && online !== null && online < total
+  const isAllHealthy = total !== null && total > 0 && online === total && (successRate === null || successRate >= 95)
+  const hasIssues = (total !== null && online !== null && online < total) || (successRate !== null && successRate < 95)
+  const healthLabel = total === null || total === 0
+    ? '等待节点数据'
+    : hasIssues
+      ? (online !== null && online < total ? '部分节点异常' : '检测质量下降')
+      : '全部正常'
   const telemetryItems = safeArray(nodes.telemetry)
   const hasTelemetry = telemetryItems.length > 0
+  const latestReportedAt = telemetryItems
+    .map((item) => item?.last_reported_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || effectiveStatus?.generated_at || null
   const syncStatus = (isRefreshing || localRefreshing)
     ? '同步中'
     : hasTelemetry
@@ -362,7 +373,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="hero-status-content">
             <h1>
-              {isAllHealthy ? '全部正常' : hasIssues ? '部分异常' : '正在侦测全网节点状态…'}
+              {healthLabel}
             </h1>
             <p>
               面向访客的实时只读探针仪表盘 · 全球三网质量侦测与可用性遥测
@@ -370,7 +381,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="hero-uptime-indicator">
             <span className="uptime-label">全网可用率</span>
-            <b className="uptime-value mono">{successRate !== null ? `${successRate}%` : '—'}</b>
+            <b className="uptime-value mono">{displayPercent(successRate)}</b>
           </div>
         </div>
 
@@ -399,15 +410,15 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><ShieldCheck size={18} /><span>24H 检测通过率</span></div>
             <div className="stat-main mono">
-              {successRate !== null ? `${successRate}%` : '—'}
+              {displayPercent(successRate)}
             </div>
-            <div className="stat-sub">无拦截/无污染</div>
+            <div className="stat-sub">{successRate !== null && successRate < 95 ? '需要关注' : '最近 24 小时'}</div>
           </div>
 
           <div className="guest-stat-box">
             <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
             <div className="stat-main mono">{syncStatus}</div>
-            <div className="stat-sub">页面与探针数据持续同步</div>
+            <div className="stat-sub">最近上报 {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}</div>
           </div>
         </div>
       </section>
@@ -517,7 +528,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
                   const telemetry = telemetryByName.get(name) || {}
                   const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
-                  const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '账单未配置'
+                  const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '账单信息隐藏'
                   const cpuPercent = numeric(telemetry.cpu_percent)
                   const loadText = telemetry.load1 !== undefined ? `${Number(telemetry.load1).toFixed(2)} 1m` : '暂无实时数据'
                   const memUsed = numeric(telemetry.memory_used_bytes)
@@ -561,6 +572,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const cuLoss = numeric(cuCheck?.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
                   const ctLoss = numeric(ctCheck?.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
                   const cmLoss = numeric(cmCheck?.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
+                  const checkLatencyText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : formatLatency(value)
+                  const checkLossText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : `${value.toFixed(1)}%`
                   const checkLabels = hasIspChecks
                     ? [cuCheck?.label || '联通', ctCheck?.label || '电信', cmCheck?.label || '移动']
                     : ['TCP', 'HTTPS', 'DNS']
@@ -589,6 +602,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                       <div className="vps-sub-pills">
                         <span className="vps-sub-pill">在线 {uptimeText}</span>
                         <span className="vps-sub-pill">{priceText}</span>
+                        <span className="vps-sub-pill">上报 {telemetry.last_reported_at ? formatTimeOfDay(telemetry.last_reported_at) : '暂无'}</span>
                       </div>
 
                       {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
@@ -669,11 +683,11 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-tri-col vps-expiry-col">
                           <div className="vps-meta-line">
                             <span className="vps-meta-icon">📅</span>
-                            <span>{remainDays !== null ? `剩余 ${remainDays} 天` : '账单未配置'}</span>
+                            <span>{remainDays !== null ? `剩余 ${remainDays} 天` : '账单信息隐藏'}</span>
                           </div>
                           <div className="vps-meta-line">
                             <span className="vps-meta-icon">💰</span>
-                            <span>{costText}</span>
+                            <span>{costText === '账单未配置' ? '成本信息隐藏' : costText}</span>
                           </div>
                         </div>
                       </div>
@@ -696,7 +710,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot unicom-red" />
                                 <span>{checkLabels[0]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{formatLatency(cuLatency)}</span>
+                              <span className="vps-isp-val mono">{checkLatencyText(cuLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
                           </div>
@@ -707,7 +721,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot telecom-blue" />
                                 <span>{checkLabels[1]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{formatLatency(ctLatency)}</span>
+                              <span className="vps-isp-val mono">{checkLatencyText(ctLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
                           </div>
@@ -718,7 +732,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot mobile-green" />
                                 <span>{checkLabels[2]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{formatLatency(cmLatency)}</span>
+                              <span className="vps-isp-val mono">{checkLatencyText(cmLatency)}</span>
                             </div>
                             <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
                           </div>
@@ -737,7 +751,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot unicom-red" />
                                 <span>{checkLabels[0]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{cuLoss !== null ? `${cuLoss.toFixed(1)}%` : '—'}</span>
+                              <span className="vps-isp-val mono">{checkLossText(cuLoss)}</span>
                             </div>
                             <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
                           </div>
@@ -748,7 +762,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot telecom-blue" />
                                 <span>{checkLabels[1]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{ctLoss !== null ? `${ctLoss.toFixed(1)}%` : '—'}</span>
+                              <span className="vps-isp-val mono">{checkLossText(ctLoss)}</span>
                             </div>
                             <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
                           </div>
@@ -759,7 +773,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                                 <span className="vps-isp-dot mobile-green" />
                                 <span>{checkLabels[2]}</span>
                               </span>
-                              <span className="vps-isp-val mono">{cmLoss !== null ? `${cmLoss.toFixed(1)}%` : '—'}</span>
+                              <span className="vps-isp-val mono">{checkLossText(cmLoss)}</span>
                             </div>
                             <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
                           </div>
