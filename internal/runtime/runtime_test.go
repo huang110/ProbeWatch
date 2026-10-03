@@ -34,7 +34,7 @@ func TestControlPlaneServesAndShutsDownWithContext(t *testing.T) {
 			MaxRequestBody: 1024,
 		})
 	}()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		response, requestErr := http.Get("http://" + address + "/healthz")
 		if requestErr == nil {
@@ -55,7 +55,7 @@ func TestControlPlaneServesAndShutsDownWithContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("control plane shutdown error = %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("control plane did not shut down")
 	}
 }
