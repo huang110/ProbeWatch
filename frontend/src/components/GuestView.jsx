@@ -209,6 +209,12 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const avgLatency = numeric(checks.avg_latency_ms) ?? (liveLatencies.length > 0
     ? liveLatencies.reduce((sum, value) => sum + value, 0) / liveLatencies.length
     : null)
+  const publicCheckRows = safeArray(nodes.telemetry).flatMap((item) => safeArray(item?.checks))
+  const hasMobileSample = publicCheckRows.some((check) => /移动|mobile|cm/i.test(`${check?.label || ''} ${check?.kind || ''}`) && numeric(check?.latency_ms) !== null)
+  const telecomLatency = publicCheckRows.filter((check) => /电信|telecom|ct/i.test(`${check?.label || ''} ${check?.kind || ''}`)).map((check) => numeric(check?.latency_ms)).find((value) => value !== null)
+  const primaryIssue = successRate !== null && successRate < 95
+    ? [!hasMobileSample ? '移动线路暂无样本' : '', telecomLatency !== null && telecomLatency >= 200 ? '电信延迟偏高' : ''].filter(Boolean).join(' · ')
+    : ''
   const allCustomMeta = getAllNodeCustomMeta()
   const rawNames = safeArray(nodes.names).map((name) => safeText(name)).filter(Boolean)
   const names = rawNames.filter((name) => {
@@ -382,7 +388,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             </p>
           </div>
           <div className="hero-uptime-indicator">
-            <span className="uptime-label">全网可用率</span>
+            <span className="uptime-label">在线率</span>
             <b className="uptime-value mono">{displayPercent(successRate)}</b>
           </div>
         </div>
@@ -415,6 +421,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
               {displayPercent(successRate)}
             </div>
             <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}${failureSummary ? ` · ${failureSummary}` : ''}` : successSummary}</div>
+            {primaryIssue && <div className="stat-sub guest-primary-issue">主要异常：{primaryIssue}</div>}
           </div>
 
           <div className="guest-stat-box">
@@ -787,7 +794,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                           className="vps-check-action"
                           onClick={(event) => { event.stopPropagation(); onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
                         >
-                          移动暂无样本 · 检查节点线路
+                          移动暂无样本 · 检查节点线路（最近探测：无记录）
                         </button>
                       )}
 
