@@ -365,7 +365,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
                         </div>
                         <div className="text-right">
                           <span className="font-bold text-sm sm:text-base font-mono text-emerald-400">
-                            {item.uptime_90d?.toFixed(2)}%
+                            {item.uptime_90d == null ? '—' : `${Math.round(item.uptime_90d)}%`}
                           </span>
                           <span className="text-xs text-slate-500 ml-1.5 hidden sm:inline font-mono">可用率 ({daysCount}天)</span>
                         </div>
@@ -391,7 +391,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
                         {/* Bar labels */}
                         <div className="flex justify-between items-center text-[11px] font-mono text-slate-500 mt-1.5">
                           <span>{daysCount} 天前</span>
-                          <span className="text-slate-400 font-medium">90 天综合 SLA 在线率: {item.uptime_90d?.toFixed(2)}%</span>
+                          <span className="text-slate-400 font-medium">90 天综合 SLA 在线率: {item.uptime_90d == null ? '—' : `${Math.round(item.uptime_90d)}%`}</span>
                           <span>今天</span>
                         </div>
                       </div>
@@ -412,7 +412,7 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="text-slate-400">可用率:</span>
-              <span className="font-mono font-bold text-emerald-400">{hoveredDay.uptime_pct?.toFixed(2)}%</span>
+              <span className="font-mono font-bold text-emerald-400">{hoveredDay.uptime_pct == null ? '—' : `${Math.round(hoveredDay.uptime_pct)}%`}</span>
             </div>
             <div className="flex items-center justify-between gap-4 mt-0.5">
               <span className="text-slate-400">运行状态:</span>
