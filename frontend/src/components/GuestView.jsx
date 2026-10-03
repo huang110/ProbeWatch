@@ -198,7 +198,10 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const online = numeric(nodes.online)
   const total = numeric(nodes.total)
   const successRate = numeric(checks.success_rate)
+  const checksTotal = numeric(checks.total)
+  const checksSuccess = numeric(checks.success)
   const displayPercent = (value) => value === null ? '—' : `${Math.round(Number(value) * 10) / 10}%`
+  const successSummary = checksTotal !== null && checksSuccess !== null ? `${Math.round(checksSuccess)} 次成功 / ${Math.round(checksTotal)} 次探测` : successRate !== null ? '最近 24 小时' : '等待检测样本'
   const liveLatencies = safeArray(nodes.telemetry)
     .map((item) => numeric(item?.latency_ms))
     .filter((value) => value !== null)
@@ -401,7 +404,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
               {formatLatency(avgLatency)}
             </div>
             <div className="stat-sub">
-              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : '跨洋/较高') : '主控探针采样平均'}
+              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : avgLatency < 200 ? '偏高' : '较高') : '主控探针采样平均'}
             </div>
           </div>
 
@@ -410,7 +413,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             <div className="stat-main mono">
               {displayPercent(successRate)}
             </div>
-            <div className="stat-sub">{successRate !== null && successRate < 95 ? '需要关注' : '最近 24 小时'}</div>
+            <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}` : successSummary}</div>
           </div>
 
           <div className="guest-stat-box">
@@ -882,7 +885,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         <div className="footer-content">
           <span>ProbeWatch 纯监控探针 · 安全加固出站模式 · 零特权设计</span>
           <span className="footer-dot">·</span>
-          <span>实时同步中</span>
+          <span>公开状态只读 · {syncStatus}</span>
         </div>
       </footer>
 
