@@ -289,6 +289,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   }, [names, searchQuery, selectedTag, selectedStatus, sortKey, allCustomMeta, telemetryByName])
 
   const isAllHealthy = total !== null && total > 0 && online === total && (successRate === null || successRate >= 95)
+  const offlineCount = total !== null && online !== null ? Math.max(0, total - online) : null
+  const attentionCount = telemetryItems.filter((item) => item?.status === 'attention').length
   const hasIssues = (total !== null && online !== null && online < total) || (successRate !== null && successRate < 95)
   const healthLabel = total === null || total === 0
     ? '等待节点数据'
@@ -436,6 +438,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                 {coverageTotal !== null ? `线路覆盖 ${coverageSampled ?? 0}/${coverageTotal}` : ''}
                 {coverageTotal !== null && recentFailureStreak > 0 ? ' · ' : ''}
                 {recentFailureStreak > 0 ? `连续失败 ${recentFailureStreak} 次` : ''}
+              </div>
+            )}
+            {(offlineCount !== null || attentionCount > 0) && (
+              <div className="stat-sub guest-check-context">
+                {offlineCount !== null ? `离线节点 ${offlineCount} 台` : ''}
+                {offlineCount !== null && attentionCount > 0 ? ' · ' : ''}
+                {attentionCount > 0 ? `需关注 ${attentionCount} 台` : ''}
               </div>
             )}
           </div>
