@@ -608,8 +608,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                   const cuLoss = numeric(cuCheck?.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
                   const ctLoss = numeric(ctCheck?.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
                   const cmLoss = numeric(cmCheck?.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
-                  const checkLatencyText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : formatLatency(value)
-                  const checkLossText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : `${value.toFixed(1)}%`
+                  const checkLatencyText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : nodeStatus === 'offline' ? `历史 ${formatLatency(value)}` : formatLatency(value)
+                  const checkLossText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : nodeStatus === 'offline' ? `历史 ${value.toFixed(1)}%` : `${value.toFixed(1)}%`
                   const checkLabels = hasIspChecks
                     ? [cuCheck?.label || '联通', ctCheck?.label || '电信', cmCheck?.label || '移动']
                     : ['TCP', 'HTTPS', 'DNS']
