@@ -39,6 +39,7 @@ const PROTOCOL_CONFIG = {
 
 const PRESET_TARGETS = [
   {
+    displayName: 'Cloudflare 网站连通性',
     name: 'Cloudflare Trace (HTTP/HTTPS)',
     protocol: 'https',
     target_url: 'https://cloudflare.com/cdn-cgi/trace',
@@ -53,6 +54,7 @@ const PRESET_TARGETS = [
     ],
   },
   {
+    displayName: 'Google DNS 查询',
     name: 'Google DNS-over-HTTPS (DoH)',
     protocol: 'doh',
     target_url: 'https://dns.google/dns-query?name=google.com&type=A',
@@ -67,6 +69,7 @@ const PRESET_TARGETS = [
     ],
   },
   {
+    displayName: 'WebSocket 回显测试',
     name: 'Postman Echo WebSocket',
     protocol: 'websocket',
     target_url: 'wss://ws.postman-echo.com/raw',
@@ -80,6 +83,7 @@ const PRESET_TARGETS = [
     ],
   },
   {
+    displayName: 'gRPC 健康检查',
     name: 'gRPC Health Check Endpoint',
     protocol: 'grpc',
     target_url: 'https://grpcb.in:9001',
@@ -106,6 +110,7 @@ export default function SyntheticProbingView() {
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isPresetPickerOpen, setIsPresetPickerOpen] = useState(false)
   const [editingTarget, setEditingTarget] = useState(null)
   const [isTestModalOpen, setIsTestModalOpen] = useState(false)
   const [testTarget, setTestTarget] = useState(null)
@@ -236,7 +241,7 @@ export default function SyntheticProbingView() {
             className="synthetic-button synthetic-button-secondary"
           >
             <Play size={16} weight="bold" className="text-emerald-400" />
-            立即探测
+            临时探测（不保存）
           </button>
           <button
             onClick={() => {
@@ -280,11 +285,11 @@ export default function SyntheticProbingView() {
             <span className="text-xs font-semibold uppercase tracking-wider">正常目标</span>
             <ShieldCheck size={18} className="text-emerald-400" />
           </div>
-          <div className="synthetic-metric-value is-green">{metrics.hasSamples ? metrics.passing : '—'}</div>
+          <div className="synthetic-metric-value is-green">{metrics.hasSamples ? metrics.passing : '未配置'}</div>
           <div className="synthetic-metric-detail">
             {metrics.hasSamples
               ? `SLA 达标率 ${metrics.passRate}%`
-              : '等待首次探测'}
+              : '创建目标后开始统计'}
           </div>
         </div>
 
@@ -294,7 +299,7 @@ export default function SyntheticProbingView() {
             <WarningCircle size={18} className={metrics.degraded > 0 ? 'text-amber-400' : 'text-slate-400'} />
           </div>
           <div className={`synthetic-metric-value ${metrics.degraded > 0 ? 'is-amber' : ''}`}>
-            {metrics.hasSamples ? metrics.degraded : '—'}
+            {metrics.hasSamples ? metrics.degraded : '未配置'}
           </div>
           <div className="synthetic-metric-detail">部分节点异常或响应变慢</div>
         </div>
@@ -366,7 +371,7 @@ export default function SyntheticProbingView() {
               ? '清除筛选条件后重试。'
               : '创建一个目标后，系统会持续检查网站、接口或 DNS 服务。'}
           </p>
-          {(overview?.total_targets || targets.length) === 0 ? <div className="synthetic-empty-actions"><button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button><button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}>使用预设模板</button></div> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
+          {(overview?.total_targets || targets.length) === 0 ? <div className="synthetic-empty-actions"><button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button><button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => setIsPresetPickerOpen(true)}>使用预设模板</button></div> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
@@ -404,6 +409,21 @@ export default function SyntheticProbingView() {
             loadData(true)
           }}
         />
+      )}
+
+      {isPresetPickerOpen && (
+        <div className="synthetic-preset-overlay" role="dialog" aria-modal="true" aria-label="选择监控模板">
+          <div className="synthetic-preset-dialog">
+            <div className="synthetic-preset-dialog-head"><div><h2>选择监控模板</h2><p>选择一个常用目标，创建后仍可继续修改。</p></div><button type="button" onClick={() => setIsPresetPickerOpen(false)} aria-label="关闭"><X size={18} /></button></div>
+            <div className="synthetic-preset-grid">
+              {PRESET_TARGETS.map((preset) => (
+                <button key={preset.name} type="button" className="synthetic-preset-card" onClick={() => { setIsPresetPickerOpen(false); setEditingTarget({ ...preset, assertions: JSON.stringify(preset.assertions || []), headers: JSON.stringify(preset.headers || {}) }); setIsModalOpen(true) }}>
+                  <strong>{preset.displayName || preset.name}</strong><span>{preset.protocol.toUpperCase()} · {preset.target_url}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Live Simulation Test Modal */}
@@ -749,7 +769,7 @@ function TargetModal({ target, onClose, onSaved }) {
   }
 
   const handleApplyPreset = (preset) => {
-    setName(preset.name)
+    setName(preset.displayName || preset.name)
     setProtocol(preset.protocol)
     setTargetURL(preset.target_url)
     setMethod(preset.method || 'GET')
