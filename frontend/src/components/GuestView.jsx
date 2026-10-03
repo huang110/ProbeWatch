@@ -296,7 +296,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     .at(-1) || effectiveStatus?.generated_at || null
   const latestAgeSeconds = latestReportedAt ? Math.max(0, Math.round((Date.now() - new Date(latestReportedAt).getTime()) / 1000)) : null
   const freshnessLabel = latestAgeSeconds === null ? '暂无上报' : latestAgeSeconds <= 15 ? '实时' : latestAgeSeconds <= 60 ? '延迟' : latestAgeSeconds <= 300 ? '滞后' : '数据滞后'
-  const syncStatus = (isRefreshing || localRefreshing) ? '同步中' : (hasTelemetry ? freshnessLabel : '等待数据')
+  const syncStatus = hasTelemetry ? freshnessLabel : ((isRefreshing || localRefreshing) ? '同步中' : '等待数据')
+  const refreshHint = (isRefreshing || localRefreshing) && hasTelemetry ? '更新中' : ''
 
   return (
     <main className="guest-shell guest-mjj-shell">
@@ -427,7 +428,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
             <div className="stat-main mono">{syncStatus}</div>
-            <div className="stat-sub">最近上报 {freshnessLabel} · {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}</div>
+            <div className="stat-sub">最近上报 {freshnessLabel} · {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}{refreshHint ? ` · ${refreshHint}` : ''}</div>
           </div>
         </div>
       </section>
