@@ -37,6 +37,9 @@ type publicStatusNodes struct {
 type publicStatusChecks struct {
 	SuccessRate  *float64 `json:"success_rate"`
 	AvgLatencyMs *float64 `json:"avg_latency_ms"`
+	Total        int      `json:"total"`
+	Success      int      `json:"success"`
+	Failure      int      `json:"failure"`
 }
 
 // publicNodeTelemetry is the allow-listed, read-only data used by the public
@@ -243,6 +246,9 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if checksTotal > 0 {
+		response.Checks.Total = checksTotal
+		response.Checks.Success = checksSuccess
+		response.Checks.Failure = checksTotal - checksSuccess
 		rate := float64(checksSuccess) * 100 / float64(checksTotal)
 		response.Checks.SuccessRate = &rate
 		if latencyCount > 0 {

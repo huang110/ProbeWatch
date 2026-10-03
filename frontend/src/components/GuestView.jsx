@@ -201,7 +201,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const checksTotal = numeric(checks.total)
   const checksSuccess = numeric(checks.success)
   const displayPercent = (value) => value === null ? '—' : `${Math.round(Number(value) * 10) / 10}%`
-  const successSummary = checksTotal !== null && checksSuccess !== null ? `${Math.round(checksSuccess)} 次成功 / ${Math.round(checksTotal)} 次探测` : successRate !== null ? '最近 24 小时' : '等待检测样本'
+  const successSummary = checksTotal !== null && checksSuccess !== null && checksTotal > 0 ? `${Math.round(checksSuccess)} 次成功 / ${Math.round(checksTotal)} 次探测` : successRate !== null ? '最近 24 小时' : '等待检测样本'
+  const failureSummary = checksTotal !== null && checksTotal > 0 ? `失败 ${Math.round(checks.failure ?? Math.max(0, checksTotal - (checksSuccess || 0)))} 次` : ''
   const liveLatencies = safeArray(nodes.telemetry)
     .map((item) => numeric(item?.latency_ms))
     .filter((value) => value !== null)
@@ -413,7 +414,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             <div className="stat-main mono">
               {displayPercent(successRate)}
             </div>
-            <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}` : successSummary}</div>
+            <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}${failureSummary ? ` · ${failureSummary}` : ''}` : successSummary}</div>
           </div>
 
           <div className="guest-stat-box">

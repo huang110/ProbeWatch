@@ -77,6 +77,9 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	if payload.Checks.AvgLatencyMs == nil || *payload.Checks.AvgLatencyMs != 120 {
 		t.Fatalf("public status avg latency = %#v, want 120", payload.Checks.AvgLatencyMs)
 	}
+	if payload.Checks.Total != 1 || payload.Checks.Success != 1 || payload.Checks.Failure != 0 {
+		t.Fatalf("public status counts = %#v/%#v/%#v, want 1/1/0", payload.Checks.Total, payload.Checks.Success, payload.Checks.Failure)
+	}
 	if payload.LastUpdatedAt == nil {
 		t.Fatal("public status last_updated_at is missing")
 	}
