@@ -1,6 +1,6 @@
 #!/bin/sh
 # ==============================================================================
-# ProbeWatch Linux / OpenWrt / Alpine 一键安装与服务配置脚本 (v0.5.9)
+# ProbeWatch Linux / OpenWrt / Alpine 一键安装与服务配置脚本 (v0.6.0)
 # 支持环境:
 #   - Linux (systemd: Debian, Ubuntu, CentOS, Rocky, Arch, Fedora)
 #   - OpenWrt / iStoreOS / ImmortalWrt (procd: x86_64, aarch64, arm, mips, mipsle)
@@ -36,6 +36,14 @@ check_temp_space() {
         exit 1
     fi
     ok "临时目录空间检查通过: $TMP_ROOT ($(awk "BEGIN {printf \"%.0f MiB\", $AVAILABLE_KB/1024}"))"
+}
+
+show_install_help() {
+    printf '%s\n' "ProbeWatch Agent 一键安装器 v0.6.0"
+    printf '%s\n' "用法: install.sh --endpoint URL --uuid UUID --token TOKEN"
+    printf '%s\n' "      install.sh --endpoint URL --uuid UUID --registration-token TOKEN"
+    printf '%s\n' "      install.sh uninstall-agent"
+    printf '%s\n' "说明: 支持 amd64/arm64/arm/mips/mipsle/386/riscv64，自动配置 systemd/OpenRC/OpenWrt。"
 }
 
 # 必须以 root 或 sudo 执行
@@ -133,8 +141,7 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         -h|--help)
-            printf '%s\n' "用法: install.sh [--endpoint URL --uuid UUID --token TOKEN] [--registration-token TOKEN]"
-            printf '%s\n' "      install.sh uninstall-agent"
+            show_install_help
             exit 0
             ;;
         *)
@@ -219,6 +226,13 @@ if [ -z "$ENDPOINT" ] || [ -z "$NODE_UUID" ] || [ -z "$NODE_TOKEN" ]; then
 fi
 
 check_temp_space
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    error "系统缺少 curl 或 wget，无法下载 ProbeWatch Agent"
+    exit 1
+fi
+if [ "$INIT_SYSTEM" = "systemd" ] && ! command -v systemctl >/dev/null 2>&1; then
+    warn "未找到 systemctl，将继续写入配置但无法自动启动服务"
+fi
 
 # 5. 配置目录准备
 mkdir -p /etc/probewatch /var/lib/probewatch
@@ -241,11 +255,11 @@ if [ ! -f "./probewatch-agent" ]; then
     rm -f "$BIN_TMP"
     DOWNLOAD_SUCCESS=0
     if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_TMP" "$DOWNLOAD_URL"; then
+        if curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 180 -fsSL -H "Authorization: Bearer ${NODE_TOKEN}" -o "$BIN_TMP" "$DOWNLOAD_URL"; then
             DOWNLOAD_SUCCESS=1
         fi
     elif command -v wget >/dev/null 2>&1; then
-        if wget -qO "$BIN_TMP" --header="Authorization: Bearer ${NODE_TOKEN}" "$DOWNLOAD_URL"; then
+        if wget -T 15 -t 3 -qO "$BIN_TMP" --header="Authorization: Bearer ${NODE_TOKEN}" "$DOWNLOAD_URL"; then
             DOWNLOAD_SUCCESS=1
         fi
     fi
@@ -256,7 +270,9 @@ if [ ! -f "./probewatch-agent" ]; then
         ok "Agent 二进制下载成功: $BIN_PATH"
     else
         rm -f "$BIN_TMP"
-        warn "从主控自动下载二进制未完成，请确认网络或手动放置 agent 到 $BIN_PATH"
+        warn "从主控自动下载二进制未完成，请检查 Endpoint、Token、架构和网络"
+        warn "下载地址: $DOWNLOAD_URL"
+        warn "也可以手动放置 probewatch-agent 到 $BIN_PATH 后重新运行安装器"
     fi
 elif [ -f "./probewatch-agent" ]; then
     cp ./probewatch-agent "$BIN_PATH"

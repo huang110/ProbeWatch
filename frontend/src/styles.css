@@ -1604,6 +1604,17 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .vps-state-label.online { color: var(--mint); background: color-mix(in srgb, var(--mint) 13%, transparent); }
 .vps-state-label.attention { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 .vps-state-label.offline { color: var(--rose); background: color-mix(in srgb, var(--rose) 13%, transparent); }
+.poster-action-label { margin-left: 5px; font-size: 10px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .poster-action-label { display: none; }
+  .guest-node-grid { grid-template-columns: 1fr; }
+  .guest-node-card { padding: 14px; }
+  .vps-resource-matrix-2x2 { column-gap: 12px; row-gap: 11px; }
+  .vps-isp-matrix-grid { grid-template-columns: 1fr; gap: 10px; }
+  .guest-filter-toolbar { align-items: stretch !important; }
+  .guest-status-filters { width: 100%; justify-content: space-between; }
+  .guest-status-filters .button { flex: 1 1 0; }
+}
 .vps-sub-pill.is-stale { color: var(--rose); background: color-mix(in srgb, var(--rose) 10%, transparent); }
 .guest-node-card.is-offline { opacity: .82; border-style: dashed; }
 .guest-node-card.is-offline .vps-res-bar-fill { opacity: .35; }

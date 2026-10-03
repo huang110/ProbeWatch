@@ -278,6 +278,7 @@ export function NodeDetailPage({
   onNavigate,
 }) {
   const [copied, setCopied] = useState(false)
+  const [posterCopied, setPosterCopied] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
   const [activeTimeRange, setActiveTimeRange] = useState(historyTimeRange || '实时')
   const [activePingRange, setActivePingRange] = useState(pingTimeRange || '1小时')
@@ -329,6 +330,68 @@ export function NodeDetailPage({
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
+  }
+
+  const handleSharePoster = async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 1200
+    canvas.height = 760
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
+    gradient.addColorStop(0, '#101b2d')
+    gradient.addColorStop(1, '#182d45')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.fillStyle = '#67e8f9'
+    ctx.font = '700 28px sans-serif'
+    ctx.fillText('ProbeWatch · 节点出鸡 / 测速卡片', 64, 70)
+    ctx.fillStyle = '#f8fafc'
+    ctx.font = '700 48px sans-serif'
+    ctx.fillText(`${customMeta.customName || node.name || 'ProbeWatch 节点'}`, 64, 145)
+    ctx.fillStyle = isOnline ? '#86efac' : '#fda4af'
+    ctx.font = '600 24px sans-serif'
+    ctx.fillText(`${isOnline ? '在线' : '离线'} · ${heartbeatText}`, 66, 188)
+    const rows = [
+      ['CPU', cpuPercent === null ? '暂无' : `${Math.round(cpuPercent)}%`],
+      ['内存', memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '暂无'],
+      ['磁盘', diskTotal ? `${Math.round((diskUsed / diskTotal) * 100)}%` : '暂无'],
+      ['剩余价值', remainingValue],
+      ['流媒体解锁', `${unlockedMediaCount}/${POPULAR_MEDIA.length}`],
+    ]
+    ctx.font = '600 25px sans-serif'
+    rows.forEach(([label, value], index) => {
+      const x = 64 + (index % 2) * 540
+      const y = 270 + Math.floor(index / 2) * 105
+      ctx.fillStyle = 'rgba(255,255,255,.08)'
+      ctx.fillRect(x, y - 38, 480, 76)
+      ctx.fillStyle = '#94a3b8'
+      ctx.fillText(label, x + 22, y - 5)
+      ctx.fillStyle = '#f8fafc'
+      ctx.fillText(value, x + 240, y - 5)
+    })
+    ctx.fillStyle = '#94a3b8'
+    ctx.font = '500 20px sans-serif'
+    ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')} · ProbeWatch`, 64, 700)
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) return
+    const fileName = `probewatch-${(customMeta.customName || node.name || 'node').replace(/[^\w\u4e00-\u9fff-]+/g, '-')}.png`
+    try {
+      if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        setPosterCopied(true)
+        setTimeout(() => setPosterCopied(false), 2400)
+        return
+      }
+    } catch { /* fallback to download below */ }
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = fileName
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setPosterCopied(true)
+    setTimeout(() => setPosterCopied(false), 2400)
   }
 
   // Keep the favorite state in memory for the current console session.
@@ -989,6 +1052,10 @@ export function NodeDetailPage({
         </div>
 
         <div className="komari-nav-right">
+          <button type="button" className="komari-icon-btn" onClick={handleSharePoster} title="生成出鸡/测速海报并复制或下载">
+            <ShareNetwork size={16} />
+            <span className="poster-action-label">{posterCopied ? '已复制' : '出鸡海报'}</span>
+          </button>
           {/* 打开远程终端 */}
           {onNavigate && (
             <button
