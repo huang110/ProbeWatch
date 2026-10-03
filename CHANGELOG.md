@@ -772,3 +772,7 @@
 - Harden freshness calculations against invalid timestamps.
 - Add accessible dialog semantics to the public administrator login flow.
 
+## v0.9.3 - Telemetry sampling copy
+
+- Clarified public traffic rate states: first sample, waiting for report, offline, and unavailable.
+
