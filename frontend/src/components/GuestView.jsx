@@ -324,7 +324,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
           <div className="brand-text">
             <strong>ProbeWatch</strong>
-            <span>全球基础设施服务状态监控大屏</span>
+            <span>公开探针状态大屏</span>
           </div>
         </div>
 
@@ -401,13 +401,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             </div>
           </div>
 
-          <div className="guest-stat-box">
+          <div className="guest-stat-box" title="主控探针到检测目标的综合采样平均，不等同于三网线路延迟">
             <div className="stat-head"><Timer size={18} /><span>探针平均延迟</span></div>
             <div className="stat-main mono">
               {formatLatency(avgLatency)}
             </div>
             <div className="stat-sub">
-              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : '跨洋/较高') : '三网平均'}
+              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : '跨洋/较高') : '主控探针采样平均'}
             </div>
           </div>
 
@@ -789,7 +789,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                           className="vps-check-action"
                           onClick={(event) => { event.stopPropagation(); onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
                         >
-                          移动暂无样本 · 查看节点详情
+                          移动暂无样本 · 检查节点线路
                         </button>
                       )}
 
