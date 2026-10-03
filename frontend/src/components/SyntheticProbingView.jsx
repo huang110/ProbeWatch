@@ -29,6 +29,14 @@ import {
 } from '../lib/api.js'
 import { useLivePolling } from '../lib/useLivePolling.js'
 
+function getNodeRouteLabel(result) {
+  const raw = String(result?.node_name || result?.node_id || '').trim()
+  if (!raw) return '未知节点'
+  const provider = /电信|telecom|chinanet/i.test(raw) ? '电信' : /联通|unicom/i.test(raw) ? '联通' : /移动|mobile|cmcc/i.test(raw) ? '移动' : ''
+  const region = raw.match(/(北京|上海|广州|深圳|香港|日本|东京|新加坡|美国|洛杉矶|欧洲|德国)/i)?.[1] || ''
+  return [provider, region].filter(Boolean).join(' · ') || raw
+}
+
 const PROTOCOL_CONFIG = {
   http: { label: 'HTTP', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
   https: { label: 'HTTPS', color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
@@ -483,6 +491,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
 
   // Worst or average timing
   const avgTiming = results.length > 0 ? results[0] : null
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   return (
     <div className="synthetic-target-card">
@@ -554,7 +563,15 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
         <div><span>平均延迟</span><strong>{Number.isFinite(Number(item.avg_latency_ms)) && Number(item.avg_latency_ms) > 0 ? `${Math.round(Number(item.avg_latency_ms))}ms` : '待采样'}</strong></div>
         <div><span>最近结果</span><strong>{results.length > 0 ? (results[0].passed ? '成功' : '失败') : '待采样'}</strong></div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-5 pt-4">
+      <button
+        type="button"
+        className="synthetic-details-toggle"
+        onClick={() => setDetailsOpen((open) => !open)}
+      >
+        {detailsOpen ? '收起详细数据' : '查看瀑布流与成功条件'}
+        <span>{detailsOpen ? '⌃' : '⌄'}</span>
+      </button>
+      {detailsOpen && <div className="grid grid-cols-1 md:grid-cols-12 gap-5 pt-4">
         {/* Timing Waterfall Chart */}
         <div className="md:col-span-7 space-y-2">
           <div className="flex items-center justify-between text-xs text-slate-400">
@@ -592,7 +609,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
                   title={`状态码: ${r.status_code}, TTFB: ${r.ttfb_ms}ms, 总时延: ${r.total_ms}ms`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${r.passed ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                  <span>{r.node_name || r.node_id}</span>
+                  <span>{getNodeRouteLabel(r)}</span>
                   <span className="text-slate-400">{Number.isFinite(Number(r.total_ms)) ? (Math.round(Number(r.total_ms)) + 'ms') : '等待'}</span>
                 </div>
               ))
@@ -627,7 +644,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
             探测周期: {t.interval_seconds || 60}s · 超时: {t.timeout_ms || 5000}ms · 共识阈值: {t.consensus_nodes || 1} 节点
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -1270,6 +1287,16 @@ function LiveTestModal({ initialTarget, onClose }) {
           {/* Test Result Display */}
           {result && (
             <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4">
+              {(() => {
+                const outcomeText = result.passed
+                  ? (Number(result.timing?.total_duration_ms) > 1000 ? '目标可访问，但响应较慢' : '目标可访问，成功条件已满足')
+                  : result.error
+                    ? '目标无法连接'
+                    : result.failed_assertion
+                      ? '目标可访问，但成功条件未满足'
+                      : '目标探测失败'
+                return <div className="text-sm text-slate-200">{outcomeText}</div>
+              })()}
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <span
