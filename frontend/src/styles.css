@@ -897,6 +897,26 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 @media (max-width: 480px) {
   .guest-node-grid { grid-template-columns: 1fr; }
 }
+
+/* MJJ 小屏布局：保留按钮可读性，避免中文被挤成竖排。 */
+@media (max-width: 560px) {
+  .guest-shell { padding: 16px 12px 18px; }
+  .guest-header { align-items: stretch; gap: 12px; }
+  .guest-header .brand-lockup { flex: 1 1 100%; min-width: 0; }
+  .guest-header .heading-actions { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .guest-header .heading-actions > * { min-width: 0; }
+  .guest-header .heading-actions .button { min-height: 38px; padding-inline: 10px; white-space: nowrap; }
+  .guest-header .heading-actions > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .guest-hero-banner { align-items: flex-start; gap: 12px; padding: 16px; }
+  .hero-status-radar { width: 42px; height: 42px; flex-basis: 42px; }
+  .hero-status-radar svg { width: 28px; height: 28px; }
+  .hero-status-content h1 { font-size: 18px; line-height: 1.25; }
+  .hero-status-content p { font-size: 12px; line-height: 1.55; }
+  .hero-uptime-indicator { margin-left: auto; flex: 0 0 auto; }
+  .uptime-value { font-size: 22px; }
+  .guest-stats-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .guest-stat-box { min-width: 0; padding: 12px; }
+}
 .guest-node-card { display: flex; flex-direction: column; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-panel); text-align: left; }
 .guest-ring { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--mint-dim); border-top-color: var(--mint); border-right-color: var(--mint); }
 .guest-node-name { max-width: 100%; overflow: hidden; color: var(--text-1); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

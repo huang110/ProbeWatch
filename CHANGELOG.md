@@ -761,3 +761,8 @@
 - Added low CPU and idle I/O scheduling defaults to the Agent service templates.
 - Added a production systemd unit template with conservative memory and scheduling defaults.
 
+## v0.9.1 - Mobile MJJ layout polish
+
+- Fixed narrow-screen public status layout so login and SLA actions stay readable.
+- Reduced hero status density and kept MJJ key metrics visible on small phones.
+
