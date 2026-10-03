@@ -250,15 +250,10 @@ export default function SyntheticProbingView() {
           </button>
           <span className={`synthetic-sync-status ${syncState !== 'ok' ? 'is-syncing' : ''}`}>
             <span className={`status-dot ${syncState === 'retrying' ? 'status-warning' : 'status-online'}`} />
-            {syncState === 'retrying' ? '同步失败，正在重试' : syncState === 'ok' ? '自动同步中' : '同步中'}
+            {syncState === 'retrying' ? '同步失败，正在重试' : syncState === 'ok' ? (metrics.total > 0 ? '自动同步中' : '等待配置') : '同步中'}
           </span>
         </div>
 
-        <div className="synthetic-status-filters" aria-label="状态筛选">
-          {[['all', '全部'], ['healthy', '正常'], ['degraded', '降级'], ['failing', '异常'], ['unknown', '待采样']].map(([id, label]) => (
-            <button key={id} type="button" className={`synthetic-status-filter ${statusFilter === id ? 'is-active' : ''}`} onClick={() => setStatusFilter(id)}>{label}</button>
-          ))}
-        </div>
       </div>
 
       {error && (
@@ -338,6 +333,12 @@ export default function SyntheticProbingView() {
           ))}
         </div>
 
+        <div className="synthetic-status-filters" aria-label="状态筛选">
+          {[['all', '全部'], ['healthy', '正常'], ['degraded', '降级'], ['failing', '异常'], ['unknown', '待采样']].map(([id, label]) => (
+            <button key={id} type="button" className={`synthetic-status-filter ${statusFilter === id ? 'is-active' : ''}`} onClick={() => setStatusFilter(id)}>{label}</button>
+          ))}
+        </div>
+
         <div className="synthetic-search-box">
           <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -365,7 +366,7 @@ export default function SyntheticProbingView() {
               ? '清除筛选条件后重试。'
               : '创建一个目标后，系统会持续检查网站、接口或 DNS 服务。'}
           </p>
-          {(overview?.total_targets || targets.length) === 0 ? <button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
+          {(overview?.total_targets || targets.length) === 0 ? <div className="synthetic-empty-actions"><button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button><button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}>使用预设模板</button></div> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
@@ -550,7 +551,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
 
           {/* Node Results Pills */}
           <div className="flex items-center gap-2 pt-1 flex-wrap">
-            <span className="text-[11px] text-slate-500">参与拨测节点:</span>
+            <span className="text-[11px] text-slate-500">节点结果:</span>
             {results.length === 0 ? (
               <span className="text-[11px] text-slate-500">等待调度执行...</span>
             ) : (
@@ -566,7 +567,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${r.passed ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                   <span>{r.node_name || r.node_id}</span>
-                  <span className="text-slate-400">({r.total_ms}ms)</span>
+                  <span className="text-slate-400">{Number.isFinite(Number(r.total_ms)) ? (Math.round(Number(r.total_ms)) + 'ms') : '等待'}</span>
                 </div>
               ))
             )}
