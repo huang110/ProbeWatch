@@ -158,7 +158,7 @@ function renderANSI(text) {
   ))
 }
 
-export default function TerminalView({ initialNodeId = null }) {
+export default function TerminalView({ initialNodeId = null, latestAgentVersion = '' }) {
   const [nodes, setNodes] = useState([])
   const [selectedNodeId, setSelectedNodeId] = useState(initialNodeId || '')
   const [selectedNodeIds, setSelectedNodeIds] = useState(initialNodeId ? [initialNodeId] : [])
@@ -454,7 +454,7 @@ export default function TerminalView({ initialNodeId = null }) {
             <h2 className="terminal-page-title">
               Agent 远程终端与受控执行
               <span className="terminal-page-version">
-                v0.5.9
+                {latestAgentVersion ? `Agent v${latestAgentVersion}` : 'Agent 隧道'}
               </span>
             </h2>
             <p className="terminal-page-description">
@@ -544,7 +544,7 @@ export default function TerminalView({ initialNodeId = null }) {
           <div>
             <div className="terminal-banner-title">当前节点 Agent 远程终端未在线</div>
             <div className="terminal-banner-text">
-              请确保目标节点已升级至最新探针版本（v0.5.9），且在运行环境中启用了终端功能（环境变量
+              请确认目标节点 Agent 已启用终端功能（环境变量
               <code className="terminal-env-code">PROBEWATCH_AGENT_ENABLE_TERMINAL=true</code>
               或保持默认开启状态）。节点将自动通过安全反向 WebSocket 连接至控制面。
             </div>

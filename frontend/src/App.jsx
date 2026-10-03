@@ -1314,7 +1314,7 @@ export function App() {
             latestAgentVersion={latestAgentVersion}
           />
         ) : activeNav === 'terminal' ? (
-          <TerminalView initialNodeId={selectedNode?.id || selectedNode?.uuid} />
+          <TerminalView initialNodeId={selectedNode?.id || selectedNode?.uuid} latestAgentVersion={latestAgentVersion} />
         ) : activeNav === 'ai-copilot' ? (
           <AICopilotView
             nodes={data}
