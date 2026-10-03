@@ -3,6 +3,7 @@ package agent
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
 )
@@ -56,7 +57,8 @@ func TestParseNetworkCounters(t *testing.T) {
 func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
 	values := []cpuStats{{total: 100, idle: 40}, {total: 200, idle: 80}}
 	index := 0
-	tracker := &cpuTracker{read: func() (cpuStats, error) {
+	clock := time.Unix(0, 0)
+	tracker := &cpuTracker{now: func() time.Time { return clock }, read: func() (cpuStats, error) {
 		value := values[index]
 		index++
 		return value, nil
@@ -64,8 +66,29 @@ func TestCPUTrackerUsesCounterDeltas(t *testing.T) {
 	if got, err := tracker.Sample(); err != nil || got != 0 {
 		t.Fatalf("first sample = %v, %v", got, err)
 	}
+	clock = clock.Add(time.Second)
 	if got, err := tracker.Sample(); err != nil || math.Abs(got-60) > 1e-9 {
 		t.Fatalf("delta sample = %v, %v", got, err)
+	}
+}
+
+func TestCPUTrackerIgnoresSubTickWindows(t *testing.T) {
+	values := []cpuStats{{total: 100, idle: 40}, {total: 101, idle: 40}, {total: 200, idle: 80}}
+	index := 0
+	clock := time.Unix(0, 0)
+	tracker := &cpuTracker{now: func() time.Time { return clock }, read: func() (cpuStats, error) {
+		value := values[index]
+		index++
+		return value, nil
+	}}
+	if _, err := tracker.Sample(); err != nil { t.Fatal(err) }
+	clock = clock.Add(10 * time.Millisecond)
+	if got, err := tracker.Sample(); err != nil || got != 0 {
+		t.Fatalf("short window = %v, %v", got, err)
+	}
+	clock = clock.Add(time.Second)
+	if got, err := tracker.Sample(); err != nil || math.Abs(got-60) > 1e-9 {
+		t.Fatalf("meaningful window = %v, %v", got, err)
 	}
 }
 

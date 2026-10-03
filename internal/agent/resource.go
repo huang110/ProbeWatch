@@ -310,10 +310,14 @@ type cpuTracker struct {
 	mu          sync.Mutex
 	previous    cpuStats
 	hasPrevious bool
+	lastSample  time.Time
+	lastValue   float64
+	hasValue    bool
 	read        func() (cpuStats, error)
+	now         func() time.Time
 }
 
-func newCPUTracker() cpuSampler { return &cpuTracker{read: readProcStat} }
+func newCPUTracker() cpuSampler { return &cpuTracker{read: readProcStat, now: time.Now} }
 
 func (t *cpuTracker) Sample() (float64, error) {
 	current, err := t.read()
@@ -322,8 +326,22 @@ func (t *cpuTracker) Sample() (float64, error) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	now := time.Now
+	if t.now != nil {
+		now = t.now
+	}
 	if !t.hasPrevious {
-		t.previous, t.hasPrevious = current, true
+		t.previous, t.hasPrevious, t.lastSample = current, true, now()
+		return 0, nil
+	}
+	// A resource-only heartbeat can be followed immediately by the regular
+	// report. A sub-tick counter window has insufficient resolution and can
+	// falsely report 100%% when no idle tick was observed. Keep the previous
+	// baseline until a meaningful interval has elapsed.
+	if now().Sub(t.lastSample) < 500*time.Millisecond {
+		if t.hasValue {
+			return t.lastValue, nil
+		}
 		return 0, nil
 	}
 	if current.total < t.previous.total || current.idle < t.previous.idle {
@@ -336,7 +354,10 @@ func (t *cpuTracker) Sample() (float64, error) {
 	if totalDelta == 0 || idleDelta > totalDelta {
 		return 0, fmt.Errorf("invalid cpu counter delta")
 	}
-	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), nil
+	t.lastSample = now()
+	t.lastValue = float64(totalDelta-idleDelta) * 100 / float64(totalDelta)
+	t.hasValue = true
+	return t.lastValue, nil
 }
 
 func readProcStat() (cpuStats, error) {
