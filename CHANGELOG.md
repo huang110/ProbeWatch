@@ -766,3 +766,9 @@
 - Fixed narrow-screen public status layout so login and SLA actions stay readable.
 - Reduced hero status density and kept MJJ key metrics visible on small phones.
 
+## v0.9.2 - Public dashboard data correctness
+
+- Sort public nodes by live telemetry values instead of stale local metadata.
+- Harden freshness calculations against invalid timestamps.
+- Add accessible dialog semantics to the public administrator login flow.
+

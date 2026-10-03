@@ -274,14 +274,16 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       if (sortKey === 'default') return 0
       const customA = allCustomMeta[a] || Object.values(allCustomMeta).find((m) => m.customName === a) || {}
       const customB = allCustomMeta[b] || Object.values(allCustomMeta).find((m) => m.customName === b) || {}
+      const telemetryA = telemetryByName.get(a) || {}
+      const telemetryB = telemetryByName.get(b) || {}
       if (sortKey === 'cpu') {
-        const cpuA = Number(customA.cpu ?? 0)
-        const cpuB = Number(customB.cpu ?? 0)
+        const cpuA = Number(telemetryA.cpu_percent ?? customA.cpu ?? -1)
+        const cpuB = Number(telemetryB.cpu_percent ?? customB.cpu ?? -1)
         return cpuB - cpuA
       }
       if (sortKey === 'mem') {
-        const memA = Number(customA.memUsed ?? 0)
-        const memB = Number(customB.memUsed ?? 0)
+        const memA = Number(telemetryA.memory_used_bytes ?? customA.memUsed ?? -1)
+        const memB = Number(telemetryB.memory_used_bytes ?? customB.memUsed ?? -1)
         return memB - memA
       }
       return 0
@@ -304,7 +306,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     .filter(Boolean)
     .sort()
     .at(-1) || effectiveStatus?.generated_at || null
-  const latestAgeSeconds = latestReportedAt ? Math.max(0, Math.round((Date.now() - new Date(latestReportedAt).getTime()) / 1000)) : null
+  const latestReportedMs = latestReportedAt ? Date.parse(latestReportedAt) : NaN
+  const latestAgeSeconds = Number.isFinite(latestReportedMs) ? Math.max(0, Math.round((Date.now() - latestReportedMs) / 1000)) : null
   const freshnessLabel = latestAgeSeconds === null ? '暂无上报' : latestAgeSeconds <= 15 ? '实时' : latestAgeSeconds <= 60 ? '延迟' : latestAgeSeconds <= 300 ? '滞后' : '数据滞后'
   const syncStatus = hasTelemetry ? freshnessLabel : ((isRefreshing || localRefreshing) ? '同步中' : '等待数据')
   const refreshHint = (isRefreshing || localRefreshing) && hasTelemetry ? '更新中' : ''
@@ -369,7 +372,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
               </button>
             </>
           ) : (
-            <button className="button button-primary" onClick={() => { setLoginError(''); setShowLogin(true) }}>
+            <button type="button" className="button button-primary" aria-haspopup="dialog" aria-expanded={showLogin} aria-controls="guest-admin-login" onClick={() => { setLoginError(''); setShowLogin(true) }}>
               <SignIn size={16} weight="bold" />
               <span>管理员登录</span>
             </button>
@@ -937,11 +940,11 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       {/* 磨砂毛玻璃管理员登录弹窗 */}
       {showLogin && (
         <div className="modal-overlay" onClick={() => setShowLogin(false)}>
-          <div className="mjj-login-modal" onClick={(e) => e.stopPropagation()}>
+          <div id="guest-admin-login" className="mjj-login-modal" role="dialog" aria-modal="true" aria-labelledby="guest-admin-login-title" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">
                 <LockKey size={22} weight="duotone" className="modal-icon" />
-                <span>管理员身份验证</span>
+                <span id="guest-admin-login-title">管理员身份验证</span>
               </div>
               <button className="icon-button modal-close" onClick={() => setShowLogin(false)} aria-label="关闭">
                 <X size={18} />
