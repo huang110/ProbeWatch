@@ -4,7 +4,6 @@ import {
   CheckCircle,
   Clock,
   Globe,
-  Lightning,
   MagnifyingGlass,
   PencilSimple,
   Play,
@@ -109,6 +108,7 @@ export default function SyntheticProbingView() {
   const [isTestModalOpen, setIsTestModalOpen] = useState(false)
   const [testTarget, setTestTarget] = useState(null)
   const [historyTarget, setHistoryTarget] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const requestRef = useRef(null)
 
   const loadData = useCallback(async (isRefresh = false) => {
@@ -151,7 +151,10 @@ export default function SyntheticProbingView() {
         (t.target_url || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (t.protocol || '').toLowerCase().includes(searchQuery.toLowerCase())
       const matchesProto =
-        activeProtocolTab === 'all' || (t.protocol || '').toLowerCase() === activeProtocolTab
+        activeProtocolTab === 'all' ||
+        (activeProtocolTab === 'https'
+          ? ['http', 'https'].includes((t.protocol || '').toLowerCase())
+          : (t.protocol || '').toLowerCase() === activeProtocolTab)
       return matchesSearch && matchesProto
     })
   }, [overview, searchQuery, activeProtocolTab])
@@ -181,12 +184,16 @@ export default function SyntheticProbingView() {
   }, [overview, targets])
 
   const handleDelete = async (id) => {
+    if (!id || deletingId) return
     if (!await window.probewatchConfirm('确认删除此合成监控目标？相关拨测历史将被同时移除。')) return
+    setDeletingId(id)
     try {
       await deleteSyntheticTarget(id)
       loadData(true)
     } catch (err) {
       setError('删除失败: ' + err.message)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -201,13 +208,13 @@ export default function SyntheticProbingView() {
             </div>
             <div>
               <h1 className="synthetic-page-title">
-                全景合成监控与 SLA 契约引擎
+                合成监控
                 <span className="synthetic-page-version">
                   v{import.meta.env.VITE_APP_VERSION}
                 </span>
               </h1>
               <p className="synthetic-page-description">
-                支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流
+                持续检查网站、接口和 DNS 服务的可用性与响应速度
               </p>
             </div>
           </div>
@@ -222,7 +229,7 @@ export default function SyntheticProbingView() {
             className="synthetic-button synthetic-button-secondary"
           >
             <Play size={16} weight="bold" className="text-emerald-400" />
-            实时模拟拨测
+            立即探测
           </button>
           <button
             onClick={() => {
@@ -232,16 +239,12 @@ export default function SyntheticProbingView() {
             className="synthetic-button synthetic-button-primary"
           >
             <Plus size={16} weight="bold" />
-            新建监控契约
+            新建监控
           </button>
-          <button
-            onClick={() => loadData(true)}
-            disabled={refreshing}
-            className="synthetic-icon-button"
-            title="刷新数据"
-          >
-            <ArrowsClockwise size={18} className={refreshing ? 'animate-spin text-indigo-400' : ''} />
-          </button>
+          <span className={`synthetic-sync-status ${refreshing || loading ? 'is-syncing' : ''}`}>
+            <span className="status-dot status-online" />
+            {refreshing || loading ? '同步中' : '自动同步中'}
+          </span>
         </div>
       </div>
 
@@ -257,7 +260,7 @@ export default function SyntheticProbingView() {
       <div className="synthetic-metrics-grid">
         <div className="synthetic-metric-card">
           <div className="synthetic-metric-head">
-            <span className="text-xs font-semibold uppercase tracking-wider">监测契约总数</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">监控目标总数</span>
             <Globe size={18} className="text-indigo-400" />
           </div>
           <div className="synthetic-metric-value">{metrics.total}</div>
@@ -266,35 +269,35 @@ export default function SyntheticProbingView() {
 
         <div className="synthetic-metric-card">
           <div className="synthetic-metric-head">
-            <span className="text-xs font-semibold uppercase tracking-wider">SLA 达标率</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">正常目标</span>
             <ShieldCheck size={18} className="text-emerald-400" />
           </div>
-          <div className="synthetic-metric-value is-green">{metrics.passRate == null ? '等待采样' : `${metrics.passRate}%`}</div>
+          <div className="synthetic-metric-value is-green">{metrics.hasSamples ? metrics.passing : '—'}</div>
           <div className="synthetic-metric-detail">
             {metrics.hasSamples
-              ? `${metrics.passing} 契约正常 · ${metrics.failing} 失败 · ${metrics.degraded} 降级`
-              : '尚未收到有效探针回传'}
+              ? `SLA 达标率 ${metrics.passRate}%`
+              : '等待首次探测'}
           </div>
         </div>
 
         <div className="synthetic-metric-card">
           <div className="synthetic-metric-head">
-            <span className="text-xs font-semibold uppercase tracking-wider">多节点共识告警</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">降级目标</span>
+            <WarningCircle size={18} className={metrics.degraded > 0 ? 'text-amber-400' : 'text-slate-400'} />
+          </div>
+          <div className={`synthetic-metric-value ${metrics.degraded > 0 ? 'is-amber' : ''}`}>
+            {metrics.hasSamples ? metrics.degraded : '—'}
+          </div>
+          <div className="synthetic-metric-detail">部分节点异常或响应变慢</div>
+        </div>
+
+        <div className="synthetic-metric-card">
+          <div className="synthetic-metric-head">
+            <span className="text-xs font-semibold uppercase tracking-wider">异常目标</span>
             <WarningCircle size={18} className={metrics.failing > 0 ? 'text-rose-400' : 'text-slate-400'} />
           </div>
-          <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>
-            {metrics.failing > 0 ? `${metrics.failing} 失活` : metrics.hasSamples ? '全网稳态' : '暂无样本'}
-          </div>
-          <div className="synthetic-metric-detail">多 ISP 交叉校验过滤偶发抖动</div>
-        </div>
-
-        <div className="synthetic-metric-card">
-          <div className="synthetic-metric-head">
-            <span className="text-xs font-semibold uppercase tracking-wider">全网平均首包 (TTFB)</span>
-            <Lightning size={18} className="text-amber-400" />
-          </div>
-          <div className="synthetic-metric-value is-amber">{metrics.fleetAvgTTFB == null ? '—' : `${metrics.fleetAvgTTFB} ms`}</div>
-          <div className="synthetic-metric-detail">DNS+TCP+TLS 全链路网络瀑布流</div>
+          <div className={`synthetic-metric-value ${metrics.failing > 0 ? 'is-red' : ''}`}>{metrics.hasSamples ? metrics.failing : '—'}</div>
+          <div className="synthetic-metric-detail">多节点共识失败，需要优先处理</div>
         </div>
       </div>
 
@@ -303,10 +306,10 @@ export default function SyntheticProbingView() {
         <div className="synthetic-protocol-tabs">
           {[
             { id: 'all', label: '全部协议' },
-            { id: 'https', label: 'HTTP / HTTPS' },
-            { id: 'grpc', label: 'gRPC Health' },
+            { id: 'https', label: 'Web（HTTP/S）' },
+            { id: 'grpc', label: 'gRPC' },
             { id: 'websocket', label: 'WebSocket' },
-            { id: 'doh', label: 'DoH (DNS)' },
+            { id: 'doh', label: 'DNS（DoH）' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -345,7 +348,7 @@ export default function SyntheticProbingView() {
           <Globe size={40} className="mx-auto text-slate-600 mb-3" />
           <h3 className="synthetic-empty-title">暂无匹配的合成拨测目标</h3>
           <p className="synthetic-empty-description">
-            您可以点击右上角“新建监控契约”或使用预设模版快速创建多协议合成探针。
+            您可以点击右上角“新建监控”或使用预设模板快速创建探测目标。
           </p>
         </div>
       ) : (
@@ -358,7 +361,8 @@ export default function SyntheticProbingView() {
                 setEditingTarget(item.target)
                 setIsModalOpen(true)
               }}
-              onDelete={() => handleDelete(item.target?.id)}
+                onDelete={() => handleDelete(item.target?.id)}
+                deleting={deletingId === item.target?.id}
               onTest={() => {
                 setTestTarget(item.target)
                 setIsTestModalOpen(true)
@@ -407,7 +411,7 @@ export default function SyntheticProbingView() {
   )
 }
 
-function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) {
+function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, deleting = false }) {
   const t = item.target || {}
   const proto = (t.protocol || 'https').toLowerCase()
   const protoStyle = PROTOCOL_CONFIG[proto] || PROTOCOL_CONFIG.https
@@ -479,7 +483,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) 
             title="实时向此目标发送模拟探测"
           >
             <Play size={13} weight="bold" />
-            即时调试
+            立即探测
           </button>
           <button
             onClick={onViewHistory}
@@ -497,10 +501,11 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) 
           </button>
           <button
             onClick={onDelete}
-            className="p-1.5 rounded-lg text-rose-400/70 hover:text-rose-400 hover:bg-rose-500/10 transition"
+            disabled={deleting}
+            className="p-1.5 rounded-lg text-rose-400/70 hover:text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50"
             title="删除"
           >
-            <Trash size={15} />
+            {deleting ? <ArrowsClockwise size={15} className="animate-spin" /> : <Trash size={15} />}
           </button>
         </div>
       </div>
@@ -515,7 +520,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory }) 
               全链路网络时延瀑布流 (Waterfall)
             </span>
             <span className="font-mono text-slate-400">
-              平均总时延: <strong className="text-white">{Math.round(item.avg_latency_ms)} ms</strong>
+              平均总时延: <strong className="text-white">{Number.isFinite(Number(item.avg_latency_ms)) ? `${Math.round(Number(item.avg_latency_ms))} ms` : '等待采样'}</strong>
             </span>
           </div>
 
