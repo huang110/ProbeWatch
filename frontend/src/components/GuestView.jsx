@@ -206,7 +206,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const coverageTotal = numeric(checks.coverage_total)
   const coverageSampled = numeric(checks.coverage_sampled)
   const coverageMissing = safeArray(checks.coverage_missing).map((item) => safeText(item)).filter(Boolean)
-  const latencyAlertThreshold = numeric(checks.latency_alert_threshold_ms) ?? 200
+  const latencyAlertThreshold = numeric(checks.latency_threshold_ms) ?? 200
   const recentFailureStreak = numeric(checks.recent_failure_streak) ?? 0
   const liveLatencies = safeArray(nodes.telemetry)
     .map((item) => numeric(item?.latency_ms))

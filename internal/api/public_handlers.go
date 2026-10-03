@@ -43,7 +43,7 @@ type publicStatusChecks struct {
 	CoverageTotal   int      `json:"coverage_total"`
 	CoverageSampled int      `json:"coverage_sampled"`
 	CoverageMissing []string `json:"coverage_missing"`
-	LatencyAlertThresholdMs int `json:"latency_alert_threshold_ms"`
+	LatencyThresholdMs int `json:"latency_threshold_ms"`
 	RecentFailureStreak int `json:"recent_failure_streak"`
 	WindowHours int `json:"window_hours"`
 }
@@ -283,7 +283,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(response.Checks.CoverageMissing)
-	response.Checks.LatencyAlertThresholdMs = latencyAlertThresholdMs
+	response.Checks.LatencyThresholdMs = latencyAlertThresholdMs
 	response.Checks.WindowHours = windowHours
 	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].at.After(outcomes[j].at) })
 	for _, outcome := range outcomes {
