@@ -65,6 +65,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [localRefreshing, setLocalRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('all')
+  const [selectedStatus, setSelectedStatus] = useState('all')
   const [sortKey, setSortKey] = useState('default')
   const [liveRates, setLiveRates] = useState({})
   const telemetryRef = useRef(new Map())
@@ -250,11 +251,13 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       const displayName = custom.customName || name
       const os = custom.os || 'Debian Linux'
       const tags = custom.tags || ''
+      const telemetry = telemetryByName.get(name) || {}
 
       if (selectedTag !== 'all') {
         const matchesTag = tags.includes(selectedTag) || flag === selectedTag
         if (!matchesTag) return false
       }
+      if (selectedStatus !== 'all' && (telemetry.status || 'unknown') !== selectedStatus) return false
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim()
@@ -283,7 +286,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       }
       return 0
     })
-  }, [names, searchQuery, selectedTag, sortKey, allCustomMeta])
+  }, [names, searchQuery, selectedTag, selectedStatus, sortKey, allCustomMeta, telemetryByName])
 
   const isAllHealthy = total !== null && total > 0 && online === total && (successRate === null || successRate >= 95)
   const hasIssues = (total !== null && online !== null && online < total) || (successRate !== null && successRate < 95)
@@ -495,6 +498,11 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div className="guest-status-filters" role="group" aria-label="节点状态筛选">
+                {[['all', '全部'], ['online', '在线'], ['attention', '需关注'], ['offline', '离线']].map(([value, label]) => (
+                  <button key={value} type="button" className={`button button-quiet btn-sm ${selectedStatus === value ? 'active' : ''}`} onClick={() => setSelectedStatus(value)}>{label}</button>
+                ))}
+              </div>
               {availableTags.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto', maxWidth: '340px' }}>
                   <button
@@ -550,6 +558,12 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
                   const telemetry = telemetryByName.get(name) || {}
                   const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
+                  const nodeStatus = telemetry.status || 'unknown'
+                  const lastReportedAt = telemetry.last_reported_at || null
+                  const lastReportedAge = lastReportedAt ? Math.max(0, Math.round((Date.now() - Date.parse(lastReportedAt)) / 86400000)) : null
+                  const statusLabel = nodeStatus === 'online' ? '在线' : nodeStatus === 'attention' ? '需关注' : '离线'
+                  const statusDetail = nodeStatus === 'offline' ? (lastReportedAt ? `最后上报 ${formatTimeOfDay(lastReportedAt)}${lastReportedAge > 0 ? ` · ${lastReportedAge}天前` : ''}` : '暂无上报') : `上报 ${lastReportedAt ? formatTimeOfDay(lastReportedAt) : '暂无'}`
+                  const hasLiveTelemetry = nodeStatus === 'online' && lastReportedAt
                   const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '账单信息隐藏'
                   const cpuPercent = numeric(telemetry.cpu_percent)
                   const loadText = telemetry.load1 !== undefined ? `${Number(telemetry.load1).toFixed(2)} 1m` : '暂无实时数据'
@@ -602,7 +616,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
                   return (
                     <article
-                      className="guest-node-card nezha-vps-card"
+                      className={`guest-node-card nezha-vps-card ${nodeStatus === 'offline' ? 'is-offline' : nodeStatus === 'attention' ? 'is-attention' : ''}`}
                       key={`${name}-${index}`}
                       onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry))}
                       title="点击查看详细性能遥测与监控"
@@ -611,8 +625,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                       {/* 1. 顶部标题行: 状态圆点, 节点名, 系统 Logo, 国旗 */}
                       <div className="vps-card-header">
                         <div className="vps-header-left">
-                          <span className={`vps-status-dot ${telemetry.status === 'online' ? 'online' : telemetry.status === 'attention' ? 'warning' : 'offline'}`} />
+                        <span className={`vps-status-dot ${nodeStatus === 'online' ? 'online' : nodeStatus === 'attention' ? 'warning' : 'offline'}`} />
                           <strong className="vps-node-name" title={displayName}>{displayName}</strong>
+                        <span className={`vps-state-label ${nodeStatus}`}>{statusLabel}</span>
                         </div>
                         <div className="vps-header-right">
                           <DistroIcon os={os} className="vps-distro-logo" />
@@ -622,9 +637,9 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
                       {/* 2. 状态标签行 (在线天数 & 价格周期) */}
                       <div className="vps-sub-pills">
-                        <span className="vps-sub-pill">在线 {uptimeText}</span>
+                        <span className="vps-sub-pill">{nodeStatus === 'offline' ? '历史在线 ' : '在线 '}{uptimeText}</span>
                         <span className="vps-sub-pill">{priceText}</span>
-                        <span className="vps-sub-pill">上报 {telemetry.last_reported_at ? formatTimeOfDay(telemetry.last_reported_at) : '暂无'}</span>
+                        <span className={`vps-sub-pill ${nodeStatus === 'offline' ? 'is-stale' : ''}`}>{statusDetail}</span>
                       </div>
 
                       {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
@@ -633,43 +648,43 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">CPU</span>
-                            <span className="vps-res-val mono">{cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '—'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, cpuPercent || 0))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, cpuPercent || 0)) : 0}%` }} />
                           </div>
-                          <div className="vps-res-sub mono">{loadText}</div>
+                          <div className="vps-res-sub mono">{hasLiveTelemetry ? loadText : '暂无实时数据'}</div>
                         </div>
 
                         {/* 内存 */}
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">内存</span>
-                            <span className="vps-res-val mono">{memPercent !== null ? `${memPercent.toFixed(1)}%` : '—'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && memPercent !== null ? `${memPercent.toFixed(1)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent || 0))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, memPercent || 0)) : 0}%` }} />
                           </div>
-                          <div className="vps-res-sub mono">{memSub}</div>
+                          <div className="vps-res-sub mono">{hasLiveTelemetry ? memSub : '暂无实时数据'}</div>
                         </div>
 
                         {/* 硬盘 */}
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">硬盘</span>
-                            <span className="vps-res-val mono">{diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '—'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
-                            <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent || 0))}%` }} />
+                            <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, diskPercent || 0)) : 0}%` }} />
                           </div>
-                          <div className="vps-res-sub mono">{diskSub}</div>
+                          <div className="vps-res-sub mono">{hasLiveTelemetry ? diskSub : '暂无实时数据'}</div>
                         </div>
 
                         {/* 流量 */}
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">累计流量</span>
-                            <span className="vps-res-val mono text-traffic">{trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '未配置配额'}</span>
+                            <span className="vps-res-val mono text-traffic">{hasLiveTelemetry ? (trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '未配置配额') : '历史数据'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
                             <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent || 0))}%` }} />

@@ -1598,6 +1598,16 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .vps-sub-pill.cursor-pointer:hover {
   background: rgba(148, 163, 184, 0.22);
 }
+.guest-status-filters { display: inline-flex; align-items: center; gap: 3px; padding: 2px; border: 1px solid var(--border-subtle, var(--border)); border-radius: 8px; background: var(--surface-card, var(--bg-panel)); }
+.guest-status-filters .button { margin: 0; }
+.vps-state-label { display: inline-flex; align-items: center; min-height: 19px; padding: 0 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.vps-state-label.online { color: var(--mint); background: color-mix(in srgb, var(--mint) 13%, transparent); }
+.vps-state-label.attention { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.vps-state-label.offline { color: var(--rose); background: color-mix(in srgb, var(--rose) 13%, transparent); }
+.vps-sub-pill.is-stale { color: var(--rose); background: color-mix(in srgb, var(--rose) 10%, transparent); }
+.guest-node-card.is-offline { opacity: .82; border-style: dashed; }
+.guest-node-card.is-offline .vps-res-bar-fill { opacity: .35; }
+.guest-node-card.is-offline .vps-isp-val, .guest-node-card.is-offline .vps-isp-col-sub { color: var(--text-3); }
 [data-theme="light"] .vps-sub-pill.cursor-pointer:hover {
   background: #e2e8f0;
 }
