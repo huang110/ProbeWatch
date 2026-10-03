@@ -284,10 +284,14 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
     .filter(Boolean)
     .sort()
     .at(-1) || effectiveStatus?.generated_at || null
+  const latestAgeSeconds = latestReportedAt ? Math.max(0, Math.round((Date.now() - new Date(latestReportedAt).getTime()) / 1000)) : null
+  const freshnessLabel = latestAgeSeconds === null ? '暂无上报' : latestAgeSeconds <= 15 ? `实时 · ${latestAgeSeconds} 秒前` : latestAgeSeconds <= 60 ? `延迟 · ${latestAgeSeconds} 秒前` : latestAgeSeconds <= 300 ? `滞后 · ${Math.floor(latestAgeSeconds / 60)} 分钟前` : '数据滞后'
   const syncStatus = (isRefreshing || localRefreshing)
     ? '同步中'
-    : hasTelemetry
-      ? '实时同步'
+    : hasTelemetry && latestAgeSeconds !== null && latestAgeSeconds <= 15
+      ? '实时'
+      : hasTelemetry
+        ? '延迟'
       : '等待数据'
 
   return (
@@ -388,17 +392,17 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
         {/* 关键四项指标看板 */}
         <div className="guest-stats-grid guest-stats-bar">
           <div className="guest-stat-box">
-            <div className="stat-head"><GlobeHemisphereWest size={18} /><span>受控节点</span></div>
+            <div className="stat-head"><GlobeHemisphereWest size={18} /><span>在线节点</span></div>
             <div className="stat-main mono">
               {online !== null && total !== null ? `${online} / ${total}` : '—'}
             </div>
             <div className="stat-sub">
-              {online !== null && total !== null ? (online === total ? '全部正常' : '部分异常') : '等待节点数据'}
+              {online !== null && total !== null ? `${online} / ${total} 在线` : '等待节点数据'}
             </div>
           </div>
 
           <div className="guest-stat-box">
-            <div className="stat-head"><Timer size={18} /><span>平均检测延迟</span></div>
+            <div className="stat-head"><Timer size={18} /><span>探针平均延迟</span></div>
             <div className="stat-main mono">
               {formatLatency(avgLatency)}
             </div>
@@ -418,7 +422,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
             <div className="stat-main mono">{syncStatus}</div>
-            <div className="stat-sub">最近上报 {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}</div>
+            <div className="stat-sub">{freshnessLabel} · {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}</div>
           </div>
         </div>
       </section>
@@ -646,8 +650,8 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                         {/* 流量 */}
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
-                            <span className="vps-res-label">流量</span>
-                            <span className="vps-res-val mono text-traffic">{trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '—'}</span>
+                            <span className="vps-res-label">累计流量</span>
+                            <span className="vps-res-val mono text-traffic">{trafficPercent !== null ? `${trafficPercent.toFixed(1)}%` : '未配置配额'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
                             <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, trafficPercent || 0))}%` }} />
@@ -779,6 +783,15 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
                           </div>
                         </div>
                       </div>
+                      {hasIspChecks && cmLatency === null && (
+                        <button
+                          type="button"
+                          className="vps-check-action"
+                          onClick={(event) => { event.stopPropagation(); onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
+                        >
+                          移动暂无样本 · 查看节点详情
+                        </button>
+                      )}
 
                       {/* 保持安全契约约束兼容 */}
                       <span className="guest-badge sr-only">状态未公开</span>
