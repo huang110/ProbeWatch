@@ -290,7 +290,6 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
   const isAllHealthy = total !== null && total > 0 && online === total && (successRate === null || successRate >= 95)
   const offlineCount = total !== null && online !== null ? Math.max(0, total - online) : null
-  const attentionCount = telemetryItems.filter((item) => item?.status === 'attention').length
   const hasIssues = (total !== null && online !== null && online < total) || (successRate !== null && successRate < 95)
   const healthLabel = total === null || total === 0
     ? '等待节点数据'
@@ -298,6 +297,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
       ? (online !== null && online < total ? '部分节点异常' : '检测质量下降')
       : '全部正常'
   const telemetryItems = safeArray(nodes.telemetry)
+  const attentionCount = telemetryItems.filter((item) => item?.status === 'attention').length
   const hasTelemetry = telemetryItems.length > 0
   const latestReportedAt = telemetryItems
     .map((item) => item?.last_reported_at)
