@@ -320,6 +320,8 @@ start_service() {
 
     procd_open_instance
     procd_set_param command "$PROG"
+	# Keep monitoring work below user workloads on small routers.
+	procd_set_param nice 19
     procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -408,6 +410,11 @@ EnvironmentFile=/etc/probewatch/agent.env
 ExecStart=${BIN_PATH}
 Restart=always
 RestartSec=8s
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+Environment=GOMEMLIMIT=96MiB
+Environment=GOGC=75
 
 # 安全基线沙箱隔离
 NoNewPrivileges=true

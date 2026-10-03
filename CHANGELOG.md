@@ -754,3 +754,10 @@
 - 统一检测质量卡片中的异常摘要与辅助信息样式。
 - 修复公开状态字段命名与脱敏测试兼容性。
 
+## v0.9.0 - Resource and deployment tuning
+
+- Added optional GOMEMLIMIT and GOGC runtime tuning for the server and agent.
+- Added safe hourly/daily aggregate retention cleanup and periodic passive SQLite WAL checkpoints.
+- Added low CPU and idle I/O scheduling defaults to the Agent service templates.
+- Added a production systemd unit template with conservative memory and scheduling defaults.
+

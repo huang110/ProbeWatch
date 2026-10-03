@@ -17,6 +17,7 @@ func main() {
 }
 
 func run() error {
+	runtime.ConfigureResourceLimits("agent")
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "-v", "--version", "version":

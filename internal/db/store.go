@@ -53,6 +53,11 @@ const DefaultNodeTokenLifetime = 365 * 24 * time.Hour
 const maxReplayCleanupRows = 1000
 const maxAuthCleanupRows = 1000
 const maxLifecycleCleanupRows = 500
+
+const (
+	aggregateHourlyRetention = 30 * 24 * time.Hour
+	aggregateDailyRetention  = 365 * 24 * time.Hour
+)
 const maxResourcePayloadBytes = 64 * 1024
 const maxTargetIDLength = 128
 const maxTargetNameLength = 128
@@ -377,16 +382,27 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 		{"node tokens", `DELETE FROM node_tokens WHERE rowid IN (SELECT rowid FROM node_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL ORDER BY COALESCE(revoked_at, expires_at), rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.NodeTokens},
 		{"request replays", `DELETE FROM request_replays WHERE rowid IN (SELECT rowid FROM request_replays WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RequestReplays},
 		{"system events history", `DELETE FROM system_events_history WHERE rowid IN (SELECT rowid FROM system_events_history WHERE occurred_at < ? ORDER BY occurred_at, rowid LIMIT ?)`, []any{cutoffSec30, maxLifecycleCleanupRows}, &result.SystemEventsHistory},
+		{"resource hourly aggregates", `DELETE FROM resource_history_hourly WHERE rowid IN (SELECT rowid FROM resource_history_hourly WHERE window_start < ? ORDER BY window_start, rowid LIMIT ?)`, []any{unixNano(now.Add(-aggregateHourlyRetention)), maxLifecycleCleanupRows}, nil},
+		{"network hourly aggregates", `DELETE FROM network_results_history_hourly WHERE rowid IN (SELECT rowid FROM network_results_history_hourly WHERE window_start < ? ORDER BY window_start, rowid LIMIT ?)`, []any{unixNano(now.Add(-aggregateHourlyRetention)), maxLifecycleCleanupRows}, nil},
+		{"resource daily aggregates", `DELETE FROM resource_history_daily WHERE rowid IN (SELECT rowid FROM resource_history_daily WHERE window_start < ? ORDER BY window_start, rowid LIMIT ?)`, []any{unixNano(now.Add(-aggregateDailyRetention)), maxLifecycleCleanupRows}, nil},
+		{"network daily aggregates", `DELETE FROM network_results_history_daily WHERE rowid IN (SELECT rowid FROM network_results_history_daily WHERE window_start < ? ORDER BY window_start, rowid LIMIT ?)`, []any{unixNano(now.Add(-aggregateDailyRetention)), maxLifecycleCleanupRows}, nil},
 	}
 	for _, item := range history {
 		count, err := deleteBatch(item.query, item.name, item.args...)
 		if err != nil {
 			return LifecycleCleanupResult{}, err
 		}
-		*item.set = count
+		if item.set != nil {
+			*item.set = count
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return LifecycleCleanupResult{}, fmt.Errorf("commit lifecycle cleanup: %w", err)
+	}
+	// PASSIVE never blocks writers and lets SQLite reclaim WAL pages when it is
+	// safe. A later lifecycle pass can retry if another reader is active.
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
+		return result, fmt.Errorf("checkpoint sqlite wal: %w", err)
 	}
 	return result, nil
 }
