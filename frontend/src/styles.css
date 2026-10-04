@@ -882,7 +882,8 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 @keyframes drawer-in { from { opacity: .4; transform: translateX(34px); } to { opacity: 1; transform: translateX(0); } }
 
 /* ---------- 游客状态页（大屏） ---------- */
-.guest-shell { min-height: 100dvh; max-width: 1080px; margin: 0 auto; padding: 36px 28px 26px; display: flex; flex-direction: column; background: radial-gradient(circle at 80% -20%, rgba(90, 216, 174, .08), transparent 36%), var(--bg-base); }
+.guest-shell { box-sizing: border-box; width: 100%; min-height: 100dvh; max-width: 1080px; margin: 0 auto; padding: 36px 28px 26px; display: flex; flex-direction: column; overflow-x: hidden; background: radial-gradient(circle at 80% -20%, rgba(90, 216, 174, .08), transparent 36%), var(--bg-base); }
+#root, .app-shell { max-width: 100%; overflow-x: hidden; }
 .guest-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
 .guest-header .brand-lockup { padding: 0; }
 .guest-hero { margin: 26px 0; }
@@ -908,6 +909,41 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 
 /* MJJ 小屏布局：保留按钮可读性，避免中文被挤成竖排。 */
 @media (max-width: 560px) {
+  html,
+  body,
+  #root,
+  .app-shell,
+  .guest-shell,
+  .guest-mjj-shell {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .guest-mjj-shell {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .guest-header,
+  .guest-hero-container,
+  .guest-hero-banner,
+  .guest-stats-grid,
+  .guest-nodes-section,
+  .guest-node-grid {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .guest-detail-wrap {
+    width: 100%;
+    max-width: 100%;
+    padding: 12px 0 28px;
+  }
+
+  .guest-mjj-shell { width: 100%; max-width: 100%; padding-left: 12px; padding-right: 12px; }
   .guest-shell { padding: 16px 12px 18px; }
   .guest-header { align-items: stretch; gap: 12px; }
   .guest-header .brand-lockup { flex: 1 1 100%; min-width: 0; }
@@ -2315,12 +2351,24 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 
 /* ---------- 签名档级公共访客大屏 (Guest View) ---------- */
 .guest-mjj-shell {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 100dvh;
   max-width: 1240px;
   margin: 0 auto;
   padding: 32px 24px 40px;
   background: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.08), transparent 50%), radial-gradient(circle at 90% 90%, rgba(14, 165, 233, 0.06), transparent 45%), #080b10;
+  overflow-x: hidden;
 }
+.guest-detail-wrap {
+  width: 100%;
+  max-width: 1440px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 16px 20px 48px;
+  box-sizing: border-box;
+}
+main.guest-shell { max-width: 100vw; width: 100%; }
 .guest-hero-container { margin: 24px 0 32px; }
 .guest-hero-banner {
   display: flex;

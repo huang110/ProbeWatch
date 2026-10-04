@@ -1171,7 +1171,7 @@ export function App() {
             </div>
           </header>
 
-          <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '16px 20px 48px' }}>
+          <div className="guest-detail-wrap" style={{ width: '100%', maxWidth: '1440px', minWidth: 0, margin: '0 auto', padding: '16px 20px 48px', boxSizing: 'border-box' }}>
             <Suspense fallback={<PageLoadingFallback />}>
               <NodeDetailPage
               node={currentDetailNode}
