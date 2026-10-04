@@ -568,6 +568,9 @@ h1, h2, h3, p { margin-top: 0; }
 .page-loading-copy strong { color: var(--text-1); font-size: 13px; }
 .page-loading-copy span { color: var(--text-3); font-size: 11px; }
 .page-loading-spinner { animation: pulse 1.2s ease-in-out infinite; }
+.telemetry-stat-box.telemetry-pending .stat-main { color: var(--amber); }
+.telemetry-stat-box.telemetry-pending::after { content: ''; display: block; width: 56px; height: 3px; margin-top: 9px; border-radius: 999px; background: linear-gradient(90deg, transparent, var(--amber), transparent); background-size: 180% 100%; animation: telemetry-scan 1.4s ease-in-out infinite; }
+@keyframes telemetry-scan { from { background-position: 100% 0; opacity: .35; } 50% { opacity: 1; } to { background-position: -100% 0; opacity: .35; } }
 .refresh-controls {
   display: flex;
   align-items: center;
@@ -1693,6 +1696,13 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   .poster-action-label { display: none; }
   .guest-node-grid { grid-template-columns: 1fr; }
   .guest-node-card { padding: 14px; }
+  .guest-node-card .vps-sub-pills { gap: 4px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .guest-node-card .vps-sub-pills::-webkit-scrollbar { display: none; }
+  .guest-node-card .vps-sub-pill { flex: 0 0 auto; max-width: 48vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .guest-node-card .vps-resource-matrix-2x2 { gap: 7px; }
+  .guest-node-card .vps-isp-matrix-grid { gap: 7px; }
+  .guest-node-card .vps-isp-track-item { padding: 7px 8px; }
+  .guest-node-card .vps-isp-tag, .guest-node-card .vps-isp-val { font-size: 10px; }
   .vps-resource-matrix-2x2 { column-gap: 12px; row-gap: 11px; }
   .vps-isp-matrix-grid { grid-template-columns: 1fr; gap: 10px; }
   .guest-filter-toolbar { align-items: stretch !important; }

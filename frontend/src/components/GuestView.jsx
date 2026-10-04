@@ -409,7 +409,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
 
         {/* 关键四项指标看板 */}
         <div className="guest-stats-grid guest-stats-bar">
-          <div className="guest-stat-box">
+          <div className={`guest-stat-box telemetry-stat-box ${!hasTelemetry ? 'telemetry-pending' : ''}`}>
             <div className="stat-head"><GlobeHemisphereWest size={18} /><span>在线节点</span></div>
             <div className="stat-main mono">
               {online !== null && total !== null ? `${online} / ${total}` : '—'}
@@ -455,7 +455,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           <div className="guest-stat-box">
             <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
             <div className="stat-main mono">{syncStatus}</div>
-            <div className="stat-sub">最近上报 {freshnessLabel} · {latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}{refreshHint ? ` · ${refreshHint}` : ''}</div>
+            <div className="stat-sub">{hasTelemetry ? `最近上报 ${freshnessLabel} · ${latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}` : '正在连接探针，先展示页面结构'}{refreshHint ? ` · ${refreshHint}` : ''}</div>
           </div>
         </div>
       </section>
