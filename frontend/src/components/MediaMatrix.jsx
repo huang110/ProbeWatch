@@ -214,6 +214,7 @@ export function MediaMatrix({ nodes = [] }) {
           </button>
         </div>
       </div>
+      <div className="mjj-quick-tags" aria-label="MJJ解锁判断"><span className="mjj-quick-tag">原生解锁优先</span><span className="mjj-quick-tag">AI / 流媒体分栏</span><span className="mjj-quick-tag">按节点横向对比</span></div>
 
       {/* 矩阵表格 */}
       <div className="panel media-matrix-panel">

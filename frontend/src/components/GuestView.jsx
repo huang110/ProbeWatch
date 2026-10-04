@@ -161,6 +161,12 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
     : (internalStatus || status)
 
   const nodes = safeObject(effectiveStatus?.nodes)
+  const guestMediaSummary = useMemo(() => {
+    const rows = safeArray(nodes.telemetry).flatMap((item) => safeArray(item?.checks)).filter((check) => String(check?.kind || '').toLowerCase().includes('media'))
+    const available = rows.filter((check) => ['available', 'unlocked', 'ok', 'success'].includes(String(check?.status || check?.result?.status || '').toLowerCase())).length
+    const platforms = rows.map((check) => ({ name: safeText(check?.label || check?.name || check?.target || '流媒体'), status: String(check?.status || check?.result?.status || 'unknown').toLowerCase() })).slice(0, 8)
+    return { available, total: rows.length, platforms }
+  }, [nodes.telemetry])
   const telemetryByName = useMemo(() => {
     const map = new Map()
     safeArray(nodes.telemetry).forEach((item) => {
@@ -485,6 +491,13 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           {visitorInfo.isp && <span className="guest-visitor-ip-meta">{visitorInfo.isp}</span>}
         </aside>
       )}
+
+      <section className="guest-media-summary" aria-label="流媒体与 AI 解锁摘要">
+        <div className="guest-media-summary-head"><div><h2>流媒体 / AI 解锁</h2><p>按公开遥测汇总最近一次检测结果</p></div><strong className="mono">{guestMediaSummary.total ? guestMediaSummary.available + '/' + guestMediaSummary.total : '暂无样本'}</strong></div>
+        <div className="guest-media-summary-grid">
+          {guestMediaSummary.platforms.length ? guestMediaSummary.platforms.map((item) => <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}><b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>{item.name}</span>) : <span className="is-muted">暂无流媒体上报，可在后台流媒体页面一键下发检测规则。</span>}
+        </div>
+      </section>
 
       {/* 节点列表展示 (DStatus 宫格与紧凑表格双视图) */}
       <section className="guest-nodes-section">

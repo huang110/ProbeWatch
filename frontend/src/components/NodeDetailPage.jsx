@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   ClipboardText,
+  Rows,
   Cpu,
   HardDrive,
   Globe,
@@ -310,6 +311,7 @@ export function NodeDetailPage({
   const [showTrafficModal, setShowTrafficModal] = useState(false)
   const [hoverData, setHoverData] = useState(null)
   const [showPublicNodeCard, setShowPublicNodeCard] = useState(true)
+  const [mobileCompact, setMobileCompact] = useState(false)
   // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
@@ -1072,7 +1074,7 @@ export function NodeDetailPage({
   }
 
   return (
-    <section className="subpage komari-detail-page">
+    <section className={`subpage komari-detail-page${mobileCompact ? ' mobile-compact-mode' : ''}`}>
       <div className="node-detail-summary-strip">
         <div><span>状态</span><strong className={isOnline ? 'text-mint' : 'text-rose'}>{isOnline ? '在线' : '离线'}</strong></div>
         <div><span>CPU</span><strong>{cpuPercent === null ? '—' : `${Math.round(cpuPercent)}%`}</strong></div>
@@ -2699,6 +2701,7 @@ export function NodeDetailPage({
       </footer>
       <div className="node-detail-mobile-actions">
         <button type="button" onClick={onBack}><ArrowLeft size={15} /> 返回</button>
+        <button type="button" className={mobileCompact ? 'active' : ''} onClick={() => setMobileCompact((value) => !value)} title="切换手机极简视图"><Rows size={15} /> {mobileCompact ? '完整' : '极简'}</button>
         <button type="button" onClick={handleSharePoster}><ShareNetwork size={15} /> 海报</button>
         <button type="button" onClick={handleCopyShareMarkdown}><ClipboardText size={15} /> Markdown</button>
         {onNavigate && <button type="button" onClick={() => onNavigate('terminal')}><Terminal size={15} /> 终端</button>}

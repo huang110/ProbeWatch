@@ -401,6 +401,7 @@ export function SpeedtestBenchmarkView() {
           gap: '12px',
         }}
       >
+        <div className="mjj-quick-tags" aria-label="MJJ测速判断"><span className="mjj-quick-tag">看峰值也看稳定</span><span className="mjj-quick-tag">适合小鸡对比</span><span className="mjj-quick-tag">下行 / 上行分开看</span></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"

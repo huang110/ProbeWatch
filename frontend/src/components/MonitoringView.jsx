@@ -255,6 +255,9 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
         <div className="text-muted" style={{ fontSize: '11.5px', paddingRight: '6px' }}>
           骨干网络探测 · 6 大省网基准 · BGP 线路指纹
         </div>
+      <div className="mjj-quick-tags" aria-label="MJJ线路判断">
+        <span className="mjj-quick-tag">三网延迟可比</span><span className="mjj-quick-tag">丢包优先</span><span className="mjj-quick-tag">适合判断建站与落地</span>
+      </div>
       </div>
 
       {/* ====================================================================
