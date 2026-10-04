@@ -2693,6 +2693,12 @@ export function NodeDetailPage({
         <div>Powered by <strong>ProbeWatch Monitor</strong></div>
         <div>Theme by <strong>Komari Glassmorphism</strong></div>
       </footer>
+      <div className="node-detail-mobile-actions">
+        <button type="button" onClick={onBack}><ArrowLeft size={15} /> 返回</button>
+        <button type="button" onClick={handleSharePoster}><ShareNetwork size={15} /> 海报</button>
+        <button type="button" onClick={handleCopyShareMarkdown}><ClipboardText size={15} /> Markdown</button>
+        {onNavigate && <button type="button" onClick={() => onNavigate('terminal')}><Terminal size={15} /> 终端</button>}
+      </div>
     </section>
   )
 }
