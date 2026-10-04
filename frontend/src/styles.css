@@ -11837,6 +11837,19 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   line-height: 1.6;
 }
 .app-shell .heading-actions { gap: var(--admin-space-2); }
+.app-shell .page-heading,
+.app-shell .subpage-heading { position: relative; }
+.app-shell .page-heading::after,
+.app-shell .subpage-heading::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 42px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--blue);
+}
 
 /* One card language across dashboards and sub-pages */
 .app-shell .panel,
@@ -11867,6 +11880,9 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   padding-bottom: var(--admin-space-3);
   border-bottom: 1px solid var(--admin-border);
 }
+.app-shell .panel-header,
+.app-shell .section-title-bar,
+.app-shell .channel-panel-head { min-height: 42px; }
 .app-shell .panel-header h2,
 .app-shell .panel-header h3 {
   color: var(--admin-heading);
@@ -11875,6 +11891,22 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   line-height: 1.35;
 }
 .app-shell .panel-header p { color: var(--admin-subtle); font-size: 11px; line-height: 1.55; }
+.app-shell .button:focus-visible,
+.app-shell .icon-button:focus-visible,
+.app-shell .icon-action-btn:focus-visible,
+.app-shell .view-toggle-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--blue) 72%, white);
+  outline-offset: 2px;
+}
+.app-shell .table th { height: 36px; vertical-align: middle; background: var(--admin-surface-muted); }
+.app-shell .table td { min-height: 44px; vertical-align: middle; }
+.app-shell .modal-card .modal-header { min-height: 58px; border-bottom: 1px solid var(--admin-border); }
+.app-shell .modal-card .modal-actions { border-top: 1px solid var(--admin-border); }
+@media (max-width: 640px) {
+  .app-shell .page-heading, .app-shell .subpage-heading { padding-bottom: 10px; }
+  .app-shell .panel-header, .app-shell .section-title-bar, .app-shell .channel-panel-head { min-height: 0; }
+  .app-shell .table th, .app-shell .table td { padding-top: 9px; padding-bottom: 9px; }
+}
 
 /* Consistent controls */
 .app-shell input:not([type=checkbox]):not([type=radio]),
