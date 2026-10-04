@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -25,6 +26,25 @@ type publicStatusResponse struct {
 	Checks        publicStatusChecks `json:"checks"`
 	LastUpdatedAt *time.Time         `json:"last_updated_at"`
 	GeneratedAt   time.Time          `json:"generated_at"`
+}
+
+type publicClientInfoResponse struct {
+	IP       string `json:"ip"`
+	Location string `json:"location,omitempty"`
+	ISP      string `json:"isp,omitempty"`
+}
+
+// publicClientInfo returns only the visitor's connection address as seen by
+// the reverse proxy. It is intentionally separate from node telemetry so the
+// public dashboard can label the current visitor without exposing node IPs.
+func (s *Server) publicClientInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ip := publicClientIP(r)
+	response := publicClientInfoResponse{IP: ip}
+	writeJSON(w, http.StatusOK, response)
 }
 
 type publicStatusNodes struct {
@@ -314,6 +334,26 @@ func publicLimiterKey(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+func publicClientIP(r *http.Request) string {
+	for _, header := range []string{"CF-Connecting-IP", "X-Real-IP"} {
+		if value := strings.TrimSpace(r.Header.Get(header)); net.ParseIP(value) != nil {
+			return value
+		}
+	}
+	if forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ","); len(forwarded) > 0 {
+		if value := strings.TrimSpace(forwarded[0]); net.ParseIP(value) != nil {
+			return value
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && net.ParseIP(host) != nil {
+		return host
+	}
+	if net.ParseIP(strings.TrimSpace(r.RemoteAddr)) != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return ""
+}
+
 func isLoopbackHost(host string) bool {
 	ip := net.ParseIP(strings.TrimSpace(host))
 	return ip != nil && ip.IsLoopback()
@@ -340,16 +380,31 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uuid := parts[3]
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
+	var node db.Node
+	var err error
+	if security.IsRFC4122UUID(uuid) {
+		node, err = s.service.Store().GetNodeByUUID(r.Context(), uuid)
+	} else if strings.HasPrefix(uuid, "guest-") {
+		// Guest cards do not expose UUIDs. Resolve their stable, URL-safe name
+		// marker server-side so clicking a public card still loads detail data.
+		name, decodeErr := url.PathUnescape(strings.TrimPrefix(uuid, "guest-"))
+		if decodeErr == nil {
+			nodes, listErr := s.service.Store().ListNodes(r.Context())
+			if listErr == nil {
+				for _, candidate := range nodes {
+					if candidate.Name == name {
+						node, err = candidate, nil
+						break
+					}
+				}
+			}
+		}
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
+	if err != nil || node.ID == "" {
+		if errors.Is(err, sql.ErrNoRows) || err == nil {
+			writeJSONError(w, http.StatusNotFound, "node not found")
+			return
+		}
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}

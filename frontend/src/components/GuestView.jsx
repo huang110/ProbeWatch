@@ -53,7 +53,7 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   }
 }
 
-export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
+export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
   const [showLogin, setShowLogin] = useState(false)
   const [username, setUsername] = useState('admin')
@@ -68,6 +68,7 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [sortKey, setSortKey] = useState('default')
   const [liveRates, setLiveRates] = useState({})
+  const visitorInfo = clientInfo || {}
   const telemetryRef = useRef(new Map())
 
   // 当外部未传入 status 或 status 节点列表为空时，自驱动从公开状态 API 同步
@@ -459,6 +460,16 @@ export function GuestView({ status, isRefreshing, onRefresh, onLoginSuccess, isP
           </div>
         </div>
       </section>
+
+      {visitorInfo.ip && (
+        <aside className="guest-visitor-ip-bar" aria-label="访客公网信息">
+          <GlobeHemisphereWest size={15} />
+          <span>当前访问公网 IP</span>
+          <strong className="mono">{visitorInfo.ip}</strong>
+          {visitorInfo.location && <span className="guest-visitor-ip-meta">{visitorInfo.location}</span>}
+          {visitorInfo.isp && <span className="guest-visitor-ip-meta">{visitorInfo.isp}</span>}
+        </aside>
+      )}
 
       {/* 节点列表展示 (DStatus 宫格与紧凑表格双视图) */}
       <section className="guest-nodes-section">

@@ -10,6 +10,18 @@ export async function fetchGuestStatus(signal) {
   }
 }
 
+export async function fetchPublicClientInfo(signal) {
+  try {
+    const response = await fetch('/api/public/client-info', { credentials: 'same-origin', signal })
+    if (!response.ok) return null
+    const json = await response.json()
+    return json && typeof json === 'object' && !Array.isArray(json) ? json : null
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    return null
+  }
+}
+
 // 管理页写操作（POST/PATCH/DELETE）先取一次性 CSRF Token，与 ackAlert / TOTP 同一模式。
 export async function fetchCsrfToken() {
   const response = await fetch('/api/csrf', { credentials: 'same-origin' })

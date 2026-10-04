@@ -276,6 +276,7 @@ export function NodeDetailPage({
   onTrafficPeriodChange,
   onBack,
   rates = {},
+  clientInfo = null,
   onNavigate,
 }) {
   const [copied, setCopied] = useState(false)
@@ -531,6 +532,7 @@ export function NodeDetailPage({
   // public node row leaves ip empty. Prefer either address before falling
   // back to the custom metadata so every public IP label stays consistent.
   const publicIp = detailResource.ip || detailResource.ipv4 || node?.hostname || customMeta.ip || '—'
+  const visitorIp = clientInfo?.ip || '—'
   const nodeIPv4 = node?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
   const nodeIPv6 = node?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
   const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
@@ -2630,12 +2632,12 @@ export function NodeDetailPage({
               <div className="floating-public-node-avatar"><Globe size={18} /></div>
               <div className="floating-public-node-title"><strong>{customMeta.customName || node?.name || '探针节点'}</strong><span>{node?.region || customMeta.region || '公网节点'}</span></div>
             </div>
-            <div className="floating-public-node-welcome">节点公网信息</div>
+            <div className="floating-public-node-welcome">当前访问公网信息</div>
             <div className="floating-public-node-divider" />
             <div className="floating-public-node-row"><Desktop size={14} /><span>{os || 'Linux'}</span></div>
             <div className="floating-public-node-row"><Globe size={14} /><span>{customMeta.client || customMeta.browser || 'ProbeWatch Agent'}</span></div>
-            <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{publicIp}</span></div>
-            <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{ispText}</span></div>
+            <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{visitorIp}</span></div>
+            <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{clientInfo?.isp || clientInfo?.location || ispText}</span></div>
             <div className="floating-public-node-row"><Clock size={14} /><span>{new Date(nowTick).toLocaleDateString('zh-CN')}</span></div>
           </aside>
         )}

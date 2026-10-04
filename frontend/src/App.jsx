@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Bell, CaretDown, CaretLineLeft, CaretLineRight, Clock, DotsThree, Eye, List, Pulse, SignOut } from '@phosphor-icons/react'
 import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, formatUptime, safeArray, detectRegionAndFlag } from './lib/format.js'
-import { fetchCsrfToken, fetchGuestStatus, fetchPublicVersion, performLogout } from './lib/api.js'
+import { fetchCsrfToken, fetchGuestStatus, fetchPublicClientInfo, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
 import { GuestView } from './components/GuestView.jsx'
@@ -467,6 +467,7 @@ export function App() {
   const [latestAgentVersion, setLatestAgentVersion] = useState('')
   const [me, setMe] = useState(null)
   const [publicStatus, setPublicStatus] = useState(null)
+  const [publicClientInfo, setPublicClientInfo] = useState(null)
   const [guestPreview, setGuestPreview] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const refreshInterval = 5
@@ -603,21 +604,26 @@ export function App() {
   }, [])
 
   const enterGuest = useCallback(async (controller, current) => {
-    const guestStatus = await fetchGuestStatus(controller.signal).catch(() => null)
+    const [guestStatus, clientInfo] = await Promise.all([
+      fetchGuestStatus(controller.signal).catch(() => null),
+      fetchPublicClientInfo(controller.signal).catch(() => null),
+    ])
     if (current !== coreRequestRef.current) return
     setMe(null); setData([]); setOverview(null); setAlerts([]); setRates({}); setLossRates({})
     setPublicStatus(guestStatus)
+    setPublicClientInfo(clientInfo)
     setApiState({ kind: 'guest', message: '' })
   }, [])
 
   const refreshGuest = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const guestStatus = await fetchGuestStatus()
+      const [guestStatus, clientInfo] = await Promise.all([fetchGuestStatus(), fetchPublicClientInfo()])
       if (guestStatus) {
         setPublicStatus(guestStatus)
         markSync()
       }
+      if (clientInfo) setPublicClientInfo(clientInfo)
     } finally {
       setIsRefreshing(false)
     }
@@ -1190,6 +1196,7 @@ export function App() {
                 navigate('overview')
               }}
               rates={rates}
+              clientInfo={publicClientInfo}
               />
             </Suspense>
           </div>
@@ -1212,6 +1219,7 @@ export function App() {
     return (
       <GuestView
         status={publicStatus || previewFallback}
+        clientInfo={publicClientInfo}
         isRefreshing={isRefreshing}
         onRefresh={refreshGuest}
         onLoginSuccess={() => { setGuestPreview(false); refreshAll() }}

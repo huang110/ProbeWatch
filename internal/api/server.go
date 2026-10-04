@@ -103,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/api/public/status", s.publicStatus)
+	mux.HandleFunc("/api/public/client-info", s.publicClientInfo)
 	mux.HandleFunc("/api/public/status-page", s.publicStatusPageHandler)
 	mux.HandleFunc("/api/public/incidents", s.publicIncidentsHandler)
 	mux.HandleFunc("/api/public/nodes/", s.publicNodeRoute)
