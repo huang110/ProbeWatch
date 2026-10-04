@@ -12363,6 +12363,18 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .floating-public-node-row svg { flex: 0 0 auto; color: var(--blue); }
 .floating-public-node-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) { .floating-public-node-card { top: 66px; right: 12px; width: min(260px, calc(100vw - 24px)); } }
+.komari-targets-empty { display: flex; align-items: center; gap: 12px; grid-column: 1 / -1; min-height: 72px; padding: 14px 16px; border: 1px dashed var(--admin-border-strong); border-radius: 10px; color: var(--admin-subtle); background: var(--admin-surface-soft); }
+.komari-targets-empty > svg { flex: 0 0 auto; color: var(--blue); }
+.komari-targets-empty div { display: grid; gap: 3px; min-width: 0; }
+.komari-targets-empty strong { color: var(--admin-heading); font-size: 12px; }
+.komari-targets-empty span { font-size: 11px; }
+.komari-targets-empty button { margin-left: auto; min-height: 30px; padding: 0 10px; border: 1px solid var(--blue); border-radius: 7px; color: var(--blue); background: var(--blue-dim); font-size: 11px; font-weight: 600; cursor: pointer; }
+.komari-ping-empty-config { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 20px; color: var(--admin-subtle); background: color-mix(in srgb, var(--admin-surface) 84%, transparent); }
+.komari-ping-empty-config svg { color: var(--blue); }
+.komari-ping-empty-config strong { color: var(--admin-heading); font-size: 13px; }
+.komari-ping-empty-config span { max-width: 420px; font-size: 11px; text-align: center; }
+.komari-ping-chart-wrap { position: relative; }
+@media (max-width: 640px) { .komari-targets-empty { align-items: flex-start; flex-wrap: wrap; } .komari-targets-empty button { margin-left: 30px; } }
 .app-shell .rbac-card h2,
 .app-shell .backup-management-card h2,
 .app-shell .notify-page-container h2 { letter-spacing: -.02em; }

@@ -2374,7 +2374,13 @@ export function NodeDetailPage({
 
         {/* 测速目标卡片列表 */}
         <div className="komari-targets-grid">
-          {pingTargets.map((t) => {
+          {pingTargets.length === 0 ? (
+            <div className="komari-targets-empty">
+              <ShareNetwork size={18} />
+              <div><strong>尚未添加三网延迟检测</strong><span>添加电信、联通、移动目标后，这里会显示延迟、丢包和抖动。</span></div>
+              {onNavigate && <button type="button" onClick={() => onNavigate('monitoring')}>去添加检测目标</button>}
+            </div>
+          ) : pingTargets.map((t) => {
             const isChecked = Boolean(selectedTargets[t.id])
             const jitterText = t.jitter === null || t.jitter === undefined || t.jitter === ''
               ? '—'
@@ -2430,6 +2436,11 @@ export function NodeDetailPage({
           </div>
 
           <div className="komari-ping-chart-wrap">
+            {pingTargets.length === 0 ? (
+              <div className="komari-ping-empty-state komari-ping-empty-config"><ShareNetwork size={22} /><strong>暂无三网检测目标</strong><span>先添加电信、联通、移动检测目标，延迟曲线会在真实采样后自动出现。</span></div>
+            ) : pingChartData.targetPaths.length === 0 ? (
+              <div className="komari-ping-empty-state komari-ping-empty-config"><Clock size={22} /><strong>等待真实延迟采样</strong><span>检测目标已配置，探针回传数据后会显示曲线。</span></div>
+            ) : null}
             <svg
               viewBox={`0 0 ${pingChartData.width} ${pingChartData.height}`}
               className="komari-ping-svg"
