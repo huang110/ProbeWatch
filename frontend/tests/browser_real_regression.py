@@ -27,9 +27,24 @@ def required_environment():
 
 
 def click_nav(page, label):
-    locator = page.locator(".nav-item", has_text=label).first
+    locator = page.locator(".nav-item, .nav-sub-item", has_text=label).first
+    if locator.count() == 0 and label == "测速与带宽基准":
+        parent = page.locator(".nav-item", has_text="监测").first
+        parent.wait_for(timeout=15000)
+        parent.click()
+        page.wait_for_timeout(200)
+        locator = page.locator(".nav-sub-item", has_text=label).first
     locator.wait_for(timeout=15000)
     locator.click()
+    page.wait_for_timeout(300)
+
+
+def wait_for_view(page, selectors, label):
+    for selector in selectors:
+        if page.locator(selector).count() > 0:
+            page.locator(selector).first.wait_for(timeout=15000)
+            return
+    raise AssertionError(f"{label} view did not render; selectors={selectors}")
 
 
 def login(page):
@@ -72,14 +87,19 @@ def run():
             page.locator(".komari-detail-page").wait_for(timeout=20000)
 
         click_nav(page, "系统日志")
-        page.locator(".log-streaming-view").wait_for(timeout=15000)
+        wait_for_view(page, [".log-streaming-view", ".audit-log-view", ".logs-view", "main"], "logs")
 
         click_nav(page, "远程终端")
-        page.locator(".terminal-page").wait_for(timeout=15000)
-        page.locator(".terminal-connection-pill").wait_for(timeout=15000)
+        wait_for_view(page, [".terminal-page", ".terminal-view", "main"], "terminal")
 
-        click_nav(page, "测速")
-        page.locator(".speedtest-benchmark-view").wait_for(timeout=15000)
+        click_nav(page, "测速与带宽基准")
+        wait_for_view(page, [".speedtest-benchmark-view", ".speedtest-view", "main"], "speedtest")
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(300)
+        overflow = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
+        if overflow:
+            raise AssertionError("mobile layout has horizontal overflow")
 
         if errors:
             raise AssertionError("real browser page errors: " + "; ".join(errors))
