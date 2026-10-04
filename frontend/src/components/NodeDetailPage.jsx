@@ -308,6 +308,7 @@ export function NodeDetailPage({
   const [targetInfoModal, setTargetInfoModal] = useState(null)
   const [showTrafficModal, setShowTrafficModal] = useState(false)
   const [hoverData, setHoverData] = useState(null)
+  const [showPublicNodeCard, setShowPublicNodeCard] = useState(true)
   // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
@@ -2615,12 +2616,22 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 节点公网 IP 胶囊栏 */}
-        <div className="komari-visitor-ip-bar">
-          <span className="komari-visitor-ip-pill mono">
-            🌐 节点公网 IP: {publicIp} | {ispText}
-          </span>
-        </div>
+        {showPublicNodeCard && (
+          <aside className="floating-public-node-card" aria-label="节点公网信息">
+            <button type="button" className="floating-public-node-close" onClick={() => setShowPublicNodeCard(false)} aria-label="关闭节点公网信息">×</button>
+            <div className="floating-public-node-head">
+              <div className="floating-public-node-avatar"><Globe size={18} /></div>
+              <div className="floating-public-node-title"><strong>{customMeta.customName || node?.name || '探针节点'}</strong><span>{node?.region || customMeta.region || '公网节点'}</span></div>
+            </div>
+            <div className="floating-public-node-welcome">节点公网信息</div>
+            <div className="floating-public-node-divider" />
+            <div className="floating-public-node-row"><Desktop size={14} /><span>{os || 'Linux'}</span></div>
+            <div className="floating-public-node-row"><Globe size={14} /><span>{customMeta.client || customMeta.browser || 'ProbeWatch Agent'}</span></div>
+            <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{publicIp}</span></div>
+            <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{ispText}</span></div>
+            <div className="floating-public-node-row"><Clock size={14} /><span>{new Date(nowTick).toLocaleDateString('zh-CN')}</span></div>
+          </aside>
+        )}
       </div>
 
       {/* 6. 目标详情信息弹窗 */}
