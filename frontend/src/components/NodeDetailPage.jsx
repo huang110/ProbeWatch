@@ -2569,10 +2569,6 @@ export function NodeDetailPage({
               )}
             </svg>
 
-            {pingChartData.targetPaths.length === 0 && (
-              <div className="komari-ping-empty-state">暂无真实延迟历史采样，等待探针回传后显示曲线</div>
-            )}
-
             {/* 浮动实时 Tooltip 悬浮框 */}
             {hoverData && (
               <div
