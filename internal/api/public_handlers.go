@@ -32,6 +32,8 @@ type publicClientInfoResponse struct {
 	IP       string `json:"ip"`
 	Location string `json:"location,omitempty"`
 	ISP      string `json:"isp,omitempty"`
+	Platform string `json:"platform,omitempty"`
+	Browser  string `json:"browser,omitempty"`
 }
 
 // publicClientInfo returns only the visitor's connection address as seen by
@@ -43,8 +45,42 @@ func (s *Server) publicClientInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := publicClientIP(r)
-	response := publicClientInfoResponse{IP: ip}
+	response := publicClientInfoResponse{IP: ip, Platform: publicClientPlatform(r.UserAgent()), Browser: publicClientBrowser(r.UserAgent())}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func publicClientPlatform(userAgent string) string {
+	ua := strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(ua, "windows"):
+		return "Windows"
+	case strings.Contains(ua, "mac os") || strings.Contains(ua, "macintosh"):
+		return "macOS"
+	case strings.Contains(ua, "android"):
+		return "Android"
+	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad"):
+		return "iOS"
+	case strings.Contains(ua, "linux"):
+		return "Linux"
+	default:
+		return "未知系统"
+	}
+}
+
+func publicClientBrowser(userAgent string) string {
+	ua := strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(ua, "edg/"):
+		return "Edge Browser"
+	case strings.Contains(ua, "firefox/"):
+		return "Firefox Browser"
+	case strings.Contains(ua, "chrome/") || strings.Contains(ua, "crios/"):
+		return "Chrome Browser"
+	case strings.Contains(ua, "safari/"):
+		return "Safari Browser"
+	default:
+		return "浏览器"
+	}
 }
 
 type publicStatusNodes struct {

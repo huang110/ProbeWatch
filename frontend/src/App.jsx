@@ -8,6 +8,7 @@ import { GuestView } from './components/GuestView.jsx'
 import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { useLivePolling } from './lib/useLivePolling.js'
+import { Globe, Desktop, ShareNetwork, ShieldCheck } from '@phosphor-icons/react'
 
 const NodeDetailPage = lazy(() => import('./components/NodeDetailPage.jsx').then((m) => ({ default: m.NodeDetailPage })))
 const OverviewPage = lazy(() => import('./components/OverviewPage.jsx').then((m) => ({ default: m.OverviewPage })))
@@ -473,6 +474,7 @@ export function App() {
   const refreshInterval = 5
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [showVisitorCard, setShowVisitorCard] = useState(true)
   const [theme, setTheme] = useState(getSavedTheme)
   const coreAbortRef = useRef(null)
   const coreRequestRef = useRef(0)
@@ -1252,6 +1254,22 @@ export function App() {
       onLogout={performLogout}
     />
     <main className="main-content">
+      {showVisitorCard && publicClientInfo?.ip && (
+        <aside className="floating-visitor-card" aria-label="当前访问者公网信息">
+          <button type="button" className="floating-public-node-close" onClick={() => setShowVisitorCard(false)} aria-label="关闭访问者信息">×</button>
+          <div className="floating-public-node-head">
+            <div className="floating-public-node-avatar"><Globe size={18} /></div>
+            <div className="floating-public-node-title"><strong>尊敬的管理员</strong><span>{publicClientInfo.location || '当前访问者'}</span></div>
+          </div>
+          <div className="floating-public-node-welcome">Welcome from ProbeWatch!</div>
+          <div className="floating-public-node-divider" />
+          <div className="floating-public-node-row"><Desktop size={14} /><span>{publicClientInfo.platform || '未知系统'}</span></div>
+          <div className="floating-public-node-row"><Globe size={14} /><span>{publicClientInfo.browser || '浏览器'}</span></div>
+          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{publicClientInfo.ip}</span></div>
+          <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{publicClientInfo.isp || '公网访问'}</span></div>
+          <div className="floating-public-node-row"><Clock size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
+        </aside>
+      )}
       <Topbar
         activeNav={activeNav}
         clockText={clockText}
