@@ -27,6 +27,7 @@ import {
   Lightning,
   Timer,
   Check,
+  CloudArrowDown,
 } from '@phosphor-icons/react'
 import { formatBytes, formatRate, formatPercent, numeric, safeText, formatTimeOfDay, calcEffectiveTraffic } from '../lib/format.js'
 import { getNodeBilling, getNodeTrafficConfig, convertCNYToCurrency, BILLING_CYCLES } from '../lib/billing.js'
@@ -72,6 +73,7 @@ export function DashboardView({
   const [checkSummaries, setCheckSummaries] = useState([])
   const [dayTrafficSeries, setDayTrafficSeries] = useState([])
   const [monthTrafficSeries, setMonthTrafficSeries] = useState([])
+  const [mediaSummary, setMediaSummary] = useState({ loading: true, available: 0, total: 0, nodes: 0, platforms: [] })
   const metricsRequestRef = useRef(null)
 
   useEffect(() => {
@@ -134,6 +136,36 @@ export function DashboardView({
     loadMetrics()
     return () => controller.abort()
   }, [primaryNodeUuid, refreshInterval])
+
+  useEffect(() => {
+    let cancelled = false
+    const targets = (nodes || []).map((node) => node?.uuid || node?.id).filter(Boolean)
+    if (!targets.length) {
+      setMediaSummary({ loading: false, available: 0, total: 0, nodes: 0, platforms: [] })
+      return () => { cancelled = true }
+    }
+    setMediaSummary((prev) => ({ ...prev, loading: true }))
+    Promise.all(targets.map((uuid) => fetch(`/api/nodes/\${encodeURIComponent(uuid)}/media`, { credentials: 'same-origin' }).then((res) => res.ok ? res.json() : []).catch(() => [])))
+      .then((rows) => {
+        if (cancelled) return
+        const counts = new Map()
+        let available = 0
+        let total = 0
+        rows.forEach((reports) => (Array.isArray(reports) ? reports : []).forEach((report) => {
+          const name = report?.name || report?.service || report?.platform || report?.key || '流媒体'
+          const status = String(report?.status || '').toLowerCase()
+          const ok = report?.ok === true || ['available', 'unlocked', 'ok', 'success'].includes(status)
+          const item = counts.get(name) || { name, available: 0, total: 0 }
+          item.total += 1
+          if (ok) { item.available += 1; available += 1 }
+          total += 1
+          counts.set(name, item)
+        }))
+        setMediaSummary({ loading: false, available, total, nodes: targets.length, platforms: Array.from(counts.values()).sort((a, b) => b.available - a.available || a.name.localeCompare(b.name)).slice(0, 6) })
+      })
+      .catch(() => { if (!cancelled) setMediaSummary((prev) => ({ ...prev, loading: false })) })
+    return () => { cancelled = true }
+  }, [nodes])
 
   // 1. 服务器状态汇总 (仅统计真实探针服务器)
   const serverStats = useMemo(() => {
@@ -673,6 +705,16 @@ export function DashboardView({
             <span>年度累计 {convertCNYToCurrency(trafficMetrics.yearTotalCostCNY).formatted}</span>
             <span>剩余价值 {convertCNYToCurrency(trafficMetrics.totalResidualCNY).formatted}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="panel dashboard-media-summary" onClick={() => onNavigate && onNavigate('media')} role="button" tabIndex={0} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && onNavigate) onNavigate('media') }}>
+        <div className="dash-card-header">
+          <div className="dash-card-header-left"><h3 className="text-sm font-bold text-foreground"><CloudArrowDown size={16} className="dashboard-media-icon" /> 流媒体解锁</h3><p className="text-xs text-muted">按节点聚合最近一次检测结果 · 点击查看完整矩阵</p></div>
+          <div className="dashboard-media-total mono">{mediaSummary.loading ? '读取中…' : String(mediaSummary.available) + ' / ' + String(mediaSummary.total)}</div>
+        </div>
+        <div className="dashboard-media-platforms">
+          {mediaSummary.platforms.length ? mediaSummary.platforms.map((item) => <div className="dashboard-media-platform" key={item.name}><span>{item.name}</span><strong>{item.available}/{item.total}</strong></div>) : <span className="text-xs text-muted">暂无流媒体上报，前往流媒体页面生成检测规则。</span>}
         </div>
       </div>
 
