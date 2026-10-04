@@ -672,7 +672,7 @@ export function NodeTable({
 
       {/* 3. Komari 极简微章视图 (Compact View) */}
       {viewMode === 'compact' && (
-        <div className="komari-compact-grid">
+        <div className="komari-compact-grid mobile-single-row-mode">
           {rows.map(({ node, key, rate, billing, calc }) => {
             const isOnline = node.status === 'online'
             return (

@@ -6,6 +6,7 @@ import {
   Star,
   Check,
   Copy,
+  ClipboardText,
   Cpu,
   HardDrive,
   Globe,
@@ -279,6 +280,7 @@ export function NodeDetailPage({
 }) {
   const [copied, setCopied] = useState(false)
   const [posterCopied, setPosterCopied] = useState(false)
+  const [markdownCopied, setMarkdownCopied] = useState(false)
   const [isFavorite, setIsFavorite] = useState(false)
   const [activeTimeRange, setActiveTimeRange] = useState(historyTimeRange || '实时')
   const [activePingRange, setActivePingRange] = useState(pingTimeRange || '1小时')
@@ -392,6 +394,45 @@ export function NodeDetailPage({
     URL.revokeObjectURL(url)
     setPosterCopied(true)
     setTimeout(() => setPosterCopied(false), 2400)
+  }
+
+  const handleCopyShareMarkdown = async () => {
+    const name = customMeta.customName || node.name || 'ProbeWatch 节点'
+    const status = isOnline ? '在线' : '离线'
+    const cpu = cpuPercent === null ? '暂无' : `${Math.round(cpuPercent)}%`
+    const memory = memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '暂无'
+    const disk = diskTotal ? `${Math.round((diskUsed / diskTotal) * 100)}%` : '暂无'
+    const mediaBadges = POPULAR_MEDIA.map((item) => {
+      const result = getMediaStatus(item, mediaData)
+      return `${result.tone === 'available' ? '✅' : '❌'} ${item.label || item.name}`
+    }).join(' · ')
+    const markdown = [
+      `### ${node.flag || '🌐'} ${name}`,
+      `**状态：** ${status} · ${heartbeatText}`,
+      '',
+      `| CPU | 内存 | 磁盘 | 剩余价值 | 流媒体解锁 |`,
+      `|---:|---:|---:|---:|---:|`,
+      `| ${cpu} | ${memory} | ${disk} | ${remainingValue} | ${unlockedMediaCount}/${POPULAR_MEDIA.length} |`,
+      '',
+      `**解锁：** ${mediaBadges}`,
+      '',
+      `> ProbeWatch · 生成于 ${new Date().toLocaleString('zh-CN')}`,
+    ].join('\n')
+    try {
+      await navigator.clipboard?.writeText(markdown)
+      setMarkdownCopied(true)
+      setTimeout(() => setMarkdownCopied(false), 2400)
+    } catch {
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `probewatch-${name.replace(/[^\w\u4e00-\u9fff-]+/g, '-')}.md`
+      anchor.click()
+      URL.revokeObjectURL(url)
+      setMarkdownCopied(true)
+      setTimeout(() => setMarkdownCopied(false), 2400)
+    }
   }
 
   // Keep the favorite state in memory for the current console session.
@@ -1055,6 +1096,10 @@ export function NodeDetailPage({
           <button type="button" className="komari-icon-btn" onClick={handleSharePoster} title="生成出鸡/测速海报并复制或下载">
             <ShareNetwork size={16} />
             <span className="poster-action-label">{posterCopied ? '已复制' : '出鸡海报'}</span>
+          </button>
+          <button type="button" className="komari-icon-btn" onClick={handleCopyShareMarkdown} title="复制适合 NodeSeek / Hostloc 的 Markdown 分享卡片">
+            <ClipboardText size={16} />
+            <span className="poster-action-label">{markdownCopied ? '已复制' : 'Markdown'}</span>
           </button>
           {/* 打开远程终端 */}
           {onNavigate && (

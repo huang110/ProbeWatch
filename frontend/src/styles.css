@@ -996,6 +996,50 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   .top-actions .top-logout-btn { display: grid; place-items: center; }
 }
 @media (max-width: 768px) {
+  /* MJJ 大户模式：极简视图在手机上压成单行流，便于快速扫过大量节点。 */
+  .mobile-single-row-mode {
+    display: grid;
+    gap: 6px;
+  }
+  .mobile-single-row-mode .komari-compact-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 10px;
+    border-radius: 9px;
+  }
+  .mobile-single-row-mode .compact-card-top {
+    min-width: 0;
+    gap: 6px;
+  }
+  .mobile-single-row-mode .compact-title {
+    min-width: 0;
+  }
+  .mobile-single-row-mode .compact-title strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 34vw;
+  }
+  .mobile-single-row-mode .compact-bars-row {
+    display: none;
+  }
+  .mobile-single-row-mode .compact-card-bottom {
+    display: contents;
+  }
+  .mobile-single-row-mode .compact-net {
+    display: flex;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: 10px;
+  }
+  .mobile-single-row-mode .compact-remaining,
+  .mobile-single-row-mode .compact-uptime {
+    white-space: nowrap;
+    font-size: 10px;
+  }
   /* 电脑端表格 → 手机端卡片 */
   .node-table-wrap { display: none; }
   .node-card-list { display: block; }
