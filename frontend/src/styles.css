@@ -12068,6 +12068,24 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   vertical-align: middle;
 }
 .app-shell table tbody tr { transition: background 120ms ease; }
+.app-shell .sync-state { min-height: 22px; padding: 0 8px; border: 1px solid var(--admin-border); border-radius: 999px; background: var(--admin-surface-soft); font-size: 10px; }
+.app-shell .stat-card { min-height: 104px; }
+.app-shell .stat-card .stat-value,
+.app-shell .metric-value,
+.app-shell .cost-metric-value,
+.app-shell .monitor-stat-value { font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.app-shell .alert-item { padding: 14px 10px; border-radius: 8px; transition: background 120ms ease; }
+.app-shell .alert-item:hover { background: color-mix(in srgb, var(--blue, #5e6ad2) 5%, transparent); }
+.app-shell .alert-item strong { font-size: 12px; }
+.app-shell .alert-item p { font-size: 11px; }
+.app-shell .recent-alert { min-height: 44px; }
+.app-shell .badge-online, .app-shell .badge-attention, .app-shell .badge-offline, .app-shell .badge-unknown { border: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
+.app-shell .alert-sev-badge, .app-shell .alert-status-badge { border-radius: 999px; }
+@media (max-width: 640px) {
+  .app-shell .sync-state { display: inline-flex; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+  .app-shell .stat-card { min-height: 96px; }
+  .app-shell .alert-item { padding-inline: 6px; }
+}
 .app-shell table tbody tr:hover { background: color-mix(in srgb, var(--blue-dim) 42%, transparent); }
 
 /* Uniform section tabs and toolbars */
