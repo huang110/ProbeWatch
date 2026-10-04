@@ -12249,6 +12249,10 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .anomaly-priority-panel.has-anomalies { border-color: color-mix(in srgb, var(--amber) 45%, var(--admin-border)); }
 .anomaly-priority-panel.all-clear { border-color: color-mix(in srgb, var(--mint) 35%, var(--admin-border)); }
 .anomaly-count { color: var(--amber); font-size: 11px; }
+.anomaly-toolbar { display: flex; align-items: center; gap: 10px; }
+.anomaly-filters { display: flex; gap: 3px; padding: 2px; border: 1px solid var(--admin-border); border-radius: 6px; background: var(--admin-surface-soft); }
+.anomaly-filters button { border: 0; border-radius: 4px; padding: 4px 7px; background: transparent; color: var(--admin-subtle); font-size: 10px; cursor: pointer; }
+.anomaly-filters button.active { background: var(--admin-surface); color: var(--blue); box-shadow: var(--shadow-card); }
 .all-clear .anomaly-count { color: var(--mint); }
 .anomaly-node-list { display: grid; gap: 5px; margin-top: 10px; }
 .anomaly-node-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border: 1px solid var(--admin-border); border-radius: 7px; background: var(--admin-surface-soft); color: var(--admin-heading); text-align: left; cursor: pointer; }
@@ -12261,7 +12265,10 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .node-detail-summary-strip div { display: grid; gap: 4px; min-width: 0; }
 .node-detail-summary-strip span { color: var(--admin-subtle); font-size: 10px; }
 .node-detail-summary-strip strong { overflow: hidden; color: var(--admin-heading); text-overflow: ellipsis; white-space: nowrap; font: 650 12px var(--font-mono); }
+.log-quick-filter { border: 1px solid var(--admin-border); border-radius: 6px; padding: 6px 9px; background: var(--admin-surface-soft); color: var(--admin-subtle); font-size: 11px; cursor: pointer; }
+.log-quick-filter.active { border-color: color-mix(in srgb, var(--amber) 50%, var(--admin-border)); color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--admin-surface)); }
 @media (max-width: 700px) {
+  .anomaly-toolbar { align-items: flex-end; flex-direction: column; gap: 6px; }
   .node-detail-summary-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 10px; }
   .anomaly-node-row { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .anomaly-node-row span:not(.status-dot) { grid-column: 2 / -1; }

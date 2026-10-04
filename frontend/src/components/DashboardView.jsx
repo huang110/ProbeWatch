@@ -64,6 +64,7 @@ export function DashboardView({
   const [selectedDayDetail, setSelectedDayDetail] = useState(null)
   const [showDbModal, setShowDbModal] = useState(false)
   const [daySearch, setDaySearch] = useState('')
+  const [anomalyFilter, setAnomalyFilter] = useState('all')
   const [currentTime, setCurrentTime] = useState(() => formatTimeOfDay(new Date()))
 
   // 异步探测目标与历史指标
@@ -447,7 +448,8 @@ export function DashboardView({
       return { node, reasons }
     })
     .filter((item) => item.reasons.length > 0)
-    .slice(0, 8), [nodes])
+    .filter((item) => anomalyFilter === 'all' || (anomalyFilter === 'offline' ? item.node.status === 'offline' : item.reasons.some((reason) => reason.startsWith(anomalyFilter))))
+    .slice(0, 8), [nodes, anomalyFilter])
 
   // 9. 当前资源排行 (Top 5: CPU, 内存, 磁盘 - 仅显示已接入探针的服务器)
   const resourceRanks = useMemo(() => {
@@ -677,7 +679,7 @@ export function DashboardView({
       <div className={`panel anomaly-priority-panel ${anomalyNodes.length ? 'has-anomalies' : 'all-clear'}`}>
         <div className="dash-card-header">
           <div className="dash-card-header-left"><h3 className="text-sm font-bold text-foreground">异常优先</h3><p className="text-xs text-muted">先看需要处理的节点，再看趋势和明细</p></div>
-          <span className="anomaly-count mono">{anomalyNodes.length ? `${anomalyNodes.length} 台需关注` : '全部正常'}</span>
+          <div className="anomaly-toolbar"><div className="anomaly-filters">{[['all','全部'],['offline','离线'],['CPU','高 CPU'],['内存','高内存']].map(([value,label]) => <button key={value} type="button" className={anomalyFilter === value ? 'active' : ''} onClick={() => setAnomalyFilter(value)}>{label}</button>)}</div><span className="anomaly-count mono">{anomalyNodes.length ? `${anomalyNodes.length} 台需关注` : '全部正常'}</span></div>
         </div>
         {anomalyNodes.length ? (
           <div className="anomaly-node-list">

@@ -358,6 +358,9 @@ export function LogStreamingView({ nodes = [] }) {
                 ))}
               </select>
 
+              <button type="button" className={`log-quick-filter ${selectedSeverity === 'critical' ? 'active' : ''}`} onClick={() => setSelectedSeverity(selectedSeverity === 'critical' ? '' : 'critical')}>仅严重</button>
+              <button type="button" className={`log-quick-filter ${selectedSeverity === 'warning' ? 'active' : ''}`} onClick={() => setSelectedSeverity(selectedSeverity === 'warning' ? '' : 'warning')}>仅警告</button>
+
               <select
                 className="input"
                 value={selectedCategory}
