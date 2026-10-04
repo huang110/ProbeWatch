@@ -12555,3 +12555,80 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   line-height: 1;
 }
 .inline-feedback-dismiss:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+
+/* Final console polish: keep high density screens calm and predictable. */
+.app-shell .page-heading,
+.app-shell .subpage-heading,
+.app-shell .terminal-page-header,
+.app-shell .synthetic-page-header {
+  min-height: 68px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.app-shell .page-heading h1,
+.app-shell .subpage-heading h1,
+.app-shell .page-heading h2,
+.app-shell .subpage-heading h2 {
+  letter-spacing: -.02em;
+}
+.app-shell .heading-actions,
+.app-shell .terminal-page-actions,
+.app-shell .synthetic-page-actions {
+  row-gap: 8px;
+}
+.app-shell .panel,
+.app-shell .lite-table-panel,
+.app-shell .network-table-panel,
+.app-shell .monitor-table-card,
+.app-shell .cost-table-panel,
+.app-shell .synthetic-target-card {
+  border-radius: 10px;
+}
+.app-shell table tbody tr {
+  transition: background-color 120ms ease;
+}
+.app-shell table tbody tr:hover td {
+  background: color-mix(in srgb, var(--blue, #5e6ad2) 5%, transparent);
+}
+.app-shell .button:focus-visible,
+.app-shell .icon-button:focus-visible,
+.app-shell .synthetic-button:focus-visible,
+.app-shell .synthetic-icon-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--blue, #5e6ad2) 70%, white);
+  outline-offset: 2px;
+}
+.app-shell .status-dot,
+.app-shell .status-indicator {
+  flex: 0 0 auto;
+}
+@media (max-width: 640px) {
+  .app-shell .page-heading,
+  .app-shell .subpage-heading,
+  .app-shell .terminal-page-header,
+  .app-shell .synthetic-page-header {
+    min-height: 0;
+    padding: 14px;
+    border-radius: 9px;
+  }
+  .app-shell .page-heading h1,
+  .app-shell .subpage-heading h1,
+  .app-shell .page-heading h2,
+  .app-shell .subpage-heading h2 {
+    font-size: 17px;
+  }
+  .app-shell .heading-actions,
+  .app-shell .terminal-page-actions,
+  .app-shell .synthetic-page-actions {
+    width: 100%;
+  }
+  .app-shell .heading-actions > .button,
+  .app-shell .terminal-page-actions > .button,
+  .app-shell .synthetic-page-actions > .synthetic-button {
+    min-height: 36px;
+  }
+  .app-shell .table-scroll,
+  .app-shell .lite-table-scroll,
+  .app-shell .ssh-node-table-wrap {
+    scrollbar-width: thin;
+  }
+}
