@@ -3539,6 +3539,15 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .app-shell .modal-card input,
 .app-shell .modal-card select,
 .app-shell .modal-card textarea { max-width: 100%; }
+.app-shell .button-danger,
+.app-shell .badge-danger { color: var(--rose); border-color: color-mix(in srgb, var(--rose) 34%, transparent); background: var(--rose-dim); }
+.app-shell .button-danger:hover { color: #fff; border-color: var(--rose); background: var(--rose); }
+.app-shell .badge-warning { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 34%, transparent); background: var(--amber-dim); }
+.app-shell .lite-pagination-row { border-top: 1px solid var(--admin-border); }
+.app-shell .lite-page-select,
+.app-shell .lite-page-nav-btn { min-height: 30px; border-color: var(--admin-border-strong); border-radius: var(--admin-radius-sm); background: var(--admin-surface-soft); }
+.app-shell .lite-page-nav-btn:focus-visible,
+.app-shell .lite-page-select:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 72%, white); outline-offset: 2px; }
 @media (max-width: 600px) {
   .app-shell .modal-backdrop { align-items: flex-end; padding: 8px; }
   .app-shell .modal-card,
@@ -3547,6 +3556,8 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   .app-shell .modal-card .modal-actions { flex-wrap: wrap; padding: 12px 0 0; }
   .app-shell .modal-card .modal-actions > .button { flex: 1 1 130px; }
   .app-shell .empty-state { min-height: 112px; padding: 24px 12px; }
+  .app-shell .lite-pagination-row { align-items: stretch; flex-direction: column; gap: 10px; }
+  .app-shell .lite-pagination-right { justify-content: space-between; }
 }
 
 /* ---------- 4. 告警事件中心 (AlertCenterView) ---------- */
