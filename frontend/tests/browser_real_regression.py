@@ -33,7 +33,8 @@ def click_nav(page, label):
 
 
 def login(page):
-    page.goto(BASE_URL, wait_until="networkidle")
+    page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(800)
     if page.locator(".app-shell").count() > 0:
         return
     login_button = page.get_by_role("button", name="管理员登录")
@@ -67,7 +68,7 @@ def run():
                 raise AssertionError(f"expected role {EXPECTED_ROLE!r} in profile title, got {role_text!r}")
 
         if NODE_UUID:
-            page.goto(f"{BASE_URL.rstrip('/')}/#/node-detail?uuid={NODE_UUID}", wait_until="networkidle")
+            page.goto(f"{BASE_URL.rstrip('/')}/#/node-detail?uuid={NODE_UUID}", wait_until="domcontentloaded", timeout=30000)
             page.locator(".komari-detail-page").wait_for(timeout=20000)
 
         click_nav(page, "系统日志")
