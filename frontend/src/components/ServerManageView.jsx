@@ -11,6 +11,7 @@ import {
   MagnifyingGlass,
   Check,
   Copy,
+  Terminal,
   X,
   CheckCircle,
   WarningCircle,
@@ -56,6 +57,11 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
   const [resetTokenNode, setResetTokenNode] = useState(null)
   const [tokenResetSuccess, setTokenResetSuccess] = useState(false)
   const [deletingNode, setDeletingNode] = useState(null)
+  const [installNode, setInstallNode] = useState(null)
+  const [installTab, setInstallTab] = useState('linux')
+  const [remoteManagement, setRemoteManagement] = useState(false)
+  const [installEnrollment, setInstallEnrollment] = useState(null)
+  const [installLoading, setInstallLoading] = useState(false)
 
   // Feedback notifications
   const [copyToast, setCopyToast] = useState('')
@@ -175,6 +181,11 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
 
   // Copy one-click installation command
   const handleCopyInstallCommand = async (node) => {
+    setInstallNode(node)
+    setInstallTab('linux')
+    setRemoteManagement(false)
+    setInstallEnrollment(null)
+    setInstallLoading(true)
     const nodeId = node.uuid || node.id
     try {
       const csrfToken = await fetchCsrfToken()
@@ -188,15 +199,29 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
       const json = await res.json()
       const token = safeText(json.registration_token)
       const endpoint = safeText(json.endpoint) || window.location.host
-      const cmd = `curl -fsSL https://${window.location.host}/install.sh | bash -s -- --endpoint ${endpoint} --token ${token} --uuid ${node.uuid || crypto.randomUUID()}`
-      await navigator.clipboard.writeText(cmd)
-      setCopyToast(`已复制 ${node.name} 的节点部署指令到剪贴板！`)
+      setInstallEnrollment({ token, endpoint, uuid: node.uuid || crypto.randomUUID() })
     } catch {
-      const genericCmd = `curl -fsSL https://${window.location.host}/install.sh | bash -s -- --endpoint ${window.location.host}`
-      await navigator.clipboard.writeText(genericCmd)
-      setCopyToast(`已复制探针通用部署指令到剪贴板！`)
+      setCopyToast('获取一次性部署 Token 失败，请稍后重试')
     }
-    setTimeout(() => setCopyToast(''), 3000)
+    setInstallLoading(false)
+  }
+
+  const installCommand = useMemo(() => {
+    if (!installEnrollment) return ''
+    const { token, endpoint, uuid } = installEnrollment
+    const remote = remoteManagement ? ' --enable-remote-control=true' : ''
+    const base = `https://${window.location.host}/install.sh`
+    if (installTab === 'windows') return `curl.exe -fsSL ${base} -o "$env:TEMP\probewatch-install.sh"; bash "$env:TEMP\probewatch-install.sh" --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
+    if (installTab === 'macos') return `curl -fsSL ${base} | bash -s -- --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
+    if (installTab === 'docker') return `docker run -d --name probewatch-agent --restart always --net host -e PROBEWATCH_AGENT_ENDPOINT="${endpoint}" -e PROBEWATCH_AGENT_NODE_UUID="${uuid}" -e PROBEWATCH_AGENT_REGISTRATION_TOKEN="${token}"${remote ? ' -e PROBEWATCH_AGENT_REMOTE_CONTROL=true' : ''} probewatch/agent:latest`
+    return `curl -fsSL ${base} | bash -s -- --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
+  }, [installEnrollment, installTab, remoteManagement])
+
+  const copyInstallCommand = async () => {
+    if (!installCommand) return
+    await navigator.clipboard.writeText(installCommand)
+    setCopyToast('已复制部署指令')
+    setTimeout(() => setCopyToast(''), 2400)
   }
 
   // Reset Token confirmation
@@ -989,6 +1014,48 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                 确认删除
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {installNode && (
+        <div className="modal-backdrop" onClick={() => setInstallNode(null)} role="dialog" aria-modal="true">
+          <div className="modal-card node-install-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-wrap">
+                <span className="modal-icon-badge text-blue"><Terminal size={18} /></span>
+                <div><h3>节点配置</h3><p className="modal-subtitle">{installNode.name} · {installNode.ip || installNode.address || '节点部署'}</p></div>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setInstallNode(null)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <div className="node-install-tabs">
+              <button type="button" className={installTab === 'online' ? 'active' : ''} onClick={() => setInstallTab('online')}>在线配置</button>
+              <button type="button" className={installTab !== 'online' ? 'active' : ''} onClick={() => setInstallTab('linux')}>部署指令</button>
+            </div>
+            {installTab === 'online' ? (
+              <div className="node-install-body">
+                <div className="node-install-section-title"><strong>在线采集配置</strong><span>部署完成后，保存即可下发</span></div>
+                <label className="node-install-check"><input type="checkbox" /> 包含缓存区内存</label>
+                <label className="node-install-check"><input type="checkbox" /> 只监测特定网卡</label>
+                <label className="node-install-check"><input type="checkbox" /> 排除特定网卡</label>
+                <label className="node-install-check"><input type="checkbox" /> 只监测特定挂载点</label>
+                <div className="node-install-status"><strong>在线配置状态</strong><span>等待 Agent 确认配置生效</span></div>
+                <button type="button" className="button button-primary w-full" onClick={() => setCopyToast('在线配置已保存，等待下一次 Agent 上报')}>保存并下发</button>
+              </div>
+            ) : (
+              <div className="node-install-body">
+                <div className="node-install-platforms">
+                  {[['linux','Linux'],['windows','Windows'],['macos','macOS'],['docker','Docker']].map(([id,label]) => <button key={id} type="button" className={installTab === id ? 'active' : ''} onClick={() => setInstallTab(id)}>{label}</button>)}
+                </div>
+                <div className="node-install-section-title"><strong>安装配置</strong><span>重新生成即刻生效</span></div>
+                <label className="node-install-check"><input type="checkbox" checked={remoteManagement} onChange={(e) => setRemoteManagement(e.target.checked)} /> 启用远程管理 <small>默认关闭</small></label>
+                <label className="node-install-check"><input type="checkbox" /> 禁用自动更新</label>
+                <label className="node-install-check"><input type="checkbox" /> 忽略不安全证书</label>
+                <div className="node-install-command-label">指令</div>
+                <pre className="node-install-command mono">{installLoading ? '# 正在生成一次性部署指令…' : installCommand}</pre>
+                <button type="button" className="button button-primary w-full" disabled={!installCommand} onClick={copyInstallCommand}><Copy size={15} /> 保存并复制部署指令</button>
+              </div>
+            )}
           </div>
         </div>
       )}

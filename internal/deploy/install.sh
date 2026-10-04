@@ -110,6 +110,7 @@ CLI_ENDPOINT=""
 CLI_UUID=""
 CLI_TOKEN=""
 CLI_REG_TOKEN=""
+CLI_REMOTE_CONTROL=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --endpoint)
@@ -131,6 +132,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || { error "$1 缺少参数"; exit 2; }
             CLI_REG_TOKEN="$2"
             shift 2
+            ;;
+        --enable-remote-control|--remote-control)
+            CLI_REMOTE_CONTROL="true"
+            shift
             ;;
         uninstall|uninstall-agent)
             ACTION="uninstall-agent"
@@ -295,6 +300,7 @@ PROBEWATCH_PUBLIC_BASE_URL=${SERVER_BASE:-${ENDPOINT%/api/agent/v1}}
 PROBEWATCH_AGENT_ENDPOINT=${ENDPOINT}
 PROBEWATCH_AGENT_NODE_UUID=${NODE_UUID}
 PROBEWATCH_AGENT_NODE_TOKEN=${NODE_TOKEN}
+PROBEWATCH_AGENT_ENABLE_TERMINAL=${CLI_REMOTE_CONTROL:-false}
 AGENT_NODE_TOKEN_TTL=8760h
 PROBEWATCH_AGENT_DATA=${DATA_DIR}
 EOF
