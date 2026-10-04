@@ -475,6 +475,9 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [showVisitorCard, setShowVisitorCard] = useState(true)
+  useEffect(() => {
+    try { setShowVisitorCard(window.localStorage.getItem('probewatch:visitor-card') !== 'hidden') } catch {}
+  }, [])
   const [theme, setTheme] = useState(getSavedTheme)
   const coreAbortRef = useRef(null)
   const coreRequestRef = useRef(0)
@@ -1256,7 +1259,7 @@ export function App() {
     <main className="main-content">
       {showVisitorCard && publicClientInfo?.ip && (
         <aside className="floating-visitor-card" aria-label="当前访问者公网信息">
-          <button type="button" className="floating-public-node-close" onClick={() => setShowVisitorCard(false)} aria-label="关闭访问者信息">×</button>
+          <button type="button" className="floating-public-node-close" onClick={() => { setShowVisitorCard(false); try { window.localStorage.setItem('probewatch:visitor-card', 'hidden') } catch {} }} aria-label="关闭访问者信息">×</button>
           <div className="floating-public-node-head">
             <div className="floating-public-node-avatar"><Globe size={18} /></div>
             <div className="floating-public-node-title"><strong>{me ? '管理员访问' : '访客访问'}</strong><span>{publicClientInfo.location || '公网访客'}</span></div>

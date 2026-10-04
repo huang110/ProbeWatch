@@ -604,7 +604,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                   const hasLiveTelemetry = nodeStatus === 'online' && lastReportedAt
                   const priceText = custom.price ? `${custom.currency === 'USD' ? '$' : '¥'}${custom.price} / ${custom.cycle === 'annual' ? '年' : '月'}` : '账单信息隐藏'
                   const cpuPercent = numeric(telemetry.cpu_percent)
-                  const loadText = telemetry.load1 !== undefined ? `${Number(telemetry.load1).toFixed(2)} 1m` : '暂无实时数据'
+                  const loadText = telemetry.load1 !== undefined ? `${Math.round(Number(telemetry.load1) * 10) / 10} 1m` : '暂无实时数据'
                   const memUsed = numeric(telemetry.memory_used_bytes)
                   const memTotal = numeric(telemetry.memory_total_bytes)
                   const memPercent = memUsed !== null && memTotal > 0 ? (memUsed / memTotal) * 100 : null
@@ -689,7 +689,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">CPU</span>
-                            <span className="vps-res-val mono">{hasLiveTelemetry && cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '暂无'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && cpuPercent !== null ? `${Math.round(cpuPercent)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
                             <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, cpuPercent || 0)) : 0}%` }} />
@@ -701,7 +701,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">内存</span>
-                            <span className="vps-res-val mono">{hasLiveTelemetry && memPercent !== null ? `${memPercent.toFixed(1)}%` : '暂无'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && memPercent !== null ? `${Math.round(memPercent)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
                             <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, memPercent || 0)) : 0}%` }} />
@@ -713,7 +713,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         <div className="vps-res-cell">
                           <div className="vps-res-header">
                             <span className="vps-res-label">硬盘</span>
-                            <span className="vps-res-val mono">{hasLiveTelemetry && diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '暂无'}</span>
+                            <span className="vps-res-val mono">{hasLiveTelemetry && diskPercent !== null ? `${Math.round(diskPercent)}%` : '暂无'}</span>
                           </div>
                           <div className="vps-res-bar-wrap">
                             <div className="vps-res-bar-fill" style={{ width: `${hasLiveTelemetry ? Math.min(100, Math.max(0, diskPercent || 0)) : 0}%` }} />

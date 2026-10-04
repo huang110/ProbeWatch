@@ -295,7 +295,7 @@ export function NodeTable({
                     <div className="vps-res-header">
                       <span className="vps-res-label">CPU</span>
                       <span className="vps-res-val mono">
-                        {cpuPercent !== null ? `${cpuPercent.toFixed(1)}%` : '—'}
+                        {cpuPercent !== null ? `${Math.round(cpuPercent)}%` : '—'}
                         {node.cpuTempC && node.cpuTempC > 0 ? (
                           <small style={{ marginLeft: '4px', color: node.cpuTempC > 85 ? '#ef4444' : node.cpuTempC > 75 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>
                             {node.cpuTempC.toFixed(0)}°
@@ -313,7 +313,7 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">内存</span>
-                      <span className="vps-res-val mono">{memPercent !== null ? `${memPercent.toFixed(1)}%` : '—'}</span>
+                            <span className="vps-res-val mono">{memPercent !== null ? `${Math.round(memPercent)}%` : '—'}</span>
                     </div>
                     <div className="vps-res-bar-wrap">
                       <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, memPercent || 0))}%` }} />
@@ -325,7 +325,7 @@ export function NodeTable({
                   <div className="vps-res-cell">
                     <div className="vps-res-header">
                       <span className="vps-res-label">硬盘</span>
-                      <span className="vps-res-val mono">{diskPercent !== null ? `${diskPercent.toFixed(1)}%` : '—'}</span>
+                      <span className="vps-res-val mono">{diskPercent !== null ? `${Math.round(diskPercent)}%` : '—'}</span>
                     </div>
                     <div className="vps-res-bar-wrap">
                       <div className="vps-res-bar-fill" style={{ width: `${Math.min(100, Math.max(0, diskPercent || 0))}%` }} />
