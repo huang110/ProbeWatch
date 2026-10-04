@@ -244,7 +244,15 @@ function getInitialNav() {
 }
 
 function PageLoadingFallback() {
-  return <div className="page-loading" role="status" aria-live="polite"><span className="status-dot status-online" />正在加载页面…</div>
+  return (
+    <div className="page-loading page-loading-card" role="status" aria-live="polite">
+      <span className="page-loading-spinner status-dot status-online" aria-hidden="true" />
+      <div className="page-loading-copy">
+        <strong>正在加载模块</strong>
+        <span>正在同步实时数据，请稍候…</span>
+      </div>
+    </div>
+  )
 }
 
 function Topbar({ activeNav, clockText, lastSyncText, apiState, liveState, me, onNavigate, onOpenMobileNav, onSwitchToGuest, onLogout, theme, onThemeChange }) {

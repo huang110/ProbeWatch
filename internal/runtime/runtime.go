@@ -119,17 +119,16 @@ func runAuthCleanup(ctx context.Context, service *auth.Service) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	cleanup := func() {
-		cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if _, err := service.CleanupExpiredOAuthStates(cleanupCtx, time.Now().UTC()); err != nil {
-			slog.Error("auth cleanup failed", "resource", "oauth_states", "error_class", fmt.Sprintf("%T", err))
+		cleanupOne := func(resource string, fn func(context.Context, time.Time) (int64, error)) {
+			cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if _, err := fn(cleanupCtx, time.Now().UTC()); err != nil {
+				slog.Error("auth cleanup failed", "resource", resource, "error_class", fmt.Sprintf("%T", err))
+			}
 		}
-		if _, err := service.CleanupExpiredTOTPPendingStates(cleanupCtx, time.Now().UTC()); err != nil {
-			slog.Error("auth cleanup failed", "resource", "totp_pending_states", "error_class", fmt.Sprintf("%T", err))
-		}
-		if _, err := service.CleanupExpiredSessions(cleanupCtx, time.Now().UTC()); err != nil {
-			slog.Error("auth cleanup failed", "resource", "sessions", "error_class", fmt.Sprintf("%T", err))
-		}
+		cleanupOne("oauth_states", service.CleanupExpiredOAuthStates)
+		cleanupOne("totp_pending_states", service.CleanupExpiredTOTPPendingStates)
+		cleanupOne("sessions", service.CleanupExpiredSessions)
 	}
 	cleanup()
 	for {

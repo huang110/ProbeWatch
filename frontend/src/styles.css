@@ -563,6 +563,11 @@ h1, h2, h3, p { margin-top: 0; }
 .breadcrumb strong { color: var(--text-1); font-weight: 500; }
 .breadcrumb-slash { color: var(--text-3); opacity: .4; }
 .top-actions { display: flex; align-items: center; gap: 12px; }
+.page-loading-card { display: flex; align-items: center; gap: 12px; min-height: 132px; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-2); background: var(--bg-panel); box-shadow: var(--shadow-card); }
+.page-loading-copy { display: grid; gap: 5px; }
+.page-loading-copy strong { color: var(--text-1); font-size: 13px; }
+.page-loading-copy span { color: var(--text-3); font-size: 11px; }
+.page-loading-spinner { animation: pulse 1.2s ease-in-out infinite; }
 .refresh-controls {
   display: flex;
   align-items: center;
