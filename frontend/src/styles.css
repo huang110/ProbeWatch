@@ -3509,6 +3509,46 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   .app-shell .cost-search-wrap { min-width: 100%; }
 }
 
+/* Final cross-feature polish: navigation, states and overlays share one rhythm. */
+.app-shell .nav-item {
+  position: relative;
+  min-height: 34px;
+}
+.app-shell .nav-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--blue);
+}
+.app-shell .page-loading-card,
+.app-shell .empty-state,
+.app-shell .empty-state-card {
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface);
+  box-shadow: var(--shadow-card);
+}
+.app-shell .page-loading-card { justify-content: center; min-height: 150px; }
+.app-shell .empty-state { min-height: 128px; }
+.app-shell .api-state { border-radius: var(--admin-radius-sm); }
+.app-shell .modal-backdrop { overscroll-behavior: contain; }
+.app-shell .modal-card { max-height: min(90vh, 760px); overscroll-behavior: contain; }
+.app-shell .modal-card input,
+.app-shell .modal-card select,
+.app-shell .modal-card textarea { max-width: 100%; }
+@media (max-width: 600px) {
+  .app-shell .modal-backdrop { align-items: flex-end; padding: 8px; }
+  .app-shell .modal-card,
+  .app-shell .modal-card.modal-lg,
+  .app-shell .modal-card.modal-sm { width: 100% !important; max-width: none !important; max-height: calc(100dvh - 16px); border-radius: 14px 14px 10px 10px !important; padding: 18px !important; }
+  .app-shell .modal-card .modal-actions { flex-wrap: wrap; padding: 12px 0 0; }
+  .app-shell .modal-card .modal-actions > .button { flex: 1 1 130px; }
+  .app-shell .empty-state { min-height: 112px; padding: 24px 12px; }
+}
+
 /* ---------- 4. 告警事件中心 (AlertCenterView) ---------- */
 .alert-center-view {
   display: flex;
