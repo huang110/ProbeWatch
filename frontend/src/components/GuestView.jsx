@@ -319,14 +319,14 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
         <aside className="floating-visitor-card" aria-label="当前访问者公网信息">
           <div className="floating-public-node-head">
             <div className="floating-public-node-avatar"><GlobeHemisphereWest size={18} /></div>
-            <div className="floating-public-node-title"><strong>尊敬的管理员</strong><span>{visitorInfo.location || '当前访问者'}</span></div>
+            <div className="floating-public-node-title"><strong>访客访问</strong><span>{visitorInfo.location || '公网访客'}</span></div>
           </div>
-          <div className="floating-public-node-welcome">Welcome from ProbeWatch!</div>
+          <div className="floating-public-node-welcome">欢迎访问 ProbeWatch</div>
           <div className="floating-public-node-divider" />
           <div className="floating-public-node-row"><Desktop size={14} /><span>{visitorInfo.platform || '未知系统'}</span></div>
           <div className="floating-public-node-row"><GlobeHemisphereWest size={14} /><span>{visitorInfo.browser || '浏览器'}</span></div>
           <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{visitorInfo.ip}</span></div>
-          <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{visitorInfo.isp || '公网访问'}</span></div>
+          <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{visitorInfo.isp || '公网访客'}</span></div>
           <div className="floating-public-node-row"><Timer size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
         </aside>
       )}
