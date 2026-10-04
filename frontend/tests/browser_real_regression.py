@@ -27,13 +27,13 @@ def required_environment():
 
 
 def click_nav(page, label):
-    locator = page.locator(".nav-item, .nav-sub-item", has_text=label).first
+    locator = page.locator(".nav-item:visible, .nav-sub-item:visible", has_text=label).first
     if locator.count() == 0 and label == "测速与带宽基准":
-        parent = page.locator(".nav-item", has_text="监测").first
+        parent = page.locator(".nav-expandable-wrap", has_text="监测").locator("button.nav-item").first
         parent.wait_for(timeout=15000)
-        parent.click()
+        parent.click(force=True)
         page.wait_for_timeout(200)
-        locator = page.locator(".nav-sub-item", has_text=label).first
+        locator = page.locator(".nav-sub-item:visible", has_text=label).first
     locator.wait_for(timeout=15000)
     locator.click()
     page.wait_for_timeout(300)
