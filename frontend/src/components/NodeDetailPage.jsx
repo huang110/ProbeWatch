@@ -1070,6 +1070,15 @@ export function NodeDetailPage({
 
   return (
     <section className="subpage komari-detail-page">
+      <div className="node-detail-summary-strip">
+        <div><span>状态</span><strong className={isOnline ? 'text-mint' : 'text-rose'}>{isOnline ? '在线' : '离线'}</strong></div>
+        <div><span>CPU</span><strong>{cpuPercent === null ? '—' : `${Math.round(cpuPercent)}%`}</strong></div>
+        <div><span>内存</span><strong>{memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '—'}</strong></div>
+        <div><span>下行</span><strong>{rate?.down == null ? '等待采样' : formatRate(rate.down)}</strong></div>
+        <div><span>上行</span><strong>{rate?.up == null ? '等待采样' : formatRate(rate.up)}</strong></div>
+        <div><span>解锁</span><strong>{unlockedMediaCount}/{POPULAR_MEDIA.length}</strong></div>
+        <div><span>剩余价值</span><strong>{remainingValue}</strong></div>
+      </div>
       {/* 1. 顶部导航与控制条 */}
       <div className="komari-nav-bar">
         <div className="komari-nav-left">

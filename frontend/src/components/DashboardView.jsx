@@ -436,6 +436,19 @@ export function DashboardView({
     }
   }, [alerts, nodes, trafficMetrics])
 
+  const anomalyNodes = useMemo(() => nodes
+    .map((node) => {
+      const cpu = numeric(node.cpu)
+      const memory = numeric(node.memory)
+      const reasons = []
+      if (node.status === 'offline') reasons.push('离线')
+      if (cpu !== null && cpu >= 90) reasons.push(`CPU ${Math.round(cpu)}%`)
+      if (memory !== null && memory >= 90) reasons.push(`内存 ${Math.round(memory)}%`)
+      return { node, reasons }
+    })
+    .filter((item) => item.reasons.length > 0)
+    .slice(0, 8), [nodes])
+
   // 9. 当前资源排行 (Top 5: CPU, 内存, 磁盘 - 仅显示已接入探针的服务器)
   const resourceRanks = useMemo(() => {
     if (!nodes || nodes.length === 0) {
@@ -659,6 +672,18 @@ export function DashboardView({
             <span>剩余价值 {convertCNYToCurrency(trafficMetrics.totalResidualCNY).formatted}</span>
           </div>
         </div>
+      </div>
+
+      <div className={`panel anomaly-priority-panel ${anomalyNodes.length ? 'has-anomalies' : 'all-clear'}`}>
+        <div className="dash-card-header">
+          <div className="dash-card-header-left"><h3 className="text-sm font-bold text-foreground">异常优先</h3><p className="text-xs text-muted">先看需要处理的节点，再看趋势和明细</p></div>
+          <span className="anomaly-count mono">{anomalyNodes.length ? `${anomalyNodes.length} 台需关注` : '全部正常'}</span>
+        </div>
+        {anomalyNodes.length ? (
+          <div className="anomaly-node-list">
+            {anomalyNodes.map(({ node, reasons }) => <button key={node.uuid || node.id} type="button" className="anomaly-node-row" onClick={() => onNavigate && onNavigate('servers')}><span className={`status-dot ${node.status === 'offline' ? 'status-offline' : 'status-warning'}`} /><strong>{node.name || '探针节点'}</strong><span>{reasons.join(' · ')}</span><b>查看</b></button>)}
+          </div>
+        ) : <div className="anomaly-clear-copy">没有发现离线、高负载节点，当前可以继续查看网络趋势。</div>}
       </div>
 
       {/* Row 2: 时延监测概览 (整行平滑折线图) */}

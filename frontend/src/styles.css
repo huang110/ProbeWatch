@@ -12245,6 +12245,28 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   background: color-mix(in srgb, var(--admin-surface) 92%, transparent);
   backdrop-filter: blur(12px);
 }
+.anomaly-priority-panel { padding: 14px 16px; }
+.anomaly-priority-panel.has-anomalies { border-color: color-mix(in srgb, var(--amber) 45%, var(--admin-border)); }
+.anomaly-priority-panel.all-clear { border-color: color-mix(in srgb, var(--mint) 35%, var(--admin-border)); }
+.anomaly-count { color: var(--amber); font-size: 11px; }
+.all-clear .anomaly-count { color: var(--mint); }
+.anomaly-node-list { display: grid; gap: 5px; margin-top: 10px; }
+.anomaly-node-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border: 1px solid var(--admin-border); border-radius: 7px; background: var(--admin-surface-soft); color: var(--admin-heading); text-align: left; cursor: pointer; }
+.anomaly-node-row:hover { border-color: var(--admin-border-strong); background: var(--admin-surface); }
+.anomaly-node-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.anomaly-node-row span:not(.status-dot) { overflow: hidden; color: var(--admin-subtle); text-overflow: ellipsis; white-space: nowrap; font: 10px var(--font-mono); }
+.anomaly-node-row b { color: var(--blue); font-size: 10px; }
+.anomaly-clear-copy { margin-top: 10px; color: var(--admin-subtle); font-size: 11px; }
+.node-detail-summary-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: var(--admin-surface); box-shadow: var(--shadow-card); }
+.node-detail-summary-strip div { display: grid; gap: 4px; min-width: 0; }
+.node-detail-summary-strip span { color: var(--admin-subtle); font-size: 10px; }
+.node-detail-summary-strip strong { overflow: hidden; color: var(--admin-heading); text-overflow: ellipsis; white-space: nowrap; font: 650 12px var(--font-mono); }
+@media (max-width: 700px) {
+  .node-detail-summary-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 10px; }
+  .anomaly-node-row { grid-template-columns: 8px minmax(0, 1fr) auto; }
+  .anomaly-node-row span:not(.status-dot) { grid-column: 2 / -1; }
+  .anomaly-node-row b { grid-column: 3; grid-row: 1; }
+}
 
 /* Headings inside modules follow the page heading scale. */
 .app-shell .cost-title-col h1,
