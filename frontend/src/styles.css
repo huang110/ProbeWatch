@@ -12330,6 +12330,38 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   padding-bottom: 12px;
   border-bottom: 1px solid var(--admin-border);
 }
+.app-shell .rbac-card,
+.app-shell .backup-management-card,
+.app-shell .alert-channel-panel,
+.app-shell .notify-page-container .lite-card-box {
+  border-radius: var(--admin-radius);
+  border-color: var(--admin-border);
+  background: var(--admin-surface);
+  box-shadow: var(--shadow-card);
+}
+.app-shell .rbac-card h2,
+.app-shell .backup-management-card h2,
+.app-shell .notify-page-container h2 { letter-spacing: -.02em; }
+.app-shell .rbac-card .table-responsive,
+.app-shell .backup-management-card .table-responsive { border-color: var(--admin-border); border-radius: var(--admin-radius-sm); }
+.app-shell .rbac-card table th,
+.app-shell .backup-management-card table th { background: var(--admin-surface-soft); color: var(--admin-subtle); }
+.app-shell .rbac-card table td,
+.app-shell .backup-management-card table td { vertical-align: middle; }
+.app-shell .channel-item { border-color: var(--admin-border); background: var(--admin-surface-soft); }
+.app-shell .notify-page-container .lite-card-row { min-height: 40px; }
+@media (max-width: 720px) {
+  .app-shell .rbac-card,
+  .app-shell .backup-management-card,
+  .app-shell .alert-channel-panel { padding: 14px !important; }
+  .app-shell .rbac-card > div:first-child,
+  .app-shell .backup-management-card .panel-header,
+  .app-shell .notify-header-row { align-items: stretch; flex-direction: column; }
+  .app-shell .rbac-card .table-responsive,
+  .app-shell .backup-management-card .table-responsive { margin-inline: -2px; }
+  .app-shell .channels-status-grid { grid-template-columns: 1fr; }
+  .app-shell .notify-page-container .lite-card-row { align-items: flex-start; flex-direction: column; }
+}
 .app-shell .komari-detail-page .komari-nav-bar {
   position: sticky;
   top: 0;
