@@ -561,7 +561,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                             <div title="24小时历史采样数">样本数: <strong style={{ color: 'var(--text-1)' }}>{isp.sampleCount > 0 ? `${isp.sampleCount} 条 / 24h` : '暂无数据'}</strong></div>
                             <div title="真实 MTR 回程路径监控">回程状态: <strong style={{ color: isp.routeStatus === '暂无回程样本' ? 'var(--text-muted)' : isp.routeStatus.startsWith('路径发生变化') ? '#ef4444' : isp.routeStatus.startsWith('路径可达') ? '#10b981' : '#f59e0b' }}>{isp.routeStatus}</strong></div>
                             <div title="线路综合质量评级">评级: <strong style={{ color: rating.tone === 'mint' ? '#34d399' : rating.tone === 'blue' ? '#38bdf8' : rating.tone === 'amber' ? '#fbbf24' : '#f87171' }}>{rating.text}</strong></div>
-                            <div title="最近一次探测时间">最近检测: <strong style={{ color: 'var(--text-1)' }}>{currentTime || '实时'}</strong></div>
+                            <div title="最近一次探测时间">最近检测: <strong style={{ color: 'var(--text-1)' }}>{reportTimeStr || '刚刚'}</strong></div>
                           </div>
                         </div>
                       )
