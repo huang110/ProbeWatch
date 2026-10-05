@@ -32,12 +32,9 @@ import { ThemeToggle } from './components/ThemeToggle.jsx'
 function maskPublicIp(value) {
   const text = String(value || '').trim()
   if (!text) return ''
-  if (text.includes(':')) {
-    const parts = text.split(':').filter(Boolean)
-    return parts.length > 1 ? `${parts.slice(0, 2).join(':')}:…` : 'IPv6 · 已脱敏'
-  }
-  const parts = text.split('.')
-  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : '公网 IP · 已脱敏'
+  // This card describes the current visitor/admin connection, not a probe
+  // node. Keep the complete value visible for self-verification.
+  return text
 }
 import {
   GlobeHemisphereWest,

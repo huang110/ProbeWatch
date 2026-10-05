@@ -10,12 +10,10 @@ import { ThemeToggle } from './ThemeToggle.jsx'
 function maskVisitorIp(value) {
   const text = String(value || '').trim()
   if (!text) return ''
-  if (text.includes(':')) {
-    const parts = text.split(':').filter(Boolean)
-    return parts.length > 1 ? `${parts.slice(0, 2).join(':')}:…` : 'IPv6 · 已脱敏'
-  }
-  const parts = text.split('.')
-  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : '公网 IP · 已脱敏'
+  // This is the current visitor's own connection address. Show it in full
+  // so the visitor can verify the egress IP they are using. Node telemetry
+  // and public node identifiers remain sanitized by their own allow-lists.
+  return text
 }
 
 function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
