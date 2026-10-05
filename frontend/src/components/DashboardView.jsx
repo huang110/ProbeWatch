@@ -145,7 +145,7 @@ export function DashboardView({
       return () => { cancelled = true }
     }
     setMediaSummary((prev) => ({ ...prev, loading: true }))
-    Promise.all(targets.map((uuid) => fetch(`/api/nodes/\${encodeURIComponent(uuid)}/media`, { credentials: 'same-origin' }).then((res) => res.ok ? res.json() : []).catch(() => [])))
+    Promise.all(targets.map((uuid) => fetch(`/api/nodes/${encodeURIComponent(uuid)}/media`, { credentials: 'same-origin' }).then((res) => res.ok ? res.json() : []).catch(() => [])))
       .then((rows) => {
         if (cancelled) return
         const counts = new Map()
