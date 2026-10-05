@@ -707,7 +707,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                             </div>
                             <div className="server-status-subline flex items-center gap-1.5 text-[11px] text-muted mt-0.5">
                               <span className={`status-dot ${isOnline ? 'status-online' : 'status-offline'}`} />
-                              <span>{isOnline ? '在线' : '离线'}</span>
+                              <span className={`status-pill ${isOnline ? 'online' : 'offline'}`}>{isOnline ? '在线' : '离线'}</span>
                               {customMeta.group && (
                                 <span className="server-group-chip">[{customMeta.group}]</span>
                               )}
@@ -722,7 +722,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                           {/* IPv4 */}
                           <div className="ip-entry-row flex items-center gap-1.5">
                             <span className="ip-protocol-tag tag-v4">IPv4</span>
-                            <span className="mono text-xs text-foreground font-medium select-all">{v4Ip}</span>
+                            <span className="mono mono-stat text-xs text-foreground font-medium select-all">{v4Ip}</span>
                             <button
                               type="button"
                               className="copy-ip-btn"

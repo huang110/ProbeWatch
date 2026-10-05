@@ -720,21 +720,24 @@ export function SpeedtestBenchmarkView() {
           </div>
 
           {filteredRankings.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
-              <Gauge size={40} style={{ opacity: 0.5, marginBottom: '12px' }} />
-              <div style={{ fontSize: '15px', fontWeight: 500 }}>暂无测速基准数据</div>
-              <p style={{ fontSize: '13px', marginTop: '6px' }}>
-                点击右上角「立即测速」或配置调度任务，边缘节点将自动开始吞吐基准评估。
+            <div className="empty-state-card">
+              <div className="empty-state-icon">
+                <Gauge size={24} />
+              </div>
+              <div className="empty-state-title">暂无测速基准数据</div>
+              <p className="empty-state-desc">
+                点击右上角「立即测速」或配置调度任务，边缘节点将自动开始网络上下行吞吐基准评估。
               </p>
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => handleTriggerRun()}
-                disabled={triggering}
-                style={{ marginTop: '16px' }}
-              >
-                立即开始首次测速
-              </button>
+              <div className="empty-state-actions">
+                <button
+                  type="button"
+                  className="button button-primary btn-sm"
+                  onClick={() => handleTriggerRun()}
+                  disabled={triggering}
+                >
+                  立即开始首次测速
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>

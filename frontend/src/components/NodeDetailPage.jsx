@@ -1078,7 +1078,7 @@ export function NodeDetailPage({
           </button>
           <span className="komari-server-flag">{customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}</span>
           <h1 className="komari-server-title">{customMeta.customName || node.name}</h1>
-          <span className={`komari-status-tag ${isOnline ? 'online' : 'offline'}`}>
+          <span className={`komari-status-tag status-pill ${isOnline ? 'online' : 'offline'}`}>
             <span className={`status-dot-pulse ${isOnline ? '' : 'offline'}`} /> {isOnline ? '在线' : '离线'} · {heartbeatText}
           </span>
 
@@ -1159,29 +1159,29 @@ export function NodeDetailPage({
       {/* 2. 顶部 8 核心指标看板 (2行4列卡片网格) */}
       <div className="komari-stats-grid-8">
         {/* 1. 节点价格 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">节点价格</span>
             <Tag size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {priceDisplay} {billing.price ? <small className="text-muted">/ 月</small> : null}
           </div>
         </div>
 
         {/* 2. 月均支出 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">月均支出</span>
             <Coins size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {monthlyExpense} {billing.price ? <small className="text-muted">/ 月</small> : null}
           </div>
         </div>
 
         {/* 3. 剩余时间 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">剩余时间</span>
             <CalendarBlank size={15} className="komari-stat-icon text-muted" />
@@ -1192,7 +1192,7 @@ export function NodeDetailPage({
         </div>
 
         {/* 4. 剩余价值 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">剩余价值</span>
             <Wallet size={15} className="komari-stat-icon text-muted" />
@@ -1203,45 +1203,45 @@ export function NodeDetailPage({
         </div>
 
         {/* 5. 累计流量 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">累计流量</span>
             <TrendUp size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {formatBytes(totalTraffic)}
           </div>
         </div>
 
         {/* 6. 流量配额 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">流量配额</span>
             <ChartPieSlice size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {trafficPercent === null ? '—' : trafficPercent} {trafficPercent !== null && <small className="text-muted">%</small>}
           </div>
         </div>
 
         {/* 7. 运行时间 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">运行时间</span>
             <Clock size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {uptimeText}
           </div>
         </div>
 
         {/* 8. 连接数 */}
-        <div className="komari-stat-card">
+        <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
             <span className="komari-stat-label">连接数</span>
             <ShareNetwork size={15} className="komari-stat-icon text-muted" />
           </div>
-          <div className="komari-stat-value mono">
+          <div className="komari-stat-value mono mono-stat">
             {totalConnections === null ? '—' : totalConnections}
           </div>
         </div>

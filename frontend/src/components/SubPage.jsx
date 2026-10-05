@@ -88,16 +88,16 @@ export function SubPage({
 
   return (
     <section className="subpage">
-      <div className="subpage-heading">
+      <div className="subpage-heading page-header-unified">
         <div className="header-meta">
-          <div className="eyebrow">ProbeWatch 运维控制台</div>
-          <h1>
+          <div className="eyebrow header-eyebrow">ProbeWatch 运维控制台</div>
+          <h1 className="header-title">
             {title}
             <span className="heading-period">。</span>
           </h1>
-          <p>{description}</p>
+          <p className="header-subtitle">{description}</p>
         </div>
-        <div className="heading-actions flex items-center gap-2">
+        <div className="heading-actions header-actions flex items-center gap-2">
           <button type="button" className="button button-quiet" onClick={onBack}>
             返回仪表盘
           </button>

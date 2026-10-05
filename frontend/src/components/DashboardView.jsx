@@ -634,12 +634,14 @@ export function DashboardView({
   return (
     <div className="dashboard-lite-container space-y-4">
       {/* 顶部标题行: 仪表盘 + 更新时间 */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground">仪表盘</h1>
-          <p className="text-xs text-muted mt-0.5">服务器、流量、存储与成本</p>
+      <div className="page-header-unified flex flex-wrap items-center justify-between gap-4">
+        <div className="header-meta">
+          <div className="header-eyebrow">ProbeWatch 中枢</div>
+          <h1 className="header-title text-xl font-bold tracking-tight text-foreground">仪表盘</h1>
+          <p className="header-subtitle text-xs text-muted mt-0.5">服务器、流量、存储与成本</p>
         </div>
-        <div className="text-xs text-muted flex items-center gap-1.5">
+        <div className="header-actions text-xs text-muted flex items-center gap-2">
+          <span className="status-pill online">● 实时同步</span>
           <span>更新于 {currentTime}</span>
         </div>
       </div>
@@ -648,7 +650,7 @@ export function DashboardView({
       <div className="dash-row-grid-5">
         {/* 卡片 1: 在线节点 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-emerald-500/40 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-emerald-500/40 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
@@ -657,7 +659,7 @@ export function DashboardView({
               <HardDrives size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground flex items-baseline gap-1.5">
             <span className="text-emerald-400">{serverStats.online}</span>
             <span className="text-xs text-muted font-normal">/ {serverStats.total} 台</span>
           </div>
@@ -668,7 +670,7 @@ export function DashboardView({
 
         {/* 卡片 2: 需关注节点 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-amber-500/40 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-amber-500/40 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
@@ -677,7 +679,7 @@ export function DashboardView({
               <Warning size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground flex items-baseline gap-1.5">
             <span className={overallResourceStats.attentionCount > 0 ? 'text-amber-400' : 'text-muted'}>
               {overallResourceStats.attentionCount}
             </span>
@@ -690,7 +692,7 @@ export function DashboardView({
 
         {/* 卡片 3: 离线节点 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-rose-500/40 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-rose-500/40 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
@@ -699,7 +701,7 @@ export function DashboardView({
               <WarningOctagon size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground flex items-baseline gap-1.5">
             <span className={serverStats.offline > 0 ? 'text-rose-400 font-bold' : 'text-muted'}>
               {serverStats.offline}
             </span>
@@ -712,7 +714,7 @@ export function DashboardView({
 
         {/* 卡片 4: 综合可用率 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('monitoring')}
         >
           <div className="flex items-center justify-between">
@@ -721,7 +723,7 @@ export function DashboardView({
               <Pulse size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {overallResourceStats.uptimePct !== null ? `${overallResourceStats.uptimePct}%` : '等待采样'}
           </div>
           <div className="text-[11px] text-muted mt-2">
@@ -730,12 +732,12 @@ export function DashboardView({
         </div>
 
         {/* 卡片 5: 最近同步时间 */}
-        <div className="panel p-3.5 transition-all rounded-xl mjj-card">
+        <div className="panel card-panel p-3.5 transition-all rounded-xl mjj-card">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted">实时同步</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {currentTime}
           </div>
           <div className="text-[11px] text-emerald-400/90 mt-2 flex items-center gap-1">
@@ -748,7 +750,7 @@ export function DashboardView({
       <div className="dash-row-grid-5">
         {/* 卡片 1: CPU 总览 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
@@ -757,7 +759,7 @@ export function DashboardView({
               <Cpu size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {overallResourceStats.avgCpu !== null ? `${overallResourceStats.avgCpu}%` : '等待采样'}
           </div>
           <div className="text-[11px] text-muted mt-2">
@@ -767,7 +769,7 @@ export function DashboardView({
 
         {/* 卡片 2: 内存总览 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
@@ -776,7 +778,7 @@ export function DashboardView({
               <Gauge size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {overallResourceStats.avgMem !== null ? `${overallResourceStats.avgMem}%` : '等待采样'}
           </div>
           <div className="text-[11px] text-muted mt-2">
@@ -786,7 +788,7 @@ export function DashboardView({
 
         {/* 卡片 3: 流量总览 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('traffic')}
         >
           <div className="flex items-center justify-between">
@@ -795,7 +797,7 @@ export function DashboardView({
               <ChartBar size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {formatBytes(trafficMetrics.todayBilledBytes)}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-muted mt-2">
@@ -806,7 +808,7 @@ export function DashboardView({
 
         {/* 卡片 4: 三网延迟摘要 */}
         <div
-          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('monitoring')}
         >
           <div className="flex items-center justify-between">
@@ -815,7 +817,7 @@ export function DashboardView({
               <WifiHigh size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground">
             {latencyOverview.hasLatencySample ? `${latencyOverview.avgLatencyMs} ms` : '等待采样'}
           </div>
           <div className="text-[11px] text-muted mt-2">
@@ -839,7 +841,7 @@ export function DashboardView({
           </div>
           {mediaSummary.total > 0 ? (
             <>
-              <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+              <div className="text-2xl font-bold mono mono-stat mt-1.5 text-foreground flex items-baseline gap-1.5">
                 <span className="text-emerald-400">{mediaSummary.available}</span>
                 <span className="text-xs text-muted font-normal">/ {mediaSummary.total} 项解锁</span>
               </div>
@@ -873,7 +875,7 @@ export function DashboardView({
       <div className="dash-row-grid-2">
         {/* 卡片 1: 本月费用与资产剩余价值 */}
         <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('billing')}
         >
           <div className="flex items-center justify-between">
@@ -882,7 +884,7 @@ export function DashboardView({
               <Wallet size={16} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-2 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-2 text-foreground">
             {convertCNYToCurrency(trafficMetrics.monthTotalCostCNY).formatted}
           </div>
           <div className="flex items-center justify-between text-xs mt-3 text-muted">
@@ -893,7 +895,7 @@ export function DashboardView({
 
         {/* 卡片 2: 数据库物理占用 */}
         <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          className="panel card-panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => setShowDbModal(true)}
           title="点击查看 SQLite 存储明细"
         >
@@ -903,7 +905,7 @@ export function DashboardView({
               <Database size={16} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-2 text-foreground">
+          <div className="text-2xl font-bold mono mono-stat mt-2 text-foreground">
             {databaseStats.formattedTotal}
           </div>
           <div className="flex items-center justify-between text-xs mt-3 text-muted">

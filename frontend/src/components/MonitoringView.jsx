@@ -521,11 +521,10 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                       return (
                         <div
                           key={isp.id}
+                          className="card-panel mjj-card"
                           style={{
                             background: 'rgba(0,0,0,0.2)',
                             padding: '14px',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255,255,255,0.06)',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: '10px',
@@ -534,7 +533,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <strong style={{ fontSize: '13.5px', color: isp.iconColor }}>{isp.name}</strong>
                             <span
-                              className={`badge ${rating.tone === 'mint' ? 'badge-success' : rating.tone === 'blue' ? 'badge-info' : rating.tone === 'amber' ? 'badge-warning' : 'badge-danger'}`}
+                              className={`status-pill ${rating.tone === 'mint' ? 'online' : rating.tone === 'blue' ? 'probing' : rating.tone === 'amber' ? 'attention' : 'offline'}`}
                               style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px' }}
                             >
                               {rating.text}
@@ -544,13 +543,13 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px' }}>
                             <div>
                               <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>当前延迟</span>
-                              <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-1)' }}>
+                              <div className="mono mono-stat" style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-1)' }}>
                                 {isp.lat != null ? `${Math.round(isp.lat)} ms` : (currentNode?.status !== 'online' ? '节点离线' : '暂无数据')}
                               </div>
                             </div>
                             <div>
                               <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>丢包率</span>
-                              <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: isp.loss && isp.loss > 0 ? '#fb7185' : isp.loss === 0 ? '#34d399' : 'var(--text-muted)' }}>
+                              <div className="mono mono-stat" style={{ fontSize: '18px', fontWeight: 700, color: isp.loss && isp.loss > 0 ? '#fb7185' : isp.loss === 0 ? '#34d399' : 'var(--text-muted)' }}>
                                 {isp.loss != null ? `${isp.loss.toFixed(1)}%` : '暂无数据'}
                               </div>
                             </div>
