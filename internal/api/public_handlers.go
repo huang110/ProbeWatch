@@ -467,6 +467,10 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeMediaLatest(w, r, node.ID)
 		return
 	}
+	if len(parts) == 5 && parts[4] == "ip-quality" {
+		s.writePublicIPQuality(w, r, node.ID)
+		return
+	}
 	if len(parts) == 5 && parts[4] == "billing" {
 		s.publicNodeBilling(w, r, uuid)
 		return
@@ -484,4 +488,39 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONError(w, http.StatusNotFound, "not found")
+}
+
+// writePublicIPQuality exposes only a deliberately small, non-identifying
+// quality summary. Provider scores and addresses stay private to the
+// authenticated node detail response.
+func (s *Server) writePublicIPQuality(w http.ResponseWriter, r *http.Request, nodeID string) {
+	_, payload, err := s.service.Store().GetResourceLatest(r.Context(), nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusOK, map[string]any{"ip_quality": nil})
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node resource unavailable")
+		return
+	}
+	var resource struct {
+		IPQuality *struct {
+			IPType string `json:"ip_type,omitempty"`
+			Country string `json:"country,omitempty"`
+			Region string `json:"region,omitempty"`
+			ASN string `json:"asn,omitempty"`
+			Organization string `json:"organization,omitempty"`
+			Proxy *bool `json:"proxy,omitempty"`
+			VPN *bool `json:"vpn,omitempty"`
+			Tor *bool `json:"tor,omitempty"`
+			Abuse *bool `json:"abuse,omitempty"`
+			Risk string `json:"risk,omitempty"`
+			CheckedAt int64 `json:"checked_at,omitempty"`
+		} `json:"ip_quality,omitempty"`
+	}
+	if json.Unmarshal(payload, &resource) != nil || resource.IPQuality == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ip_quality": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": resource.IPQuality})
 }

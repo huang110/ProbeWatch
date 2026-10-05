@@ -1202,6 +1202,7 @@ export function App() {
               }}
               rates={rates}
               clientInfo={publicClientInfo}
+              isPublic
               />
             </Suspense>
           </div>

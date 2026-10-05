@@ -312,6 +312,7 @@ type ResourceSnapshot struct {
 	Interfaces           []InterfaceStat `json:"interfaces,omitempty"`
 	IPv4                 string          `json:"ipv4,omitempty"`
 	IPv6                 string          `json:"ipv6,omitempty"`
+	IPQuality            *IPQualityInfo  `json:"ip_quality,omitempty"`
 
 	// Hardware Sensing & Storage I/O Diagnostics (v0.8.6)
 	CPUTempC float64      `json:"cpu_temp_c,omitempty"`
@@ -326,6 +327,25 @@ type ResourceSnapshot struct {
 	ListeningPorts []ListeningPort `json:"listening_ports,omitempty"`
 	// Host Health Scoring & System Maintenance (v0.8.8)
 	HealthInfo *HostHealthInfo `json:"health_info,omitempty"`
+}
+
+// IPQualityInfo is an optional, provider-neutral snapshot supplied by an
+// agent or an out-of-band quality collector. Scores are kept as raw values
+// because different providers use different scales; the UI must not merge
+// them into a fabricated global score.
+type IPQualityInfo struct {
+	IPType       string             `json:"ip_type,omitempty"`
+	Country      string             `json:"country,omitempty"`
+	Region       string             `json:"region,omitempty"`
+	ASN          string             `json:"asn,omitempty"`
+	Organization string             `json:"organization,omitempty"`
+	Proxy        *bool              `json:"proxy,omitempty"`
+	VPN          *bool              `json:"vpn,omitempty"`
+	Tor          *bool              `json:"tor,omitempty"`
+	Abuse        *bool              `json:"abuse,omitempty"`
+	Risk         string             `json:"risk,omitempty"`
+	CheckedAt    int64              `json:"checked_at,omitempty"`
+	Sources      map[string]float64 `json:"sources,omitempty"`
 }
 
 // CheckTask is the only task shape an agent accepts from the control plane.

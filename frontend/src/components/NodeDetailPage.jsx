@@ -278,6 +278,7 @@ export function NodeDetailPage({
   onBack,
   rates = {},
   clientInfo = null,
+  isPublic = false,
   onNavigate,
 }) {
   const [copied, setCopied] = useState(false)
@@ -453,6 +454,36 @@ export function NodeDetailPage({
 
   const [mediaData, setMediaData] = useState([])
   const [loadingMedia, setLoadingMedia] = useState(false)
+  const [ipQuality, setIpQuality] = useState(null)
+  const [loadingIpQuality, setLoadingIpQuality] = useState(false)
+
+  useEffect(() => {
+    if (!nodeUuid) {
+      setIpQuality(null)
+      setLoadingIpQuality(false)
+      return undefined
+    }
+    const controller = new AbortController()
+    setLoadingIpQuality(true)
+    const path = isPublic
+      ? `/api/public/nodes/${encodeURIComponent(nodeUuid)}/ip-quality`
+      : `/api/nodes/${encodeURIComponent(nodeUuid)}/resource`
+    fetch(path, { credentials: 'same-origin', signal: controller.signal })
+      .then((res) => res)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        const value = payload?.ip_quality || payload?.resource?.ip_quality || null
+        setIpQuality(value && typeof value === 'object' ? value : null)
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') setIpQuality(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingIpQuality(false)
+      })
+    return () => controller.abort()
+  }, [nodeUuid, isPublic])
 
   useEffect(() => {
     if (!nodeUuid) {
@@ -1353,7 +1384,42 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 卡片 3: 存储信息 */}
+        {/* 卡片 3: IP 质量（可选上报；没有数据时不伪造评分） */}
+        <details className="komari-info-card komari-ip-quality-card" open={Boolean(ipQuality)}>
+          <summary className="komari-info-header komari-ip-quality-summary">
+            <span className="komari-ip-quality-title"><ShieldCheck size={16} className="text-mint" /> IP 质量</span>
+            <span className={`badge ${ipQuality?.risk === 'high' ? 'badge-rose' : ipQuality?.risk === 'medium' ? 'badge-amber' : ipQuality ? 'badge-mint' : 'badge-neutral'}`}>
+              {loadingIpQuality ? '检测中' : ipQuality?.risk ? `${ipQuality.risk === 'high' ? '高' : ipQuality.risk === 'medium' ? '中' : '低'}风险` : '暂无质量库数据'}
+            </span>
+          </summary>
+          <div className="komari-ip-quality-body">
+            {ipQuality ? (
+              <>
+                <div className="komari-ip-quality-grid">
+                  <div><span>IP 类型</span><strong>{ipQuality.ip_type || '—'}</strong></div>
+                  <div><span>ASN</span><strong>{ipQuality.asn || '—'}</strong></div>
+                  <div><span>地区</span><strong>{[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}</strong></div>
+                  <div><span>组织</span><strong>{ipQuality.organization || '—'}</strong></div>
+                </div>
+                <div className="komari-ip-quality-flags">
+                  {[['代理', ipQuality.proxy], ['VPN', ipQuality.vpn], ['Tor', ipQuality.tor], ['滥用', ipQuality.abuse]].map(([label, value]) => (
+                    <span key={label} className={value === true ? 'is-risk' : value === false ? 'is-ok' : 'is-unknown'}>{label}：{value === true ? '是' : value === false ? '否' : '未知'}</span>
+                  ))}
+                </div>
+                {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 && (
+                  <div className="komari-ip-quality-sources">
+                    {Object.entries(ipQuality.sources).map(([source, score]) => <span key={source}><b>{source}</b><em>{Number(score).toFixed(2)}</em></span>)}
+                  </div>
+                )}
+                <small className="komari-ip-quality-note">多来源评分仅作参考，不合并为单一结论；检测时间：{ipQuality.checked_at ? new Date(Number(ipQuality.checked_at) * 1000).toLocaleString('zh-CN') : '未知'}。</small>
+              </>
+            ) : (
+              <div className="komari-ip-quality-empty"><ShieldWarning size={16} /> 尚未接入 IP 质量库，仅展示节点基础网络信息。</div>
+            )}
+          </div>
+        </details>
+
+        {/* 卡片 4: 存储信息 */}
         <div className="komari-info-card">
           <div className="komari-info-header">
             <h3>存储信息</h3>
