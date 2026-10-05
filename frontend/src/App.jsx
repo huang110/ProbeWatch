@@ -550,9 +550,13 @@ export function App() {
       if (route) {
         setActiveNav(route.page)
         document.cookie = `pb_nav=${encodeURIComponent(route.page)}; path=/; max-age=2592000; SameSite=Lax`
-        if (route.page === 'node-detail' && route.nodeUuid && data.length > 0) {
-          const found = data.find((n) => (n.uuid || n.id) === route.nodeUuid)
-          if (found) setDetailNode(found)
+        if (route.page === 'node-detail') {
+          if (route.nodeUuid) {
+            const found = (data || []).find((n) => (n.uuid || n.id) === route.nodeUuid)
+            setDetailNode(found || null)
+          } else {
+            setDetailNode(null)
+          }
         }
       } else {
         setActiveNav('overview')
@@ -566,14 +570,14 @@ export function App() {
 
   // 页面刷新、链接进入或数据轮询更新时，保证 detailNode 始终与 data 中最新上报保持实时同步
   useEffect(() => {
-    if (activeNav === 'node-detail' && data.length > 0) {
+    if (activeNav === 'node-detail') {
       const route = parseRouteFromHash()
-      const targetUuid = detailNode?.uuid || detailNode?.id || route?.nodeUuid || initialRouteRef.current?.nodeUuid
-      if (targetUuid) {
+      const targetUuid = route?.nodeUuid || initialRouteRef.current?.nodeUuid || detailNode?.uuid || detailNode?.id
+      if (targetUuid && data.length > 0) {
         const latest = data.find((n) => (n.uuid || n.id) === targetUuid)
         if (latest) {
           setDetailNode((prev) => {
-            if (!prev) return latest
+            if (!prev || (prev.uuid || prev.id) !== (latest.uuid || latest.id)) return latest
             if (
               prev.cpu !== latest.cpu ||
               prev.rx !== latest.rx ||
@@ -586,10 +590,14 @@ export function App() {
             }
             return prev
           })
+        } else {
+          setDetailNode(null)
         }
+      } else if (!targetUuid) {
+        setDetailNode(null)
       }
     }
-  }, [activeNav, data, detailNode?.uuid, detailNode?.id])
+  }, [activeNav, data])
 
   const markSync = () => setLastSync(Date.now())
 
@@ -1336,7 +1344,7 @@ export function App() {
               setDetailNode(node)
               navigate('node-detail', { uuid: node?.uuid || node?.id })
             }}
-            loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)}
+            loading={!detailNode && apiState.kind === 'loading'}
             history={history}
             historyLoading={historyLoading}
             historyTimeRange={historyTimeRange}
