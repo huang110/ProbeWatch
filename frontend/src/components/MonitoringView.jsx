@@ -33,7 +33,7 @@ import { MTRHopLatencyLine } from './MTRRouteView.jsx'
 import { NewLatencyTargetModal } from './NewLatencyTargetModal.jsx'
 import { NewRouteMonitorModal } from './NewRouteMonitorModal.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
-import { safeArray, safeText } from '../lib/format.js'
+import { identifyTargetCarrier, safeArray, safeText } from '../lib/format.js'
 import { useLivePolling } from '../lib/useLivePolling.js'
 
 // 官方 6 大预置骨干探针目标 (RFC 5737 文档保留地址，完全契合安全契约)
@@ -353,22 +353,21 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
             </div>
 
             {(() => {
-              const findIsp = (needle) => liveChecks.find((c) => String(c?.name || c?.target_id || '').toLowerCase().includes(needle) || String(c?.host || '').toLowerCase().includes(needle))
-              const ctCheck = findIsp('电信') || findIsp('ct')
-              const cuCheck = findIsp('联通') || findIsp('cu')
-              const cmCheck = findIsp('移动') || findIsp('cm')
+              const ctCheck = liveChecks.find((c) => identifyTargetCarrier(c) === '电信')
+              const cuCheck = liveChecks.find((c) => identifyTargetCarrier(c) === '联通')
+              const cmCheck = liveChecks.find((c) => identifyTargetCarrier(c) === '移动')
 
-              const findMtr = (needle) => liveMtrResults.find((m) => String(m?.target_id || m?.name || m?.host || '').toLowerCase().includes(needle))
-              const ctMtr = findMtr('电信') || findMtr('ct')
-              const cuMtr = findMtr('联通') || findMtr('cu')
-              const cmMtr = findMtr('移动') || findMtr('cm')
+              const ctMtr = liveMtrResults.find((m) => identifyTargetCarrier(m) === '电信')
+              const cuMtr = liveMtrResults.find((m) => identifyTargetCarrier(m) === '联通')
+              const cmMtr = liveMtrResults.find((m) => identifyTargetCarrier(m) === '移动')
 
               const getRouteStatus = (mtr) => {
                 if (!mtr || !mtr.result) return '暂无回程样本'
                 if (mtr.result.error) return `回程异常: ${mtr.result.error}`
                 if (mtr.result.route_changed || mtr.route_changed || mtr.path_changed) return `路径发生变化 (${mtr.result.hops?.length || 0}跳)`
                 if (mtr.result.reached) return `路径可达 (${mtr.result.hops?.length || 0}跳)`
-                return '路径未达'
+                if (Array.isArray(mtr.result.hops) && mtr.result.hops.length > 0) return `路径采样 (${mtr.result.hops.length}跳)`
+                return '暂无回程样本'
               }
 
               const isps = [
@@ -477,26 +476,27 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                 }
               }
 
-              // 3. NAT (Strict: Never claim "稳定未漂移" without historical baseline)
+              // 3. NAT (会话级语义：明确保存在浏览器内存，刷新重置)
               const natIp = currentNode?.egress_ip || currentNode?.nat_ip || res.egress_ip || res.nat_ip
               let natText = 'NAT出口: 暂无数据'
               let natTone = 'gray'
+              const natTooltip = '页面刷新后会话历史会重置'
               if (natIp) {
                 const nodeKey = currentNode?.uuid || currentNode?.id || selectedServerForLatency
                 const prevRecord = egressHistoryRef.current.get(nodeKey)
                 if (!prevRecord) {
                   egressHistoryRef.current.set(nodeKey, { lastIp: natIp, count: 1 })
-                  natText = `出口 IP 已上报 (${natIp}) (${reportTimeStr})`
+                  natText = `本次会话首次上报 (${natIp}) (${reportTimeStr})`
                   natTone = 'blue'
                 } else if (prevRecord.lastIp !== natIp) {
                   const oldIp = prevRecord.lastIp
                   prevRecord.lastIp = natIp
                   prevRecord.count += 1
-                  natText = `出口 IP 已变化 (${oldIp} → ${natIp}) (${reportTimeStr})`
+                  natText = `本次会话内发生变化 (${oldIp} → ${natIp}) (${reportTimeStr})`
                   natTone = 'amber'
                 } else {
                   prevRecord.count += 1
-                  natText = `出口 IP 稳定 (${natIp}) (${reportTimeStr})`
+                  natText = `本次会话内保持稳定 (${natIp}) (${reportTimeStr})`
                   natTone = 'mint'
                 }
               }
@@ -581,11 +581,16 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                       }}>
                         {ipStackText}
                       </span>
-                      <span className="compact-metric-pill" style={{
-                        background: natTone === 'mint' ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.04)',
-                        borderColor: natTone === 'mint' ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.08)',
-                        color: natTone === 'mint' ? '#34d399' : 'var(--text-muted)',
-                      }}>
+                      <span
+                        className="compact-metric-pill"
+                        title={natTooltip}
+                        style={{
+                          background: natTone === 'mint' ? 'rgba(16,185,129,0.08)' : natTone === 'amber' ? 'rgba(245,158,11,0.08)' : natTone === 'blue' ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.04)',
+                          borderColor: natTone === 'mint' ? 'rgba(16,185,129,0.2)' : natTone === 'amber' ? 'rgba(245,158,11,0.2)' : natTone === 'blue' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.08)',
+                          color: natTone === 'mint' ? '#34d399' : natTone === 'amber' ? '#fbbf24' : natTone === 'blue' ? '#38bdf8' : 'var(--text-muted)',
+                          cursor: 'help',
+                        }}
+                      >
                         {natText}
                       </span>
                       <span className="compact-metric-pill" style={{

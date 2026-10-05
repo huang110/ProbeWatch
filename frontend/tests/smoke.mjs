@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import "./carrier_matching.test.mjs"
 
 const root = resolve(process.cwd())
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))

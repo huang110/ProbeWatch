@@ -343,3 +343,34 @@ export const identifyCarrierRoute = (hops = [], targetCarrier = 'telecom') => {
   return { carrier: '国际 BGP', line: '标准公网 BGP 互联', badge: 'bgp', quality: 'standard', verified: false }
 }
 
+// 运营商目标与探针任务识别函数 (支持电信/联通/移动、ct/cu/cm、cn2/9929/cmin2 及 isp/operator 显式字段)
+export const identifyTargetCarrier = (item) => {
+  if (!item) return '未知'
+
+  const isCT = (s) => /电信|telecom|chinanet|cn2|4809|4134/i.test(s) || /(?:^|[-_.\s/])ct(?:[-_.\s/0-9]|$)/i.test(s)
+  const isCU = (s) => /联通|unicom|9929|4837|10099|cug/i.test(s) || /(?:^|[-_.\s/])cu(?:[-_.\s/0-9]|$)/i.test(s)
+  const isCM = (s) => /移动|mobile|cmcc|cmin2|58807|58453|9808/i.test(s) || /(?:^|[-_.\s/])cm(?:[-_.\s/0-9]|$)/i.test(s)
+
+  // 1. 优先使用显式 isp / operator / carrier 字段
+  if (typeof item === 'object') {
+    const explicit = String(item.isp || item.operator || item.carrier || '').trim()
+    if (explicit) {
+      if (isCT(explicit)) return '电信'
+      if (isCU(explicit)) return '联通'
+      if (isCM(explicit)) return '移动'
+    }
+  }
+
+  // 2. 依次匹配 target_id / name / host / id / target 或纯字符串
+  const fields = typeof item === 'string' ? [item] : [item.target_id, item.name, item.host, item.id, item.target]
+  for (const f of fields) {
+    if (!f) continue
+    const s = String(f).trim()
+    if (isCT(s)) return '电信'
+    if (isCU(s)) return '联通'
+    if (isCM(s)) return '移动'
+  }
+
+  return '未知'
+}
+

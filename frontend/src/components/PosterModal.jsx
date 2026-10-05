@@ -16,7 +16,7 @@ import {
   WifiHigh,
   X,
 } from '@phosphor-icons/react'
-import { formatBytes, formatLatency, formatRate, numeric, safeArray, safeObject, safeText } from '../lib/format.js'
+import { formatBytes, formatLatency, formatRate, identifyTargetCarrier, numeric, safeArray, safeObject, safeText } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta } from '../lib/billing.js'
 
 function maskIpString(ip) {
@@ -74,12 +74,11 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
   const rxBytes = numeric(node?.network_rx_bytes)
   const txBytes = numeric(node?.network_tx_bytes)
 
-  // 3-ISP checks
+  // 3-ISP checks (统一识别函数：支持电信/联通/移动、ct/cu/cm、cn2/9929/cmin2 及 target_id)
   const checks = safeArray(node?.checks || node?.telemetry?.checks)
-  const findCheck = (name) => checks.find((c) => String(c?.label || c?.name || '').includes(name))
-  const cu = findCheck('联通')
-  const ct = findCheck('电信')
-  const cm = findCheck('移动')
+  const cu = checks.find((c) => identifyTargetCarrier(c) === '联通')
+  const ct = checks.find((c) => identifyTargetCarrier(c) === '电信')
+  const cm = checks.find((c) => identifyTargetCarrier(c) === '移动')
 
   const cuLat = numeric(cu?.latency_ms)
   const cuLoss = numeric(cu?.loss_rate) !== null ? cu.loss_rate * 100 : null
