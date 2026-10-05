@@ -16,6 +16,17 @@ function maskVisitorIp(value) {
   return text
 }
 
+
+function getIspRating(latency, loss) {
+  if (latency === null || latency === undefined) return { text: '—', tone: 'muted' }
+  const lss = loss !== null && loss !== undefined ? Number(loss) : 0
+  if (latency < 100 && lss <= 0.5) return { text: '优秀', tone: 'mint' }
+  if (latency < 200 && lss <= 2) return { text: '良好', tone: 'blue' }
+  if (latency < 300 && lss <= 5) return { text: '一般', tone: 'amber' }
+  if (latency < 450 || lss <= 15) return { text: '较差', tone: 'orange' }
+  return { text: '严重异常', tone: 'rose' }
+}
+
 function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
   const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
@@ -63,7 +74,10 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
 }
 
 export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
-  const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table'
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) return 'compact'
+    return 'grid'
+  }) // 'grid' | 'table' | 'compact'
   const [showLogin, setShowLogin] = useState(false)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
@@ -535,6 +549,15 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                 <Rows size={16} weight={viewMode === 'table' ? 'bold' : 'regular'} />
                 <span>表格</span>
               </button>
+              <button
+                type="button"
+                className={`view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}`}
+                onClick={() => setViewMode('compact')}
+                title="手机极简单行模式"
+              >
+                <Pulse size={16} weight={viewMode === 'compact' ? 'bold' : 'regular'} />
+                <span>极简</span>
+              </button>
             </div>
           )}
         </div>
@@ -671,6 +694,9 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                   const cuLoss = numeric(cuCheck?.loss_rate) !== null ? Number(cuCheck.loss_rate) * 100 : null
                   const ctLoss = numeric(ctCheck?.loss_rate) !== null ? Number(ctCheck.loss_rate) * 100 : null
                   const cmLoss = numeric(cmCheck?.loss_rate) !== null ? Number(cmCheck.loss_rate) * 100 : null
+                  const cuRating = getIspRating(cuLatency, cuLoss)
+                  const ctRating = getIspRating(ctLatency, ctLoss)
+                  const cmRating = getIspRating(cmLatency, cmLoss)
                   const checkLatencyText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : nodeStatus === 'offline' ? `历史 ${formatLatency(value)}` : formatLatency(value)
                   const checkLossText = (value) => value === null ? (hasIspChecks ? '暂无样本' : '未配置') : nodeStatus === 'offline' ? `历史 ${value.toFixed(1)}%` : `${value.toFixed(1)}%`
                   const checkLabels = hasIspChecks
@@ -892,6 +918,73 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                       {/* 保持安全契约约束兼容 */}
                       <span className="guest-badge sr-only">状态未公开</span>
                     </article>
+                  )
+                })}
+              </div>
+            ) : viewMode === 'compact' ? (
+              <div className="guest-compact-list mobile-single-line-list">
+                {filteredNames.map((name, index) => {
+                  const meta = detectRegionAndFlag(name, '')
+                  const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+                  const displayName = custom.customName || name
+                  const telemetry = telemetryByName.get(name) || {}
+                  const nodeStatus = telemetry.status || 'unknown'
+                  const isOnline = nodeStatus === 'online'
+                  const cpuPercent = numeric(telemetry.cpu_percent)
+                  const memUsed = numeric(telemetry.memory_used_bytes)
+                  const memTotal = numeric(telemetry.memory_total_bytes)
+                  const memPercent = memUsed !== null && memTotal > 0 ? (memUsed / memTotal) * 100 : null
+                  const remainDays = custom.remainingDays ?? null
+
+                  const checks = safeArray(telemetry.checks)
+                  const checkFor = (...needles) => checks.find((check) => needles.some((needle) => String(check.kind || '').toLowerCase().includes(needle) || String(check.label || '').toLowerCase().includes(needle))) || null
+                  const cuCheck = checkFor('unicom', 'cu', '联通')
+                  const ctCheck = checkFor('telecom', 'ct', '电信')
+                  const cmCheck = checkFor('mobile', 'cm', '移动')
+                  const cuLatency = numeric(cuCheck?.latency_ms)
+                  const ctLatency = numeric(ctCheck?.latency_ms)
+                  const cmLatency = numeric(cmCheck?.latency_ms)
+                  const loss = numeric(telemetry.loss_rate) !== null ? (telemetry.loss_rate * 100).toFixed(1) : '0.0'
+
+                  return (
+                    <div
+                      key={`${name}-${index}`}
+                      className={`compact-single-line-row ${!isOnline ? 'is-offline' : ''}`}
+                      onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry))}
+                      title="点击查看详细性能遥测与监控"
+                    >
+                      <div className="compact-row-left">
+                        <span className="compact-flag">{displayFlag}</span>
+                        <span className={`compact-status-dot status-${nodeStatus}`} />
+                        <span className="compact-node-name" title={displayName}>{displayName}</span>
+                      </div>
+
+                      <div className="compact-row-metrics">
+                        <span className="compact-metric-pill mono">
+                          <span className="compact-metric-lbl">CPU</span>
+                          <span className="compact-metric-val">{cpuPercent !== null ? `${Math.round(cpuPercent)}%` : '—'}</span>
+                        </span>
+                        <span className="compact-metric-pill mono">
+                          <span className="compact-metric-lbl">RAM</span>
+                          <span className="compact-metric-val">{memPercent !== null ? `${Math.round(memPercent)}%` : '—'}</span>
+                        </span>
+                        <span className="compact-metric-pill compact-isp-pill mono" title={`三网延迟: 电信 ${ctLatency ? Math.round(ctLatency)+'ms' : '—'} | 联通 ${cuLatency ? Math.round(cuLatency)+'ms' : '—'} | 移动 ${cmLatency ? Math.round(cmLatency)+'ms' : '—'}`}>
+                          <span className="isp-mini ct">电{ctLatency !== null ? Math.round(ctLatency) : '—'}</span>
+                          <span className="isp-mini cu">联{cuLatency !== null ? Math.round(cuLatency) : '—'}</span>
+                          <span className="isp-mini cm">移{cmLatency !== null ? Math.round(cmLatency) : '—'}</span>
+                        </span>
+                        <span className="compact-metric-pill mono">
+                          <span className="compact-metric-lbl">丢包</span>
+                          <span className={`compact-metric-val ${Number(loss) > 0 ? 'text-rose' : ''}`}>{loss}%</span>
+                        </span>
+                        {remainDays !== null && (
+                          <span className="compact-metric-pill compact-days-pill mono">
+                            剩{remainDays}天
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   )
                 })}
               </div>

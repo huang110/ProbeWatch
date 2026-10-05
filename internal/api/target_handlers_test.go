@@ -358,7 +358,7 @@ func TestSeedMediaTargetsIdempotent(t *testing.T) {
 		t.Fatalf("seed without CSRF status = %d, want 403", noCSRF.Code)
 	}
 
-	// First call seeds all 8 targets
+	// First call seeds all 12 targets
 	res1, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/targets/seed-media", "{}")
 	if res1.Code != http.StatusOK {
 		t.Fatalf("seed status = %d %q, want 200", res1.Code, res1.Body.String())
@@ -367,7 +367,7 @@ func TestSeedMediaTargetsIdempotent(t *testing.T) {
 	if err := json.Unmarshal(res1.Body.Bytes(), &data1); err != nil {
 		t.Fatal(err)
 	}
-	if data1["ok"] != true || int(data1["created"].(float64)) != 8 {
+	if data1["ok"] != true || int(data1["created"].(float64)) != 12 {
 		t.Fatalf("unexpected seed response 1: %#v", data1)
 	}
 
@@ -379,6 +379,10 @@ func TestSeedMediaTargetsIdempotent(t *testing.T) {
 	claudeTarget, err := store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-claude")
 	if err != nil || !claudeTarget.Enabled {
 		t.Fatalf("media-claude target missing or disabled: %v", err)
+	}
+	geminiTarget, err := store.GetTarget(context.Background(), db.TargetKindMediaHTTP, "media-gemini")
+	if err != nil || !geminiTarget.Enabled {
+		t.Fatalf("media-gemini target missing or disabled: %v", err)
 	}
 
 	// Second call should be idempotent (created: 0)

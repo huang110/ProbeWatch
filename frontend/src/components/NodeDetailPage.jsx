@@ -60,6 +60,7 @@ import {
 } from '../lib/billing.js'
 import { DistroIcon } from './Common.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
+import { PosterModal } from './PosterModal.jsx'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -339,66 +340,8 @@ export function NodeDetailPage({
     }
   }
 
-  const handleSharePoster = async () => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 1200
-    canvas.height = 760
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-    gradient.addColorStop(0, '#101b2d')
-    gradient.addColorStop(1, '#182d45')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = '#67e8f9'
-    ctx.font = '700 28px sans-serif'
-    ctx.fillText('ProbeWatch · 节点出鸡 / 测速卡片', 64, 70)
-    ctx.fillStyle = '#f8fafc'
-    ctx.font = '700 48px sans-serif'
-    ctx.fillText(`${customMeta.customName || node.name || 'ProbeWatch 节点'}`, 64, 145)
-    ctx.fillStyle = isOnline ? '#86efac' : '#fda4af'
-    ctx.font = '600 24px sans-serif'
-    ctx.fillText(`${isOnline ? '在线' : '离线'} · ${heartbeatText}`, 66, 188)
-    const rows = [
-      ['CPU', cpuPercent === null ? '暂无' : `${Math.round(cpuPercent)}%`],
-      ['内存', memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '暂无'],
-      ['磁盘', diskTotal ? `${Math.round((diskUsed / diskTotal) * 100)}%` : '暂无'],
-      ['剩余价值', remainingValue],
-      ['流媒体解锁', `${unlockedMediaCount}/${POPULAR_MEDIA.length}`],
-    ]
-    ctx.font = '600 25px sans-serif'
-    rows.forEach(([label, value], index) => {
-      const x = 64 + (index % 2) * 540
-      const y = 270 + Math.floor(index / 2) * 105
-      ctx.fillStyle = 'rgba(255,255,255,.08)'
-      ctx.fillRect(x, y - 38, 480, 76)
-      ctx.fillStyle = '#94a3b8'
-      ctx.fillText(label, x + 22, y - 5)
-      ctx.fillStyle = '#f8fafc'
-      ctx.fillText(value, x + 240, y - 5)
-    })
-    ctx.fillStyle = '#94a3b8'
-    ctx.font = '500 20px sans-serif'
-    ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')} · ProbeWatch`, 64, 700)
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-    if (!blob) return
-    const fileName = `probewatch-${(customMeta.customName || node.name || 'node').replace(/[^\w\u4e00-\u9fff-]+/g, '-')}.png`
-    try {
-      if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-        setPosterCopied(true)
-        setTimeout(() => setPosterCopied(false), 2400)
-        return
-      }
-    } catch { /* fallback to download below */ }
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = fileName
-    anchor.click()
-    URL.revokeObjectURL(url)
-    setPosterCopied(true)
-    setTimeout(() => setPosterCopied(false), 2400)
+  const handleSharePoster = () => {
+    setShowPosterModal(true)
   }
 
   const handleCopyShareMarkdown = async () => {
@@ -453,6 +396,18 @@ export function NodeDetailPage({
   }
 
   const [mediaData, setMediaData] = useState([])
+  const [showPosterModal, setShowPosterModal] = useState(false)
+
+  // Track recently visited nodes for quick access
+  useEffect(() => {
+    if (!nodeUuid) return
+    try {
+      const raw = localStorage.getItem('probewatch:recent-nodes') || '[]'
+      const list = JSON.parse(raw).filter((id) => id !== nodeUuid)
+      list.unshift(nodeUuid)
+      localStorage.setItem('probewatch:recent-nodes', JSON.stringify(list.slice(0, 10)))
+    } catch {}
+  }, [nodeUuid])
   const [loadingMedia, setLoadingMedia] = useState(false)
   const [ipQuality, setIpQuality] = useState(null)
   const [loadingIpQuality, setLoadingIpQuality] = useState(false)
@@ -2772,6 +2727,14 @@ export function NodeDetailPage({
         <button type="button" onClick={handleCopyShareMarkdown}><ClipboardText size={15} /> Markdown</button>
         {onNavigate && <button type="button" onClick={() => onNavigate('terminal')}><Terminal size={15} /> 终端</button>}
       </div>
+      {showPosterModal && (
+        <PosterModal
+          node={node}
+          mediaData={mediaData}
+          pingHistory={pingHistory}
+          onClose={() => setShowPosterModal(false)}
+        />
+      )}
     </section>
   )
 }

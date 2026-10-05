@@ -547,6 +547,30 @@ func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
 				{Region: "HK", Contains: "\"code\":-10403"},
 			},
 		},
+		{
+			id:   "media-prime",
+			name: "Amazon Prime Video",
+			host: "www.primevideo.com",
+			path: "/",
+		},
+		{
+			id:   "media-gemini",
+			name: "Gemini",
+			host: "gemini.google.com",
+			path: "/",
+		},
+		{
+			id:   "media-perplexity",
+			name: "Perplexity",
+			host: "www.perplexity.ai",
+			path: "/",
+		},
+		{
+			id:   "media-google",
+			name: "Google 服务",
+			host: "www.google.com",
+			path: "/generate_204",
+		},
 	}
 
 	createdCount := 0

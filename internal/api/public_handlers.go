@@ -283,7 +283,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		response.Nodes.Names = append(response.Nodes.Names, telemetry.Name)
 		response.Nodes.Telemetry = append(response.Nodes.Telemetry, telemetry)
-		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
+		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS, db.TargetKindMTR} {
 			records, e := s.service.Store().GetResultHistory(r.Context(), kind, node.ID, from, now, limit)
 			if e != nil {
 				continue

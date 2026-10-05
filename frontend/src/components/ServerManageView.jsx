@@ -20,9 +20,12 @@ import {
   CheckSquare,
   Square,
   Sliders,
+  ShareNetwork,
+  Star,
 } from '@phosphor-icons/react'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
+import { PosterModal } from './PosterModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
 import { BillingModal } from './BillingModal.jsx'
 import {
@@ -41,6 +44,28 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all') // 'all' | 'online' | 'offline'
   const [regionFilter, setRegionFilter] = useState('all')
+  const [sortKey, setSortKey] = useState('default')
+  const [carrierFilter, setCarrierFilter] = useState('all')
+  const [posterNode, setPosterNode] = useState(null)
+  const [favorites, setFavorites] = useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('probewatch:favorite-nodes') || '[]'))
+    } catch {
+      return new Set()
+    }
+  })
+
+  const toggleFavorite = (id, e) => {
+    if (e) e.stopPropagation()
+    const next = new Set(favorites)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setFavorites(next)
+    try {
+      localStorage.setItem('probewatch:favorite-nodes', JSON.stringify(Array.from(next)))
+    } catch {}
+  }
+
   const [groupFilter, setGroupFilter] = useState('all')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
@@ -108,20 +133,51 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
     return Array.from(set)
   }, [nodes, refreshTrigger])
 
-  // Multi-dimensional filtering
+  // Multi-dimensional filtering and sorting
   const filteredNodes = useMemo(() => {
-    return nodes.filter((node) => {
+    let list = nodes.filter((node) => {
       const id = node.uuid || node.id
       const meta = getNodeCustomMeta(id, node)
 
+      // Status / Special filters
       if (statusFilter === 'online' && node.status !== 'online') return false
       if (statusFilter === 'offline' && node.status === 'online') return false
+      if (statusFilter === 'attention') {
+        const cpu = numeric(node.cpu ?? node.cpu_percent) || 0
+        const loss = numeric(lossRates[id]) || 0
+        const isAttn = node.status === 'attention' || cpu > 85 || loss > 5
+        if (!isAttn) return false
+      }
+      if (statusFilter === 'favorite' && !favorites.has(id)) return false
+      if (statusFilter === 'recent') {
+        try {
+          const recents = JSON.parse(localStorage.getItem('probewatch:recent-nodes') || '[]')
+          if (!recents.includes(id)) return false
+        } catch {
+          return false
+        }
+      }
+
+      // Region filter
       if (regionFilter !== 'all') {
         const r = meta.customFlag || node.region || '公网节点'
         if (r !== regionFilter) return false
       }
+
+      // Group filter
       if (groupFilter !== 'all' && (meta.group || '默认') !== groupFilter) return false
 
+      // Carrier filter
+      if (carrierFilter !== 'all') {
+        const tags = (meta.tags || '').toLowerCase()
+        const name = (node.name || '').toLowerCase()
+        if (carrierFilter === 'telecom' && !tags.includes('电信') && !tags.includes('cn2') && !tags.includes('ct') && !name.includes('电信')) return false
+        if (carrierFilter === 'unicom' && !tags.includes('联通') && !tags.includes('9929') && !tags.includes('4837') && !tags.includes('cu') && !name.includes('联通')) return false
+        if (carrierFilter === 'mobile' && !tags.includes('移动') && !tags.includes('cmin2') && !tags.includes('cm') && !name.includes('移动')) return false
+        if (carrierFilter === 'bgp' && (tags.includes('电信') || tags.includes('联通') || tags.includes('移动'))) return false
+      }
+
+      // Search term
       if (searchTerm) {
         const q = searchTerm.toLowerCase().trim()
         const matchName = (node.name || '').toLowerCase().includes(q)
@@ -129,14 +185,53 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
         const matchHost = (node.hostname || '').toLowerCase().includes(q)
         const matchTag = (meta.tags || '').toLowerCase().includes(q)
         const matchGroup = (meta.group || '').toLowerCase().includes(q)
-        const matchIp = (node.ipv4 || node.ip || '').toLowerCase().includes(q)
-        if (!matchName && !matchCustomName && !matchHost && !matchTag && !matchGroup && !matchIp) {
+        const matchIp = (node.ipv4 || node.ip || node.public_ip || '').toLowerCase().includes(q)
+        const matchAsn = (node.asn || '').toLowerCase().includes(q)
+        const matchRegion = (node.region || '').toLowerCase().includes(q)
+        if (!matchName && !matchCustomName && !matchHost && !matchTag && !matchGroup && !matchIp && !matchAsn && !matchRegion) {
           return false
         }
       }
       return true
     })
-  }, [nodes, statusFilter, regionFilter, groupFilter, searchTerm, refreshTrigger])
+
+    // Sorting
+    if (sortKey !== 'default') {
+      list = [...list].sort((a, b) => {
+        const idA = a.uuid || a.id
+        const idB = b.uuid || b.id
+        const getIspLat = (node, needle) => {
+          const checks = safeArray(node?.checks || node?.telemetry?.checks)
+          const found = checks.find(c => String(c?.label || c?.name || '').includes(needle))
+          return numeric(found?.latency_ms) ?? 9999
+        }
+        if (sortKey === 'cpu_desc') return (numeric(b.cpu ?? b.cpu_percent) || 0) - (numeric(a.cpu ?? a.cpu_percent) || 0)
+        if (sortKey === 'cpu_asc') return (numeric(a.cpu ?? a.cpu_percent) || 0) - (numeric(b.cpu ?? b.cpu_percent) || 0)
+        if (sortKey === 'mem_desc') return (numeric(b.memory ?? b.memPercent) || 0) - (numeric(a.memory ?? a.memPercent) || 0)
+        if (sortKey === 'disk_desc') return (numeric(b.disk ?? b.diskPercent) || 0) - (numeric(a.disk ?? a.diskPercent) || 0)
+        if (sortKey === 'traffic_desc') return ((numeric(b.tx) || 0) + (numeric(b.rx) || 0)) - ((numeric(a.tx) || 0) + (numeric(a.rx) || 0))
+        if (sortKey === 'latency_asc') return (numeric(a.latency) ?? 9999) - (numeric(b.latency) ?? 9999)
+        if (sortKey === 'latency_desc') return (numeric(b.latency) ?? 0) - (numeric(a.latency) ?? 0)
+        if (sortKey === 'loss_desc') return (numeric(lossRates[idB]) || 0) - (numeric(lossRates[idA]) || 0)
+        if (sortKey === 'ct_lat_asc') return getIspLat(a, '电信') - getIspLat(b, '电信')
+        if (sortKey === 'cu_lat_asc') return getIspLat(a, '联通') - getIspLat(b, '联通')
+        if (sortKey === 'cm_lat_asc') return getIspLat(a, '移动') - getIspLat(b, '移动')
+        if (sortKey === 'val_desc') {
+          const valA = calculateRemainingValue(getNodeBilling(idA, a.name)).remainingValueCNY
+          const valB = calculateRemainingValue(getNodeBilling(idB, b.name)).remainingValueCNY
+          return valB - valA
+        }
+        if (sortKey === 'rem_days_asc') {
+          const daysA = calculateRemainingValue(getNodeBilling(idA, a.name)).remainingDays ?? 9999
+          const daysB = calculateRemainingValue(getNodeBilling(idB, b.name)).remainingDays ?? 9999
+          return daysA - daysB
+        }
+        return 0
+      })
+    }
+
+    return list
+  }, [nodes, statusFilter, regionFilter, groupFilter, carrierFilter, sortKey, searchTerm, favorites, lossRates, refreshTrigger])
 
   // Pagination calculation
   const totalItems = filteredNodes.length
@@ -330,16 +425,59 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
 
           {/* 筛选: 状态 */}
           <select
-            className="select select-sm lite-filter-select w-28"
+            className="select select-sm lite-filter-select w-32"
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value)
               setCurrentPage(1)
             }}
           >
-            <option value="all">状态</option>
+            <option value="all">状态 (全部)</option>
             <option value="online">在线 ({nodes.filter((n) => n.status === 'online').length})</option>
+            <option value="attention">需关注</option>
             <option value="offline">离线 ({nodes.filter((n) => n.status !== 'online').length})</option>
+            <option value="favorite">已收藏 ⭐ ({favorites.size})</option>
+            <option value="recent">最近访问 🕒</option>
+          </select>
+
+          {/* 筛选: 运营商线路 */}
+          <select
+            className="select select-sm lite-filter-select w-32"
+            value={carrierFilter}
+            onChange={(e) => {
+              setCarrierFilter(e.target.value)
+              setCurrentPage(1)
+            }}
+          >
+            <option value="all">线路/运营商</option>
+            <option value="telecom">中国电信 (CT)</option>
+            <option value="unicom">中国联通 (CU)</option>
+            <option value="mobile">中国移动 (CM)</option>
+            <option value="bgp">国际 BGP / 其他</option>
+          </select>
+
+          {/* 排序方式 */}
+          <select
+            className="select select-sm lite-filter-select w-36"
+            value={sortKey}
+            onChange={(e) => {
+              setSortKey(e.target.value)
+              setCurrentPage(1)
+            }}
+          >
+            <option value="default">默认排序</option>
+            <option value="cpu_desc">CPU 从高到低</option>
+            <option value="cpu_asc">CPU 从低到高</option>
+            <option value="mem_desc">内存使用率</option>
+            <option value="disk_desc">磁盘使用率</option>
+            <option value="traffic_desc">累计总流量</option>
+            <option value="latency_asc">平均延迟 (低延迟)</option>
+            <option value="loss_desc">丢包率 (高丢包)</option>
+            <option value="ct_lat_asc">电信延迟优先</option>
+            <option value="cu_lat_asc">联通延迟优先</option>
+            <option value="cm_lat_asc">移动延迟优先</option>
+            <option value="rem_days_asc">即将到期优先</option>
+            <option value="val_desc">剩余价值最高</option>
           </select>
 
           {/* 筛选: 分组 */}
@@ -510,13 +648,26 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                               : (node.flag || '🌐')}
                           </span>
                           <div className="min-w-0">
-                            <span
-                              className="server-name-link font-medium block truncate cursor-pointer hover:underline"
-                              onClick={() => onSelectNode && onSelectNode(node)}
-                              title={customMeta.customName || node.name}
-                            >
-                              {customMeta.customName || node.name}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="server-name-link font-medium block truncate cursor-pointer hover:underline"
+                                onClick={() => onSelectNode && onSelectNode(node)}
+                                title={customMeta.customName || node.name}
+                              >
+                                {customMeta.customName || node.name}
+                              </span>
+                              <button
+                                type="button"
+                                className={`favorite-star-btn ${favorites.has(node.uuid) ? 'text-amber' : 'text-muted/40 hover:text-amber'}`}
+                                title={favorites.has(node.uuid) ? '取消收藏' : '收藏节点'}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleFavorite(node.uuid)
+                                }}
+                              >
+                                <Star size={13} weight={favorites.has(node.uuid) ? 'fill' : 'regular'} />
+                              </button>
+                            </div>
                             <div className="server-status-subline flex items-center gap-1.5 text-[11px] text-muted mt-0.5">
                               <span className={`status-dot ${isOnline ? 'status-online' : 'status-offline'}`} />
                               <span>{isOnline ? '在线' : '离线'}</span>
@@ -659,6 +810,16 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                             onClick={() => handleCopyInstallCommand(node)}
                           >
                             <DownloadSimple size={15} />
+                          </button>
+
+                          {/* 出鸡海报 */}
+                          <button
+                            type="button"
+                            className="icon-action-btn text-amber hover:bg-amber/10"
+                            title="出鸡海报 (生成分享卡片与Markdown)"
+                            onClick={() => setPosterNode(node)}
+                          >
+                            <ShareNetwork size={15} />
                           </button>
 
                           {/* 2. 编辑节点 */}
@@ -1058,6 +1219,15 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
             )}
           </div>
         </div>
+      )}
+
+      {posterNode && (
+        <PosterModal
+          node={posterNode}
+          mediaData={[]}
+          pingHistory={[]}
+          onClose={() => setPosterNode(null)}
+        />
       )}
     </div>
   )

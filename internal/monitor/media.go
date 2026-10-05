@@ -22,6 +22,7 @@ const (
 	// mediaRegionProbeBytes bounds how much of the response body may be held
 	// in memory for region matching. The prefix is never persisted.
 	mediaRegionProbeBytes = 64 * 1024
+	defaultMediaMaxBodyBytes = 4 << 20
 )
 
 var errMediaBodyExceedsLimit = errors.New("body exceeds limit")
@@ -212,7 +213,7 @@ func (d *MediaDetector) timeoutFor(taskTimeoutMS int) time.Duration {
 }
 func (d *MediaDetector) maxBodyBytes() int64 {
 	if d.MaxBodyBytes <= 0 {
-		return defaultMaxBodyBytes
+		return defaultMediaMaxBodyBytes
 	}
 	if d.MaxBodyBytes > maxMaxBodyBytes {
 		return maxMaxBodyBytes

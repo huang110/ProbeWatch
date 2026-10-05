@@ -1332,7 +1332,10 @@ export function App() {
           <NodeDetailPage
             node={detailNode}
             nodes={data}
-            onSelectNode={setSelectedNode}
+            onSelectNode={(node) => {
+              setDetailNode(node)
+              navigate('node-detail', { uuid: node?.uuid || node?.id })
+            }}
             loading={!detailNode && (apiState.kind === 'loading' || data.length === 0)}
             history={history}
             historyLoading={historyLoading}

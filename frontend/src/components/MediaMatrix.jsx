@@ -8,24 +8,34 @@ import { useLivePolling } from '../lib/useLivePolling.js'
 const POPULAR_STREAMING_PLATFORMS = [
   { id: 'chatgpt', label: 'OpenAI / ChatGPT', category: 'ai', host: 'chatgpt.com', path: '/cdn-cgi/trace', regionRules: [{ region: 'US', contains: 'loc=US' }] },
   { id: 'claude', label: 'Claude AI', category: 'ai', host: 'claude.ai', path: '/cdn-cgi/trace', regionRules: [{ region: 'US', contains: 'loc=US' }] },
+  { id: 'gemini', label: 'Gemini', category: 'ai', host: 'gemini.google.com', path: '/', regionRules: [] },
+  { id: 'perplexity', label: 'Perplexity', category: 'ai', host: 'www.perplexity.ai', path: '/', regionRules: [] },
+  { id: 'google', label: 'Google 服务', category: 'ai', host: 'www.google.com', path: '/generate_204', regionRules: [] },
   { id: 'youtube', label: 'YouTube Premium', category: 'media', host: 'www.youtube.com', path: '/premium', regionRules: [{ region: 'US', contains: 'Premium' }] },
   { id: 'netflix', label: 'Netflix', category: 'media', host: 'www.netflix.com', path: '/title/80018499', regionRules: [{ region: 'US', contains: 'United States' }] },
   { id: 'disney', label: 'Disney+', category: 'media', host: 'www.disneyplus.com', path: '/', regionRules: [] },
+  { id: 'prime', label: 'Amazon Prime Video', category: 'media', host: 'www.primevideo.com', path: '/', regionRules: [] },
   { id: 'tiktok', label: 'TikTok', category: 'media', host: 'www.tiktok.com', path: '/', regionRules: [] },
   { id: 'spotify', label: 'Spotify', category: 'media', host: 'www.spotify.com', path: '/', regionRules: [] },
   { id: 'bilibili', label: 'Bilibili 港澳台', category: 'media', host: 'api.bilibili.com', path: '/pgc/player/web/v2/playurl?cid=144541892&ep_id=234405', regionRules: [{ region: 'TW', contains: '"code":0' }, { region: 'HK', contains: '"code":-10403' }] },
 ]
 
 const mediaStatusLabel = (status) => ({
-  available: '原生解锁',
-  unavailable: '未解锁',
+  available: '可用',
+  partial: '部分可用',
+  unavailable: '不可用',
+  checking: '检测中',
+  pending: '检测中',
   timeout: '请求超时',
   blocked: '被封锁',
   error: '检测异常',
-}[status] || (safeText(status) || '—'))
+  nodata: '暂无数据',
+}[status] || (safeText(status) || '暂无数据'))
 
 const mediaStatusTone = (status) => {
   if (status === 'available') return 'available'
+  if (status === 'partial') return 'partial'
+  if (status === 'checking' || status === 'pending') return 'checking'
   if (status === 'unavailable') return 'unavailable'
   if (['timeout', 'blocked', 'error'].includes(status)) return 'warning'
   return 'muted'
@@ -296,20 +306,39 @@ export function MediaMatrix({ nodes = [] }) {
                       {entry?.ok ? (
                         displayColumns.map((column) => {
                           const report = byDetector.get(column)
-                          if (!report) return <td key={column} className="media-cell media-cell-muted text-center">—</td>
+                          if (!report || !report.status) {
+                            return (
+                              <td key={column} className="text-center">
+                                <span className="media-status-badge media-badge-muted" title={`目标: ${column} · 节点: ${entry.name} · 暂无检测数据`}>
+                                  <span>暂无数据</span>
+                                </span>
+                              </td>
+                            )
+                          }
                           const tone = mediaStatusTone(report.status)
                           const label = mediaStatusLabel(report.status)
+                          const detailTitle = `平台: ${report.detector || column} | 状态: ${label} | 节点: ${entry.name} | 耗时: ${report.latencyMs !== null ? report.latencyMs + 'ms' : '—'} | 时间: ${formatRelativeTime(report.checkedAtMs)}`
 
                           return (
                             <td key={column} className="text-center">
                               <span
                                 className={`media-status-badge media-badge-${tone}`}
-                                title={report.reason || label}
+                                title={report.reason ? `${detailTitle} (${report.reason})` : detailTitle}
                               >
                                 {tone === 'available' ? (
                                   <>
                                     <Check size={12} weight="bold" />
-                                    <span>{report.region ? `${report.region} 解锁` : label}</span>
+                                    <span>{report.region ? `${report.region} 可用` : label}</span>
+                                  </>
+                                ) : tone === 'partial' ? (
+                                  <>
+                                    <CheckCircle size={12} weight="bold" />
+                                    <span>{report.region ? `${report.region} 部分可用` : label}</span>
+                                  </>
+                                ) : tone === 'checking' ? (
+                                  <>
+                                    <CircleNotch size={12} className="spin" />
+                                    <span>检测中</span>
                                   </>
                                 ) : tone === 'unavailable' ? (
                                   <>

@@ -20,6 +20,7 @@ import {
   Sparkle,
   WindowsLogo,
   X,
+  ShareNetwork,
 } from '@phosphor-icons/react'
 import {
   dash,
@@ -37,6 +38,7 @@ import { ProgressBar, StatusDot } from './Common.jsx'
 import { BillingModal } from './BillingModal.jsx'
 import { EditNodeModal } from './EditNodeModal.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
+import { PosterModal } from './PosterModal.jsx'
 
 const POPULAR_MEDIA = [
   { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
@@ -905,11 +907,24 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
             <span>打开完整详情</span>
             <ArrowUpRight size={16} />
           </button>
+          <button type="button" className="button button-quiet inline-flex items-center gap-1.5" onClick={() => setShowPosterModal(true)} title="生成出鸡海报">
+            <ShareNetwork size={15} />
+            <span>出鸡海报</span>
+          </button>
           <button className="button button-quiet" onClick={onClose}>
             关闭
           </button>
         </div>
       </aside>
+
+      {/* MJJ 出鸡海报弹窗 */}
+      {showPosterModal && (
+        <PosterModal
+          node={node}
+          mediaData={mediaReports}
+          onClose={() => setShowPosterModal(false)}
+        />
+      )}
 
       {/* 账单配置与出鸡计算弹窗 */}
       {showBillingModal && (
