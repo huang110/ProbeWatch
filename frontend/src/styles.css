@@ -2806,7 +2806,7 @@ main.guest-shell { max-width: 100vw; width: 100%; }
   white-space: nowrap;
 }
 
-/* 2. 账单配置与出鸡计算弹窗 (BillingModal) */
+/* 2. 账单配置与出机计算弹窗 (BillingModal) */
 .billing-modal {
   width: min(620px, 95vw);
   max-height: 90vh;
@@ -2917,7 +2917,7 @@ main.guest-shell { max-width: 100vw; width: 100%; }
   margin-top: 20px;
 }
 
-/* 3. 论坛出鸡/收鸡交易计算器 (Sales Calculator) */
+/* 3. 论坛出机/收鸡交易计算器 (Sales Calculator) */
 .sales-calculator-view {
   display: flex;
   flex-direction: column;
@@ -12917,7 +12917,7 @@ main.guest-shell { max-width: 100vw; width: 100%; }
 }
 
 /* ==========================================================================
-   MJJ 极简单行模式 (Mobile Single-Row Mode) & 出鸡海报样式
+   MJJ 极简单行模式 (Mobile Single-Row Mode) & 出机海报样式
    ========================================================================== */
 .guest-compact-list,
 .mobile-single-line-list {
@@ -13061,4 +13061,270 @@ main.guest-shell { max-width: 100vw; width: 100%; }
     padding: 2px 6px;
     font-size: 11px;
   }
+}
+
+/* ============================================================
+   ProbeWatch 统一视觉系统规范 (Unified Design System)
+   统一容器宽度、统一卡片边框/圆角、统一状态配色、统一空状态与等宽数字
+   ============================================================ */
+
+/* 1. 统一后台主容器与页面节奏 */
+.content-wrap,
+.app-shell .content-wrap {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 28px 36px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .content-wrap,
+  .app-shell .content-wrap {
+    padding: 14px 12px 24px !important;
+  }
+}
+
+/* 2. 统一页面标题结构 (Header Rhythm) */
+.page-header-unified,
+.subpage-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  min-height: auto;
+}
+
+.page-header-unified .header-meta,
+.subpage-heading .header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.page-header-unified .header-eyebrow,
+.subpage-heading .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--blue, #5e6ad2);
+}
+
+.page-header-unified .header-title,
+.subpage-heading h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.page-header-unified .header-subtitle,
+.subpage-heading p {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.page-header-unified .header-actions,
+.subpage-heading .heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* 3. 统一卡片与面板基础类 (Card Foundations) */
+.card-panel,
+.mjj-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  min-width: 0;
+}
+
+.card-panel:hover,
+.mjj-card:hover {
+  border-color: var(--border-strong);
+}
+
+.card-panel.interactive:hover,
+.mjj-card.interactive:hover {
+  border-color: rgba(94, 106, 210, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* 4. 统一状态颜色徽章系统 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.status-pill.online,
+.status-pill.success {
+  background: rgba(48, 164, 108, 0.12);
+  border-color: rgba(48, 164, 108, 0.25);
+  color: #34d399;
+}
+
+.status-pill.attention,
+.status-pill.warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+
+.status-pill.offline,
+.status-pill.danger {
+  background: rgba(235, 87, 87, 0.12);
+  border-color: rgba(235, 87, 87, 0.25);
+  color: #f87171;
+}
+
+.status-pill.probing,
+.status-pill.info {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+}
+
+.status-pill.nodata,
+.status-pill.gray {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+/* 5. 统一操作性空状态卡片 (Actionable Empty State) */
+.empty-state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: rgba(255, 255, 255, 0.015);
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.empty-state-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.empty-state-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.empty-state-desc {
+  font-size: 12.5px;
+  color: var(--text-2);
+  max-width: 420px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.empty-state-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* 6. 等宽数字与指标强化 */
+.mono-stat {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* 7. 移动端触控优化 */
+@media (max-width: 768px) {
+  .button,
+  .icon-button,
+  .komari-icon-btn,
+  .topbar button,
+  .subpage-heading button {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+/* 8. 仪表盘 5 列响应式网格与紧凑流媒体卡片 */
+.dash-row-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1180px) {
+  .dash-row-grid-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .dash-row-grid-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .dash-row-grid-5 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-media-compact {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.dashboard-media-compact .compact-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.dashboard-media-compact .compact-pill {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-2);
 }

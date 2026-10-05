@@ -662,7 +662,7 @@ export function BillingCenter({ nodes = [] }) {
         </div>
       )}
 
-      {/* 账单配置与出鸡计算弹窗 */}
+      {/* 账单配置与出机计算弹窗 */}
       {selectedNodeForBilling && (
         <BillingModal
           node={selectedNodeForBilling}

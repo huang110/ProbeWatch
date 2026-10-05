@@ -184,7 +184,7 @@ export function NetworkLatencyLines({ targets = [], resultsByTargetId = new Map(
             <span>
               {isTimeMode
                 ? '哪吒 2.0 TCP 延迟时序走势 · 鼠标滑过节点查看对应时间点的检测延迟与状态'
-                : '哪吒 2.0 网络延迟探针流线 · 鼠标滑过节点查看实时连通性与时延'}
+                : '哪吒 2.0 网络延迟探针流线 · 鼠标滑过节点查看实时连通性与延迟'}
             </span>
           </div>
         )}

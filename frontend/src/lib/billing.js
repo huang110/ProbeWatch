@@ -289,7 +289,7 @@ export const calculateRemainingValue = (billing) => {
   }
 }
 
-// 一键生成 Hostloc / NodeSeek 社区标准的出鸡发帖文案
+// 一键生成 Hostloc / NodeSeek 社区标准的出机发帖文案
 export const generateForumSalesPost = (node, billing, calc, markupCNY = 0) => {
   const totalPriceCNY = Math.max(0, calc.remainingValueCNY + Number(markupCNY))
   const rateInfo = resolveCurrency(billing.currency)

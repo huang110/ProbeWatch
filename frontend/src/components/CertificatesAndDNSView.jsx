@@ -448,7 +448,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                        平均时延：<strong style={{ color: item.avg_query_time_ms > 100 ? '#f59e0b' : '#10b981' }}>{item.avg_query_time_ms} ms</strong>
+                        平均延迟：<strong style={{ color: item.avg_query_time_ms > 100 ? '#f59e0b' : '#10b981' }}>{item.avg_query_time_ms} ms</strong>
                       </span>
                       {item.is_consistent ? (
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981', fontSize: '13px', fontWeight: 600 }}>
@@ -473,7 +473,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                           <th style={{ padding: '8px 12px' }}>监测节点</th>
                           <th style={{ padding: '8px 12px' }}>解析结果 (IP 集合)</th>
                           <th style={{ padding: '8px 12px' }}>Nameserver</th>
-                          <th style={{ padding: '8px 12px' }}>解析时延</th>
+                          <th style={{ padding: '8px 12px' }}>解析延迟</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right' }}>最近上报</th>
                         </tr>
                       </thead>

@@ -133,7 +133,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
     // Top Header bar
     ctx.fillStyle = '#38bdf8'
     ctx.font = 'bold 16px "SF Mono", monospace, sans-serif'
-    ctx.fillText('PROBEWATCH · VPS SALE POSTER / 节点出鸡海报', 40, 45)
+    ctx.fillText('PROBEWATCH · VPS SALE POSTER / 节点出机海报', 40, 45)
 
     ctx.fillStyle = '#64748b'
     ctx.font = '14px sans-serif'
@@ -191,7 +191,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
 
     ctx.fillStyle = '#34d399'
     ctx.font = 'bold 15px sans-serif'
-    ctx.fillText('💰 账单与出鸡残值', 535, 182)
+    ctx.fillText('💰 账单与出机残值', 535, 182)
 
     const remainingDays = calc.daysRemaining ?? calc.remainingDays
     const price = billing.price ?? billing.amount
@@ -208,7 +208,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
           ['到期时间', dueDate || '未配置'],
           ['剩余天数', (typeof remainingDays === 'number' && Number.isFinite(remainingDays)) ? `${remainingDays} 天` : '未配置'],
           ['折算剩余价值', `¥ ${(calc.remainingValueCNY || 0).toFixed(1)} 元`],
-          ['出鸡建议', (remainingDays > 0) ? '建议按剩余价值原价或微溢折价出' : (billing.cycle === 'free' ? '传家宝永久免费鸡' : '账单未配置或已临近到期')],
+          ['出机建议', (remainingDays > 0) ? '建议按剩余价值原价或微溢折价出' : (billing.cycle === 'free' ? '传家宝永久免费鸡' : '账单未配置或已临近到期')],
         ]
     billItems.forEach(([k, v], idx) => {
       const y = 215 + idx * 26
@@ -373,7 +373,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
   // Copy Markdown (Hostloc / NodeSeek format)
   const handleCopyMarkdown = async () => {
     const lines = [
-      `### ${displayFlag} 【出鸡 / 测速】${displayName}`,
+      `### ${displayFlag} 【出机 / 测速】${displayName}`,
       '',
       `**基本信息：**`,
       `- 节点位置：${displayRegion}`,
@@ -459,7 +459,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
   // Copy Plain Text (Telegram / QQ format)
   const handleCopyPlainText = async () => {
     const lines = [
-      `【出鸡】${displayFlag} ${displayName}`,
+      `【出机】${displayFlag} ${displayName}`,
       `地区: ${displayRegion} | IP: ${maskedIp}`,
       `配置: CPU ${cpuPercent !== null ? Math.round(cpuPercent) + '%' : '—'} | 内存: ${memTotal ? formatBytes(memUsed) + '/' + formatBytes(memTotal) : '—'}`,
       `流量: 已跑 ↑${formatBytes(txBytes || 0)} / ↓${formatBytes(rxBytes || 0)}`,
@@ -500,10 +500,10 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
           <div>
             <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <ShareNetwork size={20} className="text-mint" />
-              <span>MJJ 出鸡与测速海报生成器</span>
+              <span>MJJ 出机与测速海报生成器</span>
             </h3>
             <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-              支持一键生成高清晰度出鸡卡片、Hostloc/NodeSeek Markdown 排版及 Telegram 纯文本格式。
+              支持一键生成高清晰度出机卡片、Hostloc/NodeSeek Markdown 排版及 Telegram 纯文本格式。
             </p>
           </div>
           <button type="button" className="button button-quiet btn-sm" onClick={onClose}>

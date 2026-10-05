@@ -120,9 +120,9 @@ function DrawerChecksLatencyLine({ checks = [] }) {
   const area = `${path} L ${pts[pts.length - 1].x.toFixed(2)} ${baselineY} L ${pts[0].x.toFixed(2)} ${baselineY} Z`
 
   return (
-    <div className="drawer-mini-latency-card" title="哪吒 2.0 三网探测时延走势">
+    <div className="drawer-mini-latency-card" title="哪吒 2.0 三网探测延迟走势">
       <div className="drawer-mini-latency-header mono">
-        <span className="text-muted">三网时延流线</span>
+        <span className="text-muted">三网延迟流线</span>
         <b className="text-mint">{Math.round(maxLat)} ms 峰值</b>
       </div>
       <svg className="drawer-mini-latency-svg" viewBox="0 0 100 48" preserveAspectRatio="none">
@@ -706,7 +706,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
                   onNavigate('network')
                 }}
               >
-                <span>前往网络检测管理与时延走势</span>
+                <span>前往网络检测管理与延迟走势</span>
                 <ArrowUpRight size={13} />
               </button>
             )}
@@ -908,9 +908,9 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
             <span>打开完整详情</span>
             <ArrowUpRight size={16} />
           </button>
-          <button type="button" className="button button-quiet inline-flex items-center gap-1.5" onClick={() => setShowPosterModal(true)} title="生成出鸡海报">
+          <button type="button" className="button button-quiet inline-flex items-center gap-1.5" onClick={() => setShowPosterModal(true)} title="生成出机海报">
             <ShareNetwork size={15} />
-            <span>出鸡海报</span>
+            <span>出机海报</span>
           </button>
           <button className="button button-quiet" onClick={onClose}>
             关闭
@@ -918,7 +918,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
         </div>
       </aside>
 
-      {/* MJJ 出鸡海报弹窗 */}
+      {/* MJJ 出机海报弹窗 */}
       {showPosterModal && (
         <PosterModal
           node={node}
@@ -927,7 +927,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
         />
       )}
 
-      {/* 账单配置与出鸡计算弹窗 */}
+      {/* 账单配置与出机计算弹窗 */}
       {showBillingModal && (
         <BillingModal
           node={node}

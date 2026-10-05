@@ -368,18 +368,49 @@ export default function SyntheticProbingView() {
       {loading ? (
         <div className="synthetic-loading-state">
           <ArrowsClockwise size={28} className="animate-spin mx-auto text-indigo-400 mb-3" />
-          正在加载合成拨测契约与节点回传时延...
+          正在加载合成拨测契约与节点回传延迟...
         </div>
       ) : filteredTargets.length === 0 ? (
-        <div className="synthetic-empty-state">
-          <Globe size={40} className="mx-auto text-slate-600 mb-3" />
-          <h3 className="synthetic-empty-title">{(overview?.total_targets || targets.length) > 0 ? '没有找到匹配的监控目标' : '还没有合成监控目标'}</h3>
-          <p className="synthetic-empty-description">
+        <div className="empty-state-card">
+          <div className="empty-state-icon">
+            <Globe size={24} />
+          </div>
+          <h3 className="empty-state-title">
+            {(overview?.total_targets || targets.length) > 0 ? '没有找到匹配的监控目标' : '暂无合成监控任务'}
+          </h3>
+          <p className="empty-state-desc">
             {(overview?.total_targets || targets.length) > 0
-              ? '清除筛选条件后重试。'
-              : '创建一个目标后，系统会持续检查网站、接口或 DNS 服务。'}
+              ? '当前筛选条件下暂无目标，请清除筛选或更改搜索词。'
+              : '创建一个 HTTP、HTTPS、DNS 或 TCP 任务开始监测'}
           </p>
-          {(overview?.total_targets || targets.length) === 0 ? <div className="synthetic-empty-actions"><button type="button" className="synthetic-button synthetic-button-primary synthetic-empty-action" onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}><Plus size={16} /> 新建监控</button><button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => setIsPresetPickerOpen(true)}>使用预设模板</button></div> : <button type="button" className="synthetic-button synthetic-button-secondary synthetic-empty-action" onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}>清除筛选</button>}
+          {(overview?.total_targets || targets.length) === 0 ? (
+            <div className="empty-state-actions">
+              <button
+                type="button"
+                className="button button-primary btn-sm"
+                onClick={() => { setEditingTarget(null); setIsModalOpen(true) }}
+              >
+                <Plus size={15} /> 创建检测目标
+              </button>
+              <button
+                type="button"
+                className="button button-secondary btn-sm"
+                onClick={() => setIsPresetPickerOpen(true)}
+              >
+                使用预设模板
+              </button>
+            </div>
+          ) : (
+            <div className="empty-state-actions">
+              <button
+                type="button"
+                className="button button-secondary btn-sm"
+                onClick={() => { setSearchQuery(''); setActiveProtocolTab('all'); setStatusFilter('all') }}
+              >
+                清除筛选
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
@@ -577,10 +608,10 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="font-medium text-slate-300 flex items-center gap-1.5">
               <Pulse size={14} className="text-indigo-400" />
-              全链路网络时延瀑布流 (Waterfall)
+              全链路网络延迟瀑布流 (Waterfall)
             </span>
             <span className="font-mono text-slate-400">
-              平均总时延: <strong className="text-white">{Number.isFinite(Number(item.avg_latency_ms)) ? `${Math.round(Number(item.avg_latency_ms))} ms` : '等待采样'}</strong>
+              平均总延迟: <strong className="text-white">{Number.isFinite(Number(item.avg_latency_ms)) ? `${Math.round(Number(item.avg_latency_ms))} ms` : '等待采样'}</strong>
             </span>
           </div>
 
@@ -588,7 +619,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
             <WaterfallBar timing={avgTiming} />
           ) : (
             <div className="h-8 rounded-lg bg-slate-800/40 border border-slate-800/80 flex items-center justify-center text-xs text-slate-500">
-              暂无探针节点上报时延瀑布数据
+              暂无探针节点上报延迟瀑布数据
             </div>
           )}
 
@@ -606,7 +637,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                       : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                   }`}
-                  title={`状态码: ${r.status_code}, TTFB: ${r.ttfb_ms}ms, 总时延: ${r.total_ms}ms`}
+                  title={`状态码: ${r.status_code}, TTFB: ${r.ttfb_ms}ms, 总延迟: ${r.total_ms}ms`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${r.passed ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                   <span>{getNodeRouteLabel(r)}</span>
@@ -662,7 +693,7 @@ function WaterfallBar({ timing }) {
   const totalValue = asDuration(timing.total_ms)
   const total = totalValue ?? (knownStages.length > 0 ? knownStages.reduce((sum, value) => sum + value, 0) : null)
   if (total === null) {
-    return <div className="text-xs text-slate-500 font-mono">暂无时延分解数据</div>
+    return <div className="text-xs text-slate-500 font-mono">暂无延迟分解数据</div>
   }
   const scaleTotal = Math.max(total, 1)
   const transfer = Math.max(0, total - knownStages.reduce((sum, value) => sum + value, 0))
@@ -996,7 +1027,7 @@ function TargetModal({ target, onClose, onSaved }) {
                     <option value="jsonpath">JSONPath 字段 (jsonpath)</option>
                     <option value="body_regex">响应体匹配 (body_regex)</option>
                     <option value="header">响应头 (header)</option>
-                    <option value="max_latency_ms">时延上限 (max_latency_ms)</option>
+                    <option value="max_latency_ms">延迟上限 (max_latency_ms)</option>
                     <option value="cert_days_left">证书剩余天数 (cert_days_left)</option>
                   </select>
 
@@ -1326,7 +1357,7 @@ function LiveTestModal({ initialTarget, onClose }) {
               {/* Waterfall Bar in Test Modal */}
               {result.timing && (
                 <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-slate-300">网络流水线时延分解:</span>
+                  <span className="text-xs font-medium text-slate-300">网络流水线延迟分解:</span>
                   <WaterfallBar timing={result.timing} />
                 </div>
               )}
@@ -1396,7 +1427,7 @@ function HistoryModal({ target, onClose }) {
                     <span className="text-slate-400">状态码: {h.status_code}</span>
                   </div>
                   <div className="flex items-center gap-4 text-slate-400">
-                    <span>总时延: <strong className="text-white">{h.total_ms}ms</strong></span>
+                    <span>总延迟: <strong className="text-white">{h.total_ms}ms</strong></span>
                     <span>TTFB: {h.ttfb_ms}ms</span>
                     <span className="text-slate-500">{new Date(h.checked_at).toLocaleTimeString()}</span>
                   </div>

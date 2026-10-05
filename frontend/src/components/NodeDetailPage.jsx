@@ -1079,7 +1079,7 @@ export function NodeDetailPage({
           <span className="komari-server-flag">{customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}</span>
           <h1 className="komari-server-title">{customMeta.customName || node.name}</h1>
           <span className={`komari-status-tag ${isOnline ? 'online' : 'offline'}`}>
-            <span className={`status-dot-pulse ${isOnline ? '' : 'offline'}`} /> {isOnline ? '在線' : '離線'} · {heartbeatText}
+            <span className={`status-dot-pulse ${isOnline ? '' : 'offline'}`} /> {isOnline ? '在线' : '离线'} · {heartbeatText}
           </span>
 
           {/* 彩色标签 */}
@@ -1093,9 +1093,9 @@ export function NodeDetailPage({
         </div>
 
         <div className="komari-nav-right">
-          <button type="button" className="komari-icon-btn" onClick={handleSharePoster} title="生成出鸡/测速海报并复制或下载">
+          <button type="button" className="komari-icon-btn" onClick={handleSharePoster} title="生成出机/测速海报并复制或下载">
             <ShareNetwork size={16} />
-            <span className="poster-action-label">{posterCopied ? '已复制' : '出鸡海报'}</span>
+            <span className="poster-action-label">{posterCopied ? '已复制' : '出机海报'}</span>
           </button>
           <button type="button" className="komari-icon-btn" onClick={handleCopyShareMarkdown} title="复制适合 NodeSeek / Hostloc 的 Markdown 分享卡片">
             <ClipboardText size={16} />

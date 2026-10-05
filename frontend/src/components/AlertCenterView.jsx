@@ -2143,7 +2143,7 @@ export function AlertCenterView({
                           <button
                             type="button"
                             className="icon-action-btn"
-                            title="配置丢包与时延告警阈值"
+                            title="配置丢包与延迟告警阈值"
                             onClick={() => showToast(`已打开 ${row.task} - ${row.server} 的阈值配置`)}
                           >
                             <PencilSimple size={15} />

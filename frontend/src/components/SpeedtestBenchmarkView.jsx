@@ -1104,7 +1104,7 @@ export function SpeedtestBenchmarkView() {
             <div>
               <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>基准测速历史流水</h2>
               <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
-                记录各节点往次压测的上下行速率、网络时延与抖动审计明细
+                记录各节点往次压测的上下行速率、网络延迟与抖动审计明细
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1157,7 +1157,7 @@ export function SpeedtestBenchmarkView() {
                     <th style={{ padding: '12px 8px' }}>下行速率 (Mbps)</th>
                     <th style={{ padding: '12px 8px' }}>上行速率 (Mbps)</th>
                     <th style={{ padding: '12px 8px' }}>往返延迟</th>
-                    <th style={{ padding: '12px 8px' }}>时延抖动</th>
+                    <th style={{ padding: '12px 8px' }}>延迟抖动</th>
                     <th style={{ padding: '12px 8px' }}>状态</th>
                   </tr>
                 </thead>

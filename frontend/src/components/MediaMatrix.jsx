@@ -189,10 +189,24 @@ export function MediaMatrix({ nodes = [] }) {
     })
   )
 
-  const isAI = (key) => /chatgpt|claude|openai|gemini|anthropic/i.test(key)
+  const [nodeFilter, setNodeFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  const getCategory = (key) => {
+    if (/chatgpt|claude|openai|gemini|anthropic|perplexity/i.test(key)) return 'ai'
+    if (/youtube|tiktok|bilibili|google|twitter|telegram/i.test(key)) return 'social'
+    return 'media'
+  }
+
   const displayColumns = columns.filter((col) => {
-    if (categoryFilter === 'ai') return isAI(col)
-    if (categoryFilter === 'media') return !isAI(col)
+    if (categoryFilter === 'ai') return getCategory(col) === 'ai'
+    if (categoryFilter === 'media') return getCategory(col) === 'media'
+    if (categoryFilter === 'social') return getCategory(col) === 'social'
+    return true
+  })
+
+  const filteredEntries = entries.filter((entry) => {
+    if (nodeFilter !== 'all' && entry.key !== nodeFilter && entry.uuid !== nodeFilter) return false
     return true
   })
 
@@ -256,7 +270,27 @@ export function MediaMatrix({ nodes = [] }) {
               >
                 影音流媒体
               </button>
+              <button
+                type="button"
+                style={{ padding: '4px 10px', fontSize: '12px', border: 'none', borderRadius: '4px', cursor: 'pointer', background: categoryFilter === 'social' ? 'var(--primary, #0284c7)' : 'transparent', color: categoryFilter === 'social' ? '#fff' : 'inherit' }}
+                onClick={() => setCategoryFilter('social')}
+              >
+                社交与视频
+              </button>
             </div>
+            {entries.length > 1 && (
+              <select
+                className="input input-sm text-xs py-1"
+                value={nodeFilter}
+                onChange={(e) => setNodeFilter(e.target.value)}
+                style={{ height: '28px', maxWidth: '140px' }}
+              >
+                <option value="all">全部节点 ({entries.length})</option>
+                {entries.map((e) => (
+                  <option key={e.key} value={e.key}>{e.name}</option>
+                ))}
+              </select>
+            )}
             <button type="button" className="button button-quiet btn-sm" onClick={fetchAllMedia}>
               刷新矩阵
             </button>
@@ -278,7 +312,7 @@ export function MediaMatrix({ nodes = [] }) {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => {
+                {filteredEntries.map((entry) => {
                   const reports = safeArray(entry?.reports)
                   const byDetector = new Map()
                   reports.forEach((report) => {

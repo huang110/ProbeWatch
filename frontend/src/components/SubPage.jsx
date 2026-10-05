@@ -47,7 +47,7 @@ export function SubPage({
     dashboard: ['仪表盘', '值守巡检中枢：异常Top排行榜、今日与30天流量、回程与被墙监测、成本中心与主控健康。'],
     servers: ['服务器管理', '全网 VPS 实例维护：5 种流量口径、流量校准 Offset、网卡过滤与 24h 平滑 Token 重置。'],
     nodes: ['服务器管理', '全网 VPS 实例维护：5 种流量口径、流量校准 Offset、网卡过滤与 24h 平滑 Token 重置。'],
-    billing: ['成本中心', '多币种实时汇率折算、费用趋势柱状图、本月构成、综合资产台账与二手出鸡发帖器。'],
+    billing: ['成本中心', '多币种实时汇率折算、费用趋势柱状图、本月构成、综合资产台账与二手出机发帖器。'],
     monitoring: ['监测与回程', '三大运营商精品骨干线路指纹识别 (CN2 GIA/GT, 9929, CMIN2) 与 IP 疑似被墙交叉判定。'],
     network: ['网络检测', '网络连通性只读列表（TCP / HTTP / HTTPS / DNS）。'],
     mtr: ['回程追踪', '回程路由检测目标只读列表（MTR）。'],
@@ -67,15 +67,15 @@ export function SubPage({
     incidents: ['服务异常与维护通告', '发布、跟进与闭环面向公众的服务事件与计划停机维护窗口。'],
     certificates: ['SSL/TLS 证书生命周期巡检', '自动追踪 HTTPS/TLS 证书到期倒计时、颁发机构、SANs 别名与跨地域多节点告警。'],
     ssl: ['SSL/TLS 证书生命周期巡检', '自动追踪 HTTPS/TLS 证书到期倒计时、颁发机构、SANs 别名与跨地域多节点告警。'],
-    dns: ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
-    'dns-matrix': ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、时延对比与跨节点一致性 / 投毒检测。'],
+    dns: ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、延迟对比与跨节点一致性 / 投毒检测。'],
+    'dns-matrix': ['DNS 多节点解析矩阵', '全网多地域节点对监测域名的解析结果汇总、延迟对比与跨节点一致性 / 投毒检测。'],
     mesh: ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
     matrix: ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
     'mesh-matrix': ['全球互联延迟网格', '全网边缘节点两两互联往返延迟热力分布与智能两跳加速中继路径。'],
-    speedtest: ['测速与带宽基准', '多节点分布式测速调度：边缘节点并发下行/上行网络吞吐基准压测与往返时延抖动评估。'],
-    speed: ['测速与带宽基准', '多节点分布式测速调度：边缘节点并发下行/上行网络吞吐基准压测与往返时延抖动评估。'],
-    synthetic: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流。'],
-    sla: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路时延瀑布流。'],
+    speedtest: ['测速与带宽基准', '多节点分布式测速调度：边缘节点并发下行/上行网络吞吐基准压测与往返延迟抖动评估。'],
+    speed: ['测速与带宽基准', '多节点分布式测速调度：边缘节点并发下行/上行网络吞吐基准压测与往返延迟抖动评估。'],
+    synthetic: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路延迟瀑布流。'],
+    sla: ['合成监控与全景 SLA 契约', '支持 HTTP/S、gRPC Health、WebSocket 与 DoH 多协议多节点共识主动拨测与全链路延迟瀑布流。'],
     containers: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
     processes: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
     docker: ['Docker 容器与宿主进程', '全网边缘节点 Docker/Podman 容器微服务生命周期度量、宿主资源杀手排查与 Top 进程深度剖析。'],
@@ -89,7 +89,7 @@ export function SubPage({
   return (
     <section className="subpage">
       <div className="subpage-heading">
-        <div>
+        <div className="header-meta">
           <div className="eyebrow">ProbeWatch 运维控制台</div>
           <h1>
             {title}
@@ -97,9 +97,11 @@ export function SubPage({
           </h1>
           <p>{description}</p>
         </div>
-        <button type="button" className="button button-quiet" onClick={onBack}>
-          返回仪表盘
-        </button>
+        <div className="heading-actions flex items-center gap-2">
+          <button type="button" className="button button-quiet" onClick={onBack}>
+            返回仪表盘
+          </button>
+        </div>
       </div>
 
       {page === 'dashboard' || page === 'overview' ? (

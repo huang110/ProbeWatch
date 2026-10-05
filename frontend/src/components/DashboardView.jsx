@@ -269,7 +269,7 @@ export function DashboardView({
     }
   }, [overview])
 
-  // 4. 时延监测概览 (整行平滑折线)
+  // 4. 延迟监测概览 (整行平滑折线)
   const latencyOverview = useMemo(() => {
     let avg = null
     if (overview?.checks?.avg_latency_ms !== null && overview?.checks?.avg_latency_ms !== undefined) {
@@ -530,7 +530,7 @@ export function DashboardView({
       .slice(0, 5)
   }, [nodes])
 
-  // 11. 时延排行 (Top 5 - 仅显示真实探针任务)
+  // 11. 延迟排行 (Top 5 - 仅显示真实探针任务)
   const latencyRankList = useMemo(() => {
     if (!nodes || nodes.length === 0) return []
     const list = []
@@ -605,6 +605,32 @@ export function DashboardView({
     return list.sort((a, b) => b.lossVal - a.lossVal).slice(0, 5)
   }, [nodes, primaryNode, checkSummaries])
 
+  // 全网资源加权与状态概览
+  const overallResourceStats = useMemo(() => {
+    const validCpu = nodes.filter((n) => numeric(n.cpu) !== null)
+    const avgCpu = validCpu.length > 0
+      ? Math.round(validCpu.reduce((sum, n) => sum + numeric(n.cpu), 0) / validCpu.length)
+      : null
+
+    const validMem = nodes.filter((n) => numeric(n.memory ?? n.mem) !== null)
+    const avgMem = validMem.length > 0
+      ? Math.round(validMem.reduce((sum, n) => sum + numeric(n.memory ?? n.mem), 0) / validMem.length)
+      : null
+
+    const uptimePct = serverStats.total > 0
+      ? ((serverStats.online / serverStats.total) * 100).toFixed(1)
+      : (overview?.checks?.success_rate_24h ? Number(overview.checks.success_rate_24h).toFixed(1) : null)
+
+    const attentionCount = anomalyNodes.length
+
+    return {
+      avgCpu,
+      avgMem,
+      uptimePct,
+      attentionCount,
+    }
+  }, [nodes, serverStats, anomalyNodes, overview])
+
   return (
     <div className="dashboard-lite-container space-y-4">
       {/* 顶部标题行: 仪表盘 + 更新时间 */}
@@ -618,62 +644,261 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Row 1: 顶部 4 个核心指标卡片 */}
-      <div className="dash-row-grid-4">
-        {/* 卡片 1: 服务器状态 */}
+      {/* Row 1: 核心可用性与节点状态 (5 列卡片) */}
+      <div className="dash-row-grid-5">
+        {/* 卡片 1: 在线节点 */}
         <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl"
+          className="panel p-3.5 cursor-pointer hover:border-emerald-500/40 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('servers')}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">服务器状态</span>
-            <span className="p-1.5 rounded-lg bg-amber/10 text-amber">
-              <HardDrives size={16} />
+            <span className="text-xs text-muted">在线节点</span>
+            <span className="p-1 rounded bg-emerald-500/10 text-emerald-400">
+              <HardDrives size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-2 text-foreground">
-            {serverStats.online} / {serverStats.total}
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+            <span className="text-emerald-400">{serverStats.online}</span>
+            <span className="text-xs text-muted font-normal">/ {serverStats.total} 台</span>
           </div>
-          <div className="flex items-center justify-between text-xs mt-3 text-muted">
-            <span>在线 {serverStats.online} 台</span>
-            <span className={serverStats.offline > 0 ? 'text-amber font-medium' : 'text-muted'}>
-              离线 {serverStats.offline} 台
-            </span>
+          <div className="text-[11px] text-muted mt-2">
+            探针健康运行中
           </div>
         </div>
 
-        {/* 卡片 2: 今日流量概览 */}
+        {/* 卡片 2: 需关注节点 */}
         <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl"
+          className="panel p-3.5 cursor-pointer hover:border-amber-500/40 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('servers')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">需关注节点</span>
+            <span className="p-1 rounded bg-amber-500/10 text-amber-400">
+              <Warning size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+            <span className={overallResourceStats.attentionCount > 0 ? 'text-amber-400' : 'text-muted'}>
+              {overallResourceStats.attentionCount}
+            </span>
+            <span className="text-xs text-muted font-normal">台</span>
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            {overallResourceStats.attentionCount > 0 ? '存在高负载或异常' : '全部节点正常'}
+          </div>
+        </div>
+
+        {/* 卡片 3: 离线节点 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-rose-500/40 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('servers')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">离线节点</span>
+            <span className="p-1 rounded bg-rose-500/10 text-rose-400">
+              <WarningOctagon size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+            <span className={serverStats.offline > 0 ? 'text-rose-400 font-bold' : 'text-muted'}>
+              {serverStats.offline}
+            </span>
+            <span className="text-xs text-muted font-normal">台</span>
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            {serverStats.offline > 0 ? '心跳中断需排查' : '无离线实例'}
+          </div>
+        </div>
+
+        {/* 卡片 4: 综合可用率 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('monitoring')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">综合可用率</span>
+            <span className="p-1 rounded bg-blue/10 text-blue">
+              <Pulse size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+            {overallResourceStats.uptimePct !== null ? `${overallResourceStats.uptimePct}%` : '等待采样'}
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            全网探针实时在线率
+          </div>
+        </div>
+
+        {/* 卡片 5: 最近同步时间 */}
+        <div className="panel p-3.5 transition-all rounded-xl mjj-card">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">实时同步</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+            {currentTime}
+          </div>
+          <div className="text-[11px] text-emerald-400/90 mt-2 flex items-center gap-1">
+            <span>● 状态与指标已连接</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: 资源总览与网络流媒体摘要 (5 列卡片) */}
+      <div className="dash-row-grid-5">
+        {/* 卡片 1: CPU 总览 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('servers')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">CPU 总览</span>
+            <span className="p-1 rounded bg-blue/10 text-blue">
+              <Cpu size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+            {overallResourceStats.avgCpu !== null ? `${overallResourceStats.avgCpu}%` : '等待采样'}
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            全网探针算力平均值
+          </div>
+        </div>
+
+        {/* 卡片 2: 内存总览 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('servers')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">内存总览</span>
+            <span className="p-1 rounded bg-purple-500/10 text-purple-400">
+              <Gauge size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+            {overallResourceStats.avgMem !== null ? `${overallResourceStats.avgMem}%` : '等待采样'}
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            物理内存加权占用
+          </div>
+        </div>
+
+        {/* 卡片 3: 流量总览 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => onNavigate && onNavigate('traffic')}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">今日流量概览</span>
-            <span className="p-1.5 rounded-lg bg-blue/10 text-blue">
-              <ChartBar size={16} />
+            <span className="text-xs text-muted">流量总览</span>
+            <span className="p-1 rounded bg-blue/10 text-blue">
+              <ChartBar size={15} />
             </span>
           </div>
-          <div className="text-2xl font-bold mono mt-2 text-foreground">
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
             {formatBytes(trafficMetrics.todayBilledBytes)}
           </div>
-          <div className="flex items-center gap-3 text-xs mt-3 text-muted">
-            <span className="flex items-center gap-1">
-              <span className="text-blue">↑</span> 上传 {formatBytes(trafficMetrics.todayUploadBytes)}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="text-amber">↓</span> 下载 {formatBytes(trafficMetrics.todayDownloadBytes)}
-            </span>
+          <div className="flex items-center gap-2 text-[11px] text-muted mt-2">
+            <span>↑ {formatBytes(trafficMetrics.todayUploadBytes)}</span>
+            <span>↓ {formatBytes(trafficMetrics.todayDownloadBytes)}</span>
           </div>
         </div>
 
-        {/* 卡片 3: 数据库占用 */}
+        {/* 卡片 4: 三网延迟摘要 */}
         <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl"
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('monitoring')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">三网延迟摘要</span>
+            <span className="p-1 rounded bg-amber/10 text-amber">
+              <WifiHigh size={15} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-1.5 text-foreground">
+            {latencyOverview.hasLatencySample ? `${latencyOverview.avgLatencyMs} ms` : '等待采样'}
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            {latencyOverview.targetCount} 个目标 · {latencyOverview.anomalies > 0 ? `${latencyOverview.anomalies} 项异常` : '线路平稳'}
+          </div>
+        </div>
+
+        {/* 卡片 5: 流媒体解锁摘要 */}
+        <div
+          className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card dashboard-media-compact"
+          onClick={() => onNavigate && onNavigate('media')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && onNavigate) onNavigate('media') }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">流媒体解锁</span>
+            <span className="p-1 rounded bg-emerald-500/10 text-emerald-400">
+              <CloudArrowDown size={15} />
+            </span>
+          </div>
+          {mediaSummary.total > 0 ? (
+            <>
+              <div className="text-2xl font-bold mono mt-1.5 text-foreground flex items-baseline gap-1.5">
+                <span className="text-emerald-400">{mediaSummary.available}</span>
+                <span className="text-xs text-muted font-normal">/ {mediaSummary.total} 项解锁</span>
+              </div>
+              <div className="compact-badge-row">
+                {mediaSummary.platforms.slice(0, 3).map((item) => (
+                  <span key={item.name} className="compact-pill mono">
+                    {item.name}: {item.available}/{item.total}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="mt-1.5 flex flex-col justify-between h-full">
+              <div className="text-xs text-muted">暂无流媒体上报</div>
+              <button
+                type="button"
+                className="button button-quiet btn-sm mt-2 text-xs py-1"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onNavigate) onNavigate('media')
+                }}
+              >
+                前往流媒体配置
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 财务支出与存储体积概览 */}
+      <div className="dash-row-grid-2">
+        {/* 卡片 1: 本月费用与资产剩余价值 */}
+        <div
+          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
+          onClick={() => onNavigate && onNavigate('billing')}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">本月支出折算</span>
+            <span className="p-1.5 rounded-lg bg-blue/10 text-blue">
+              <Wallet size={16} />
+            </span>
+          </div>
+          <div className="text-2xl font-bold mono mt-2 text-foreground">
+            {convertCNYToCurrency(trafficMetrics.monthTotalCostCNY).formatted}
+          </div>
+          <div className="flex items-center justify-between text-xs mt-3 text-muted">
+            <span>年度预算 {convertCNYToCurrency(trafficMetrics.yearTotalCostCNY).formatted}</span>
+            <span>剩余价值 {convertCNYToCurrency(trafficMetrics.totalResidualCNY).formatted}</span>
+          </div>
+        </div>
+
+        {/* 卡片 2: 数据库物理占用 */}
+        <div
+          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card"
           onClick={() => setShowDbModal(true)}
           title="点击查看 SQLite 存储明细"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">数据库占用</span>
+            <span className="text-xs text-muted">数据库存储体积</span>
             <span className="p-1.5 rounded-lg bg-subtle text-muted">
               <Database size={16} />
             </span>
@@ -686,63 +911,52 @@ export function DashboardView({
             <span>WAL + SHM {databaseStats.formattedWalShm}</span>
           </div>
         </div>
-
-        {/* 卡片 4: 本月费用 */}
-        <div
-          className="panel p-4 cursor-pointer hover:border-blue/50 transition-all rounded-xl"
-          onClick={() => onNavigate && onNavigate('billing')}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">本月费用</span>
-            <span className="p-1.5 rounded-lg bg-blue/10 text-blue">
-              <Wallet size={16} />
-            </span>
-          </div>
-          <div className="text-2xl font-bold mono mt-2 text-foreground">
-            {convertCNYToCurrency(trafficMetrics.monthTotalCostCNY).formatted}
-          </div>
-          <div className="flex items-center justify-between text-xs mt-3 text-muted">
-            <span>年度累计 {convertCNYToCurrency(trafficMetrics.yearTotalCostCNY).formatted}</span>
-            <span>剩余价值 {convertCNYToCurrency(trafficMetrics.totalResidualCNY).formatted}</span>
-          </div>
-        </div>
       </div>
 
-      <div className="panel dashboard-media-summary" onClick={() => onNavigate && onNavigate('media')} role="button" tabIndex={0} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && onNavigate) onNavigate('media') }}>
-        <div className="dash-card-header">
-          <div className="dash-card-header-left"><h3 className="text-sm font-bold text-foreground"><CloudArrowDown size={16} className="dashboard-media-icon" /> 流媒体解锁</h3><p className="text-xs text-muted">按节点聚合最近一次检测结果 · 点击查看完整矩阵</p></div>
-          <div className="dashboard-media-total mono">{mediaSummary.loading ? '读取中…' : String(mediaSummary.available) + ' / ' + String(mediaSummary.total)}</div>
-        </div>
-        <div className="dashboard-media-platforms">
-          {mediaSummary.platforms.length ? mediaSummary.platforms.map((item) => <div className="dashboard-media-platform" key={item.name}><span>{item.name}</span><strong>{item.available}/{item.total}</strong></div>) : <span className="text-xs text-muted">暂无流媒体上报，前往流媒体页面生成检测规则。</span>}
-        </div>
-      </div>
-
-      <div className={`panel anomaly-priority-panel ${anomalyNodes.length ? 'has-anomalies' : 'all-clear'}`}>
-        <div className="dash-card-header">
-          <div className="dash-card-header-left"><h3 className="text-sm font-bold text-foreground">异常优先</h3><p className="text-xs text-muted">先看需要处理的节点，再看趋势和明细</p></div>
-          <div className="anomaly-toolbar"><div className="anomaly-filters">{[['all','全部'],['offline','离线'],['CPU','高 CPU'],['内存','高内存']].map(([value,label]) => <button key={value} type="button" className={anomalyFilter === value ? 'active' : ''} onClick={() => setAnomalyFilter(value)}>{label}</button>)}</div><span className="anomaly-count mono">{anomalyNodes.length ? `${anomalyNodes.length} 台需关注` : '全部正常'}</span></div>
-        </div>
-        {anomalyNodes.length ? (
+      {anomalyNodes.length > 0 && (
+        <div className="panel anomaly-priority-panel has-anomalies">
+          <div className="dash-card-header">
+            <div className="dash-card-header-left">
+              <h3 className="text-sm font-bold text-foreground">异常优先</h3>
+              <p className="text-xs text-muted">先看需要处理的节点，再看趋势和明细</p>
+            </div>
+            <div className="anomaly-toolbar">
+              <div className="anomaly-filters">
+                {[['all', '全部'], ['offline', '离线'], ['CPU', '高 CPU'], ['内存', '高内存']].map(([value, label]) => (
+                  <button key={value} type="button" className={anomalyFilter === value ? 'active' : ''} onClick={() => setAnomalyFilter(value)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="anomaly-count mono">{anomalyNodes.length} 台需关注</span>
+            </div>
+          </div>
           <div className="anomaly-node-list">
-            {anomalyNodes.map(({ node, reasons }) => <button key={node.uuid || node.id} type="button" className="anomaly-node-row" onClick={() => onNavigate && onNavigate('servers')}><span className={`status-dot ${node.status === 'offline' ? 'status-offline' : 'status-warning'}`} /><strong>{node.name || '探针节点'}</strong><span>{reasons.join(' · ')}</span><b>查看</b></button>)}
+            {anomalyNodes.map(({ node, reasons }) => (
+              <button key={node.uuid || node.id} type="button" className="anomaly-node-row" onClick={() => onNavigate && onNavigate('servers')}>
+                <span className={`status-dot ${node.status === 'offline' ? 'status-offline' : 'status-warning'}`} />
+                <strong>{node.name || '探针节点'}</strong>
+                <span>{reasons.join(' · ')}</span>
+                <b>查看</b>
+              </button>
+            ))}
           </div>
-        ) : <div className="anomaly-clear-copy">没有发现离线、高负载节点，当前可以继续查看网络趋势。</div>}
-      </div>
+        </div>
+      )}
 
-      {/* Row 2: 时延监测概览 (整行平滑折线图) */}
+      {/* Row 3: 延迟监测概览 (整行平滑折线图) */}
       <div className="panel p-4 rounded-xl">
         <div className="dash-card-header mb-3">
           <div className="dash-card-header-left">
-            <h3 className="text-sm font-bold text-foreground">时延监测概览</h3>
-            <p className="text-xs text-muted">监测目标与最近 6 小时时延趋势</p>
+            <h3 className="text-sm font-bold text-foreground">延迟监测概览</h3>
+            <p className="text-xs text-muted">监测目标与最近 6 小延迟迟趋势</p>
           </div>
           <div
             className="flex items-center gap-1.5 text-xs text-blue font-medium cursor-pointer hover:underline"
             onClick={() => onNavigate && onNavigate('monitoring')}
           >
             <span className="w-2 h-2 rounded-full bg-blue inline-block" />
-            <span>平均时延</span>
+            <span>平均延迟</span>
           </div>
         </div>
 
@@ -751,7 +965,7 @@ export function DashboardView({
           <div className="dash-latency-sidebar">
             <div className="dash-latency-stat">
               <div className="text-xl font-bold text-blue mono">{latencyOverview.hasLatencySample ? `${latencyOverview.avgLatencyMs} ms` : '等待采样'}</div>
-              <div className="text-[11px] text-muted">平均时延</div>
+              <div className="text-[11px] text-muted">平均延迟</div>
             </div>
             <div className="dash-latency-stat">
               <div className="text-xl font-bold text-foreground mono">{latencyOverview.targetCount}</div>
@@ -1254,7 +1468,7 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Row 6: 单日流量消耗排行 + 时延排行 (50% / 50%) */}
+      {/* Row 6: 单日流量消耗排行 + 延迟排行 (50% / 50%) */}
       <div className="dash-row-grid-2">
         {/* 左: 单日流量消耗排行 */}
         <div className="panel p-4 rounded-xl">
@@ -1308,12 +1522,12 @@ export function DashboardView({
           </div>
         </div>
 
-        {/* 右: 时延排行 */}
+        {/* 右: 延迟排行 */}
         <div className="panel p-4 rounded-xl">
           <div className="dash-card-header mb-3">
             <div className="dash-card-header-left">
-              <h3 className="text-sm font-bold text-foreground">时延排行</h3>
-              <p className="text-xs text-muted">按近 6 小时平均时延，列出全部探测任务</p>
+              <h3 className="text-sm font-bold text-foreground">延迟排行</h3>
+              <p className="text-xs text-muted">按近 6 小时平均延迟，列出全部探测任务</p>
             </div>
             <span className="badge badge-quiet text-xs flex items-center gap-1">
               <Timer size={12} />
@@ -1323,7 +1537,7 @@ export function DashboardView({
 
           <div className="space-y-3.5 pt-1">
             {latencyRankList.length === 0 ? (
-              <div className="text-center py-8 text-xs text-muted">暂无时延监测数据（需配置探测任务）</div>
+              <div className="text-center py-8 text-xs text-muted">暂无延迟监测数据（需配置探测任务）</div>
             ) : (
               latencyRankList.map((item, idx) => (
                 <div

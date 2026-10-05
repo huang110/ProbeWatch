@@ -188,7 +188,8 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
         const matchIp = (node.ipv4 || node.ip || node.public_ip || '').toLowerCase().includes(q)
         const matchAsn = (node.asn || '').toLowerCase().includes(q)
         const matchRegion = (node.region || '').toLowerCase().includes(q)
-        if (!matchName && !matchCustomName && !matchHost && !matchTag && !matchGroup && !matchIp && !matchAsn && !matchRegion) {
+        const matchUuid = (node.uuid || node.id || '').toLowerCase().includes(q)
+        if (!matchName && !matchCustomName && !matchHost && !matchTag && !matchGroup && !matchIp && !matchAsn && !matchRegion && !matchUuid) {
           return false
         }
       }
@@ -580,9 +581,45 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
             <tbody>
               {paginatedNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-muted">
-                    <p className="text-sm font-medium">暂无符合条件的服务器节点</p>
-                    <p className="text-xs mt-1">请尝试更换筛选条件，或点击右上角「添加节点」接入新探针。</p>
+                  <td colSpan={8} className="py-12">
+                    <div className="empty-state-card">
+                      <div className="empty-state-icon">
+                        <HardDrives size={24} />
+                      </div>
+                      <div className="empty-state-title">
+                        {searchTerm ? `未找到与 “${searchTerm}” 匹配的服务器` : '暂无符合条件的服务器节点'}
+                      </div>
+                      <p className="empty-state-desc">
+                        {statusFilter !== 'all' || carrierFilter !== 'all' || regionFilter !== 'all' || searchTerm
+                          ? `当前筛选组合：状态 [${statusFilter}] · 运营商 [${carrierFilter}] · 地区 [${regionFilter}]，无对应实例。`
+                          : '当前尚未接入任何 VPS 探针服务器，可通过一键脚本极速纳管。'}
+                      </p>
+                      <div className="empty-state-actions">
+                        {(statusFilter !== 'all' || carrierFilter !== 'all' || regionFilter !== 'all' || searchTerm) ? (
+                          <button
+                            type="button"
+                            className="button button-secondary btn-sm"
+                            onClick={() => {
+                              setStatusFilter('all')
+                              setCarrierFilter('all')
+                              setRegionFilter('all')
+                              setGroupFilter('all')
+                              setSearchTerm('')
+                            }}
+                          >
+                            重置所有筛选
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button button-primary btn-sm"
+                            onClick={() => setShowAddModal(true)}
+                          >
+                            <Plus size={14} /> 添加首台节点
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -812,11 +849,11 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
                             <DownloadSimple size={15} />
                           </button>
 
-                          {/* 出鸡海报 */}
+                          {/* 出机海报 */}
                           <button
                             type="button"
                             className="icon-action-btn text-amber hover:bg-amber/10"
-                            title="出鸡海报 (生成分享卡片与Markdown)"
+                            title="出机海报 (生成分享卡片与Markdown)"
                             onClick={() => setPosterNode(node)}
                           >
                             <ShareNetwork size={15} />

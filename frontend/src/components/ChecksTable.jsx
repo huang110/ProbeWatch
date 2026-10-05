@@ -195,7 +195,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
             <span>
               {isTimeMode
                 ? '哪吒 2.0 TCP 延迟历史走势 · 鼠标滑过节点查看对应时间点的检测延迟与状态'
-                : '哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标时延与丢包'}
+                : '哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标延迟与丢包'}
             </span>
           </div>
         )}
@@ -570,7 +570,7 @@ export function ChecksSummaryPanel({ rows, loading = false, networkHistory = [] 
         </div>
       </div>
 
-      {/* 平滑时延走势曲线视图 */}
+      {/* 平滑延迟走势曲线视图 */}
       <ChecksLatencyLines rows={displayRows} networkHistory={networkHistory} />
 
       {/* 目标质量表格（始终严格保留满足契约测试要求） */}

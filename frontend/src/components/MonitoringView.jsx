@@ -282,7 +282,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
           <div className="monitor-header-row">
             <div className="monitor-title-col">
               <h1>延迟监测</h1>
-              <p>监测目标时延、丢包率与抖动，支持多种协议探测。</p>
+              <p>监测目标延迟、丢包率与抖动，支持多种协议探测。</p>
             </div>
           </div>
 
@@ -515,7 +515,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
 
               return (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                  <div className="mjj-3isp-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
                     {isps.map((isp) => {
                       const rating = getIspLineRating(isp.lat, isp.loss)
                       return (
@@ -559,8 +559,10 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                           <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }} className="mono">
                             <div>24h 均值: <strong style={{ color: 'var(--text-1)' }}>{isp.lat != null ? Math.round(isp.lat) + 'ms' : '暂无数据'}</strong></div>
                             <div title="真实采样计算 P95 延迟">24h P95: <strong style={{ color: 'var(--text-1)' }}>{isp.p95 != null ? Math.round(isp.p95) + 'ms' : (isp.sampleCount > 0 ? `样本不足(${isp.sampleCount}条)` : '暂无数据')}</strong></div>
-                            <div title="24小时历史采样数">样本数: <strong style={{ color: 'var(--text-1)' }}>{isp.sampleCount > 0 ? `${isp.sampleCount} 条 / 24h` : '暂无'}</strong></div>
+                            <div title="24小时历史采样数">样本数: <strong style={{ color: 'var(--text-1)' }}>{isp.sampleCount > 0 ? `${isp.sampleCount} 条 / 24h` : '暂无数据'}</strong></div>
                             <div title="真实 MTR 回程路径监控">回程状态: <strong style={{ color: isp.routeStatus === '暂无回程样本' ? 'var(--text-muted)' : isp.routeStatus.startsWith('路径发生变化') ? '#ef4444' : isp.routeStatus.startsWith('路径可达') ? '#10b981' : '#f59e0b' }}>{isp.routeStatus}</strong></div>
+                            <div title="线路综合质量评级">评级: <strong style={{ color: rating.tone === 'mint' ? '#34d399' : rating.tone === 'blue' ? '#38bdf8' : rating.tone === 'amber' ? '#fbbf24' : '#f87171' }}>{rating.text}</strong></div>
+                            <div title="最近一次探测时间">最近检测: <strong style={{ color: 'var(--text-1)' }}>{currentTime || '实时'}</strong></div>
                           </div>
                         </div>
                       )
@@ -772,7 +774,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                 </div>
 
                 <div className="text-xs text-muted">
-                  展示源服务器对各骨干目标实时 Ping/TCP 时延与丢包率走势
+                  展示源服务器对各骨干目标实时 Ping/TCP 延迟与丢包率走势
                 </div>
               </div>
 
@@ -1078,7 +1080,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                     <div>
                       <h3 className="font-bold text-base flex items-center gap-2">
                         <Broadcast size={18} className="text-blue" />
-                        <span>{selectedRouteTask.name} · 逐跳回程链路时延跳数</span>
+                        <span>{selectedRouteTask.name} · 逐跳回程链路延迟跳数</span>
                       </h3>
                       <p className="text-xs text-muted mt-0.5">
                         目标: {selectedRouteTask.host} · 期望线路: {selectedRouteTask.expectedRoute} · BGP AS 路径追踪

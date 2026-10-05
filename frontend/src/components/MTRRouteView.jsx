@@ -94,7 +94,7 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
             </span>
             <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat mono text-mint">
-              时延: <b>{active.hop.latency !== null ? `${active.hop.latency} ms` : '—'}</b>
+              延迟: <b>{active.hop.latency !== null ? `${active.hop.latency} ms` : '—'}</b>
             </span>
             <span className="hover-sep" aria-hidden="true" />
             <span className={`hover-stat mono ${active.hop.ttl === count && isReached ? 'text-mint' : active.hop.isTimedOut ? 'text-rose' : 'text-1'}`}>
@@ -109,7 +109,7 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
           </div>
         ) : (
           <div className="hover-badge-hint mono">
-            <span>哪吒 2.0 逐跳时延跃迁流线 · 鼠标滑过各跳节点查看骨干网延时与丢包</span>
+            <span>哪吒 2.0 逐跳延迟跃迁流线 · 鼠标滑过各跳节点查看骨干网延时与丢包</span>
           </div>
         )}
       </div>
@@ -120,7 +120,7 @@ export function MTRHopLatencyLine({ hops = [], isReached = false, destination = 
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
           role="img"
-          aria-label="逐跳路由时延细线条走势图"
+          aria-label="逐跳路由延迟细线条走势图"
         >
           <defs>
             <linearGradient id="nezha-mtr-grad" x1="0" y1="0" x2="0" y2="1">
@@ -563,7 +563,7 @@ export function MTRRouteView({ nodes = [] }) {
             </div>
           </div>
 
-          {/* MTR 逐跳时延跃升流线图 (哪吒 2.0 风格) */}
+          {/* MTR 逐跳延迟跃升流线图 (哪吒 2.0 风格) */}
           <MTRHopLatencyLine hops={hops} isReached={isReached} destination={result?.host} />
 
           {/* 逐跳路由表格 */}
@@ -574,7 +574,7 @@ export function MTRRouteView({ nodes = [] }) {
                   <th style={{ width: '60px' }}>跳数</th>
                   <th>路由节点 IP</th>
                   <th>单跳延迟</th>
-                  <th style={{ width: '220px' }}>链路时延阶梯</th>
+                  <th style={{ width: '220px' }}>链路延迟阶梯</th>
                   <th>状态</th>
                 </tr>
               </thead>

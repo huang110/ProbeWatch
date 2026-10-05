@@ -206,7 +206,7 @@ export function BillingModal({ node, onClose, onSaved }) {
               onClick={() => setShowCalculator((v) => !v)}
             >
               <Sparkle size={13} className="text-amber" />
-              <span>{showCalculator ? '收起发帖文案' : '论坛出鸡计算器'}</span>
+              <span>{showCalculator ? '收起发帖文案' : '论坛出机计算器'}</span>
             </button>
           </div>
 

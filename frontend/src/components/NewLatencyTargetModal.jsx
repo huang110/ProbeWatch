@@ -123,7 +123,7 @@ export function NewLatencyTargetModal({ isOpen, onClose, onCreated }) {
             </div>
             <div>
               <h2 className="modal-title">新建延迟监测任务</h2>
-              <p className="modal-subtitle">创建全网 Ping / TCP / HTTP / DNS 时延、抖动与丢包探测目标</p>
+              <p className="modal-subtitle">创建全网 Ping / TCP / HTTP / DNS 延迟、抖动与丢包探测目标</p>
             </div>
           </div>
           <button type="button" className="icon-button modal-close" onClick={onClose} aria-label="关闭">
