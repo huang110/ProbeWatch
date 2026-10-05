@@ -28,6 +28,17 @@ const TerminalView = lazy(() => import('./components/TerminalView.jsx'))
 const ContainerProcessView = lazy(() => import('./components/ContainerProcessView.jsx').then((m) => ({ default: m.ContainerProcessView })))
 const SubPage = lazy(() => import('./components/SubPage.jsx').then((m) => ({ default: m.SubPage })))
 import { ThemeToggle } from './components/ThemeToggle.jsx'
+
+function maskPublicIp(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  if (text.includes(':')) {
+    const parts = text.split(':').filter(Boolean)
+    return parts.length > 1 ? `${parts.slice(0, 2).join(':')}:…` : 'IPv6 · 已脱敏'
+  }
+  const parts = text.split('.')
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : '公网 IP · 已脱敏'
+}
 import {
   GlobeHemisphereWest,
   WifiHigh,
@@ -1269,7 +1280,7 @@ export function App() {
           <div className="floating-public-node-divider" />
           <div className="floating-public-node-row"><Desktop size={14} /><span>{publicClientInfo.platform || '未知系统'}</span></div>
           <div className="floating-public-node-row"><Globe size={14} /><span>{publicClientInfo.browser || '浏览器'}</span></div>
-          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{publicClientInfo.ip}</span></div>
+          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{maskPublicIp(publicClientInfo.ip)}</span></div>
           <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{publicClientInfo.isp || '公网访客'}</span></div>
           <div className="floating-public-node-row"><Clock size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
         </aside>
