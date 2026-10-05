@@ -50,6 +50,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
   const [latencySearch, setLatencySearch] = useState('')
   const [showAddLatencyModal, setShowAddLatencyModal] = useState(false)
   const [selectedServerForLatency, setSelectedServerForLatency] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
+  const egressHistoryRef = useRef(new Map())
 
   // 回程线路监测相关状态
   const [routeTasks, setRouteTasks] = useState([])
@@ -418,47 +419,86 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                 } catch { return '' }
               }
 
-              // 1. IP Stack
-              const hasIpv4 = Boolean(currentNode?.ip || currentNode?.address)
-              const hasIpv6 = Boolean(currentNode?.ipv6)
+              // 1. IP Stack (Strict: Only address present => "地址已上报", reachability true => "双栈在线")
+              const res = currentNode?.resource || {}
+              const ipv4Val = currentNode?.ip || currentNode?.address || currentNode?.ipv4 || res.ipv4
+              const ipv6Val = currentNode?.ipv6 || res.ipv6
+              const hasIpv4 = Boolean(ipv4Val)
+              const hasIpv6 = Boolean(ipv6Val)
+              const ipv4Reachable = currentNode?.ipv4_reachable === true || res.ipv4_reachable === true
+              const ipv6Reachable = currentNode?.ipv6_reachable === true || res.ipv6_reachable === true
+              const reportTimeStr = formatCheckedTime(currentNode?.last_reported_at) || '刚刚'
+
               let ipStackText = '网络协议栈: 暂无数据'
               let ipStackTone = 'gray'
               if (hasIpv4 && hasIpv6) {
-                ipStackText = `IPv4/IPv6 双栈在线 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
-                ipStackTone = 'mint'
+                if (ipv4Reachable && ipv6Reachable) {
+                  ipStackText = `IPv4/IPv6 双栈在线 (${reportTimeStr})`
+                  ipStackTone = 'mint'
+                } else {
+                  ipStackText = `IPv4/IPv6 双栈地址已上报 (${reportTimeStr})`
+                  ipStackTone = 'blue'
+                }
               } else if (hasIpv4) {
-                ipStackText = `仅 IPv4 单栈 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
-                ipStackTone = 'blue'
+                if (ipv4Reachable) {
+                  ipStackText = `IPv4 在线 (${reportTimeStr})`
+                  ipStackTone = 'mint'
+                } else {
+                  ipStackText = `IPv4 地址已上报 (${reportTimeStr})`
+                  ipStackTone = 'blue'
+                }
               } else if (hasIpv6) {
-                ipStackText = `仅 IPv6 单栈 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
-                ipStackTone = 'blue'
+                if (ipv6Reachable) {
+                  ipStackText = `IPv6 在线 (${reportTimeStr})`
+                  ipStackTone = 'mint'
+                } else {
+                  ipStackText = `IPv6 地址已上报 (${reportTimeStr})`
+                  ipStackTone = 'blue'
+                }
               }
 
-              // 2. DNS
-              const dnsCheck = liveChecks.find((c) => c.kind === 'dns' || String(c.name || '').toLowerCase().includes('dns'))
-              let dnsText = 'DNS解析: 暂无数据'
+              // 2. DNS (Strict: Only real dns/doh kind targets, never general http/tcp)
+              const dnsCheck = liveChecks.find((c) => c.kind === 'dns' || c.kind === 'doh')
+              let dnsText = 'DNS: 暂无 DNS 检测任务'
               let dnsTone = 'gray'
-              if (dnsCheck && dnsCheck.last_checked_at) {
-                const timeStr = formatCheckedTime(dnsCheck.last_checked_at)
-                if (dnsCheck.latency_avg_ms != null) {
-                  dnsText = `DNS解析 (${dnsCheck.name || '骨干网'}): ${Math.round(dnsCheck.latency_avg_ms)}ms (${timeStr})`
+              if (dnsCheck) {
+                const targetId = dnsCheck.target_id || dnsCheck.id || ''
+                const kind = (dnsCheck.kind || 'DNS').toUpperCase()
+                const timeStr = dnsCheck.last_checked_at ? formatCheckedTime(dnsCheck.last_checked_at) : reportTimeStr
+                if (dnsCheck.latency_avg_ms != null && dnsCheck.latency_avg_ms > 0) {
+                  dnsText = `DNS解析 (${kind} · ${dnsCheck.name || targetId}): ${Math.round(dnsCheck.latency_avg_ms)}ms (${timeStr})`
                   dnsTone = 'mint'
-                } else if (dnsCheck.failure > 0) {
-                  dnsText = `DNS解析异常 (${timeStr})`
+                } else if (dnsCheck.failure > 0 || dnsCheck.error) {
+                  dnsText = `DNS解析异常 (${kind} · ${dnsCheck.name || targetId}) (${timeStr})`
                   dnsTone = 'rose'
                 } else {
-                  dnsText = `DNS解析: 采样中 (${timeStr})`
+                  dnsText = `DNS解析采样中 (${kind} · ${dnsCheck.name || targetId}) (${timeStr})`
                   dnsTone = 'amber'
                 }
               }
 
-              // 3. NAT
-              const natIp = currentNode?.egress_ip || currentNode?.nat_ip
+              // 3. NAT (Strict: Never claim "稳定未漂移" without historical baseline)
+              const natIp = currentNode?.egress_ip || currentNode?.nat_ip || res.egress_ip || res.nat_ip
               let natText = 'NAT出口: 暂无数据'
               let natTone = 'gray'
               if (natIp) {
-                natText = `NAT出口 IP: ${natIp} (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
-                natTone = 'mint'
+                const nodeKey = currentNode?.uuid || currentNode?.id || selectedServerForLatency
+                const prevRecord = egressHistoryRef.current.get(nodeKey)
+                if (!prevRecord) {
+                  egressHistoryRef.current.set(nodeKey, { lastIp: natIp, count: 1 })
+                  natText = `出口 IP 已上报 (${natIp}) (${reportTimeStr})`
+                  natTone = 'blue'
+                } else if (prevRecord.lastIp !== natIp) {
+                  const oldIp = prevRecord.lastIp
+                  prevRecord.lastIp = natIp
+                  prevRecord.count += 1
+                  natText = `出口 IP 已变化 (${oldIp} → ${natIp}) (${reportTimeStr})`
+                  natTone = 'amber'
+                } else {
+                  prevRecord.count += 1
+                  natText = `出口 IP 稳定 (${natIp}) (${reportTimeStr})`
+                  natTone = 'mint'
+                }
               }
 
               // 4. Line Recommendation

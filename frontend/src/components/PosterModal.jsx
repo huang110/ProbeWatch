@@ -33,7 +33,7 @@ function maskIpString(ip) {
 }
 
 function getRating(latency, loss) {
-  if (latency === null && loss === null) return { text: '未知', tone: 'muted' }
+  if (latency === null && loss === null) return { text: '暂无数据', tone: 'gray' }
   const lat = latency ?? 999
   const lss = loss ?? 100
   if (lat < 100 && lss <= 0.5) return { text: '优秀', tone: 'mint' }
@@ -250,12 +250,23 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
         ctx.fillText(`延迟: ${formatLatency(isp.lat)}`, x, currentY + 83)
         ctx.fillText(`丢包: ${isp.loss !== null ? isp.loss.toFixed(1) + '%' : '暂无数据'}`, x, currentY + 103)
 
-        // Rating badge
-        ctx.fillStyle = isp.rate.tone === 'mint' ? '#059669' : isp.rate.tone === 'blue' ? '#2563eb' : isp.rate.tone === 'amber' ? '#d97706' : '#dc2626'
-        ctx.fillRect(x + 190, currentY + 47, 50, 22)
+        // Rating badge (gray for null/unknown, strictly not red)
+        const isGray = isp.rate.tone === 'gray' || isp.rate.tone === 'muted'
+        ctx.fillStyle = isp.rate.tone === 'mint'
+          ? '#059669'
+          : isp.rate.tone === 'blue'
+          ? '#2563eb'
+          : isp.rate.tone === 'amber'
+          ? '#d97706'
+          : isGray
+          ? '#475569'
+          : '#dc2626'
+        const badgeW = isGray ? 64 : 50
+        const badgeX = isGray ? x + 176 : x + 190
+        ctx.fillRect(badgeX, currentY + 47, badgeW, 22)
         ctx.fillStyle = '#ffffff'
         ctx.font = 'bold 12px sans-serif'
-        ctx.fillText(isp.rate.text, x + 200, currentY + 62)
+        ctx.fillText(isp.rate.text, badgeX + (isGray ? 7 : 12), currentY + 62)
       })
 
       currentY += 135
