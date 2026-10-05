@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -37,6 +38,11 @@ type CheckSummary struct {
 	// latency; it is only meaningful when LatencyCount > 0.
 	LatencyAvgMS float64
 	LatencyCount int64
+	// LatencyP95MS is the 95th percentile latency from real raw history samples inside the window.
+	// Nil if fewer than 5 samples are available.
+	LatencyP95MS *float64
+	// SampleCount is the count of raw positive latency samples inside the window.
+	SampleCount int
 	// JitterMS is the max−min spread, in milliseconds, of the latency
 	// observations inside the window. Max−min is chosen over standard
 	// deviation deliberately: the hourly/daily aggregates retain per-window
@@ -72,6 +78,7 @@ type checkAccumulator struct {
 	latencyMaxMS  float64
 	jitterSeen    bool
 	rawCheckedAt  time.Time
+	latencies     []float64
 }
 
 func (a *checkAccumulator) addRawSample(sample networkSample) {
@@ -86,6 +93,7 @@ func (a *checkAccumulator) addRawSample(sample networkSample) {
 		a.latencySumMS += float64(sample.latency)
 		a.latencyCount++
 		a.observeLatency(float64(sample.latency), float64(sample.latency))
+		a.latencies = append(a.latencies, float64(sample.latency))
 	}
 }
 
@@ -262,6 +270,23 @@ func (s *Store) GetCheckSummary(ctx context.Context, nodeID string, from, to tim
 				summary.JitterMS = 0
 			}
 			summary.HasJitter = true
+		}
+		if len(accumulator.latencies) > 0 {
+			summary.SampleCount = len(accumulator.latencies)
+			if len(accumulator.latencies) >= 5 {
+				sorted := make([]float64, len(accumulator.latencies))
+				copy(sorted, accumulator.latencies)
+				sort.Float64s(sorted)
+				idx := int(math.Ceil(float64(len(sorted))*0.95)) - 1
+				if idx < 0 {
+					idx = 0
+				}
+				if idx >= len(sorted) {
+					idx = len(sorted) - 1
+				}
+				v := sorted[idx]
+				summary.LatencyP95MS = &v
+			}
 		}
 		summaries = append(summaries, summary)
 	}

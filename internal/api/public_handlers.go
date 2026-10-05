@@ -130,6 +130,8 @@ type publicNodeCheck struct {
 	Kind          string     `json:"kind"`
 	Label         string     `json:"label,omitempty"`
 	LatencyMS     *float64   `json:"latency_ms"`
+	LatencyP95MS  *float64   `json:"latency_p95_ms,omitempty"`
+	SampleCount   int        `json:"sample_count,omitempty"`
 	LossRate      *float64   `json:"loss_rate"`
 	LastCheckedAt *time.Time `json:"last_checked_at"`
 }
@@ -276,6 +278,8 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				check := publicNodeCheck{Kind: summary.Kind, Label: publicCheckLabel(summary.Name, summary.Kind)}
 				if _, known := coverageLabels[check.Label]; known && summary.HasWindowData { coverageLabels[check.Label] = true }
 				if summary.HasWindowData && summary.LatencyCount > 0 { value := summary.LatencyAvgMS; check.LatencyMS = &value }
+				if summary.HasWindowData && summary.LatencyP95MS != nil { p95 := *summary.LatencyP95MS; check.LatencyP95MS = &p95 }
+				check.SampleCount = summary.SampleCount
 				if summary.HasWindowData && summary.Total > 0 { value := float64(summary.Failure) / float64(summary.Total); check.LossRate = &value }
 				if !summary.LastCheckedAt.IsZero() { value := summary.LastCheckedAt; check.LastCheckedAt = &value }
 				if check.LatencyMS != nil || check.LossRate != nil || check.LastCheckedAt != nil { telemetry.Checks = append(telemetry.Checks, check) }

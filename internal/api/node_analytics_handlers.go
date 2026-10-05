@@ -28,6 +28,9 @@ type checkSummaryResponse struct {
 	Failure       *int64     `json:"failure"`
 	LossRate      *float64   `json:"loss_rate"`
 	LatencyAvgMS  *float64   `json:"latency_avg_ms"`
+	LatencyP95MS  *float64   `json:"latency_p95_ms"`
+	SampleCount   int        `json:"sample_count"`
+	WindowHours   int        `json:"window_hours"`
 	JitterMS      *float64   `json:"jitter_ms"`
 	LastCheckedAt *time.Time `json:"last_checked_at"`
 }
@@ -85,6 +88,12 @@ func (s *Server) nodeChecksSummary(w http.ResponseWriter, r *http.Request, uuid 
 				jitter := summary.JitterMS
 				item.JitterMS = &jitter
 			}
+			if summary.LatencyP95MS != nil {
+				p95 := *summary.LatencyP95MS
+				item.LatencyP95MS = &p95
+			}
+			item.SampleCount = summary.SampleCount
+			item.WindowHours = int(to.Sub(from).Hours())
 		}
 		out = append(out, item)
 	}

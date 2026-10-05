@@ -357,6 +357,19 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
               const cuCheck = findIsp('联通') || findIsp('cu')
               const cmCheck = findIsp('移动') || findIsp('cm')
 
+              const findMtr = (needle) => liveMtrResults.find((m) => String(m?.target_id || m?.name || m?.host || '').toLowerCase().includes(needle))
+              const ctMtr = findMtr('电信') || findMtr('ct')
+              const cuMtr = findMtr('联通') || findMtr('cu')
+              const cmMtr = findMtr('移动') || findMtr('cm')
+
+              const getRouteStatus = (mtr) => {
+                if (!mtr || !mtr.result) return '暂无回程样本'
+                if (mtr.result.error) return `回程异常: ${mtr.result.error}`
+                if (mtr.result.route_changed || mtr.route_changed || mtr.path_changed) return `路径发生变化 (${mtr.result.hops?.length || 0}跳)`
+                if (mtr.result.reached) return `路径可达 (${mtr.result.hops?.length || 0}跳)`
+                return '路径未达'
+              }
+
               const isps = [
                 {
                   id: 'ct',
@@ -366,8 +379,9 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                   lat: ctCheck ? ctCheck.latency_avg_ms : null,
                   loss: ctCheck && ctCheck.loss_rate != null ? Number(ctCheck.loss_rate) * 100 : null,
                   failures: ctCheck ? ctCheck.failure || 0 : 0,
-                  p95: ctCheck && ctCheck.latency_avg_ms ? Math.round(ctCheck.latency_avg_ms * 1.18) : null,
-                  routeStatus: '稳定无变动',
+                  p95: ctCheck ? ctCheck.latency_p95_ms : null,
+                  sampleCount: ctCheck ? ctCheck.sample_count : 0,
+                  routeStatus: getRouteStatus(ctMtr),
                 },
                 {
                   id: 'cu',
@@ -377,8 +391,9 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                   lat: cuCheck ? cuCheck.latency_avg_ms : null,
                   loss: cuCheck && cuCheck.loss_rate != null ? Number(cuCheck.loss_rate) * 100 : null,
                   failures: cuCheck ? cuCheck.failure || 0 : 0,
-                  p95: cuCheck && cuCheck.latency_avg_ms ? Math.round(cuCheck.latency_avg_ms * 1.15) : null,
-                  routeStatus: '稳定无变动',
+                  p95: cuCheck ? cuCheck.latency_p95_ms : null,
+                  sampleCount: cuCheck ? cuCheck.sample_count : 0,
+                  routeStatus: getRouteStatus(cuMtr),
                 },
                 {
                   id: 'cm',
@@ -388,87 +403,170 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                   lat: cmCheck ? cmCheck.latency_avg_ms : null,
                   loss: cmCheck && cmCheck.loss_rate != null ? Number(cmCheck.loss_rate) * 100 : null,
                   failures: cmCheck ? cmCheck.failure || 0 : 0,
-                  p95: cmCheck && cmCheck.latency_avg_ms ? Math.round(cmCheck.latency_avg_ms * 1.12) : null,
-                  routeStatus: '稳定无变动',
+                  p95: cmCheck ? cmCheck.latency_p95_ms : null,
+                  sampleCount: cmCheck ? cmCheck.sample_count : 0,
+                  routeStatus: getRouteStatus(cmMtr),
                 },
               ]
 
+              const currentNode = nodes.find((n) => (n.uuid || n.id) === selectedServerForLatency)
+              const formatCheckedTime = (t) => {
+                if (!t) return ''
+                try {
+                  const d = new Date(t)
+                  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
+                } catch { return '' }
+              }
+
+              // 1. IP Stack
+              const hasIpv4 = Boolean(currentNode?.ip || currentNode?.address)
+              const hasIpv6 = Boolean(currentNode?.ipv6)
+              let ipStackText = '网络协议栈: 暂无数据'
+              let ipStackTone = 'gray'
+              if (hasIpv4 && hasIpv6) {
+                ipStackText = `IPv4/IPv6 双栈在线 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
+                ipStackTone = 'mint'
+              } else if (hasIpv4) {
+                ipStackText = `仅 IPv4 单栈 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
+                ipStackTone = 'blue'
+              } else if (hasIpv6) {
+                ipStackText = `仅 IPv6 单栈 (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
+                ipStackTone = 'blue'
+              }
+
+              // 2. DNS
+              const dnsCheck = liveChecks.find((c) => c.kind === 'dns' || String(c.name || '').toLowerCase().includes('dns'))
+              let dnsText = 'DNS解析: 暂无数据'
+              let dnsTone = 'gray'
+              if (dnsCheck && dnsCheck.last_checked_at) {
+                const timeStr = formatCheckedTime(dnsCheck.last_checked_at)
+                if (dnsCheck.latency_avg_ms != null) {
+                  dnsText = `DNS解析 (${dnsCheck.name || '骨干网'}): ${Math.round(dnsCheck.latency_avg_ms)}ms (${timeStr})`
+                  dnsTone = 'mint'
+                } else if (dnsCheck.failure > 0) {
+                  dnsText = `DNS解析异常 (${timeStr})`
+                  dnsTone = 'rose'
+                } else {
+                  dnsText = `DNS解析: 采样中 (${timeStr})`
+                  dnsTone = 'amber'
+                }
+              }
+
+              // 3. NAT
+              const natIp = currentNode?.egress_ip || currentNode?.nat_ip
+              let natText = 'NAT出口: 暂无数据'
+              let natTone = 'gray'
+              if (natIp) {
+                natText = `NAT出口 IP: ${natIp} (${formatCheckedTime(currentNode.last_reported_at) || '刚刚'})`
+                natTone = 'mint'
+              }
+
+              // 4. Line Recommendation
+              const validLines = isps.filter((i) => i.lat != null && i.lat > 0)
+              let bestLineText = '三网优选: 暂无足够样本'
+              let bestLineTone = 'gray'
+              if (validLines.length > 0) {
+                validLines.sort((a, b) => (a.lat + (a.loss || 0) * 10) - (b.lat + (b.loss || 0) * 10))
+                const best = validLines[0]
+                const lossStr = best.loss != null ? `${best.loss.toFixed(1)}%` : '0%丢包'
+                bestLineText = `${best.name.split(' ')[0]}线路最佳 (${Math.round(best.lat)}ms / ${lossStr})`
+                bestLineTone = 'blue'
+              }
+
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
-                  {isps.map((isp) => {
-                    const rating = getIspLineRating(isp.lat, isp.loss)
-                    return (
-                      <div
-                        key={isp.id}
-                        style={{
-                          background: 'rgba(0,0,0,0.2)',
-                          padding: '14px',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(255,255,255,0.06)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '10px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <strong style={{ fontSize: '13.5px', color: isp.iconColor }}>{isp.name}</strong>
-                          <span
-                            className={`badge ${rating.tone === 'mint' ? 'badge-success' : rating.tone === 'blue' ? 'badge-info' : rating.tone === 'amber' ? 'badge-warning' : 'badge-danger'}`}
-                            style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px' }}
-                          >
-                            {rating.text}
-                          </span>
-                        </div>
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                    {isps.map((isp) => {
+                      const rating = getIspLineRating(isp.lat, isp.loss)
+                      return (
+                        <div
+                          key={isp.id}
+                          style={{
+                            background: 'rgba(0,0,0,0.2)',
+                            padding: '14px',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(255,255,255,0.06)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: '13.5px', color: isp.iconColor }}>{isp.name}</strong>
+                            <span
+                              className={`badge ${rating.tone === 'mint' ? 'badge-success' : rating.tone === 'blue' ? 'badge-info' : rating.tone === 'amber' ? 'badge-warning' : 'badge-danger'}`}
+                              style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px' }}
+                            >
+                              {rating.text}
+                            </span>
+                          </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px' }}>
-                          <div>
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>当前延迟</span>
-                            <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-1)' }}>
-                              {isp.lat != null ? `${Math.round(isp.lat)} ms` : '暂无数据'}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '6px' }}>
+                            <div>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>当前延迟</span>
+                              <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-1)' }}>
+                                {isp.lat != null ? `${Math.round(isp.lat)} ms` : (currentNode?.status !== 'online' ? '节点离线' : '暂无数据')}
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>丢包率</span>
+                              <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: isp.loss && isp.loss > 0 ? '#fb7185' : isp.loss === 0 ? '#34d399' : 'var(--text-muted)' }}>
+                                {isp.loss != null ? `${isp.loss.toFixed(1)}%` : '暂无数据'}
+                              </div>
                             </div>
                           </div>
-                          <div>
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>丢包率</span>
-                            <div className="mono" style={{ fontSize: '18px', fontWeight: 700, color: isp.loss && isp.loss > 0 ? '#fb7185' : '#34d399' }}>
-                              {isp.loss != null ? `${isp.loss.toFixed(1)}%` : '0.0%'}
-                            </div>
+
+                          <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }} className="mono">
+                            <div>24h 均值: <strong style={{ color: 'var(--text-1)' }}>{isp.lat != null ? Math.round(isp.lat) + 'ms' : '暂无数据'}</strong></div>
+                            <div title="真实采样计算 P95 延迟">24h P95: <strong style={{ color: 'var(--text-1)' }}>{isp.p95 != null ? Math.round(isp.p95) + 'ms' : (isp.sampleCount > 0 ? `样本不足(${isp.sampleCount}条)` : '暂无数据')}</strong></div>
+                            <div title="24小时历史采样数">样本数: <strong style={{ color: 'var(--text-1)' }}>{isp.sampleCount > 0 ? `${isp.sampleCount} 条 / 24h` : '暂无'}</strong></div>
+                            <div title="真实 MTR 回程路径监控">回程状态: <strong style={{ color: isp.routeStatus === '暂无回程样本' ? 'var(--text-muted)' : isp.routeStatus.startsWith('路径发生变化') ? '#ef4444' : isp.routeStatus.startsWith('路径可达') ? '#10b981' : '#f59e0b' }}>{isp.routeStatus}</strong></div>
                           </div>
                         </div>
+                      )
+                    })}
+                  </div>
 
-                        <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }} className="mono">
-                          <div>24h 均值: <strong style={{ color: 'var(--text-1)' }}>{isp.lat != null ? Math.round(isp.lat) + 'ms' : '—'}</strong></div>
-                          <div>24h P95: <strong style={{ color: 'var(--text-1)' }}>{isp.p95 != null ? isp.p95 + 'ms' : '—'}</strong></div>
-                          <div>异常次数: <strong style={{ color: isp.failures > 0 ? '#f59e0b' : 'var(--text-1)' }}>{isp.failures} 次</strong></div>
-                          <div>回程状态: <strong style={{ color: '#10b981' }}>{isp.routeStatus}</strong></div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                  {/* 网络异常识别摘要区 */}
+                  <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-1)', marginBottom: '8px' }}>
+                      <ShieldWarning size={15} className="text-amber" />
+                      <span>智能网络异常识别与线路状态</span>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      <span className="compact-metric-pill" style={{
+                        background: ipStackTone === 'mint' ? 'rgba(16,185,129,0.08)' : ipStackTone === 'blue' ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.04)',
+                        borderColor: ipStackTone === 'mint' ? 'rgba(16,185,129,0.2)' : ipStackTone === 'blue' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.08)',
+                        color: ipStackTone === 'mint' ? '#34d399' : ipStackTone === 'blue' ? '#38bdf8' : 'var(--text-muted)',
+                      }}>
+                        {ipStackText}
+                      </span>
+                      <span className="compact-metric-pill" style={{
+                        background: natTone === 'mint' ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.04)',
+                        borderColor: natTone === 'mint' ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.08)',
+                        color: natTone === 'mint' ? '#34d399' : 'var(--text-muted)',
+                      }}>
+                        {natText}
+                      </span>
+                      <span className="compact-metric-pill" style={{
+                        background: dnsTone === 'mint' ? 'rgba(16,185,129,0.08)' : dnsTone === 'rose' ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.04)',
+                        borderColor: dnsTone === 'mint' ? 'rgba(16,185,129,0.2)' : dnsTone === 'rose' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.08)',
+                        color: dnsTone === 'mint' ? '#34d399' : dnsTone === 'rose' ? '#f87171' : 'var(--text-muted)',
+                      }}>
+                        {dnsText}
+                      </span>
+                      <span className="compact-metric-pill" style={{
+                        background: bestLineTone === 'blue' ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.04)',
+                        borderColor: bestLineTone === 'blue' ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.08)',
+                        color: bestLineTone === 'blue' ? '#38bdf8' : 'var(--text-muted)',
+                      }}>
+                        {bestLineText}
+                      </span>
+                    </div>
+                  </div>
+                </>
               )
             })()}
-
-            {/* 网络异常识别摘要区 */}
-            <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-1)', marginBottom: '8px' }}>
-                <ShieldWarning size={15} className="text-amber" />
-                <span>智能网络异常识别与线路状态</span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                <span className="compact-metric-pill" style={{ background: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.2)', color: '#34d399' }}>
-                  ✔ IPv4/IPv6 双栈连通正常
-                </span>
-                <span className="compact-metric-pill" style={{ background: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.2)', color: '#34d399' }}>
-                  ✔ NAT 出口 IP 稳定未漂移
-                </span>
-                <span className="compact-metric-pill" style={{ background: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.2)', color: '#34d399' }}>
-                  ✔ 骨干网 DNS 解析一致 (1.39ms)
-                </span>
-                <span className="compact-metric-pill" style={{ background: 'rgba(56,189,248,0.08)', borderColor: 'rgba(56,189,248,0.2)', color: '#38bdf8' }}>
-                  ℹ 移动线路最佳 (低延迟 / 0 丢包)
-                </span>
-              </div>
-            </div>
           </div>
 
           {/* 视图切换与搜索栏 (匹配 Image 4) */}

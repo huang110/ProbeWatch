@@ -945,7 +945,8 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                   const cuLatency = numeric(cuCheck?.latency_ms)
                   const ctLatency = numeric(ctCheck?.latency_ms)
                   const cmLatency = numeric(cmCheck?.latency_ms)
-                  const loss = numeric(telemetry.loss_rate) !== null ? (telemetry.loss_rate * 100).toFixed(1) : '0.0'
+                  const rawLoss = numeric(telemetry.loss_rate)
+                  const lossDisplay = !isOnline ? '离线' : (rawLoss !== null ? `${(rawLoss * 100).toFixed(1)}%` : '暂无数据')
 
                   return (
                     <div
@@ -976,7 +977,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         </span>
                         <span className="compact-metric-pill mono">
                           <span className="compact-metric-lbl">丢包</span>
-                          <span className={`compact-metric-val ${Number(loss) > 0 ? 'text-rose' : ''}`}>{loss}%</span>
+                          <span className={`compact-metric-val ${rawLoss !== null && rawLoss > 0 ? 'text-rose' : ''}`}>{lossDisplay}</span>
                         </span>
                         {remainDays !== null && (
                           <span className="compact-metric-pill compact-days-pill mono">

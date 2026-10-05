@@ -31,3 +31,4 @@ singbox*.txt
 deploy-package.tar.gz
 deploy-package.zip
 frontend/CHANGELOG.md
+scratch/

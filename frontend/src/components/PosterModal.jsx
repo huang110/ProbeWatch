@@ -110,21 +110,26 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    let totalHeight = 365
+    if (includeIsp) totalHeight += 135
+    if (includeMedia) totalHeight += 135
+    totalHeight += 45
+
     canvas.width = 1000
-    canvas.height = 680
+    canvas.height = totalHeight
 
     // Background gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, 1000, 680)
+    const bgGrad = ctx.createLinearGradient(0, 0, 1000, totalHeight)
     bgGrad.addColorStop(0, '#0a0f1d')
     bgGrad.addColorStop(0.5, '#0d1527')
     bgGrad.addColorStop(1, '#080d18')
     ctx.fillStyle = bgGrad
-    ctx.fillRect(0, 0, 1000, 680)
+    ctx.fillRect(0, 0, 1000, totalHeight)
 
     // Border
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)'
     ctx.lineWidth = 2
-    ctx.strokeRect(1, 1, 998, 678)
+    ctx.strokeRect(1, 1, 998, totalHeight - 2)
 
     // Top Header bar
     ctx.fillStyle = '#38bdf8'
@@ -216,77 +221,110 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
       ctx.font = '14px sans-serif'
     })
 
+    let currentY = 365
+
     // Section 3: Three-Network Quality (Full width 920px)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
-    ctx.fillRect(40, 365, 920, 120)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
-    ctx.strokeRect(40, 365, 920, 120)
+    if (includeIsp) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
+      ctx.fillRect(40, currentY, 920, 120)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+      ctx.strokeRect(40, currentY, 920, 120)
 
-    ctx.fillStyle = '#fbbf24'
-    ctx.font = 'bold 15px sans-serif'
-    ctx.fillText('📶 三网链路质量与回程状态', 55, 392)
+      ctx.fillStyle = '#fbbf24'
+      ctx.font = 'bold 15px sans-serif'
+      ctx.fillText('📶 三网链路质量与回程状态', 55, currentY + 27)
 
-    const isps = [
-      { name: '中国电信 (CT)', lat: ctLat, loss: ctLoss, rate: ctRating },
-      { name: '中国联通 (CU)', lat: cuLat, loss: cuLoss, rate: cuRating },
-      { name: '中国移动 (CM)', lat: cmLat, loss: cmLoss, rate: cmRating },
-    ]
-    isps.forEach((isp, idx) => {
-      const x = 55 + idx * 305
-      ctx.fillStyle = '#f8fafc'
-      ctx.font = 'bold 14px sans-serif'
-      ctx.fillText(isp.name, x, 425)
+      const isps = [
+        { name: '中国电信 (CT)', lat: ctLat, loss: ctLoss, rate: ctRating },
+        { name: '中国联通 (CU)', lat: cuLat, loss: cuLoss, rate: cuRating },
+        { name: '中国移动 (CM)', lat: cmLat, loss: cmLoss, rate: cmRating },
+      ]
+      isps.forEach((isp, idx) => {
+        const x = 55 + idx * 305
+        ctx.fillStyle = '#f8fafc'
+        ctx.font = 'bold 14px sans-serif'
+        ctx.fillText(isp.name, x, currentY + 60)
 
-      ctx.fillStyle = '#94a3b8'
-      ctx.font = '13px "SF Mono", monospace, sans-serif'
-      ctx.fillText(`延迟: ${formatLatency(isp.lat)}`, x, 448)
-      ctx.fillText(`丢包: ${isp.loss !== null ? isp.loss.toFixed(1) + '%' : '0%'}`, x, 468)
+        ctx.fillStyle = '#94a3b8'
+        ctx.font = '13px "SF Mono", monospace, sans-serif'
+        ctx.fillText(`延迟: ${formatLatency(isp.lat)}`, x, currentY + 83)
+        ctx.fillText(`丢包: ${isp.loss !== null ? isp.loss.toFixed(1) + '%' : '暂无数据'}`, x, currentY + 103)
 
-      // Rating badge
-      ctx.fillStyle = isp.rate.tone === 'mint' ? '#059669' : isp.rate.tone === 'blue' ? '#2563eb' : isp.rate.tone === 'amber' ? '#d97706' : '#dc2626'
-      ctx.fillRect(x + 190, 412, 50, 22)
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 12px sans-serif'
-      ctx.fillText(isp.rate.text, x + 200, 427)
-    })
+        // Rating badge
+        ctx.fillStyle = isp.rate.tone === 'mint' ? '#059669' : isp.rate.tone === 'blue' ? '#2563eb' : isp.rate.tone === 'amber' ? '#d97706' : '#dc2626'
+        ctx.fillRect(x + 190, currentY + 47, 50, 22)
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 12px sans-serif'
+        ctx.fillText(isp.rate.text, x + 200, currentY + 62)
+      })
+
+      currentY += 135
+    }
 
     // Section 4: Media & AI Unlocks (Bottom 920px)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
-    ctx.fillRect(40, 500, 920, 120)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
-    ctx.strokeRect(40, 500, 920, 120)
+    if (includeMedia) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
+      ctx.fillRect(40, currentY, 920, 120)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+      ctx.strokeRect(40, currentY, 920, 120)
 
-    ctx.fillStyle = '#a855f7'
-    ctx.font = 'bold 15px sans-serif'
-    ctx.fillText('🎬 流媒体与 AI 原生解锁矩阵', 55, 527)
+      ctx.fillStyle = '#a855f7'
+      ctx.font = 'bold 15px sans-serif'
+      ctx.fillText('🎬 流媒体与 AI 原生解锁矩阵', 55, currentY + 27)
 
-    const mediaList = [
-      { id: 'chatgpt', label: 'ChatGPT' },
-      { id: 'claude', label: 'Claude AI' },
-      { id: 'netflix', label: 'Netflix' },
-      { id: 'youtube', label: 'YouTube' },
-      { id: 'tiktok', label: 'TikTok' },
-      { id: 'disney', label: 'Disney+' },
-      { id: 'spotify', label: 'Spotify' },
-      { id: 'bilibili', label: 'Bilibili' },
-    ]
-    mediaList.forEach((m, idx) => {
-      const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m.id))
-      const isUnlocked = rep && (rep.status === 'available' || rep.status === 'partial')
-      const x = 55 + (idx % 4) * 225
-      const y = 560 + Math.floor(idx / 4) * 32
+      const mediaList = [
+        { id: 'chatgpt', label: 'ChatGPT' },
+        { id: 'claude', label: 'Claude AI' },
+        { id: 'netflix', label: 'Netflix' },
+        { id: 'youtube', label: 'YouTube' },
+        { id: 'tiktok', label: 'TikTok' },
+        { id: 'disney', label: 'Disney+' },
+        { id: 'spotify', label: 'Spotify' },
+        { id: 'bilibili', label: 'Bilibili' },
+      ]
+      mediaList.forEach((m, idx) => {
+        const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m.id))
+        let icon = '—'
+        let text = '暂无数据'
+        let tone = '#64748b'
+        if (rep && rep.status) {
+          if (rep.status === 'available') {
+            icon = '✔'
+            text = '可用'
+            tone = '#10b981'
+          } else if (rep.status === 'partial') {
+            icon = '⚡'
+            text = '部分'
+            tone = '#38bdf8'
+          } else if (rep.status === 'checking') {
+            icon = '⏳'
+            text = '检测中'
+            tone = '#fbbf24'
+          } else if (rep.status === 'unavailable') {
+            icon = '✖'
+            text = '不可用'
+            tone = '#f43f5e'
+          }
+        }
+        const x = 55 + (idx % 4) * 225
+        const y = currentY + 62 + Math.floor(idx / 4) * 32
 
-      ctx.fillStyle = isUnlocked ? '#10b981' : '#64748b'
-      ctx.fillText(isUnlocked ? '✔' : '✖', x, y)
-      ctx.fillStyle = isUnlocked ? '#f8fafc' : '#94a3b8'
-      ctx.font = '13px sans-serif'
-      ctx.fillText(`${m.label} ${rep?.region ? `(${rep.region})` : ''}`, x + 18, y)
-    })
+        ctx.fillStyle = tone
+        ctx.font = 'bold 13px sans-serif'
+        ctx.fillText(`${icon} ${text}`, x, y)
+
+        ctx.fillStyle = (rep?.status === 'available' || rep?.status === 'partial') ? '#f8fafc' : '#94a3b8'
+        ctx.font = '13px sans-serif'
+        ctx.fillText(`${m.label}${rep?.region ? ` (${rep.region})` : ''}`, x + 65, y)
+      })
+
+      currentY += 135
+    }
 
     // Footer signature
     ctx.fillStyle = '#475569'
     ctx.font = '12px "SF Mono", monospace, sans-serif'
-    ctx.fillText('Powered by ProbeWatch · 轻量化极客 VPS 监控看板', 40, 655)
+    ctx.fillText('Powered by ProbeWatch · 轻量化极客 VPS 监控看板', 40, currentY + 22)
   }, [node, maskIp, maskUuid, maskBilling, includeIsp, includeMedia, mediaData])
 
   // Copy PNG to Clipboard
@@ -354,19 +392,44 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
         `**三网回程质量：**`,
         `| 运营商 | 延迟 | 丢包率 | 评级 |`,
         `| :--- | :--- | :--- | :--- |`,
-        `| 🇨🇳 电信 (CT) | ${formatLatency(ctLat)} | ${ctLoss !== null ? ctLoss.toFixed(1) + '%' : '0%'} | ${ctRating.text} |`,
-        `| 🇨🇳 联通 (CU) | ${formatLatency(cuLat)} | ${cuLoss !== null ? cuLoss.toFixed(1) + '%' : '0%'} | ${cuRating.text} |`,
-        `| 🇨🇳 移动 (CM) | ${formatLatency(cmLat)} | ${cmLoss !== null ? cmLoss.toFixed(1) + '%' : '0%'} | ${cmRating.text} |`,
+        `| 🇨🇳 电信 (CT) | ${formatLatency(ctLat)} | ${ctLoss !== null ? ctLoss.toFixed(1) + '%' : '暂无数据'} | ${ctRating.text} |`,
+        `| 🇨🇳 联通 (CU) | ${formatLatency(cuLat)} | ${cuLoss !== null ? cuLoss.toFixed(1) + '%' : '暂无数据'} | ${cuRating.text} |`,
+        `| 🇨🇳 移动 (CM) | ${formatLatency(cmLat)} | ${cmLoss !== null ? cmLoss.toFixed(1) + '%' : '暂无数据'} | ${cmRating.text} |`,
         ''
       )
     }
 
     if (includeMedia) {
-      const mediaList = ['chatgpt', 'claude', 'netflix', 'youtube', 'tiktok', 'disney', 'spotify', 'bilibili']
+      const mediaList = [
+        { id: 'chatgpt', label: 'ChatGPT' },
+        { id: 'claude', label: 'Claude AI' },
+        { id: 'netflix', label: 'Netflix' },
+        { id: 'youtube', label: 'YouTube' },
+        { id: 'tiktok', label: 'TikTok' },
+        { id: 'disney', label: 'Disney+' },
+        { id: 'spotify', label: 'Spotify' },
+        { id: 'bilibili', label: 'Bilibili' },
+      ]
       const badges = mediaList.map((m) => {
-        const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m))
-        const ok = rep && (rep.status === 'available' || rep.status === 'partial')
-        return `${ok ? '✅' : '❌'} ${m.toUpperCase()}${rep?.region ? `(${rep.region})` : ''}`
+        const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m.id))
+        let st = '暂无数据'
+        let icon = '⚪'
+        if (rep && rep.status) {
+          if (rep.status === 'available') {
+            st = '可用'
+            icon = '✅'
+          } else if (rep.status === 'partial') {
+            st = '部分可用'
+            icon = '⚡'
+          } else if (rep.status === 'checking') {
+            st = '检测中'
+            icon = '⏳'
+          } else if (rep.status === 'unavailable') {
+            st = '不可用'
+            icon = '❌'
+          }
+        }
+        return `${icon} ${m.label}: ${st}${rep?.region ? `(${rep.region})` : ''}`
       }).join(' · ')
       lines.push(`**流媒体 & AI 解锁：**`, `> ${badges}`, '')
     }
@@ -396,13 +459,19 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
       lines.push(`账单: ${billing.cycle || '未配置'} | 剩余: ${remainingDays !== null && remainingDays !== undefined ? remainingDays + '天' : '未配置'} | 残值: ¥${(calc.remainingValueCNY || 0).toFixed(1)}`)
     }
     if (includeIsp) {
-      lines.push(`三网: 电信 ${formatLatency(ctLat)} | 联通 ${formatLatency(cuLat)} | 移动 ${formatLatency(cmLat)}`)
+      lines.push(`三网: 电信 ${formatLatency(ctLat)} (丢包: ${ctLoss !== null ? ctLoss.toFixed(1) + '%' : '暂无数据'}) | 联通 ${formatLatency(cuLat)} (丢包: ${cuLoss !== null ? cuLoss.toFixed(1) + '%' : '暂无数据'}) | 移动 ${formatLatency(cmLat)} (丢包: ${cmLoss !== null ? cmLoss.toFixed(1) + '%' : '暂无数据'})`)
     }
     if (includeMedia) {
-      const openAI = mediaReports.find((r) => r.name.toLowerCase().includes('chatgpt'))
-      const claude = mediaReports.find((r) => r.name.toLowerCase().includes('claude'))
-      const netflix = mediaReports.find((r) => r.name.toLowerCase().includes('netflix'))
-      lines.push(`解锁: GPT(${openAI?.region || '未解'}) Claude(${claude?.region || '未解'}) NF(${netflix?.status === 'available' ? '解锁' : '未解'})`)
+      const getMediaBadge = (id, shortLabel) => {
+        const rep = mediaReports.find((r) => r.name.toLowerCase().includes(id))
+        if (!rep || !rep.status) return `${shortLabel}(暂无数据)`
+        if (rep.status === 'available') return `${shortLabel}(${rep.region || '可用'})`
+        if (rep.status === 'partial') return `${shortLabel}(部分:${rep.region || '可用'})`
+        if (rep.status === 'checking') return `${shortLabel}(检测中)`
+        if (rep.status === 'unavailable') return `${shortLabel}(不可用)`
+        return `${shortLabel}(${rep.status})`
+      }
+      lines.push(`解锁: ${getMediaBadge('chatgpt', 'GPT')} ${getMediaBadge('claude', 'Claude')} ${getMediaBadge('netflix', 'NF')} ${getMediaBadge('disney', 'Disney')} ${getMediaBadge('youtube', 'YT')}`)
     }
     lines.push(`时间: ${new Date().toLocaleString('zh-CN')} (ProbeWatch)`)
 
