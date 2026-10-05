@@ -51,7 +51,11 @@ def login(page):
     page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(800)
     if page.locator(".app-shell").count() > 0:
-        return
+        try:
+            if page.request.get(BASE_URL.rstrip("/") + "/api/me").status == 200:
+                return
+        except Exception:
+            pass
     login_button = page.get_by_role("button", name="管理员登录")
     if login_button.count() == 0:
         login_button = page.get_by_text("管理员登录", exact=True)
@@ -60,6 +64,7 @@ def login(page):
     page.locator("#admin-pwd").fill(PASSWORD)
     page.get_by_role("button", name="口令登录进入控制台").click()
     page.locator(".app-shell").wait_for(timeout=20000)
+    page.wait_for_function("async () => (await fetch('/api/me', { credentials: 'same-origin' })).ok", timeout=20000)
 
 
 def run():
