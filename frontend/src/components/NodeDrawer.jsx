@@ -149,6 +149,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
   const [billingVersion, setBillingVersion] = useState(0)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showTrafficModal, setShowTrafficModal] = useState(false)
+  const [showPosterModal, setShowPosterModal] = useState(false)
   const [metaVersion, setMetaVersion] = useState(0)
 
   // 扩展诊断数据状态：网络检测、MTR 路由、流媒体
@@ -921,7 +922,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
       {showPosterModal && (
         <PosterModal
           node={node}
-          mediaData={mediaReports}
+          mediaData={mediaData}
           onClose={() => setShowPosterModal(false)}
         />
       )}
