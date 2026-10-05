@@ -7,6 +7,17 @@ import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
 
+function maskVisitorIp(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  if (text.includes(':')) {
+    const parts = text.split(':').filter(Boolean)
+    return parts.length > 1 ? `${parts.slice(0, 2).join(':')}:…` : 'IPv6 · 已脱敏'
+  }
+  const parts = text.split('.')
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.*.*` : '公网 IP · 已脱敏'
+}
+
 function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
   const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
@@ -331,7 +342,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           <div className="floating-public-node-divider" />
           <div className="floating-public-node-row"><Desktop size={14} /><span>{visitorInfo.platform || '未知系统'}</span></div>
           <div className="floating-public-node-row"><GlobeHemisphereWest size={14} /><span>{visitorInfo.browser || '浏览器'}</span></div>
-          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{visitorInfo.ip}</span></div>
+          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{maskVisitorIp(visitorInfo.ip)}</span></div>
           <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{visitorInfo.isp || '公网访客'}</span></div>
           <div className="floating-public-node-row"><Timer size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
         </aside>
@@ -486,7 +497,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
         <aside className="guest-visitor-ip-bar" aria-label="访客公网信息">
           <GlobeHemisphereWest size={15} />
           <span>当前访问公网 IP</span>
-          <strong className="mono">{visitorInfo.ip}</strong>
+          <strong className="mono">{maskVisitorIp(visitorInfo.ip)}</strong>
           {visitorInfo.location && <span className="guest-visitor-ip-meta">{visitorInfo.location}</span>}
           {visitorInfo.isp && <span className="guest-visitor-ip-meta">{visitorInfo.isp}</span>}
         </aside>
