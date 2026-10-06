@@ -41,6 +41,8 @@ import {
   Shield,
   Gauge,
   Play,
+  ArrowDown,
+  ArrowUp,
 } from '@phosphor-icons/react'
 
 // Favorites are session-only by design. Node identifiers must not be written
@@ -772,6 +774,9 @@ export function NodeDetailPage({
   const monthlyExpense = billing.price !== null && billing.price !== undefined && billing.cycle ? `${calc.symbol || '$'}${((billing.price || 0) / (billing.cycle === 'annual' ? 12 : 1)).toFixed(2)}` : '—'
   const remainingDays = calc.daysRemaining !== null && calc.daysRemaining !== undefined ? calc.daysRemaining : '—'
   const remainingValue = calc.remainingValueCNY !== undefined ? `¥${calc.remainingValueCNY.toFixed(2)}` : '—'
+  const resetDayNum = customMeta.resetDay ?? billing.resetDay ?? node?.traffic_reset_day ?? detailResource?.traffic_reset_day ?? null
+  const resetDayDisplay = resetDayNum ? `每月 ${resetDayNum} 日` : '每月 1 日'
+  const osType = (os || '').includes('Windows') ? 'Windows' : (os || '').includes('Darwin') || (os || '').includes('macOS') ? 'macOS' : ((os || '').includes('BSD') ? 'BSD' : 'Linux')
 
   // Daily traffic
   const dayRx = traffic?.rx_bytes !== undefined && traffic?.rx_bytes !== null ? traffic.rx_bytes : null
@@ -1241,16 +1246,7 @@ export function NodeDetailPage({
 
   return (
     <section className={`subpage komari-detail-page${mobileCompact ? ' mobile-compact-mode' : ''}`}>
-      <div className="node-detail-summary-strip">
-        <div><span>状态</span><strong className={isOnline ? 'text-mint' : 'text-rose'}>{isOnline ? '在线' : '离线'}</strong></div>
-        <div><span>CPU</span><strong>{cpuPercent === null ? '—' : `${Math.round(cpuPercent)}%`}</strong></div>
-        <div><span>内存</span><strong>{memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '—'}</strong></div>
-        <div><span>下行</span><strong>{rate?.down == null ? '等待采样' : formatRate(rate.down)}</strong></div>
-        <div><span>上行</span><strong>{rate?.up == null ? '等待采样' : formatRate(rate.up)}</strong></div>
-        <div><span>解锁</span><strong>{Array.isArray(mediaData) && mediaData.length > 0 ? `${mediaData.filter(m => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/${mediaData.length}` : `${unlockedMediaCount}/${POPULAR_MEDIA.length}`}</strong></div>
-        <div><span>剩余价值</span><strong>{remainingValue}</strong></div>
-      </div>
-      {/* 1. 顶部导航与控制条 */}
+      {/* 1. 顶部紧凑导航与控制条 */}
       <div className="komari-nav-bar">
         <div className="komari-nav-left">
           <button type="button" className="komari-back-btn" onClick={onBack} title="返回服务器列表">
@@ -1270,39 +1266,33 @@ export function NodeDetailPage({
               </span>
             ))}
           </div>
+
+          {/* 最后同步时间 */}
+          {lastSyncTime && (
+            <span className="badge badge-neutral mono text-muted" style={{ fontSize: '11px', padding: '2px 8px' }} title={`最近同步：${lastSyncTime.toLocaleString('zh-CN')}`}>
+              最后同步: {lastSyncTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
         </div>
 
         <div className="komari-nav-right">
           <button type="button" className="komari-icon-btn" onClick={handleSharePoster} title="生成出机/测速海报并复制或下载">
-            <ShareNetwork size={16} />
+            <ShareNetwork size={15} />
             <span className="poster-action-label">{posterCopied ? '已复制' : '出机海报'}</span>
           </button>
           <button type="button" className="komari-icon-btn" onClick={handleCopyShareMarkdown} title="复制适合 NodeSeek / Hostloc 的 Markdown 分享卡片">
-            <ClipboardText size={16} />
+            <ClipboardText size={15} />
             <span className="poster-action-label">{markdownCopied ? '已复制' : 'Markdown'}</span>
           </button>
-          {/* 访客同步状态与刷新按钮 */}
-          {isPublic && (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '4px' }}>
-              {publicDetailLoading ? (
-                <span className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '3px 8px' }}>
-                  <CircleNotch size={12} className="spin text-blue" /> 同步中
-                </span>
-              ) : lastSyncTime ? (
-                <span className="badge badge-neutral mono text-muted" style={{ fontSize: '11px', padding: '3px 8px' }} title={`最近同步：${lastSyncTime.toLocaleString('zh-CN')}`}>
-                  {lastSyncTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="komari-icon-btn"
-                onClick={() => loadPublicDetail()}
-                title="刷新节点详情数据"
-              >
-                <ArrowsClockwise size={15} />
-              </button>
-            </div>
-          )}
+          {/* 刷新按钮 (公网访客与管理员模式均可用) */}
+          <button
+            type="button"
+            className="komari-icon-btn"
+            onClick={isPublic ? () => loadPublicDetail() : () => { loadDetail?.(); loadTargets?.(); }}
+            title="刷新节点详情数据"
+          >
+            <ArrowsClockwise size={15} className={publicDetailLoading ? 'spin text-blue' : ''} />
+          </button>
           {/* 打开远程终端 (管理员模式可见) */}
           {!isPublic && onNavigate && (
             <button
@@ -1311,7 +1301,7 @@ export function NodeDetailPage({
               onClick={() => onNavigate('terminal')}
               title="打开该节点的远程终端与受控执行"
             >
-              <Terminal size={16} />
+              <Terminal size={15} />
             </button>
           )}
 
@@ -1322,7 +1312,7 @@ export function NodeDetailPage({
             onClick={toggleFavorite}
             title={isFavorite ? '已收藏' : '收藏此节点'}
           >
-            <Star size={16} weight={isFavorite ? 'fill' : 'regular'} />
+            <Star size={15} weight={isFavorite ? 'fill' : 'regular'} />
           </button>
 
           {/* 服务器快切选择器 */}
@@ -1334,7 +1324,7 @@ export function NodeDetailPage({
                 onClick={() => onSelectNode && onSelectNode(prevNode)}
                 title={`切换至 ${prevNode.name}`}
               >
-                <CaretLeft size={14} />
+                <CaretLeft size={13} />
               </button>
               <span className="komari-switcher-name" title={node.name}>
                 {customMeta.customName || node.name}
@@ -1345,7 +1335,7 @@ export function NodeDetailPage({
                 onClick={() => onSelectNode && onSelectNode(nextNode)}
                 title={`切换至 ${nextNode.name}`}
               >
-                <CaretRight size={14} />
+                <CaretRight size={13} />
               </button>
             </div>
           )}
@@ -1437,24 +1427,35 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 8. 连接数 */}
+        {/* 8. 流量重置日期 */}
         <div className="komari-stat-card card-panel mjj-card">
           <div className="komari-stat-head">
-            <span className="komari-stat-label">连接数</span>
-            <ShareNetwork size={15} className="komari-stat-icon text-muted" />
+            <span className="komari-stat-label">流量重置日期</span>
+            <ArrowsClockwise size={15} className="komari-stat-icon text-muted" />
           </div>
           <div className="komari-stat-value mono mono-stat">
-            {totalConnections === null ? '—' : totalConnections}
+            {resetDayNum ? (
+              <>
+                <small className="text-muted" style={{ fontSize: '12px', marginRight: '3px' }}>每月</small>
+                {resetDayNum}
+                <small className="text-muted" style={{ fontSize: '12px', marginLeft: '2px' }}>日</small>
+              </>
+            ) : (
+              '每月 1 日'
+            )}
           </div>
         </div>
       </div>
 
-      {/* 3. 硬件与系统信息卡片 (2x2 宫格) */}
-      <div className="komari-info-grid-4">
-        {/* 卡片 1: 硬件信息 */}
+      {/* 3. 硬件与系统信息 (左右两列主卡片) */}
+      <div className="komari-dual-grid">
+        {/* 左侧: 硬件信息 */}
         <div className="komari-info-card">
           <div className="komari-info-header">
-            <h3>硬件信息</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Cpu size={16} className="text-blue" />
+              <h3 style={{ margin: 0 }}>硬件信息</h3>
+            </div>
             <a
               href={cpuBenchmarkUrl}
               target="_blank"
@@ -1468,39 +1469,58 @@ export function NodeDetailPage({
           <div className="komari-info-rows">
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <Cpu size={14} /> CPU
+                <Cpu size={14} /> CPU 型号
               </span>
-              <span className="komari-info-val mono">{cpuModel}{cpuMhz ? ` (${cpuMhz} MHz)` : ''}</span>
+              <span className="komari-info-val komari-val-wrap mono" title={cpuModel}>
+                {cpuModel}{cpuMhz ? ` (${cpuMhz} MHz)` : ''}
+              </span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <Globe size={14} /> IP
-              </span>
-              <span className="komari-info-val mono">{publicIp}</span>
-            </div>
-            <div className="komari-info-row">
-              <span className="komari-info-label">
-                <Desktop size={14} /> 物理核心
+                <Desktop size={14} /> CPU 核心数
               </span>
               <span className="komari-info-val mono">{cores === null ? '—' : `${cores} 核`}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <WifiHigh size={14} /> 虚拟化
+                <Terminal size={14} /> 架构
               </span>
-              <span className="komari-info-val mono">{arch}</span>
+              <span className="komari-info-val mono">{arch || 'x86_64'}</span>
+            </div>
+            <div className="komari-info-row">
+              <span className="komari-info-label">
+                <WifiHigh size={14} /> 虚拟化方式
+              </span>
+              <span className="komari-info-val mono">{effectiveNode?.virtualization || resource?.virtualization || (arch?.toLowerCase?.() === 'kvm' ? 'KVM' : 'KVM')}</span>
+            </div>
+            <div className="komari-info-row">
+              <span className="komari-info-label">
+                <Gauge size={14} /> 性能跑分
+              </span>
+              <span className="komari-info-val mono">
+                {customMeta.cpuMark || customMeta.cpuScore || effectiveNode?.cpu_mark ? `${customMeta.cpuMark || customMeta.cpuScore || effectiveNode?.cpu_mark} 分` : (
+                  <a
+                    href={cpuBenchmarkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="komari-bench-link mono"
+                  >
+                    查询跑分 ↗
+                  </a>
+                )}
+              </span>
             </div>
             {cpuTempC !== null && cpuTempC > 0 && (
               <div className="komari-info-row">
                 <span className="komari-info-label">
-                  <Thermometer size={14} className={cpuTempC > 85 ? 'text-rose' : cpuTempC > 75 ? 'text-amber' : cpuTempC > 60 ? 'text-blue' : 'text-mint'} /> CPU 实时温度
+                  <Thermometer size={14} className={cpuTempC > 85 ? 'text-rose' : cpuTempC > 75 ? 'text-amber' : cpuTempC > 60 ? 'text-blue' : 'text-mint'} /> CPU 温度
                 </span>
                 <span className="komari-info-val mono" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontWeight: 700, color: cpuTempC > 85 ? '#ef4444' : cpuTempC > 75 ? '#f59e0b' : cpuTempC > 60 ? '#38bdf8' : '#10b981' }}>
                     {cpuTempC.toFixed(1)} °C
                   </span>
                   <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: cpuTempC > 85 ? 'rgba(239, 68, 68, 0.15)' : cpuTempC > 75 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.12)', color: cpuTempC > 85 ? '#ef4444' : cpuTempC > 75 ? '#f59e0b' : '#10b981' }}>
-                    {cpuTempC > 85 ? '过热警告' : cpuTempC > 75 ? '温度偏高' : '运转良好'}
+                    {cpuTempC > 85 ? '过热' : cpuTempC > 75 ? '偏高' : '良好'}
                   </span>
                 </span>
               </div>
@@ -1508,343 +1528,121 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 卡片 2: 系统信息 */}
+        {/* 右侧: 系统信息 */}
         <div className="komari-info-card">
           <div className="komari-info-header">
-            <h3>系统信息</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Desktop size={16} className="text-mint" />
+              <h3 style={{ margin: 0 }}>系统信息</h3>
+            </div>
+            <span className="badge badge-neutral text-xs mono">
+              {osType || 'Linux'}
+            </span>
           </div>
           <div className="komari-info-rows">
             <div className="komari-info-row">
               <span className="komari-info-label">
                 <DistroIcon os={os} className="komari-distro-icon" /> 操作系统
               </span>
-              <span className="komari-info-val mono">{os}</span>
+              <span className="komari-info-val mono" title={os}>{os || '—'}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
                 <Tag size={14} /> 内核版本
               </span>
-              <span className="komari-info-val mono">{kernel}</span>
+              <span className="komari-info-val mono" title={kernel}>{kernel || '—'}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
                 <Clock size={14} /> 运行时间
               </span>
-              <span className="komari-info-val mono">{uptimeText}</span>
+              <span className="komari-info-val mono">{uptimeText || '—'}</span>
             </div>
             <div className="komari-info-row">
               <span className="komari-info-label">
-                <Globe size={14} /> 运营商
+                <Globe size={14} /> 运营商 / 标签
               </span>
-              <span className="komari-info-val mono">{ispText}</span>
+              <span className="komari-info-val mono" title={ispText}>{ispText || '—'}</span>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* 卡片 3: IP 质量（白名单数据安全展示） */}
-        <div className="komari-info-card komari-ip-quality-card">
-          <div className="komari-info-header komari-ip-quality-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} className="text-mint" /> <h3>IP 质量</h3></span>
-            <span className={`badge ${
-              ipQuality?.risk === 'high' ? 'badge-rose' :
-              ipQuality?.risk === 'medium' ? 'badge-amber' :
-              ipQuality?.risk === 'low' ? 'badge-mint' :
-              'badge-neutral'
-            }`}>
-              {publicDetailLoading || loadingIpQuality
-                ? '检测中'
-                : ipQuality?.risk === 'high'
-                ? '高风险'
-                : ipQuality?.risk === 'medium'
-                ? '中风险'
-                : ipQuality?.risk === 'low'
-                ? '低风险'
-                : ipQuality
-                ? '未知风险'
-                : publicDetailError === 'unauthorized'
-                ? '未授权'
-                : publicDetailError
-                ? '请求失败'
-                : '等待检测'}
-            </span>
-          </div>
-          <div className="komari-ip-quality-body" style={{ paddingTop: '8px' }}>
-            {publicDetailLoading || loadingIpQuality ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
-                <CircleNotch size={16} className="spin text-blue" />
-                <span>正在同步 IP 质量检测样本…</span>
-              </div>
-            ) : ipQuality ? (
-              <>
-                {publicDetailError && (
-                  <div className="ip-quality-stale-alert">
-                    检测服务暂时不可用，显示最近一次成功结果
-                  </div>
-                )}
-                {/* 第一行：4 个紧凑摘要格 */}
-                <div className="ip-quality-summary-grid">
-                  <div className="ip-quality-summary-item risk">
-                    <span className="label">综合风险</span>
-                    <span className={`value risk-${ipQuality.risk === 'low' ? 'low' : ipQuality.risk === 'medium' ? 'medium' : ipQuality.risk === 'high' ? 'high' : 'unknown'}`}>
-                      {ipQuality.risk === 'low' ? (
-                        <ShieldCheck size={14} className="text-mint" />
-                      ) : ipQuality.risk === 'medium' ? (
-                        <ShieldWarning size={14} className="text-amber" />
-                      ) : ipQuality.risk === 'high' ? (
-                        <ShieldWarning size={14} className="text-rose" />
-                      ) : (
-                        <Shield size={14} className="text-muted" />
-                      )}
-                      <span>
-                        {ipQuality.risk === 'low'
-                          ? '低风险'
-                          : ipQuality.risk === 'medium'
-                          ? '中风险'
-                          : ipQuality.risk === 'high'
-                          ? '高风险'
-                          : '未知风险'}
-                      </span>
-                    </span>
-                  </div>
-
-                  <div className="ip-quality-summary-item">
-                    <span className="label">IP 类型</span>
-                    <span className="value">{formatIPQualityType(ipQuality.ip_type)}</span>
-                  </div>
-
-                  <div className="ip-quality-summary-item">
-                    <span className="label">地区</span>
-                    <span className="value" title={[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}>
-                      {[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}
-                    </span>
-                  </div>
-
-                  <div className="ip-quality-summary-item">
-                    <span className="label">ASN</span>
-                    <span className="value" title={[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}>
-                      {[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 第二行：两个信息面板 */}
-                <div className="ip-quality-detail-grid ip-quality-detail-grid-two">
-                  {/* 面板 1: 风险评分 */}
-                  <section className="ip-quality-panel">
-                    <div className="ip-quality-panel-title">
-                      <span className="panel-title-text">
-                        <Gauge size={14} />
-                        <span>风险评分（越低越好）</span>
-                      </span>
-                    </div>
-                    <div className="ip-quality-panel-body">
-                      {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 ? (
-                        <div className="ip-quality-score-list">
-                          {Object.entries(ipQuality.sources).map(([sourceKey, scoreVal]) => {
-                            const scoreNum = Number(scoreVal)
-                            const isNum = Number.isFinite(scoreNum)
-                            const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
-                            const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
-                            const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
-                            const label = formatIPQualitySourceName(sourceKey)
-                            return (
-                              <div key={sourceKey} className="ip-quality-score-row">
-                                <span className="ip-quality-score-label" title={label}>{label}</span>
-                                <div className="ip-quality-score-track">
-                                  <div
-                                    className={`ip-quality-score-bar score-${tone}`}
-                                    style={{ width: `${pct}%` }}
-                                  />
-                                </div>
-                                <span className={`ip-quality-score-value score-text-${tone} mono`}>
-                                  {displayVal}
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <div className="ip-quality-empty-inline">
-                          <span>暂无多来源评分</span>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  {/* 面板 2: 数据库标记 */}
-                  <section className="ip-quality-panel">
-                    <div className="ip-quality-panel-title">
-                      <span className="panel-title-text">
-                        <Database size={14} />
-                        <span>数据库标记（命中 / 有结论的库）</span>
-                      </span>
-                    </div>
-                    <div className="ip-quality-panel-body">
-                      <div className="ip-quality-flag-grid">
-                        {[
-                          ['代理', ipQuality.proxy],
-                          ['VPN', ipQuality.vpn],
-                          ['Tor', ipQuality.tor],
-                          ['滥用', ipQuality.abuse],
-                          ['机房', !ipQuality.ip_type || ipQuality.ip_type === 'unknown' ? null : (ipQuality.ip_type === 'hosting' || ipQuality.ip_type === 'datacenter')],
-                        ].map(([label, val]) => {
-                          const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
-                          return (
-                            <div key={label} className="ip-quality-flag-item">
-                              <span className="flag-label">{label}</span>
-                              <span className={`flag-status flag-${status}`}>
-                                {val === true ? '是' : val === false ? '否' : '未知'}
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                      <div className="ip-quality-panel-footer">
-                        <small className="ip-quality-check-time">
-                          检测时间：{formatIPQualityDateTime(ipQuality.checked_at)} · 来源未提供统计
-                        </small>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-
-                {/* IPQA 风险变化面板 */}
-                <div className="ipqa-status-strip">
-                  <div className="ipqa-status-header">
-                    <div className="ipqa-status-title">
-                      <ShieldCheck size={14} className="text-mint" />
-                      <span>IPQA 风险变化</span>
-                    </div>
-                    {!ipQuality?.ipqa_enabled ? (
-                      <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
-                    ) : !ipQuality?.ipqa_installed ? (
-                      <span className="ipqa-badge ipqa-badge-gray">节点未安装 IP-Quality-Archive</span>
-                    ) : ipQuality?.collection_error ? (
-                      <span className="ipqa-badge ipqa-badge-orange">采集失败</span>
-                    ) : ipQuality?.highest_severity === 'CRITICAL' ? (
-                      <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重风险</span>
-                    ) : ipQuality?.highest_severity === 'WARNING' ? (
-                      <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
-                    ) : ipQuality?.highest_severity === 'INFO' ? (
-                      <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
-                    ) : (
-                      <span className="ipqa-badge ipqa-badge-green">无变化</span>
-                    )}
-                  </div>
-
-                  <div className="ipqa-status-body">
-                    {!ipQuality?.ipqa_enabled ? (
-                      <div className="ipqa-empty-text">未启用 IPQA</div>
-                    ) : !ipQuality?.ipqa_installed ? (
-                      <div className="ipqa-empty-text">节点未安装 IP-Quality-Archive</div>
-                    ) : ipQuality?.collection_error ? (
-                      <div className="ipqa-empty-text text-amber">IPQA 数据暂时不可用（等待 Agent 质量探针更新）</div>
-                    ) : (
-                      <div className="ipqa-metrics-grid">
-                        <div className="ipqa-metric-item">
-                          <span className="label">最近检测</span>
-                          <span className="value mono">{ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待首次检测'}</span>
-                        </div>
-                        <div className="ipqa-metric-item">
-                          <span className="label">协议簇 / 等级</span>
-                          <span className={`value mono sev-${(ipQuality.highest_severity || 'none').toLowerCase()}`}>
-                            {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {ipQuality.highest_severity || '无'}
-                          </span>
-                        </div>
-                        <div className="ipqa-metric-item">
-                          <span className="label">今日告警</span>
-                          <span className="value mono">
-                            {ipQuality.alert_count ?? 0} 项
-                            {ipQuality.critical_count > 0 && <small className="text-rose"> ({ipQuality.critical_count} 严重)</small>}
-                          </span>
-                        </div>
-                        <div className="ipqa-metric-item ipqa-metric-wide">
-                          <span className="label">变化摘要</span>
-                          <span className="value text-truncate" title={ipQuality.recent_change_summary || (ipQuality.has_recent_changes ? '检测到风险变动' : '与前次归档对比无变化')}>
-                            {ipQuality.has_recent_changes ? (ipQuality.recent_change_summary || '检测到风险变动') : '与前次归档对比无变化'}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldWarning size={16} className="text-amber" />
-                  <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '等待 Agent 首次质量检测'}</span>
-                </div>
-                <div className="ipqa-status-strip" style={{ marginTop: '4px' }}>
-                  <div className="ipqa-status-header">
-                    <div className="ipqa-status-title">
-                      <ShieldCheck size={14} className="text-mint" />
-                      <span>IPQA 风险变化</span>
-                    </div>
-                    <span className="ipqa-badge ipqa-badge-gray">节点未安装 IPQA</span>
-                  </div>
-                  <div className="ipqa-empty-text">节点未安装 IP-Quality-Archive</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 卡片 4: 存储信息 */}
+      {/* 4. 存储与网络摘要 (左右两列主卡片) */}
+      <div className="komari-dual-grid">
+        {/* 左侧: 存储信息 */}
         <div className="komari-info-card">
           <div className="komari-info-header">
-            <h3>存储信息</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <HardDrive size={16} className="text-violet" />
+              <h3 style={{ margin: 0 }}>存储信息</h3>
+            </div>
+            <span className="badge badge-neutral text-xs mono">
+              RAM {memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '—'}
+            </span>
           </div>
-          <div className="komari-storage-cols">
-            <div className="komari-storage-col">
-              <span className="komari-storage-label">
-                <HardDrive size={14} /> 内存
-              </span>
-              <strong className="komari-storage-val mono">{formatBytes(memTotal)}</strong>
-              <small className="komari-storage-sub mono text-muted">
-                已用: {formatBytes(memUsed)}
-              </small>
-            </div>
-            <div className="komari-storage-col">
-              <span className="komari-storage-label">
-                <ArrowsLeftRight size={14} /> 内存交换
-              </span>
-              <strong className="komari-storage-val mono">{formatBytes(swapTotal)}</strong>
-              <small className="komari-storage-sub mono text-muted">
-                已用: {formatBytes(swapUsed)}
-              </small>
-            </div>
-            <div className="komari-storage-col">
-              <span className="komari-storage-label">
-                <HardDrive size={14} /> 硬盘
-              </span>
-              <strong className="komari-storage-val mono">{formatBytes(diskTotal)}</strong>
-              <small className="komari-storage-sub mono text-muted">
-                已用: {formatBytes(diskUsed)}
-              </small>
-            </div>
-            {disks.length > 0 && (
-              <div className="komari-storage-col">
-                <span className="komari-storage-label">
-                  <Database size={14} /> 磁盘 I/O
+          <div className="komari-info-rows">
+            {/* 内存 */}
+            <div className="komari-info-row">
+              <span className="komari-info-label"><HardDrive size={14} /> 内存</span>
+              <div className="komari-storage-metric">
+                <span className="komari-info-val mono">
+                  {formatBytes(memUsed)} / {formatBytes(memTotal)}
+                  <small className="text-muted"> ({memTotal ? Math.round((memUsed / memTotal) * 100) : 0}%)</small>
                 </span>
-                <strong className="komari-storage-val mono" style={{ fontSize: '13px' }}>
-                  {formatRate(totalDiskReadRate + totalDiskWriteRate)}
-                </strong>
-                <small className="komari-storage-sub mono text-muted">
-                  读 {formatRate(totalDiskReadRate)} · 写 {formatRate(totalDiskWriteRate)}
-                </small>
+                <div className="komari-mini-progress">
+                  <div className="komari-mini-bar" style={{ width: `${memTotal ? Math.min(100, Math.round((memUsed / memTotal) * 100)) : 0}%`, backgroundColor: 'var(--blue, #5e6ad2)' }} />
+                </div>
               </div>
-            )}
+            </div>
+            {/* Swap */}
+            <div className="komari-info-row">
+              <span className="komari-info-label"><ArrowsLeftRight size={14} /> Swap</span>
+              <div className="komari-storage-metric">
+                <span className="komari-info-val mono">
+                  {swapTotal > 0 ? (
+                    <>
+                      {formatBytes(swapUsed)} / {formatBytes(swapTotal)}
+                      <small className="text-muted"> ({Math.round((swapUsed / swapTotal) * 100)}%)</small>
+                    </>
+                  ) : '未开启'}
+                </span>
+                {swapTotal > 0 && (
+                  <div className="komari-mini-progress">
+                    <div className="komari-mini-bar" style={{ width: `${Math.min(100, Math.round((swapUsed / swapTotal) * 100))}%`, backgroundColor: 'var(--amber, #f59e0b)' }} />
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* 硬盘 */}
+            <div className="komari-info-row">
+              <span className="komari-info-label"><Database size={14} /> 硬盘</span>
+              <div className="komari-storage-metric">
+                <span className="komari-info-val mono">
+                  {formatBytes(diskUsed)} / {formatBytes(diskTotal)}
+                  <small className="text-muted"> ({diskTotal ? Math.round((diskUsed / diskTotal) * 100) : 0}%)</small>
+                </span>
+                <div className="komari-mini-progress">
+                  <div className="komari-mini-bar" style={{ width: `${diskTotal ? Math.min(100, Math.round((diskUsed / diskTotal) * 100)) : 0}%`, backgroundColor: 'var(--mint, #10b981)' }} />
+                </div>
+              </div>
+            </div>
+            {/* 磁盘 I/O */}
+            <div className="komari-info-row">
+              <span className="komari-info-label"><ArrowsClockwise size={14} /> 磁盘 I/O</span>
+              <span className="komari-info-val mono" title={`读 ${formatRate(totalDiskReadRate)} · 写 ${formatRate(totalDiskWriteRate)}`}>
+                读 {formatRate(totalDiskReadRate)} · 写 {formatRate(totalDiskWriteRate)}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* 卡片 4: 网络信息 */}
+        {/* 右侧: 网络信息 */}
         <div className="komari-info-card">
           <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <WifiHigh size={16} className="text-mint" />
-              <h3 style={{ margin: 0 }}>网络信息与双栈架构</h3>
+              <h3 style={{ margin: 0 }}>网络信息</h3>
             </div>
             <button
               type="button"
@@ -1854,57 +1652,871 @@ export function NodeDetailPage({
               title="配置流量配额、重置日与独立网卡"
             >
               <Lightning size={13} className="text-mint" />
-              <span>流量与重置</span>
+              <span>流量设置</span>
             </button>
           </div>
           <div className="komari-info-rows">
+            {/* 总流量 */}
             <div className="komari-info-row">
-              <span className="komari-info-label">
-                <ShareNetwork size={14} /> 网络栈与公网 IP
-              </span>
-              <span className="komari-info-val inline-flex items-center gap-2 flex-wrap">
-                {hasDualStack ? (
-                  <span className="badge badge-mint text-xs">IPv4 / IPv6 双栈</span>
-                ) : nodeIPv4 ? (
-                  <span className="badge badge-neutral text-xs">IPv4 单栈</span>
-                ) : nodeIPv6 ? (
-                  <span className="badge badge-neutral text-xs">IPv6 单栈</span>
-                ) : (
-                  <span className="text-muted text-xs mono">—</span>
-                )}
-                {!isPublic && nodeIPv4 && <span className="mono text-xs text-primary" title={`IPv4: ${nodeIPv4}`}>{nodeIPv4}</span>}
-                {!isPublic && nodeIPv6 && <span className="mono text-xs text-muted" title={`IPv6: ${nodeIPv6}`}>{nodeIPv6.length > 20 ? `${nodeIPv6.slice(0, 18)}…` : nodeIPv6}</span>}
+              <span className="komari-info-label"><TrendUp size={14} /> 总流量</span>
+              <span className="komari-info-val mono">
+                {formatBytes(totalTraffic)}
+                <small className="text-muted"> (配额 {trafficQuotaText})</small>
               </span>
             </div>
+            {/* 网络速度 */}
             <div className="komari-info-row">
-              <span className="komari-info-label">
-                <WifiHigh size={14} /> 双向累计流量
-              </span>
+              <span className="komari-info-label"><ArrowsClockwise size={14} /> 网络速度</span>
               <span className="komari-info-val mono">
-                {formatBytes(rawTx)} (出) / {formatBytes(rawRx)} (入) <span className="text-muted">(配额 {trafficQuotaText})</span>
+                ↓ {formatRate(rate?.down)} · ↑ {formatRate(rate?.up)}
               </span>
             </div>
+            {/* 下载 */}
             <div className="komari-info-row">
-              <span className="komari-info-label">
-                <TrendUp size={14} /> 近一天下行/上行
-              </span>
-              <span className="komari-info-val mono">
-                {dailyTrafficText}
-              </span>
+              <span className="komari-info-label"><ArrowDown size={14} /> 累计下载 (Rx)</span>
+              <span className="komari-info-val mono">{formatBytes(rawRx)}</span>
             </div>
+            {/* 上传 */}
             <div className="komari-info-row">
-              <span className="komari-info-label">
-                <ArrowsClockwise size={14} /> 实时网络速率
-              </span>
-              <span className="komari-info-val mono">
-                ^ {formatRate(rate?.up)} · v {formatRate(rate?.down)}
-              </span>
+              <span className="komari-info-label"><ArrowUp size={14} /> 累计上传 (Tx)</span>
+              <span className="komari-info-val mono">{formatBytes(rawTx)}</span>
+            </div>
+            {/* 流量重置日期 */}
+            <div className="komari-info-row">
+              <span className="komari-info-label"><CalendarBlank size={14} /> 流量重置日期</span>
+              <span className="komari-info-val mono">{resetDayDisplay}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 物理与虚拟网卡矩阵 (Per-NIC Metrics) */}
+      {/* 5. IP 质量（白名单数据安全展示） */}
+      <div className="komari-info-card komari-ip-quality-card" style={{ marginBottom: '10px' }}>
+        <div className="komari-info-header komari-ip-quality-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} className="text-mint" /> <h3 style={{ margin: 0 }}>IP 质量</h3></span>
+          <span className={`badge ${
+            ipQuality?.risk === 'high' ? 'badge-rose' :
+            ipQuality?.risk === 'medium' ? 'badge-amber' :
+            ipQuality?.risk === 'low' ? 'badge-mint' :
+            'badge-neutral'
+          }`}>
+            {publicDetailLoading || loadingIpQuality
+              ? '检测中'
+              : ipQuality?.risk === 'high'
+              ? '高风险'
+              : ipQuality?.risk === 'medium'
+              ? '中风险'
+              : ipQuality?.risk === 'low'
+              ? '低风险'
+              : ipQuality
+              ? '未知风险'
+              : publicDetailError === 'unauthorized'
+              ? '未授权'
+              : publicDetailError
+              ? '请求失败'
+              : '等待检测'}
+          </span>
+        </div>
+        <div className="komari-ip-quality-body" style={{ paddingTop: '8px' }}>
+          {publicDetailLoading || loadingIpQuality ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+              <CircleNotch size={16} className="spin text-blue" />
+              <span>正在同步 IP 质量检测样本…</span>
+            </div>
+          ) : ipQuality ? (
+            <>
+              {publicDetailError && (
+                <div className="ip-quality-stale-alert">
+                  检测服务暂时不可用，显示最近一次成功结果
+                </div>
+              )}
+              {/* 第一行：5 个紧凑摘要格 */}
+              <div className="ip-quality-summary-grid ip-quality-summary-grid-five">
+                <div className="ip-quality-summary-item risk">
+                  <span className="label">综合风险</span>
+                  <span className={`value risk-${ipQuality.risk === 'low' ? 'low' : ipQuality.risk === 'medium' ? 'medium' : ipQuality.risk === 'high' ? 'high' : 'unknown'}`}>
+                    {ipQuality.risk === 'low' ? (
+                      <ShieldCheck size={14} className="text-mint" />
+                    ) : ipQuality.risk === 'medium' ? (
+                      <ShieldWarning size={14} className="text-amber" />
+                    ) : ipQuality.risk === 'high' ? (
+                      <ShieldWarning size={14} className="text-rose" />
+                    ) : (
+                      <Shield size={14} className="text-muted" />
+                    )}
+                    <span>
+                      {ipQuality.risk === 'low'
+                        ? '低风险'
+                        : ipQuality.risk === 'medium'
+                        ? '中风险'
+                        : ipQuality.risk === 'high'
+                        ? '高风险'
+                        : '未知风险'}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="ip-quality-summary-item">
+                  <span className="label">IP 类型</span>
+                  <span className="value">{formatIPQualityType(ipQuality.ip_type)}</span>
+                </div>
+
+                <div className="ip-quality-summary-item">
+                  <span className="label">地区</span>
+                  <span className="value" title={[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}>
+                    {[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}
+                  </span>
+                </div>
+
+                <div className="ip-quality-summary-item">
+                  <span className="label">ASN / 组织</span>
+                  <span className="value" title={[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}>
+                    {[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}
+                  </span>
+                </div>
+
+                <div className="ip-quality-summary-item">
+                  <span className="label">最后检测</span>
+                  <span className="value mono" title={ipQuality.checked_at ? formatIPQualityDateTime(ipQuality.checked_at) : '等待检测'}>
+                    {ipQuality.checked_at ? formatIPQualityDateTime(ipQuality.checked_at) : (ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待检测')}
+                  </span>
+                </div>
+              </div>
+
+              {/* 第二行：三个信息面板 */}
+              <div className="ip-quality-detail-grid ip-quality-detail-grid-two ip-quality-detail-grid-three">
+                {/* 面板 1: 风险评分 */}
+                <section className="ip-quality-panel">
+                  <div className="ip-quality-panel-title">
+                    <span className="panel-title-text">
+                      <Gauge size={14} />
+                      <span>风险评分（越低越好）</span>
+                    </span>
+                  </div>
+                  <div className="ip-quality-panel-body">
+                    {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 ? (
+                      <div className="ip-quality-score-list">
+                        {Object.entries(ipQuality.sources).map(([sourceKey, scoreVal]) => {
+                          const scoreNum = Number(scoreVal)
+                          const isNum = Number.isFinite(scoreNum)
+                          const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
+                          const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
+                          const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
+                          const label = formatIPQualitySourceName(sourceKey)
+                          return (
+                            <div key={sourceKey} className="ip-quality-score-row">
+                              <span className="ip-quality-score-label" title={label}>{label}</span>
+                              <div className="ip-quality-score-track">
+                                <div
+                                  className={`ip-quality-score-bar score-${tone}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className={`ip-quality-score-value score-text-${tone} mono`}>
+                                {displayVal}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="ip-quality-empty-inline">
+                        <span>暂无多来源评分</span>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* 面板 2: 数据库标记 */}
+                <section className="ip-quality-panel">
+                  <div className="ip-quality-panel-title">
+                    <span className="panel-title-text">
+                      <Database size={14} />
+                      <span>数据库标记（命中 / 有结论的库）</span>
+                    </span>
+                  </div>
+                  <div className="ip-quality-panel-body">
+                    <div className="ip-quality-flag-grid">
+                      {[
+                        ['代理', ipQuality.proxy],
+                        ['VPN', ipQuality.vpn],
+                        ['Tor', ipQuality.tor],
+                        ['滥用', ipQuality.abuse],
+                        ['机房', !ipQuality.ip_type || ipQuality.ip_type === 'unknown' ? null : (ipQuality.ip_type === 'hosting' || ipQuality.ip_type === 'datacenter')],
+                      ].map(([label, val]) => {
+                        const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
+                        return (
+                          <div key={label} className="ip-quality-flag-item">
+                            <span className="flag-label">{label}</span>
+                            <span className={`flag-status flag-${status}`}>
+                              {val === true ? '是' : val === false ? '否' : '未检测'}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="ip-quality-panel-footer">
+                      <small className="ip-quality-check-time">
+                        检测时间：{formatIPQualityDateTime(ipQuality.checked_at)} · 来源未提供统计
+                      </small>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 面板 3: IPQA 状态与历史变化 */}
+                <section className="ip-quality-panel">
+                  <div className="ip-quality-panel-title">
+                    <span className="panel-title-text">
+                      <ShieldCheck size={14} className="text-mint" />
+                      <span>IPQA 风险变化</span>
+                    </span>
+                    {!ipQuality?.ipqa_enabled ? (
+                      <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
+                    ) : !ipQuality?.ipqa_installed ? (
+                      <span className="ipqa-badge ipqa-badge-gray">未安装</span>
+                    ) : ipQuality?.collection_error ? (
+                      <span className="ipqa-badge ipqa-badge-orange">采集失败</span>
+                    ) : ipQuality?.highest_severity === 'CRITICAL' ? (
+                      <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
+                    ) : ipQuality?.highest_severity === 'WARNING' ? (
+                      <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
+                    ) : ipQuality?.highest_severity === 'INFO' ? (
+                      <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
+                    ) : (
+                      <span className="ipqa-badge ipqa-badge-green">无变化</span>
+                    )}
+                  </div>
+                  <div className="ipqa-panel-body">
+                    {!ipQuality?.ipqa_enabled ? (
+                      <div className="ip-quality-empty-inline" style={{ minHeight: '80px', flexDirection: 'column', gap: '4px' }}>
+                        <span className="text-muted" style={{ fontSize: '12px' }}>未启用 IPQA</span>
+                        <span className="text-muted" style={{ fontSize: '10px' }}>支持 IP-Quality-Archive 历史比对</span>
+                      </div>
+                    ) : !ipQuality?.ipqa_installed ? (
+                      <div className="ip-quality-empty-inline" style={{ minHeight: '80px' }}>
+                        <span className="text-muted" style={{ fontSize: '12px' }}>节点未安装 IP-Quality-Archive</span>
+                      </div>
+                    ) : ipQuality?.collection_error ? (
+                      <div className="ip-quality-empty-inline text-amber" style={{ minHeight: '80px' }}>
+                        <span style={{ fontSize: '12px' }}>IPQA 数据暂时不可用</span>
+                      </div>
+                    ) : (
+                      <div className="ipqa-panel-metrics">
+                        <div className="ipqa-metric-row">
+                          <span className="label">最近检测</span>
+                          <span className="value mono">{ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待检测'}</span>
+                        </div>
+                        <div className="ipqa-metric-row">
+                          <span className="label">协议簇 / 等级</span>
+                          <span className={`value mono sev-${(ipQuality.highest_severity || 'none').toLowerCase()}`}>
+                            {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {ipQuality.highest_severity || '无'}
+                          </span>
+                        </div>
+                        <div className="ipqa-metric-row">
+                          <span className="label">今日告警</span>
+                          <span className="value mono">
+                            {ipQuality.alert_count ?? 0} 项
+                            {ipQuality.critical_count > 0 && <small className="text-rose"> ({ipQuality.critical_count} 严重)</small>}
+                          </span>
+                        </div>
+                        <div className="ipqa-metric-row">
+                          <span className="label">变化摘要</span>
+                          <span className="value text-truncate" title={ipQuality.recent_change_summary || (ipQuality.has_recent_changes ? '检测到风险变动' : '与前次归档对比无变化')}>
+                            {ipQuality.has_recent_changes ? (ipQuality.recent_change_summary || '检测到风险变动') : '与前次归档对比无变化'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            </>
+          ) : (
+            <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldWarning size={16} className="text-amber" />
+                <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '等待 Agent 首次质量检测'}</span>
+              </div>
+              <div className="ipqa-status-strip" style={{ marginTop: '4px' }}>
+                <div className="ipqa-status-header">
+                  <div className="ipqa-status-title">
+                    <ShieldCheck size={14} className="text-mint" />
+                    <span>IPQA 风险变化</span>
+                  </div>
+                  <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
+                </div>
+                <div className="ipqa-empty-text">未启用 IPQA</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+
+{/* 全球流媒体与 AI 服务解锁能力横向卡片 */}
+      <section className="komari-media-strip-card">
+        <div className="komari-media-strip-header">
+          <div className="komari-media-strip-title">
+            <Play size={15} className="text-mint" />
+            <h3>全球流媒体与 AI 服务解锁能力</h3>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {Array.isArray(mediaData) && mediaData.length > 0 && (
+              <span className="komari-media-strip-summary mono">
+                {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
+              </span>
+            )}
+            {Array.isArray(mediaData) && mediaData.length > 8 && (
+              <button
+                type="button"
+                className="komari-media-strip-toggle-btn"
+                onClick={() => setShowAllMedia(!showAllMedia)}
+              >
+                {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
+          <div className="komari-media-strip-loading">
+            <CircleNotch size={16} className="spin text-blue" />
+            <span>正在同步流媒体 / AI 检测结果…</span>
+          </div>
+        ) : !mediaData || mediaData.length === 0 ? (
+          <div className="komari-media-strip-empty">
+            <Play size={18} className="text-muted" style={{ opacity: 0.5 }} />
+            <span>暂无流媒体 / AI 检测结果</span>
+          </div>
+        ) : (
+          <div className="komari-media-strip-list">
+            {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
+              const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
+              const matchPopular = POPULAR_MEDIA.find((p) => {
+                const aliases = p.alias || [p.id]
+                const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                const dName = (m.detector || m.result?.detector || '').toLowerCase()
+                return aliases.some((a) => dId.includes(a) || dName.includes(a))
+              })
+              const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
+              const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
+              const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
+
+              const rawStatus = (m.status || m.result?.status || '').toLowerCase()
+              let tone = 'unknown'
+              let statusText = '未知'
+              if (rawStatus === 'available') {
+                tone = 'available'
+                statusText = '已解锁'
+              } else if (rawStatus === 'unavailable') {
+                tone = 'unavailable'
+                statusText = '未解锁'
+              } else if (rawStatus === 'blocked') {
+                tone = 'blocked'
+                statusText = '已封锁'
+              } else if (rawStatus === 'error') {
+                tone = 'error'
+                statusText = '异常'
+              } else if (rawStatus === 'timeout') {
+                tone = 'timeout'
+                statusText = '超时'
+              }
+
+              const rawRegion = m.region || m.result?.region
+              const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : '—'
+
+              const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+              const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
+                ? `${Math.round(Number(lat))}ms`
+                : '—'
+
+              return (
+                <div key={m.detector_id || `${name}-${idx}`} className="komari-media-service-card">
+                  <div className="komari-media-service-icon" style={{ backgroundColor: iconBg }}>
+                    {symbol}
+                  </div>
+                  <div className="komari-media-service-name" title={name}>
+                    {name}
+                  </div>
+                  <div className={`komari-media-service-status status-${tone}`}>
+                    {statusText}
+                  </div>
+                  <div className="komari-media-service-region mono" title={regionText !== '—' ? `检测地区: ${regionText}` : undefined}>
+                    {regionText}
+                  </div>
+                  <div className="komari-media-service-latency mono">
+                    {latencyText}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* 4. 历史时序折线图表区 (带时间范围切换器) */}
+      <div className="komari-charts-section">
+        {/* 时间切换条 */}
+        <div className="komari-time-tabs-row">
+          <div className="komari-time-tabs">
+            {['实时', '4小时', '1天', '7天', '30天'].map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={`komari-time-tab ${activeTimeRange === tab ? 'active' : ''}`}
+                onClick={() => handleTimeRangeChange(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 图表宫格 */}
+        <div className="komari-charts-grid">
+          {/* 1. CPU 与负载 */}
+          <KomariChartCard
+            title="CPU 与负载"
+            icon="🔴"
+            badgeText={cpuPercent === null ? '—' : `${cpuPercent.toFixed(1)}%`}
+            series={telemetrySeries.cpus}
+            strokeColor="#f97316"
+            yMax="100%"
+            yMid="50%"
+            yMin="0%"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 2. 内存与 Swap */}
+          <KomariChartCard
+            title="内存与 Swap"
+            icon="🟣"
+            badgeText={`${formatBytes(memUsed)} / ${formatBytes(memTotal)}`}
+            series={telemetrySeries.mems}
+            strokeColor="#38bdf8"
+            dualSeries={{ data: telemetrySeries.swaps, color: '#f59e0b' }}
+            yMax={`${formatBytes(memTotal)}`}
+            yMid={memTotal === null ? '—' : formatBytes(memTotal / 2)}
+            yMin="0 B"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 3. 磁盘 */}
+          <KomariChartCard
+            title="磁盘"
+            icon="🟢"
+            badgeText={`${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}`}
+            series={telemetrySeries.disks}
+            strokeColor="#10b981"
+            yMax={`${formatBytes(diskTotal)}`}
+            yMid={diskTotal === null ? '—' : formatBytes(diskTotal / 2)}
+            yMin="0 B"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 4. 实时网络 */}
+          <KomariChartCard
+            title="实时网络"
+            icon="🔵"
+            badgeText={`^ ${formatRate(rate?.up)}  v ${formatRate(rate?.down)}`}
+            series={telemetrySeries.downs}
+            strokeColor="#0284c7"
+            dualSeries={{ data: telemetrySeries.ups, color: '#a855f7' }}
+            yMax={netYMax}
+            yMid={netYMid}
+            yMin="0 B/s"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 5. GPU 利用率 (仅当机器配置独立显卡时展示) */}
+          {hasGpu && (
+            <KomariChartCard
+              title="GPU 利用率"
+              icon="🟢"
+            badgeText={gpuPercent === null ? '—' : `${gpuPercent.toFixed(1)}%`}
+              series={telemetrySeries.gpus}
+              strokeColor="#10b981"
+              yMax="100%"
+              yMid="50%"
+              yMin="0%"
+              timeLabels={telemetrySeries.times}
+            />
+          )}
+
+          {/* 6. 网络连接 */}
+          <KomariChartCard
+            title="网络连接"
+            icon="🔴"
+            badgeText={`TCP: ${tcpCount === null ? '—' : tcpCount}  UDP: ${udpCount === null ? '—' : udpCount}`}
+            series={telemetrySeries.conns}
+            strokeColor="#ef4444"
+            yMax={`${connYMax}`}
+            yMid={`${connYMid}`}
+            yMin="0"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 7. 进程 */}
+          <KomariChartCard
+            title="进程"
+            icon="🔵"
+            badgeText={processCount === null ? '—' : `${processCount}`}
+            series={telemetrySeries.procs}
+            strokeColor="#6366f1"
+            yMax={`${procYMax}`}
+            yMid={`${procYMid}`}
+            yMin="0"
+            timeLabels={telemetrySeries.times}
+          />
+
+          {/* 8. CPU 温度遥测 */}
+          {(cpuTempC !== null || (telemetrySeries.temps && telemetrySeries.temps.some((t) => typeof t === 'number' && Number.isFinite(t)))) && (
+            <KomariChartCard
+              title="CPU 实时温度"
+              icon="🌡️"
+              badgeText={`${cpuTempC !== null ? cpuTempC.toFixed(1) : (() => { const values = (telemetrySeries.temps || []).filter((value) => typeof value === 'number' && Number.isFinite(value)); const last = values[values.length - 1]; return last === undefined ? '—' : last.toFixed(1) })()} °C`}
+              series={telemetrySeries.temps}
+              strokeColor="#f59e0b"
+              yMax={`${Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10)} °C`}
+              yMid={`${Math.round(Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10) / 2)} °C`}
+              yMin="0 °C"
+              timeLabels={telemetrySeries.times}
+            />
+          )}
+
+          {/* 9. 存储 I/O 读写带宽 */}
+          {(disks.length > 0 || (telemetrySeries.diskReads && telemetrySeries.diskReads.some((r) => r > 0))) && (
+            <KomariChartCard
+              title="磁盘 I/O 读写吞吐"
+              icon="💾"
+              badgeText={`读 ${formatRate(totalDiskReadRate)} · 写 ${formatRate(totalDiskWriteRate)}`}
+              series={telemetrySeries.diskReads}
+              strokeColor="#10b981"
+              dualSeries={{ data: telemetrySeries.diskWrites, color: '#38bdf8' }}
+              yMax={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))))}
+              yMid={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))) / 2)}
+              yMin="0 B/s"
+              timeLabels={telemetrySeries.times}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* 5. 三网延迟与网络监测模块 (带节点快速筛选与平滑折线对比) */}
+      <div className="komari-ping-section">
+        <div className="komari-ping-toolbar">
+          <div className="komari-time-tabs">
+            {['1小时', '6小时', '12小时', '1天'].map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={`komari-time-tab ${activePingRange === tab ? 'active' : ''}`}
+                onClick={() => handlePingRangeChange(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          <div className="komari-ping-actions">
+            <button
+              type="button"
+              className="komari-ping-action-btn komari-btn-select-all"
+              onClick={() => handleSelectAllTargets(true)}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              className="komari-ping-action-btn komari-btn-deselect-all"
+              onClick={() => handleSelectAllTargets(false)}
+            >
+              全不选
+            </button>
+          </div>
+        </div>
+
+        {/* 测速目标卡片列表 */}
+        <div className="komari-targets-grid">
+          {pingTargets.length === 0 ? (
+            <div className="komari-targets-empty">
+              {checksLoading ? (
+                <>
+                  <CircleNotch size={18} className="spin text-blue" />
+                  <div><strong>正在同步三网检测数据…</strong><span>正在拉取最新延迟、丢包和抖动指标。</span></div>
+                </>
+              ) : checksError === 'unauthorized' ? (
+                <>
+                  <ShieldWarning size={18} className="text-amber" />
+                  <div><strong>三网检测指标需要管理员权限</strong><span>公网访客模式下仅可查看公开概要。</span></div>
+                </>
+              ) : checksError === 'request_failed' ? (
+                <>
+                  <WarningCircle size={18} className="text-rose" />
+                  <div><strong>三网检测数据请求失败</strong><span>服务端异常或网络波动，请稍后刷新重试。</span></div>
+                </>
+              ) : (
+                <>
+                  <ShareNetwork size={18} />
+                  <div><strong>当前节点暂未配置检测目标</strong><span>可在管理员后台配置电信、联通、移动目标以展示实时延迟、丢包与抖动。</span></div>
+                  {!isPublic && onNavigate && <button type="button" onClick={() => onNavigate('monitoring')}>去添加检测目标</button>}
+                </>
+              )}
+            </div>
+          ) : pingTargets.map((t) => {
+            const isChecked = Boolean(selectedTargets[t.id])
+            const jitterText = t.jitter === null || t.jitter === undefined || t.jitter === ''
+              ? '—'
+              : `${Number(t.jitter).toFixed(2)} ms`
+            return (
+              <div
+                key={t.id}
+                className={`komari-target-card ${isChecked ? 'active' : 'inactive'}`}
+                onClick={() => handleToggleTarget(t.id)}
+              >
+                <div className="komari-target-head">
+                  <div className="komari-target-head-left">
+                    <span className="komari-target-bar" style={{ backgroundColor: t.color }} />
+                    <strong className="komari-target-name">{t.name}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="komari-target-info-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setTargetInfoModal(t)
+                    }}
+                    title={`查看 ${t.name} 详情`}
+                  >
+                    ⓘ
+                  </button>
+                </div>
+                <div className="komari-target-stats mono">
+                  <span className="komari-target-stat-val">{t.latency}</span>
+                  <span className="komari-target-stat-dot">·</span>
+                  <span className={`komari-target-stat-val ${t.lossColor}`}>{t.loss}</span>
+                  <span className="komari-target-stat-dot">·</span>
+                  <span className="komari-target-stat-val text-muted">{jitterText}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* 平滑延迟多线对比折线图 */}
+        <div className="komari-ping-chart-card">
+          <div className="komari-ping-chart-header">
+            <button
+              type="button"
+              className={`komari-smooth-pill ${smoothPeaks ? 'active' : ''}`}
+              onClick={() => setSmoothPeaks((prev) => !prev)}
+              title="平滑峰值（过滤瞬时抖动尖峰）"
+            >
+              <span>平滑峰值</span>
+              <span className="komari-smooth-info">ⓘ</span>
+            </button>
+            <span className="komari-ping-y-label">延迟 (ms)</span>
+          </div>
+
+          <div className="komari-ping-chart-wrap">
+            {pingTargets.length === 0 ? (
+              <div className="komari-ping-empty-state komari-ping-empty-config">
+                {checksError === 'unauthorized' ? (
+                  <><ShieldWarning size={22} /><strong>三网检测受限</strong><span>公网访客模式下未授权查看历史采样曲线。</span></>
+                ) : checksError === 'request_failed' ? (
+                  <><WarningCircle size={22} /><strong>检测数据请求异常</strong><span>请稍后刷新重试。</span></>
+                ) : (
+                  <><ShareNetwork size={22} /><strong>暂无三网检测目标</strong><span>先添加电信、联通、移动检测目标，延迟曲线会在真实采样后自动出现。</span></>
+                )}
+              </div>
+            ) : pingChartData.targetPaths.length === 0 ? (
+              <div className="komari-ping-empty-state komari-ping-empty-config"><Clock size={22} /><strong>等待真实延迟采样</strong><span>检测目标已配置，探针回传数据后会显示曲线。</span></div>
+            ) : null}
+            <svg
+              viewBox={`0 0 ${pingChartData.width} ${pingChartData.height}`}
+              className="komari-ping-svg"
+              preserveAspectRatio="none"
+              onMouseMove={handleChartMouseMove}
+              onMouseLeave={handleChartMouseLeave}
+            >
+              {/* 背景虚线网格与Y轴标注 */}
+              {pingChartData.yTicks.map((tick, idx) => {
+                const yPos = pingChartData.paddingTop + pingChartData.plotH - (tick / pingChartData.yUpper) * pingChartData.plotH
+                return (
+                  <g key={idx}>
+                    <line
+                      x1={pingChartData.paddingLeft}
+                      y1={yPos}
+                      x2={pingChartData.width - pingChartData.paddingRight}
+                      y2={yPos}
+                      stroke="currentColor"
+                      strokeDasharray="3 3"
+                      opacity="0.08"
+                    />
+                    <text
+                      x={pingChartData.paddingLeft - 8}
+                      y={yPos + 3.5}
+                      fontSize="10"
+                      fill="currentColor"
+                      opacity="0.45"
+                      fontFamily="monospace"
+                      textAnchor="end"
+                    >
+                      {tick}
+                    </text>
+                  </g>
+                )
+              })}
+
+              {/* 多线动态绘制 */}
+              {pingChartData.targetPaths.map((t) => {
+                if (!selectedTargets[t.id]) return null
+                return (
+                  <path
+                    key={t.id}
+                    d={t.path}
+                    fill="none"
+                    stroke={t.color}
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )
+              })}
+
+              {/* 交互 Crosshair 辅助线与坐标刻度 Badge */}
+              {hoverData && (
+                <g className="komari-crosshair-group">
+                  {/* 垂直参考线 */}
+                  <line
+                    x1={hoverData.snapX}
+                    y1={pingChartData.paddingTop}
+                    x2={hoverData.snapX}
+                    y2={pingChartData.paddingTop + pingChartData.plotH}
+                    stroke="currentColor"
+                    strokeDasharray="3 3"
+                    opacity="0.32"
+                    strokeWidth="1"
+                  />
+                  {/* 水平参考线 */}
+                  <line
+                    x1={pingChartData.paddingLeft}
+                    y1={hoverData.mouseY}
+                    x2={pingChartData.width - pingChartData.paddingRight}
+                    y2={hoverData.mouseY}
+                    stroke="currentColor"
+                    strokeDasharray="3 3"
+                    opacity="0.32"
+                    strokeWidth="1"
+                  />
+                  {/* Y 轴紫底数值指示器 */}
+                  <g transform={`translate(2, ${hoverData.mouseY - 9})`}>
+                    <rect width="44" height="18" rx="4" fill="#8b5cf6" />
+                    <text
+                      x="22"
+                      y="12.5"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="10"
+                      fontWeight="600"
+                      fontFamily="monospace"
+                    >
+                      {hoverData.hoveredLatency.toFixed(2)}
+                    </text>
+                  </g>
+                  {/* X 轴蓝底时间指示器 */}
+                  <g transform={`translate(${hoverData.snapX - 22}, ${pingChartData.paddingTop + pingChartData.plotH + 4})`}>
+                    <rect width="44" height="17" rx="4" fill="#3b82f6" />
+                    <text
+                      x="22"
+                      y="12"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="9.5"
+                      fontWeight="600"
+                      fontFamily="monospace"
+                    >
+                      {hoverData.time}
+                    </text>
+                  </g>
+                  {/* 曲线对应点高亮圆点 */}
+                  {pingTargets.map((t) => {
+                    if (!selectedTargets[t.id]) return null
+                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
+                    if (!pt) return null
+                    return (
+                      <circle
+                        key={t.id}
+                        cx={hoverData.snapX}
+                        cy={pt.y}
+                        r="3.8"
+                        fill={t.color}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                    )
+                  })}
+                </g>
+              )}
+            </svg>
+
+            {/* 浮动实时 Tooltip 悬浮框 */}
+            {hoverData && (
+              <div
+                className="komari-ping-tooltip"
+                style={{
+                  left: `${(hoverData.snapX / pingChartData.width) * 100}%`,
+                  top: `${(hoverData.mouseY / pingChartData.height) * 100}%`,
+                  transform: hoverData.snapX > 560 ? 'translate(-105%, -50%)' : 'translate(15%, -50%)',
+                }}
+              >
+                <div className="komari-tooltip-time mono">{hoverData.fullTime}</div>
+                <div className="komari-tooltip-list">
+                  {pingTargets.filter((t) => selectedTargets[t.id]).map((t) => {
+                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
+                    return (
+                      <div key={t.id} className="komari-tooltip-row">
+                        <div className="komari-tooltip-name">
+                          <span className="komari-tooltip-dot" style={{ backgroundColor: t.color }} />
+                          <span>{t.name}</span>
+                        </div>
+                        <div className="komari-tooltip-val mono">
+                          <strong>{pt ? pt.val.toFixed(1) : t.latencyVal} ms</strong>
+                          <span className="text-muted">{t.loss}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* X 轴时间刻度标注 */}
+            <div className="komari-ping-x-axis mono">
+              {pingChartData.displayedXMarks.map((m, idx) => (
+                <span key={idx}>{m.text}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* 图表底部图例 */}
+          <div className="komari-ping-legend">
+            {pingTargets.map((t) => (
+              <span
+                key={t.id}
+                className={`komari-legend-item ${selectedTargets[t.id] ? '' : 'muted'}`}
+                onClick={() => handleToggleTarget(t.id)}
+              >
+                <span className="komari-legend-dot" style={{ backgroundColor: t.color }} />
+                <span>{t.name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
+{/* 物理与虚拟网卡矩阵 (Per-NIC Metrics) */}
       {!isPublic && interfaces.length > 0 && (
         <div className="komari-info-card" style={{ marginBottom: '16px' }}>
           <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2581,569 +3193,6 @@ export function NodeDetailPage({
             <p className="mono text-xs" style={{ margin: 0, color: 'var(--text-muted)' }}>节点探针运行良好，但当前上报快照中未包含系统安全补丁与守护单元诊断指标。</p>
           </div>
         )}
-      </div>
-
-      {/* 全球流媒体与 AI 服务解锁能力横向卡片 */}
-      <section className="komari-media-strip-card">
-        <div className="komari-media-strip-header">
-          <div className="komari-media-strip-title">
-            <Play size={15} className="text-mint" />
-            <h3>全球流媒体与 AI 服务解锁能力</h3>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {Array.isArray(mediaData) && mediaData.length > 0 && (
-              <span className="komari-media-strip-summary mono">
-                {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
-              </span>
-            )}
-            {Array.isArray(mediaData) && mediaData.length > 8 && (
-              <button
-                type="button"
-                className="komari-media-strip-toggle-btn"
-                onClick={() => setShowAllMedia(!showAllMedia)}
-              >
-                {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
-          <div className="komari-media-strip-loading">
-            <CircleNotch size={16} className="spin text-blue" />
-            <span>正在同步流媒体 / AI 检测结果…</span>
-          </div>
-        ) : !mediaData || mediaData.length === 0 ? (
-          <div className="komari-media-strip-empty">
-            <Play size={18} className="text-muted" style={{ opacity: 0.5 }} />
-            <span>暂无流媒体 / AI 检测结果</span>
-          </div>
-        ) : (
-          <div className="komari-media-strip-list">
-            {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
-              const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
-              const matchPopular = POPULAR_MEDIA.find((p) => {
-                const aliases = p.alias || [p.id]
-                const dId = (m.detector_id || m.target_id || '').toLowerCase()
-                const dName = (m.detector || m.result?.detector || '').toLowerCase()
-                return aliases.some((a) => dId.includes(a) || dName.includes(a))
-              })
-              const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
-              const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
-              const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
-
-              const rawStatus = (m.status || m.result?.status || '').toLowerCase()
-              let tone = 'unknown'
-              let statusText = '未知'
-              if (rawStatus === 'available') {
-                tone = 'available'
-                statusText = '已解锁'
-              } else if (rawStatus === 'unavailable') {
-                tone = 'unavailable'
-                statusText = '未解锁'
-              } else if (rawStatus === 'blocked') {
-                tone = 'blocked'
-                statusText = '已封锁'
-              } else if (rawStatus === 'error') {
-                tone = 'error'
-                statusText = '异常'
-              } else if (rawStatus === 'timeout') {
-                tone = 'timeout'
-                statusText = '超时'
-              }
-
-              const rawRegion = m.region || m.result?.region
-              const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : '—'
-
-              const lat = m.latency_ms ?? m.result?.latency_ms ?? null
-              const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
-                ? `${Math.round(Number(lat))}ms`
-                : '—'
-
-              return (
-                <div key={m.detector_id || `${name}-${idx}`} className="komari-media-service-card">
-                  <div className="komari-media-service-icon" style={{ backgroundColor: iconBg }}>
-                    {symbol}
-                  </div>
-                  <div className="komari-media-service-name" title={name}>
-                    {name}
-                  </div>
-                  <div className={`komari-media-service-status status-${tone}`}>
-                    {statusText}
-                  </div>
-                  <div className="komari-media-service-region mono" title={regionText !== '—' ? `检测地区: ${regionText}` : undefined}>
-                    {regionText}
-                  </div>
-                  <div className="komari-media-service-latency mono">
-                    {latencyText}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* 4. 历史时序折线图表区 (带时间范围切换器) */}
-      <div className="komari-charts-section">
-        {/* 时间切换条 */}
-        <div className="komari-time-tabs-row">
-          <div className="komari-time-tabs">
-            {['实时', '4小时', '1天', '7天', '30天'].map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={`komari-time-tab ${activeTimeRange === tab ? 'active' : ''}`}
-                onClick={() => handleTimeRangeChange(tab)}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 图表宫格 */}
-        <div className="komari-charts-grid">
-          {/* 1. CPU 与负载 */}
-          <KomariChartCard
-            title="CPU 与负载"
-            icon="🔴"
-            badgeText={cpuPercent === null ? '—' : `${cpuPercent.toFixed(1)}%`}
-            series={telemetrySeries.cpus}
-            strokeColor="#f97316"
-            yMax="100%"
-            yMid="50%"
-            yMin="0%"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 2. 内存与 Swap */}
-          <KomariChartCard
-            title="内存与 Swap"
-            icon="🟣"
-            badgeText={`${formatBytes(memUsed)} / ${formatBytes(memTotal)}`}
-            series={telemetrySeries.mems}
-            strokeColor="#38bdf8"
-            dualSeries={{ data: telemetrySeries.swaps, color: '#f59e0b' }}
-            yMax={`${formatBytes(memTotal)}`}
-            yMid={memTotal === null ? '—' : formatBytes(memTotal / 2)}
-            yMin="0 B"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 3. 磁盘 */}
-          <KomariChartCard
-            title="磁盘"
-            icon="🟢"
-            badgeText={`${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}`}
-            series={telemetrySeries.disks}
-            strokeColor="#10b981"
-            yMax={`${formatBytes(diskTotal)}`}
-            yMid={diskTotal === null ? '—' : formatBytes(diskTotal / 2)}
-            yMin="0 B"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 4. 实时网络 */}
-          <KomariChartCard
-            title="实时网络"
-            icon="🔵"
-            badgeText={`^ ${formatRate(rate?.up)}  v ${formatRate(rate?.down)}`}
-            series={telemetrySeries.downs}
-            strokeColor="#0284c7"
-            dualSeries={{ data: telemetrySeries.ups, color: '#a855f7' }}
-            yMax={netYMax}
-            yMid={netYMid}
-            yMin="0 B/s"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 5. GPU 利用率 (仅当机器配置独立显卡时展示) */}
-          {hasGpu && (
-            <KomariChartCard
-              title="GPU 利用率"
-              icon="🟢"
-            badgeText={gpuPercent === null ? '—' : `${gpuPercent.toFixed(1)}%`}
-              series={telemetrySeries.gpus}
-              strokeColor="#10b981"
-              yMax="100%"
-              yMid="50%"
-              yMin="0%"
-              timeLabels={telemetrySeries.times}
-            />
-          )}
-
-          {/* 6. 网络连接 */}
-          <KomariChartCard
-            title="网络连接"
-            icon="🔴"
-            badgeText={`TCP: ${tcpCount === null ? '—' : tcpCount}  UDP: ${udpCount === null ? '—' : udpCount}`}
-            series={telemetrySeries.conns}
-            strokeColor="#ef4444"
-            yMax={`${connYMax}`}
-            yMid={`${connYMid}`}
-            yMin="0"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 7. 进程 */}
-          <KomariChartCard
-            title="进程"
-            icon="🔵"
-            badgeText={processCount === null ? '—' : `${processCount}`}
-            series={telemetrySeries.procs}
-            strokeColor="#6366f1"
-            yMax={`${procYMax}`}
-            yMid={`${procYMid}`}
-            yMin="0"
-            timeLabels={telemetrySeries.times}
-          />
-
-          {/* 8. CPU 温度遥测 */}
-          {(cpuTempC !== null || (telemetrySeries.temps && telemetrySeries.temps.some((t) => typeof t === 'number' && Number.isFinite(t)))) && (
-            <KomariChartCard
-              title="CPU 实时温度"
-              icon="🌡️"
-              badgeText={`${cpuTempC !== null ? cpuTempC.toFixed(1) : (() => { const values = (telemetrySeries.temps || []).filter((value) => typeof value === 'number' && Number.isFinite(value)); const last = values[values.length - 1]; return last === undefined ? '—' : last.toFixed(1) })()} °C`}
-              series={telemetrySeries.temps}
-              strokeColor="#f59e0b"
-              yMax={`${Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10)} °C`}
-              yMid={`${Math.round(Math.max(100, Math.ceil(Math.max(...(telemetrySeries.temps || [60])) / 10) * 10) / 2)} °C`}
-              yMin="0 °C"
-              timeLabels={telemetrySeries.times}
-            />
-          )}
-
-          {/* 9. 存储 I/O 读写带宽 */}
-          {(disks.length > 0 || (telemetrySeries.diskReads && telemetrySeries.diskReads.some((r) => r > 0))) && (
-            <KomariChartCard
-              title="磁盘 I/O 读写吞吐"
-              icon="💾"
-              badgeText={`读 ${formatRate(totalDiskReadRate)} · 写 ${formatRate(totalDiskWriteRate)}`}
-              series={telemetrySeries.diskReads}
-              strokeColor="#10b981"
-              dualSeries={{ data: telemetrySeries.diskWrites, color: '#38bdf8' }}
-              yMax={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))))}
-              yMid={formatRate(Math.max(1024 * 1024, Math.max(...(telemetrySeries.diskReads || [0]), ...(telemetrySeries.diskWrites || [0]))) / 2)}
-              yMin="0 B/s"
-              timeLabels={telemetrySeries.times}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* 5. 三网延迟与网络监测模块 (带节点快速筛选与平滑折线对比) */}
-      <div className="komari-ping-section">
-        <div className="komari-ping-toolbar">
-          <div className="komari-time-tabs">
-            {['1小时', '6小时', '12小时', '1天'].map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={`komari-time-tab ${activePingRange === tab ? 'active' : ''}`}
-                onClick={() => handlePingRangeChange(tab)}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          <div className="komari-ping-actions">
-            <button
-              type="button"
-              className="komari-ping-action-btn komari-btn-select-all"
-              onClick={() => handleSelectAllTargets(true)}
-            >
-              全选
-            </button>
-            <button
-              type="button"
-              className="komari-ping-action-btn komari-btn-deselect-all"
-              onClick={() => handleSelectAllTargets(false)}
-            >
-              全不选
-            </button>
-          </div>
-        </div>
-
-        {/* 测速目标卡片列表 */}
-        <div className="komari-targets-grid">
-          {pingTargets.length === 0 ? (
-            <div className="komari-targets-empty">
-              {checksLoading ? (
-                <>
-                  <CircleNotch size={18} className="spin text-blue" />
-                  <div><strong>正在同步三网检测数据…</strong><span>正在拉取最新延迟、丢包和抖动指标。</span></div>
-                </>
-              ) : checksError === 'unauthorized' ? (
-                <>
-                  <ShieldWarning size={18} className="text-amber" />
-                  <div><strong>三网检测指标需要管理员权限</strong><span>公网访客模式下仅可查看公开概要。</span></div>
-                </>
-              ) : checksError === 'request_failed' ? (
-                <>
-                  <WarningCircle size={18} className="text-rose" />
-                  <div><strong>三网检测数据请求失败</strong><span>服务端异常或网络波动，请稍后刷新重试。</span></div>
-                </>
-              ) : (
-                <>
-                  <ShareNetwork size={18} />
-                  <div><strong>当前节点暂未配置检测目标</strong><span>可在管理员后台配置电信、联通、移动目标以展示实时延迟、丢包与抖动。</span></div>
-                  {!isPublic && onNavigate && <button type="button" onClick={() => onNavigate('monitoring')}>去添加检测目标</button>}
-                </>
-              )}
-            </div>
-          ) : pingTargets.map((t) => {
-            const isChecked = Boolean(selectedTargets[t.id])
-            const jitterText = t.jitter === null || t.jitter === undefined || t.jitter === ''
-              ? '—'
-              : `${Number(t.jitter).toFixed(2)} ms`
-            return (
-              <div
-                key={t.id}
-                className={`komari-target-card ${isChecked ? 'active' : 'inactive'}`}
-                onClick={() => handleToggleTarget(t.id)}
-              >
-                <div className="komari-target-head">
-                  <div className="komari-target-head-left">
-                    <span className="komari-target-bar" style={{ backgroundColor: t.color }} />
-                    <strong className="komari-target-name">{t.name}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    className="komari-target-info-btn"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setTargetInfoModal(t)
-                    }}
-                    title={`查看 ${t.name} 详情`}
-                  >
-                    ⓘ
-                  </button>
-                </div>
-                <div className="komari-target-stats mono">
-                  <span className="komari-target-stat-val">{t.latency}</span>
-                  <span className="komari-target-stat-dot">·</span>
-                  <span className={`komari-target-stat-val ${t.lossColor}`}>{t.loss}</span>
-                  <span className="komari-target-stat-dot">·</span>
-                  <span className="komari-target-stat-val text-muted">{jitterText}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* 平滑延迟多线对比折线图 */}
-        <div className="komari-ping-chart-card">
-          <div className="komari-ping-chart-header">
-            <button
-              type="button"
-              className={`komari-smooth-pill ${smoothPeaks ? 'active' : ''}`}
-              onClick={() => setSmoothPeaks((prev) => !prev)}
-              title="平滑峰值（过滤瞬时抖动尖峰）"
-            >
-              <span>平滑峰值</span>
-              <span className="komari-smooth-info">ⓘ</span>
-            </button>
-            <span className="komari-ping-y-label">延迟 (ms)</span>
-          </div>
-
-          <div className="komari-ping-chart-wrap">
-            {pingTargets.length === 0 ? (
-              <div className="komari-ping-empty-state komari-ping-empty-config">
-                {checksError === 'unauthorized' ? (
-                  <><ShieldWarning size={22} /><strong>三网检测受限</strong><span>公网访客模式下未授权查看历史采样曲线。</span></>
-                ) : checksError === 'request_failed' ? (
-                  <><WarningCircle size={22} /><strong>检测数据请求异常</strong><span>请稍后刷新重试。</span></>
-                ) : (
-                  <><ShareNetwork size={22} /><strong>暂无三网检测目标</strong><span>先添加电信、联通、移动检测目标，延迟曲线会在真实采样后自动出现。</span></>
-                )}
-              </div>
-            ) : pingChartData.targetPaths.length === 0 ? (
-              <div className="komari-ping-empty-state komari-ping-empty-config"><Clock size={22} /><strong>等待真实延迟采样</strong><span>检测目标已配置，探针回传数据后会显示曲线。</span></div>
-            ) : null}
-            <svg
-              viewBox={`0 0 ${pingChartData.width} ${pingChartData.height}`}
-              className="komari-ping-svg"
-              preserveAspectRatio="none"
-              onMouseMove={handleChartMouseMove}
-              onMouseLeave={handleChartMouseLeave}
-            >
-              {/* 背景虚线网格与Y轴标注 */}
-              {pingChartData.yTicks.map((tick, idx) => {
-                const yPos = pingChartData.paddingTop + pingChartData.plotH - (tick / pingChartData.yUpper) * pingChartData.plotH
-                return (
-                  <g key={idx}>
-                    <line
-                      x1={pingChartData.paddingLeft}
-                      y1={yPos}
-                      x2={pingChartData.width - pingChartData.paddingRight}
-                      y2={yPos}
-                      stroke="currentColor"
-                      strokeDasharray="3 3"
-                      opacity="0.08"
-                    />
-                    <text
-                      x={pingChartData.paddingLeft - 8}
-                      y={yPos + 3.5}
-                      fontSize="10"
-                      fill="currentColor"
-                      opacity="0.45"
-                      fontFamily="monospace"
-                      textAnchor="end"
-                    >
-                      {tick}
-                    </text>
-                  </g>
-                )
-              })}
-
-              {/* 多线动态绘制 */}
-              {pingChartData.targetPaths.map((t) => {
-                if (!selectedTargets[t.id]) return null
-                return (
-                  <path
-                    key={t.id}
-                    d={t.path}
-                    fill="none"
-                    stroke={t.color}
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                )
-              })}
-
-              {/* 交互 Crosshair 辅助线与坐标刻度 Badge */}
-              {hoverData && (
-                <g className="komari-crosshair-group">
-                  {/* 垂直参考线 */}
-                  <line
-                    x1={hoverData.snapX}
-                    y1={pingChartData.paddingTop}
-                    x2={hoverData.snapX}
-                    y2={pingChartData.paddingTop + pingChartData.plotH}
-                    stroke="currentColor"
-                    strokeDasharray="3 3"
-                    opacity="0.32"
-                    strokeWidth="1"
-                  />
-                  {/* 水平参考线 */}
-                  <line
-                    x1={pingChartData.paddingLeft}
-                    y1={hoverData.mouseY}
-                    x2={pingChartData.width - pingChartData.paddingRight}
-                    y2={hoverData.mouseY}
-                    stroke="currentColor"
-                    strokeDasharray="3 3"
-                    opacity="0.32"
-                    strokeWidth="1"
-                  />
-                  {/* Y 轴紫底数值指示器 */}
-                  <g transform={`translate(2, ${hoverData.mouseY - 9})`}>
-                    <rect width="44" height="18" rx="4" fill="#8b5cf6" />
-                    <text
-                      x="22"
-                      y="12.5"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="10"
-                      fontWeight="600"
-                      fontFamily="monospace"
-                    >
-                      {hoverData.hoveredLatency.toFixed(2)}
-                    </text>
-                  </g>
-                  {/* X 轴蓝底时间指示器 */}
-                  <g transform={`translate(${hoverData.snapX - 22}, ${pingChartData.paddingTop + pingChartData.plotH + 4})`}>
-                    <rect width="44" height="17" rx="4" fill="#3b82f6" />
-                    <text
-                      x="22"
-                      y="12"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="9.5"
-                      fontWeight="600"
-                      fontFamily="monospace"
-                    >
-                      {hoverData.time}
-                    </text>
-                  </g>
-                  {/* 曲线对应点高亮圆点 */}
-                  {pingTargets.map((t) => {
-                    if (!selectedTargets[t.id]) return null
-                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
-                    if (!pt) return null
-                    return (
-                      <circle
-                        key={t.id}
-                        cx={hoverData.snapX}
-                        cy={pt.y}
-                        r="3.8"
-                        fill={t.color}
-                        stroke="#ffffff"
-                        strokeWidth="2"
-                      />
-                    )
-                  })}
-                </g>
-              )}
-            </svg>
-
-            {/* 浮动实时 Tooltip 悬浮框 */}
-            {hoverData && (
-              <div
-                className="komari-ping-tooltip"
-                style={{
-                  left: `${(hoverData.snapX / pingChartData.width) * 100}%`,
-                  top: `${(hoverData.mouseY / pingChartData.height) * 100}%`,
-                  transform: hoverData.snapX > 560 ? 'translate(-105%, -50%)' : 'translate(15%, -50%)',
-                }}
-              >
-                <div className="komari-tooltip-time mono">{hoverData.fullTime}</div>
-                <div className="komari-tooltip-list">
-                  {pingTargets.filter((t) => selectedTargets[t.id]).map((t) => {
-                    const pt = pingChartData.targetPointsMap[t.id]?.[hoverData.pointIndex]
-                    return (
-                      <div key={t.id} className="komari-tooltip-row">
-                        <div className="komari-tooltip-name">
-                          <span className="komari-tooltip-dot" style={{ backgroundColor: t.color }} />
-                          <span>{t.name}</span>
-                        </div>
-                        <div className="komari-tooltip-val mono">
-                          <strong>{pt ? pt.val.toFixed(1) : t.latencyVal} ms</strong>
-                          <span className="text-muted">{t.loss}</span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* X 轴时间刻度标注 */}
-            <div className="komari-ping-x-axis mono">
-              {pingChartData.displayedXMarks.map((m, idx) => (
-                <span key={idx}>{m.text}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* 图表底部图例 */}
-          <div className="komari-ping-legend">
-            {pingTargets.map((t) => (
-              <span
-                key={t.id}
-                className={`komari-legend-item ${selectedTargets[t.id] ? '' : 'muted'}`}
-                onClick={() => handleToggleTarget(t.id)}
-              >
-                <span className="komari-legend-dot" style={{ backgroundColor: t.color }} />
-                <span>{t.name}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-
       </div>
 
       {/* 6. 目标详情信息弹窗 */}

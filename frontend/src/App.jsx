@@ -145,7 +145,7 @@ function getSavedTheme() {
       if (val === 'light' || val === 'dark' || val === 'system') return val
     }
   } catch {}
-  return 'light'
+  return 'dark'
 }
 
 function saveTheme(val) {
