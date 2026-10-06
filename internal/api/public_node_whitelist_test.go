@@ -208,7 +208,7 @@ func TestPublicNodeRouteScopeAndBypassRejection(t *testing.T) {
 		{"Non-existent UUID", "/api/public/nodes/00000000-0000-0000-0000-000000000000/detail", http.StatusNotFound},
 		{"Name matching bypass forbidden", "/api/public/nodes/primary-target/detail", http.StatusNotFound},
 		{"guest- prefix fallback forbidden", "/api/public/nodes/guest-primary-target/detail", http.StatusNotFound},
-		{"Path traversal rejected", "/api/public/nodes/../../../etc/passwd/detail", http.StatusNotFound},
+		{"Path traversal rejected", "/api/public/nodes/..%2f..%2fetc%2fpasswd/detail", http.StatusNotFound},
 		{"Non-UUID string rejected", "/api/public/nodes/not-a-valid-uuid/detail", http.StatusNotFound},
 		{"Protected containers endpoint hidden from public", "/api/public/nodes/" + node.UUID + "/containers", http.StatusNotFound},
 		{"Protected processes endpoint hidden from public", "/api/public/nodes/" + node.UUID + "/processes", http.StatusNotFound},
