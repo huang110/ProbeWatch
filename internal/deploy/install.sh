@@ -383,8 +383,16 @@ if [ ! -f "./probewatch-agent" ]; then
         warn "也可以手动放置 probewatch-agent 到 $BIN_PATH 后重新运行安装器"
     fi
 elif [ -f "./probewatch-agent" ]; then
-    cp ./probewatch-agent "$BIN_PATH"
-    chmod 0755 "$BIN_PATH"
+    # 原子替换运行中的二进制，避免直接覆盖触发 Linux ETXTBSY (Text file busy)。
+    BIN_TMP="${BIN_PATH}.tmp.$$"
+    rm -f "$BIN_TMP"
+    if cp ./probewatch-agent "$BIN_TMP" && chmod 0755 "$BIN_TMP" && "$BIN_TMP" --version >/dev/null 2>&1; then
+        mv -f "$BIN_TMP" "$BIN_PATH"
+    else
+        rm -f "$BIN_TMP"
+        error "当前目录的 probewatch-agent 校验失败，未替换现有二进制"
+        exit 1
+    fi
     ok "已使用当前目录的 probewatch-agent 二进制"
 fi
 
