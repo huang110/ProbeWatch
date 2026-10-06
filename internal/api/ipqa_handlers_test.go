@@ -175,9 +175,10 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 	}
 
 	// 3. POST /api/nodes/:uuid/ipqa/sync (with CSRF)
-	reqSync := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/sync", nil)
+	reqSync := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/sync", bytes.NewBufferString(`{}`))
 	reqSync.AddCookie(task4SessionCookie(session))
 	reqSync.Header.Set("X-CSRF-Token", csrfToken)
+	reqSync.Header.Set("Content-Type", "application/json")
 	recSync := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recSync, reqSync)
 	if recSync.Code != http.StatusOK {
@@ -195,6 +196,7 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 	reqTest := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/test", testBody)
 	reqTest.AddCookie(task4SessionCookie(session))
 	reqTest.Header.Set("X-CSRF-Token", csrfToken)
+	reqTest.Header.Set("Content-Type", "application/json")
 	recTest := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recTest, reqTest)
 	if recTest.Code != http.StatusOK {
