@@ -474,7 +474,7 @@ export function App() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
   const [liveState, setLiveState] = useState('connecting')
-  const [apiState, setApiState] = useState({ kind: 'loading', message: '正在加载 API 数据…' })
+  const [apiState, setApiState] = useState({ kind: 'guest', message: '' })
   const [apiVersion, setApiVersion] = useState('')
   const [latestAgentVersion, setLatestAgentVersion] = useState('')
   const [me, setMe] = useState(null)
