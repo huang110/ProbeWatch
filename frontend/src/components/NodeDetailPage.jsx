@@ -1247,7 +1247,7 @@ export function NodeDetailPage({
         <div><span>内存</span><strong>{memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '—'}</strong></div>
         <div><span>下行</span><strong>{rate?.down == null ? '等待采样' : formatRate(rate.down)}</strong></div>
         <div><span>上行</span><strong>{rate?.up == null ? '等待采样' : formatRate(rate.up)}</strong></div>
-        <div><span>解锁</span><strong>{unlockedMediaCount}/{POPULAR_MEDIA.length}</strong></div>
+        <div><span>解锁</span><strong>{Array.isArray(mediaData) && mediaData.length > 0 ? `${mediaData.filter(m => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/${mediaData.length}` : `${unlockedMediaCount}/${POPULAR_MEDIA.length}`}</strong></div>
         <div><span>剩余价值</span><strong>{remainingValue}</strong></div>
       </div>
       {/* 1. 顶部导航与控制条 */}
@@ -1627,8 +1627,8 @@ export function NodeDetailPage({
                   </div>
                 </div>
 
-                {/* 第二行：三个信息面板 */}
-                <div className="ip-quality-detail-grid">
+                {/* 第二行：两个信息面板 */}
+                <div className="ip-quality-detail-grid ip-quality-detail-grid-two">
                   {/* 面板 1: 风险评分 */}
                   <section className="ip-quality-panel">
                     <div className="ip-quality-panel-title">
@@ -1704,75 +1704,6 @@ export function NodeDetailPage({
                           检测时间：{formatIPQualityDateTime(ipQuality.checked_at)} · 来源未提供统计
                         </small>
                       </div>
-                    </div>
-                  </section>
-
-                  {/* 面板 3: 流媒体 / AI */}
-                  <section className="ip-quality-panel">
-                    <div className="ip-quality-panel-title">
-                      <span className="panel-title-text">
-                        <Play size={14} />
-                        <span>流媒体 / AI</span>
-                      </span>
-                      {Array.isArray(mediaData) && mediaData.length > 8 && (
-                        <button
-                          type="button"
-                          className="ip-quality-media-toggle-btn"
-                          onClick={() => setShowAllMedia(!showAllMedia)}
-                        >
-                          {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
-                        </button>
-                      )}
-                    </div>
-                    <div className="ip-quality-panel-body">
-                      {Array.isArray(mediaData) && mediaData.length > 0 ? (
-                        <div className="ip-quality-media-list">
-                          {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
-                            const rawName = m.detector || m.detector_id || `item-${idx}`
-                            const matchPopular = POPULAR_MEDIA.find((p) => {
-                              const aliases = p.alias || [p.id]
-                              const dId = (m.detector_id || m.target_id || '').toLowerCase()
-                              const dName = (m.detector || m.result?.detector || '').toLowerCase()
-                              return aliases.some((a) => dId.includes(a) || dName.includes(a))
-                            })
-                            const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
-                            const rawStatus = (m.status || m.result?.status || '').toLowerCase()
-                            let tone = 'unknown'
-                            let statusText = '未知'
-                            if (rawStatus === 'available') {
-                              tone = 'available'
-                              statusText = '已解锁'
-                            } else if (rawStatus === 'unavailable') {
-                              tone = 'unavailable'
-                              statusText = '未解锁'
-                            } else if (rawStatus === 'blocked' || rawStatus === 'error' || rawStatus === 'timeout') {
-                              tone = 'blocked'
-                              statusText = rawStatus === 'blocked' ? '已封锁' : '异常'
-                            }
-                            const region = (m.region || m.result?.region || '—').toUpperCase()
-                            const lat = m.latency_ms ?? m.result?.latency_ms ?? null
-                            const latencyText = lat !== null && lat !== undefined ? `${lat}ms` : '—'
-                            const ts = m.checked_at ?? m.result?.checked_at ?? null
-                            const timeText = formatIPQualityShortTime(ts)
-                            const fullTime = ts ? formatIPQualityDateTime(ts) : '未知'
-                            return (
-                              <div key={m.detector_id || `${name}-${idx}`} className="ip-quality-media-row">
-                                <span className="media-name" title={name}>{name}</span>
-                                <span className={`media-status status-${tone}`}>
-                                  {statusText}
-                                </span>
-                                <span className="media-region mono">{region}</span>
-                                <span className="media-latency mono">{latencyText}</span>
-                                <span className="media-time mono" title={fullTime}>{timeText}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <div className="ip-quality-empty-inline">
-                          <span>暂无流媒体 / AI 检测结果</span>
-                        </div>
-                      )}
                     </div>
                   </section>
                 </div>
@@ -2579,85 +2510,106 @@ export function NodeDetailPage({
         )}
       </div>
 
-      {/* 全球流媒体与 AI 服务解锁能力卡片 */}
-      <div className="komari-info-card komari-media-card" style={{ marginBottom: '16px' }}>
-        <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* 全球流媒体与 AI 服务解锁能力横向卡片 */}
+      <section className="komari-media-strip-card">
+        <div className="komari-media-strip-header">
+          <div className="komari-media-strip-title">
+            <Play size={15} className="text-mint" />
+            <h3>全球流媒体与 AI 服务解锁能力</h3>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FilmStrip size={16} className="text-amber" />
-            <h3 style={{ margin: 0 }}>全球流媒体与 AI 服务解锁能力</h3>
+            {Array.isArray(mediaData) && mediaData.length > 0 && (
+              <span className="komari-media-strip-summary mono">
+                {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
+              </span>
+            )}
+            {Array.isArray(mediaData) && mediaData.length > 8 && (
+              <button
+                type="button"
+                className="komari-media-strip-toggle-btn"
+                onClick={() => setShowAllMedia(!showAllMedia)}
+              >
+                {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
+              </button>
+            )}
           </div>
-          <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: 'var(--primary, #0284c7)' }}>
-            {mediaData && mediaData.length > 0 ? `${unlockedMediaCount}/${POPULAR_MEDIA.length} 项已解锁` : (isPublic && publicDetailLoading) || loadingMedia ? '加载中' : '未配置检测任务'}
-          </span>
         </div>
-        {(loadingMedia || (isPublic && publicDetailLoading)) && mediaData.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '20px', color: 'var(--muted)' }}>
-            <CircleNotch size={16} className="spin text-amber" />
-            <span style={{ fontSize: '12px' }}>正在加载流媒体与 AI 解锁状态…</span>
+
+        {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
+          <div className="komari-media-strip-loading">
+            <CircleNotch size={16} className="spin text-blue" />
+            <span>正在同步流媒体 / AI 检测结果…</span>
           </div>
-        ) : mediaData.length === 0 ? (
-          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
-            <FilmStrip size={28} style={{ color: 'var(--text-muted)', margin: '0 auto 8px', display: 'block', opacity: 0.6 }} />
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main, #f8fafc)', marginBottom: '4px' }}>
-              未配置流媒体解锁检测任务
-            </div>
-            <div style={{ fontSize: '12px', maxWidth: '440px', margin: '0 auto' }}>
-              当前节点尚未启用流媒体与 AI 平台连通性周期性测试，暂无最新解锁上报记录。
-            </div>
+        ) : !mediaData || mediaData.length === 0 ? (
+          <div className="komari-media-strip-empty">
+            <Play size={18} className="text-muted" style={{ opacity: 0.5 }} />
+            <span>暂无流媒体 / AI 检测结果</span>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '10px', paddingTop: '4px' }}>
-            {POPULAR_MEDIA.map((p) => {
-              const status = getMediaStatus(p, mediaData)
+          <div className="komari-media-strip-list">
+            {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
+              const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
+              const matchPopular = POPULAR_MEDIA.find((p) => {
+                const aliases = p.alias || [p.id]
+                const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                const dName = (m.detector || m.result?.detector || '').toLowerCase()
+                return aliases.some((a) => dId.includes(a) || dName.includes(a))
+              })
+              const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
+              const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
+              const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
+
+              const rawStatus = (m.status || m.result?.status || '').toLowerCase()
+              let tone = 'unknown'
+              let statusText = '未知'
+              if (rawStatus === 'available') {
+                tone = 'available'
+                statusText = '已解锁'
+              } else if (rawStatus === 'unavailable') {
+                tone = 'unavailable'
+                statusText = '未解锁'
+              } else if (rawStatus === 'blocked') {
+                tone = 'blocked'
+                statusText = '已封锁'
+              } else if (rawStatus === 'error') {
+                tone = 'error'
+                statusText = '异常'
+              } else if (rawStatus === 'timeout') {
+                tone = 'timeout'
+                statusText = '超时'
+              }
+
+              const rawRegion = m.region || m.result?.region
+              const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : '—'
+
+              const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+              const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
+                ? `${Math.round(Number(lat))}ms`
+                : '—'
+
               return (
-                <div
-                  key={p.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    background: 'var(--bg-subtle, rgba(255, 255, 255, 0.03))',
-                    border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '22px',
-                        height: '22px',
-                        borderRadius: '5px',
-                        fontSize: '9px',
-                        fontWeight: 'bold',
-                        backgroundColor: p.iconBg,
-                        color: '#fff',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {p.symbol}
-                    </span>
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>{p.name}</span>
+                <div key={m.detector_id || `${name}-${idx}`} className="komari-media-service-card">
+                  <div className="komari-media-service-icon" style={{ backgroundColor: iconBg }}>
+                    {symbol}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                    <span className={`media-tag-${status.tone}`} style={{ fontSize: '10px' }}>
-                      {status.text}
-                    </span>
-                    {status.latency !== null && (
-                      <small className="mono text-muted" style={{ fontSize: '9px' }}>
-                        {status.latency}ms
-                      </small>
-                    )}
+                  <div className="komari-media-service-name" title={name}>
+                    {name}
+                  </div>
+                  <div className={`komari-media-service-status status-${tone}`}>
+                    {statusText}
+                  </div>
+                  <div className="komari-media-service-region mono" title={regionText !== '—' ? `检测地区: ${regionText}` : undefined}>
+                    {regionText}
+                  </div>
+                  <div className="komari-media-service-latency mono">
+                    {latencyText}
                   </div>
                 </div>
               )
             })}
           </div>
         )}
-      </div>
+      </section>
 
       {/* 4. 历史时序折线图表区 (带时间范围切换器) */}
       <div className="komari-charts-section">

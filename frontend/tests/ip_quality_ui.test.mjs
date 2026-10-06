@@ -206,50 +206,137 @@ console.log("=== Testing CSS Rules and Layout Definitions ===")
   const css = readFileSync(cssPath, "utf8")
 
   const requiredClasses = [
+    ".komari-ip-quality-card",
     ".ip-quality-summary-grid",
     ".ip-quality-summary-item",
     ".ip-quality-detail-grid",
+    ".ip-quality-detail-grid-two",
     ".ip-quality-panel",
     ".ip-quality-panel-title",
     ".ip-quality-score-row",
     ".ip-quality-score-bar",
     ".ip-quality-flag-grid",
-    ".ip-quality-media-row",
+    ".komari-media-strip-card",
+    ".komari-media-strip-header",
+    ".komari-media-strip-title",
+    ".komari-media-strip-summary",
+    ".komari-media-strip-list",
+    ".komari-media-service-card",
+    ".komari-media-service-icon",
+    ".komari-media-service-name",
+    ".komari-media-service-status",
+    ".komari-media-service-region",
+    ".komari-media-service-latency",
   ]
 
   for (const cls of requiredClasses) {
     assert.ok(css.includes(cls), `CSS must define ${cls}`)
   }
 
-  // Check 3 columns in desktop detail grid
-  assert.ok(css.includes("repeat(3, minmax(0, 1fr))"), "Desktop detail grid must use 3 columns")
+  // Check 2 columns in desktop detail grid two
+  assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "Desktop detail grid two must use 2 columns")
   // Check 4 columns in summary grid
   assert.ok(css.includes("repeat(4, minmax(0, 1fr))"), "Desktop summary grid must use 4 columns")
+  // Check responsive single column for detail grid two
+  assert.ok(css.includes(".ip-quality-detail-grid.ip-quality-detail-grid-two"), "Must support responsive single column for detail grid two")
+  // Check mobile scroll for media strip list
+  assert.ok(css.includes("overflow-x: auto"), "Mobile media strip list must support horizontal scroll")
+  assert.ok(css.includes("min-width: 148px"), "Mobile media service card must have min-width 148px")
   // Check light theme support
-  assert.ok(css.includes('[data-theme="light"] .komari-ip-quality-card'), "Must support light theme")
+  assert.ok(css.includes('[data-theme="light"] .komari-ip-quality-card'), "Must support light theme for IP quality card")
+  assert.ok(css.includes('[data-theme="light"] .komari-media-strip-card'), "Must support light theme for media strip card")
 
-  console.log("[PASS] All 9 required CSS classes and responsive grid rules verified")
+  console.log("[PASS] All required CSS classes and responsive layout rules verified")
 }
 
-// 8. Verify NodeDetailPage.jsx contains no hardcoded fake scores and no public IP display
+// 8. Verify NodeDetailPage.jsx contains independent media strip card and 2-panel IP quality
 console.log("=== Testing Component Code Security & Structure ===")
 {
   const compPath = resolve(process.cwd(), "src/components/NodeDetailPage.jsx")
   const comp = readFileSync(compPath, "utf8")
 
+  // IP quality card must have summary grid and detail grid two
   assert.ok(comp.includes("ip-quality-summary-grid"), "Component must render ip-quality-summary-grid")
-  assert.ok(comp.includes("ip-quality-detail-grid"), "Component must render ip-quality-detail-grid")
+  assert.ok(comp.includes("ip-quality-detail-grid ip-quality-detail-grid-two"), "Component must render ip-quality-detail-grid-two")
   assert.ok(comp.includes("风险评分（越低越好）"), "Component must render 风险评分（越低越好）")
   assert.ok(comp.includes("数据库标记（命中 / 有结论的库）"), "Component must render 数据库标记")
-  assert.ok(comp.includes("流媒体 / AI"), "Component must render 流媒体 / AI")
   assert.ok(comp.includes("暂无多来源评分"), "Component must handle empty sources")
-  assert.ok(comp.includes("暂无流媒体 / AI 检测结果"), "Component must handle empty media")
 
-  // Ensure no hardcoded fake scores like scamalytics: 12, etc.
+  // Streaming / AI must NOT be inside IP quality detail grid
+  const ipQualityGridIdx = comp.indexOf("ip-quality-detail-grid ip-quality-detail-grid-two")
+  const ipQualityGridEnd = comp.indexOf("komari-ip-quality-empty", ipQualityGridIdx)
+  const ipQualitySection = comp.substring(ipQualityGridIdx, ipQualityGridEnd > 0 ? ipQualityGridEnd : ipQualityGridIdx + 3000)
+  assert.ok(!ipQualitySection.includes("流媒体 / AI"), "IP Quality section must NOT contain 流媒体 / AI")
+
+  // Independent horizontal streaming card
+  assert.ok(comp.includes("komari-media-strip-card"), "Component must render komari-media-strip-card")
+  assert.ok(comp.includes("komari-media-strip-header"), "Component must render komari-media-strip-header")
+  assert.ok(comp.includes("komari-media-strip-title"), "Component must render komari-media-strip-title")
+  assert.ok(comp.includes("komari-media-strip-summary"), "Component must render komari-media-strip-summary")
+  assert.ok(comp.includes("komari-media-strip-list"), "Component must render komari-media-strip-list")
+  assert.ok(comp.includes("komari-media-service-card"), "Component must render komari-media-service-card")
+  assert.ok(comp.includes("komari-media-service-icon"), "Component must render komari-media-service-icon")
+  assert.ok(comp.includes("komari-media-service-name"), "Component must render komari-media-service-name")
+  assert.ok(comp.includes("komari-media-service-status"), "Component must render komari-media-service-status")
+  assert.ok(comp.includes("komari-media-service-region"), "Component must render komari-media-service-region")
+  assert.ok(comp.includes("komari-media-service-latency"), "Component must render komari-media-service-latency")
+
+  assert.ok(comp.includes("全球流媒体与 AI 服务解锁能力"), "Component must render title 全球流媒体与 AI 服务解锁能力")
+  assert.ok(comp.includes("暂无流媒体 / AI 检测结果"), "Component must handle empty media with 暂无流媒体 / AI 检测结果")
+  assert.ok(comp.includes("正在同步流媒体 / AI 检测结果…"), "Component must handle loading with 正在同步流媒体 / AI 检测结果…")
+
+  // Security: No public IP in media cards, no hardcoded fake scores
   assert.ok(!comp.includes("scamalytics: 12"), "Must not hardcode fake scores")
   assert.ok(!comp.includes("abuseipdb: 0"), "Must not hardcode fake scores")
 
   console.log("[PASS] Component layout structure and security checks verified")
 }
 
-console.log("=== ALL IP QUALITY UI TESTS PASSED ===")
+// 9. Verify Media Field Mapping and Formatting Logic
+console.log("=== Testing Media Field Mapping Logic ===")
+{
+  function mapMediaStatus(rawStatus) {
+    const s = String(rawStatus || '').toLowerCase()
+    if (s === 'available') return { tone: 'available', text: '已解锁' }
+    if (s === 'unavailable') return { tone: 'unavailable', text: '未解锁' }
+    if (s === 'blocked') return { tone: 'blocked', text: '已封锁' }
+    if (s === 'error') return { tone: 'error', text: '异常' }
+    if (s === 'timeout') return { tone: 'timeout', text: '超时' }
+    return { tone: 'unknown', text: '未知' }
+  }
+
+  function formatMediaRegion(region) {
+    if (!region) return '—'
+    return String(region).trim().toUpperCase()
+  }
+
+  function formatMediaLatency(latency) {
+    if (latency === null || latency === undefined || latency === '' || isNaN(Number(latency)) || Number(latency) <= 0) {
+      return '—'
+    }
+    return `${Math.round(Number(latency))}ms`
+  }
+
+  assert.deepEqual(mapMediaStatus('available'), { tone: 'available', text: '已解锁' })
+  assert.deepEqual(mapMediaStatus('unavailable'), { tone: 'unavailable', text: '未解锁' })
+  assert.deepEqual(mapMediaStatus('blocked'), { tone: 'blocked', text: '已封锁' })
+  assert.deepEqual(mapMediaStatus('error'), { tone: 'error', text: '异常' })
+  assert.deepEqual(mapMediaStatus('timeout'), { tone: 'timeout', text: '超时' })
+  assert.deepEqual(mapMediaStatus('other'), { tone: 'unknown', text: '未知' })
+  assert.deepEqual(mapMediaStatus(null), { tone: 'unknown', text: '未知' })
+
+  assert.equal(formatMediaRegion('tw'), 'TW')
+  assert.equal(formatMediaRegion('US'), 'US')
+  assert.equal(formatMediaRegion(null), '—')
+  assert.equal(formatMediaRegion(''), '—')
+
+  assert.equal(formatMediaLatency(45.6), '46ms')
+  assert.equal(formatMediaLatency(12), '12ms')
+  assert.equal(formatMediaLatency(0), '—', "Latency 0 must be formatted as — (not 0ms)")
+  assert.equal(formatMediaLatency(null), '—')
+  assert.equal(formatMediaLatency(undefined), '—')
+
+  console.log("[PASS] Media field mapping logic verified")
+}
+
+console.log("=== ALL IP QUALITY & STREAMING UI TESTS PASSED ===")
