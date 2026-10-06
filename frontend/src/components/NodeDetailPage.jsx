@@ -236,14 +236,15 @@ const getMediaStatus = (platform, mediaList) => {
     : [platformId, platformId === 'chatgpt' ? 'openai' : platformId]
   const match = (mediaList || []).find((m) => {
     const dId = (m.detector_id || m.target_id || '').toLowerCase()
-    const dName = (m.result?.detector || '').toLowerCase()
+    const dName = (m.detector || m.result?.detector || '').toLowerCase()
     return aliases.some((a) => dId.includes(a) || dName.includes(a))
   })
   if (!match) return { text: '未测试', tone: 'muted', latency: null }
-  const res = match.result || {}
-  const status = res.status
-  const latency = res.latency_ms ?? null
-  const region = res.region
+  const res = match.result || match || {}
+  const status = res.status || match.status
+  const latency = res.latency_ms ?? match.latency_ms ?? null
+  const region = res.region || match.region
+  const reason = res.reason || match.reason
 
   if (status === 'available') {
     return {
@@ -257,7 +258,7 @@ const getMediaStatus = (platform, mediaList) => {
   }
   if (status === 'error' || status === 'blocked' || status === 'timeout') {
     return {
-      text: res.reason === 'body exceeds limit' ? '仅自制剧' : '超时/异常',
+      text: reason === 'body exceeds limit' ? '仅自制剧' : '超时/异常',
       tone: 'warning',
       latency,
     }
