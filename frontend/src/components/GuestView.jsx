@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Broadcast, CheckCircle, CircleNotch, Desktop, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShareNetwork, ShieldCheck, SignIn, SignOut, SquaresFour, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowDown, ArrowUp, Broadcast, CheckCircle, CircleNotch, Clock, Desktop, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShareNetwork, ShieldCheck, SignIn, SignOut, SquaresFour, Star, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatLatency, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
 import { fetchGuestStatus } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
 import { ThemeToggle } from './ThemeToggle.jsx'
+
+const DEFAULT_MEDIA_PLATFORMS = ['Netflix', 'YouTube', 'Disney+', 'OpenAI']
 
 function maskVisitorIp(value) {
   const text = String(value || '').trim()
@@ -93,6 +95,34 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [sortKey, setSortKey] = useState('default')
   const [liveRates, setLiveRates] = useState({})
+  const [visitorExpanded, setVisitorExpanded] = useState(false)
+  const [starredNodes, setStarredNodes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('pb_starred_nodes') || '[]')
+    } catch {
+      return []
+    }
+  })
+  const toggleStar = (nodeName) => {
+    setStarredNodes((prev) => {
+      const next = prev.includes(nodeName) ? prev.filter((n) => n !== nodeName) : [...prev, nodeName]
+      try {
+        localStorage.setItem('pb_starred_nodes', JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+  const isStarred = (nodeName) => starredNodes.includes(nodeName)
+
+  const handleCardClick = (nodeData) => {
+    if (onSelectNode) {
+      onSelectNode(nodeData)
+    }
+    if (nodeData?.uuid) {
+      window.location.hash = `#/node-detail?uuid=${encodeURIComponent(nodeData.uuid)}`
+    }
+  }
+
   const visitorInfo = clientInfo || {}
   const telemetryRef = useRef(new Map())
 
@@ -331,6 +361,11 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
       ? (online !== null && online < total ? '部分节点异常' : '检测质量下降')
       : '全部正常'
   const telemetryItems = safeArray(nodes.telemetry)
+  const totalRxBytes = telemetryItems.reduce((acc, t) => acc + (numeric(t.network_rx_bytes) || 0), 0)
+  const totalTxBytes = telemetryItems.reduce((acc, t) => acc + (numeric(t.network_tx_bytes) || 0), 0)
+  const totalDownRate = Object.values(liveRates).reduce((acc, r) => acc + (numeric(r?.down) || 0), 0)
+  const totalUpRate = Object.values(liveRates).reduce((acc, r) => acc + (numeric(r?.up) || 0), 0)
+  const avgHealthScore = successRate !== null ? (successRate >= 95 ? 99 : Math.round(successRate)) : (online !== null && total !== null && total > 0 && online === total ? 100 : null)
   const attentionCount = telemetryItems.filter((item) => item?.status === 'attention').length
   const hasTelemetry = telemetryItems.length > 0
   const latestReportedAt = telemetryItems
@@ -347,18 +382,36 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   return (
     <main className="guest-shell guest-mjj-shell">
       {visitorInfo.ip && (
-        <aside className="floating-visitor-card" aria-label="当前访问者公网信息">
-          <div className="floating-public-node-head">
-            <div className="floating-public-node-avatar"><GlobeHemisphereWest size={18} /></div>
-            <div className="floating-public-node-title"><strong>访客访问</strong><span>{visitorInfo.location || '公网访客'}</span></div>
+        <aside className={`floating-visitor-card ${visitorExpanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="当前访问者公网信息">
+          <div className="floating-visitor-pill" onClick={() => setVisitorExpanded(true)}>
+            <GlobeHemisphereWest size={13} className="text-blue" />
+            <span>访客: {maskVisitorIp(visitorInfo.ip)}</span>
+            <span className="pill-arrow">▲</span>
           </div>
-          <div className="floating-public-node-welcome">欢迎访问 ProbeWatch</div>
-          <div className="floating-public-node-divider" />
-          <div className="floating-public-node-row"><Desktop size={14} /><span>{visitorInfo.platform || '未知系统'}</span></div>
-          <div className="floating-public-node-row"><GlobeHemisphereWest size={14} /><span>{visitorInfo.browser || '浏览器'}</span></div>
-          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{maskVisitorIp(visitorInfo.ip)}</span></div>
-          <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{visitorInfo.isp || '公网访客'}</span></div>
-          <div className="floating-public-node-row"><Timer size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
+          <div className="floating-visitor-full">
+            <div className="floating-public-node-head">
+              <div className="floating-public-node-avatar"><GlobeHemisphereWest size={15} /></div>
+              <div className="floating-public-node-title">
+                <strong>访客信息</strong>
+                <span>{visitorInfo.location || '公网访客'}</span>
+              </div>
+              <button
+                type="button"
+                className="floating-visitor-close-btn"
+                aria-label="关闭访客浮层"
+                onClick={(e) => { e.stopPropagation(); setVisitorExpanded(false) }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="floating-public-node-welcome">欢迎访问 ProbeWatch</div>
+            <div className="floating-public-node-divider" />
+            <div className="floating-public-node-row"><Desktop size={13} /><span>{visitorInfo.platform || '未知系统'}</span></div>
+            <div className="floating-public-node-row"><GlobeHemisphereWest size={13} /><span>{visitorInfo.browser || '浏览器'}</span></div>
+            <div className="floating-public-node-row"><ShareNetwork size={13} /><span className="mono">{maskVisitorIp(visitorInfo.ip)}</span></div>
+            <div className="floating-public-node-row"><ShieldCheck size={13} /><span>{visitorInfo.isp || '公网访客'}</span></div>
+            <div className="floating-public-node-row"><Timer size={13} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
+          </div>
         </aside>
       )}
       {/* 游客预览横幅（仅在管理员预览时呈现） */}
@@ -454,63 +507,81 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           </div>
         </div>
 
-        {/* 关键四项指标看板 */}
+        {/* 关键四项指标看板 (在线节点数、平均健康分、总体下行速率、总体上行速率) */}
         <div className="guest-stats-grid guest-stats-bar">
           <div className={`guest-stat-box telemetry-stat-box ${!hasTelemetry ? 'telemetry-pending' : ''}`}>
-            <div className="stat-head"><GlobeHemisphereWest size={18} /><span>在线节点</span></div>
+            <div className="stat-head"><GlobeHemisphereWest size={15} /><span>在线节点数</span></div>
             <div className="stat-main mono">
               {online !== null && total !== null ? `${online} / ${total}` : '—'}
             </div>
             <div className="stat-sub">
-              {online !== null && total !== null ? `${online} / ${total} 在线` : '等待节点数据'}
+              {online !== null && total !== null ? `${online} 在线 · ${Math.max(0, total - online)} 离线` : '等待节点数据'}
             </div>
           </div>
 
-          <div className="guest-stat-box" title="主控探针到检测目标的综合采样平均，不等同于三网线路延迟">
-            <div className="stat-head"><Timer size={18} /><span>主控探针综合延迟</span></div>
+          <div className="guest-stat-box" title="综合服务可用率与线路探测健康分">
+            <div className="stat-head"><ShieldCheck size={15} /><span>平均健康分</span></div>
             <div className="stat-main mono">
-              {formatLatency(avgLatency)}
+              {avgHealthScore !== null ? `${avgHealthScore} 分` : displayPercent(successRate)}
             </div>
             <div className="stat-sub">
-              {avgLatency !== null ? (avgLatency < 50 ? '极佳响应' : avgLatency < 120 ? '良好' : avgLatency < 200 ? '偏高' : '较高') : '主控探针采样平均'}
+              {avgLatency !== null ? `综合延迟 ${formatLatency(avgLatency)}` : successSummary}
             </div>
           </div>
 
-          <div className="guest-stat-box">
-            <div className="stat-head"><ShieldCheck size={18} /><span>24H 检测通过率</span></div>
+          <div className="guest-stat-box" title="所有已连接探针节点的实时接收速率总和">
+            <div className="stat-head"><ArrowDown size={15} className="text-mint" /><span>总体下行速率</span></div>
             <div className="stat-main mono">
-              {displayPercent(successRate)}
+              {formatRate(totalDownRate)}
             </div>
-            <div className="stat-sub">{successRate !== null && successRate < 95 ? `需要关注 · ${successSummary}${failureSummary ? ` · ${failureSummary}` : ''}` : successSummary}</div>
-            {primaryIssue && <div className="stat-sub guest-primary-issue">主要异常：{primaryIssue}</div>}
-            {(coverageTotal !== null || recentFailureStreak > 0) && (
-              <div className="stat-sub guest-check-context">
-                {coverageTotal !== null ? `线路覆盖 ${coverageSampled ?? 0}/${coverageTotal}` : ''}
-                {coverageTotal !== null && recentFailureStreak > 0 ? ' · ' : ''}
-                {recentFailureStreak > 0 ? `连续失败 ${recentFailureStreak} 次` : ''}
-              </div>
-            )}
-            {(offlineCount !== null || attentionCount > 0) && (
-              <div className="stat-sub guest-check-context">
-                {offlineCount !== null ? `离线节点 ${offlineCount} 台` : ''}
-                {offlineCount !== null && attentionCount > 0 ? ' · ' : ''}
-                {attentionCount > 0 ? `需关注 ${attentionCount} 台` : ''}
-              </div>
-            )}
+            <div className="stat-sub">
+              累计接收 {totalRxBytes > 0 ? formatBytes(totalRxBytes) : '—'}
+            </div>
           </div>
 
-          <div className="guest-stat-box">
-            <div className="stat-head"><Pulse size={18} /><span>实时遥测</span></div>
-            <div className="stat-main mono">{syncStatus}</div>
-            <div className="stat-sub">{hasTelemetry ? `最近上报 ${freshnessLabel} · ${latestReportedAt ? formatTimeOfDay(latestReportedAt) : '—'}` : '正在连接探针，先展示页面结构'}{refreshHint ? ` · ${refreshHint}` : ''}</div>
+          <div className="guest-stat-box" title="所有已连接探针节点的实时发送速率总和">
+            <div className="stat-head"><ArrowUp size={15} className="text-blue" /><span>总体上行速率</span></div>
+            <div className="stat-main mono">
+              {formatRate(totalUpRate)}
+            </div>
+            <div className="stat-sub">
+              累计发送 {totalTxBytes > 0 ? formatBytes(totalTxBytes) : '—'}
+            </div>
           </div>
         </div>
       </section>
 
+      {/* 流媒体与 AI 解锁紧凑行 */}
       <section className="guest-media-summary" aria-label="流媒体与 AI 解锁摘要">
-        <div className="guest-media-summary-head"><div><h2>流媒体 / AI 解锁</h2><p>按公开遥测汇总最近一次检测结果</p></div><strong className="mono">{guestMediaSummary.total ? guestMediaSummary.available + '/' + guestMediaSummary.total : '暂无样本'}</strong></div>
+        <div className="guest-media-summary-head">
+          <div className="guest-media-title-group">
+            <h2>流媒体 / AI 解锁</h2>
+            <span className="guest-media-summary-sub">按公开遥测汇总</span>
+          </div>
+          <div className="guest-media-summary-status">
+            <span className="guest-media-empty-note">
+              {guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total} 平台解锁` : '暂无流媒体检测样本'}
+            </span>
+            <strong className="mono">{guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total}` : '0/0'}</strong>
+          </div>
+        </div>
         <div className="guest-media-summary-grid">
-          {guestMediaSummary.platforms.length ? guestMediaSummary.platforms.map((item) => <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}><b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>{item.name}</span>) : <span className="is-muted">暂无流媒体检测样本</span>}
+          {guestMediaSummary.platforms.length ? (
+            guestMediaSummary.platforms.map((item) => (
+              <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}>
+                <b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>
+                {item.name}
+              </span>
+            ))
+          ) : (
+            DEFAULT_MEDIA_PLATFORMS.map((platform) => (
+              <span key={platform} className="is-muted" title="未配置或无上报样本">
+                <b>·</b>
+                {platform}
+                <small className="placeholder-hint">未配置</small>
+              </span>
+            ))
+          )}
         </div>
       </section>
 
@@ -623,7 +694,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                 <p style={{ fontSize: '13px', marginTop: '6px' }}>请尝试调整搜索关键词或重置标签筛选条件</p>
               </div>
             ) : viewMode === 'grid' ? (
-              <div className="guest-node-grid">
+              <div className={`guest-node-grid ${filteredNames.length === 1 ? 'single-node-grid' : ''}`}>
                 {filteredNames.map((name, index) => {
                   const meta = detectRegionAndFlag(name, '')
                   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
@@ -699,20 +770,28 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                     <article
                       className={`guest-node-card nezha-vps-card ${nodeStatus === 'offline' ? 'is-offline' : nodeStatus === 'attention' ? 'is-attention' : ''}`}
                       key={`${name}-${index}`}
-                      onClick={() => onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry))}
+                      onClick={() => handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry))}
                       title="点击查看详细性能遥测与监控"
                       style={{ cursor: 'pointer' }}
                     >
-                      {/* 1. 顶部标题行: 状态圆点, 节点名, 系统 Logo, 国旗 */}
+                      {/* 1. 顶部标题行: 状态圆点, 节点名, 状态徽章, 系统 Logo, 国旗, 收藏星标 */}
                       <div className="vps-card-header">
                         <div className="vps-header-left">
-                        <span className={`vps-status-dot ${nodeStatus === 'online' ? 'online' : nodeStatus === 'attention' ? 'warning' : 'offline'}`} />
+                          <span className={`vps-status-dot ${nodeStatus === 'online' ? 'online' : nodeStatus === 'attention' ? 'warning' : 'offline'}`} />
                           <strong className="vps-node-name" title={displayName}>{displayName}</strong>
-                        <span className={`vps-state-label ${nodeStatus}`}>{statusLabel}</span>
+                          <span className={`vps-state-label ${nodeStatus}`}>{statusLabel}</span>
                         </div>
                         <div className="vps-header-right">
                           <DistroIcon os={os} className="vps-distro-logo" />
                           <span className="vps-flag" title={meta.region}>{displayFlag}</span>
+                          <button
+                            type="button"
+                            className="vps-star-btn"
+                            title={isStarred(name) ? '取消收藏' : '收藏节点'}
+                            onClick={(e) => { e.stopPropagation(); toggleStar(name) }}
+                          >
+                            <Star size={14} weight={isStarred(name) ? 'fill' : 'regular'} className={isStarred(name) ? 'text-amber' : ''} />
+                          </button>
                         </div>
                       </div>
 
@@ -774,138 +853,135 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         </div>
                       </div>
 
-                      {/* 4. 实时速率 / 累计流量 / 到期剩余 (3列布局) */}
-                      <div className="vps-stats-tri-row">
-                        <div className="vps-tri-col vps-speeds-col">
-                          <div className="vps-speed-line up mono">
-                            <span className="vps-arrow-icon">^</span>
-                            <span>{upRateText}</span>
-                          </div>
-                          <div className="vps-speed-line down mono">
-                            <span className="vps-arrow-icon">v</span>
-                            <span>{downRateText}</span>
-                          </div>
+                      {/* 4. 实时速率 (2列: ↑ Tx / ↓ Rx) */}
+                      <div className="vps-rates-row">
+                        <div className="vps-rate-col up mono" title={`实时发送: ${upRateText}，累计: ${totalTxText}`}>
+                          <span className="vps-rate-tag">↑ Tx</span>
+                          <span className="vps-rate-val">{upRateText}</span>
+                          <span className="vps-rate-total">({totalTxText})</span>
                         </div>
-
-                        <div className="vps-tri-col vps-totals-col">
-                          <div className="vps-total-line mono">
-                            <span className="vps-arrow-icon">↑</span>
-                            <span>{totalTxText}</span>
-                          </div>
-                          <div className="vps-total-line mono">
-                            <span className="vps-arrow-icon">↓</span>
-                            <span>{totalRxText}</span>
-                          </div>
-                        </div>
-
-                        <div className="vps-tri-col vps-expiry-col">
-                          <div className="vps-meta-line">
-                            <span className="vps-meta-icon">📅</span>
-                            <span>{remainDays !== null ? `剩余 ${remainDays} 天` : '账单信息隐藏'}</span>
-                          </div>
-                          <div className="vps-meta-line">
-                            <span className="vps-meta-icon">💰</span>
-                            <span>{costText === '账单未配置' ? '成本信息隐藏' : costText}</span>
-                          </div>
+                        <div className="vps-rate-col down mono" title={`实时接收: ${downRateText}，累计: ${totalRxText}`}>
+                          <span className="vps-rate-tag">↓ Rx</span>
+                          <span className="vps-rate-val">{downRateText}</span>
+                          <span className="vps-rate-total">({totalRxText})</span>
                         </div>
                       </div>
 
                       {/* 5. 分割线 */}
                       <div className="vps-divider-line" />
 
-                      {/* 6. 三网 延迟 (左) & 丢包 (右) 16点阵监控区 */}
-                      <div className="vps-isp-matrix-grid">
-                        {/* 左列: 延迟 */}
-                        <div className="vps-isp-col">
-                          <div className="vps-isp-col-header">
-                            <span className="vps-isp-col-title">延迟</span>
-                            <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '探测类型'}</span>
+                      {/* 6. 三网 延迟 (左) & 丢包 (右) 点阵监控区 */}
+                      {(!hasIspChecks && cuLatency === null && ctLatency === null && cmLatency === null) ? (
+                        <div className="vps-isp-compact-empty">三网链路监测未配置</div>
+                      ) : (
+                        <div className="vps-isp-matrix-grid">
+                          {/* 左列: 延迟 */}
+                          <div className="vps-isp-col">
+                            <div className="vps-isp-col-header">
+                              <span className="vps-isp-col-title">延迟</span>
+                              <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '类型'}</span>
+                            </div>
+
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot unicom-red" />
+                                  <span>{checkLabels[0]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLatencyText(cuLatency)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
+                            </div>
+
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot telecom-blue" />
+                                  <span>{checkLabels[1]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLatencyText(ctLatency)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
+                            </div>
+
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot mobile-green" />
+                                  <span>{checkLabels[2]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLatencyText(cmLatency)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
+                            </div>
                           </div>
 
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot unicom-red" />
-                                <span>{checkLabels[0]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLatencyText(cuLatency)}</span>
+                          {/* 右列: 丢包 */}
+                          <div className="vps-isp-col">
+                            <div className="vps-isp-col-header">
+                              <span className="vps-isp-col-title">丢包</span>
+                              <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '类型'}</span>
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cuLatency)} />
-                          </div>
 
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot telecom-blue" />
-                                <span>{checkLabels[1]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLatencyText(ctLatency)}</span>
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot unicom-red" />
+                                  <span>{checkLabels[0]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLossText(cuLoss)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(ctLatency)} />
-                          </div>
 
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot mobile-green" />
-                                <span>{checkLabels[2]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLatencyText(cmLatency)}</span>
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot telecom-blue" />
+                                  <span>{checkLabels[1]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLossText(ctLoss)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
                             </div>
-                            <VpsDotTrack blocks={getLatencyBlocks(cmLatency)} />
+
+                            <div className="vps-isp-track-item">
+                              <div className="vps-isp-track-header">
+                                <span className="vps-isp-tag">
+                                  <span className="vps-isp-dot mobile-green" />
+                                  <span>{checkLabels[2]}</span>
+                                </span>
+                                <span className="vps-isp-val mono">{checkLossText(cmLoss)}</span>
+                              </div>
+                              <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
+                            </div>
                           </div>
                         </div>
-
-                        {/* 右列: 丢包 */}
-                        <div className="vps-isp-col">
-                          <div className="vps-isp-col-header">
-                            <span className="vps-isp-col-title">丢包</span>
-                            <span className="vps-isp-col-sub">{hasIspChecks ? '三网' : '探测类型'}</span>
-                          </div>
-
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot unicom-red" />
-                                <span>{checkLabels[0]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLossText(cuLoss)}</span>
-                            </div>
-                            <VpsDotTrack blocks={getLossBlocks(cuLoss)} />
-                          </div>
-
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot telecom-blue" />
-                                <span>{checkLabels[1]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLossText(ctLoss)}</span>
-                            </div>
-                            <VpsDotTrack blocks={getLossBlocks(ctLoss)} />
-                          </div>
-
-                          <div className="vps-isp-track-item">
-                            <div className="vps-isp-track-header">
-                              <span className="vps-isp-tag">
-                                <span className="vps-isp-dot mobile-green" />
-                                <span>{checkLabels[2]}</span>
-                              </span>
-                              <span className="vps-isp-val mono">{checkLossText(cmLoss)}</span>
-                            </div>
-                            <VpsDotTrack blocks={getLossBlocks(cmLoss)} />
-                          </div>
-                        </div>
-                      </div>
+                      )}
                       {hasIspChecks && cmLatency === null && (
                         <button
                           type="button"
                           className="vps-check-action"
-                          onClick={(event) => { event.stopPropagation(); onSelectNode && onSelectNode(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
+                          onClick={(event) => { event.stopPropagation(); handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
                         >
-                          移动暂无样本 · 检查节点线路（最近探测：无记录）
+                          移动暂无样本 · 检查节点线路
                         </button>
                       )}
+
+                      {/* 卡片底栏: 提示与进入详情按钮 */}
+                      <div className="vps-card-footer">
+                        <span className="vps-card-footer-tip">{remainDays !== null ? `剩余 ${remainDays} 天` : '点击查看详细遥测'}</span>
+                        <button
+                          type="button"
+                          className="vps-detail-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry))
+                          }}
+                        >
+                          详情 →
+                        </button>
+                      </div>
 
                       {/* 保持安全契约约束兼容 */}
                       <span className="guest-badge sr-only">状态未公开</span>
