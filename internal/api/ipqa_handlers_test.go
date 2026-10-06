@@ -193,10 +193,11 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 	}
 
 	// 4. POST /api/nodes/:uuid/ipqa/test (dry-run, default force_send=false)
+	testCSRF := task4CSRF(t, srv.Handler(), session)
 	testBody := bytes.NewBufferString(`{"window": "today"}`)
 	reqTest := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/test", testBody)
 	reqTest.AddCookie(task4SessionCookie(session))
-	reqTest.Header.Set("X-CSRF-Token", csrfToken)
+	reqTest.Header.Set("X-CSRF-Token", testCSRF)
 	reqTest.Header.Set("Content-Type", "application/json")
 	reqTest.Header.Set("Origin", "http://127.0.0.1:8080")
 	recTest := httptest.NewRecorder()
