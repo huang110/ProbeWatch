@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckTaskValidateAcceptsEveryAllowedKind(t *testing.T) {
@@ -863,6 +864,80 @@ func TestResourceSnapshotHostHealthInfo(t *testing.T) {
 		t.Fatal("expected error on health_score < 0")
 	}
 }
+
+func TestIPQualityInfoValidate(t *testing.T) {
+	isProxy := false
+	valid := IPQualityInfo{
+		IPType:       "hosting",
+		Country:      "TW",
+		Region:       "Taipei",
+		ASN:          "AS31972",
+		Organization: "Taiwan Internet Technology Co., Ltd.",
+		Proxy:        &isProxy,
+		Risk:         "low",
+		CheckedAt:    time.Now().Unix(),
+		Sources:      map[string]float64{"risk_score": 10},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid IPQualityInfo rejected: %v", err)
+	}
+
+	invalidType := valid
+	invalidType.IPType = "bad_type"
+	if err := invalidType.Validate(); err == nil {
+		t.Fatal("expected error on invalid ip_type")
+	}
+
+	invalidRisk := valid
+	invalidRisk.Risk = "critical"
+	if err := invalidRisk.Validate(); err == nil {
+		t.Fatal("expected error on invalid risk")
+	}
+
+	invalidFuture := valid
+	invalidFuture.CheckedAt = time.Now().Add(2 * time.Hour).Unix()
+	if err := invalidFuture.Validate(); err == nil {
+		t.Fatal("expected error on future checked_at")
+	}
+
+	invalidScore := valid
+	invalidScore.Sources = map[string]float64{"fraud": 150}
+	if err := invalidScore.Validate(); err == nil {
+		t.Fatal("expected error on score > 100")
+	}
+}
+
+func TestReportRequestDiscardsInvalidIPQuality(t *testing.T) {
+	req := ReportRequest{
+		NodeUUID:   "010ae432-2c08-4eef-9133-18289643549f",
+		ReportedAt: time.Now().Unix(),
+		Resource: ResourceSnapshot{
+			CPUPercent: 15.5,
+			Hostname:   "test-node",
+			IPQuality: &IPQualityInfo{
+				IPType:    "invalid_type",
+				Risk:      "invalid_risk",
+				CheckedAt: time.Now().Add(10 * time.Hour).Unix(),
+			},
+		},
+		Results: []CheckResult{},
+	}
+
+	// Validation must succeed without failing the entire report!
+	if err := req.Validate(); err != nil {
+		t.Fatalf("expected report validation to succeed, got %v", err)
+	}
+
+	// But IPQuality must have been safely discarded (set to nil)
+	if req.Resource.IPQuality != nil {
+		t.Fatalf("expected invalid IPQuality to be discarded (nil), got %+v", req.Resource.IPQuality)
+	}
+	// Other resource data must be preserved!
+	if req.Resource.CPUPercent != 15.5 || req.Resource.Hostname != "test-node" {
+		t.Fatalf("expected CPU and Hostname preserved, got cpu=%v host=%v", req.Resource.CPUPercent, req.Resource.Hostname)
+	}
+}
+
 
 
 

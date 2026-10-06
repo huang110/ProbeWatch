@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/security"
 )
@@ -348,6 +350,63 @@ type IPQualityInfo struct {
 	Sources      map[string]float64 `json:"sources,omitempty"`
 }
 
+// Validate checks boundaries, lengths, and accepted enum values for IPQualityInfo.
+func (q IPQualityInfo) Validate() error {
+	if err := validateString("ip_type", q.IPType, 32, false); err != nil {
+		return err
+	}
+	if q.IPType != "" {
+		switch strings.ToLower(q.IPType) {
+		case "hosting", "isp", "residential", "unknown":
+		default:
+			return fmt.Errorf("ip_type %q is invalid", q.IPType)
+		}
+	}
+	if err := validateString("country", q.Country, 64, false); err != nil {
+		return err
+	}
+	if err := validateString("region", q.Region, 128, false); err != nil {
+		return err
+	}
+	if err := validateString("asn", q.ASN, 64, false); err != nil {
+		return err
+	}
+	if err := validateString("organization", q.Organization, 256, false); err != nil {
+		return err
+	}
+	if err := validateString("risk", q.Risk, 32, false); err != nil {
+		return err
+	}
+	if q.Risk != "" {
+		switch strings.ToLower(q.Risk) {
+		case "low", "medium", "high", "unknown":
+		default:
+			return fmt.Errorf("risk %q is invalid", q.Risk)
+		}
+	}
+	if q.CheckedAt < 0 {
+		return errors.New("checked_at must not be negative")
+	}
+	if q.CheckedAt > 0 {
+		maxFuture := time.Now().UTC().Add(1 * time.Hour).Unix()
+		if q.CheckedAt > maxFuture {
+			return errors.New("checked_at is in the future")
+		}
+	}
+	if len(q.Sources) > 16 {
+		return errors.New("sources count exceeds 16")
+	}
+	for k, v := range q.Sources {
+		if err := validateString("source name", k, 64, true); err != nil {
+			return err
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
+			return fmt.Errorf("source score %q must be a finite number between 0 and 100", k)
+		}
+	}
+	return nil
+}
+
 // CheckTask is the only task shape an agent accepts from the control plane.
 type CheckTask struct {
 	ID              string       `json:"id"`
@@ -633,12 +692,17 @@ func (r SyntheticResult) Validate() error {
 	return nil
 }
 
-func (r ReportRequest) Validate() error {
+func (r *ReportRequest) Validate() error {
 	if err := validateUUID("node_uuid", r.NodeUUID); err != nil {
 		return err
 	}
 	if r.ReportedAt <= 0 {
 		return errors.New("reported_at must be greater than zero")
+	}
+	if r.Resource.IPQuality != nil {
+		if err := r.Resource.IPQuality.Validate(); err != nil {
+			r.Resource.IPQuality = nil
+		}
 	}
 	if err := r.Resource.Validate(); err != nil {
 		return fmt.Errorf("resource: %w", err)
@@ -733,7 +797,7 @@ func (r SyntheticResultEnvelope) Validate() error {
 	return r.Result.Validate()
 }
 
-func (r ResourceSnapshot) Validate() error {
+func (r *ResourceSnapshot) Validate() error {
 	for _, field := range []struct {
 		name  string
 		value string
@@ -816,6 +880,11 @@ func (r ResourceSnapshot) Validate() error {
 		}
 		if len(r.HealthInfo.HealthDeductions) > 32 {
 			return errors.New("health_deductions count exceeds 32")
+		}
+	}
+	if r.IPQuality != nil {
+		if err := r.IPQuality.Validate(); err != nil {
+			r.IPQuality = nil
 		}
 	}
 	return nil

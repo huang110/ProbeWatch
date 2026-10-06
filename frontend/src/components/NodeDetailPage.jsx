@@ -106,6 +106,16 @@ function generateSplinePath(points, width = 450, height = 110, padding = 12) {
   return { line, area }
 }
 
+function formatIPQualityType(type) {
+  if (!type) return '未知 / 未识别'
+  const t = String(type).trim().toLowerCase()
+  if (t === 'hosting' || t === 'datacenter') return '数据中心 / 机房'
+  if (t === 'isp') return '宽带 ISP'
+  if (t === 'residential') return '家庭住宅'
+  if (t === 'unknown') return '未知 / 未识别'
+  return type
+}
+
 // Single Chart Card Component
 function KomariChartCard({
   title,
@@ -444,6 +454,8 @@ export function NodeDetailPage({
         const quality = data.ip_quality
         if (quality && typeof quality === 'object') {
           setIpQuality(quality)
+        } else {
+          setIpQuality(null)
         }
       }
     } catch (err) {
@@ -460,6 +472,7 @@ export function NodeDetailPage({
   useEffect(() => {
     if (isPublic && nodeUuid) {
       setPublicDetail(null)
+      setIpQuality(null)
       setPublicDetailError(null)
       setPublicDetailLoading(true)
       const controller = new AbortController()
@@ -486,9 +499,11 @@ export function NodeDetailPage({
       })
       .then((payload) => {
         if (controller.signal.aborted) return
-        const value = payload?.ip_quality || null
+        const value = payload?.resource?.ip_quality || payload?.ip_quality || null
         if (value && typeof value === 'object') {
           setIpQuality(value)
+        } else {
+          setIpQuality(null)
         }
       })
       .catch((error) => {
@@ -1490,8 +1505,27 @@ export function NodeDetailPage({
         <div className="komari-info-card komari-ip-quality-card">
           <div className="komari-info-header komari-ip-quality-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} className="text-mint" /> <h3>IP 质量</h3></span>
-            <span className={`badge ${ipQuality?.risk === 'high' ? 'badge-rose' : ipQuality?.risk === 'medium' ? 'badge-amber' : ipQuality ? 'badge-mint' : publicDetailLoading || loadingIpQuality ? 'badge-neutral' : publicDetailError === 'unauthorized' ? 'badge-amber' : publicDetailError ? 'badge-rose' : 'badge-neutral'}`}>
-              {publicDetailLoading || loadingIpQuality ? '检测中' : ipQuality?.risk ? `${ipQuality.risk === 'high' ? '高' : ipQuality.risk === 'medium' ? '中' : '低'}风险` : publicDetailError === 'unauthorized' ? '未授权' : publicDetailError ? '请求失败' : '等待上报'}
+            <span className={`badge ${
+              ipQuality?.risk === 'high' ? 'badge-rose' :
+              ipQuality?.risk === 'medium' ? 'badge-amber' :
+              ipQuality?.risk === 'low' ? 'badge-mint' :
+              'badge-neutral'
+            }`}>
+              {publicDetailLoading || loadingIpQuality
+                ? '检测中'
+                : ipQuality?.risk === 'high'
+                ? '高风险'
+                : ipQuality?.risk === 'medium'
+                ? '中风险'
+                : ipQuality?.risk === 'low'
+                ? '低风险'
+                : ipQuality
+                ? '未知风险'
+                : publicDetailError === 'unauthorized'
+                ? '未授权'
+                : publicDetailError
+                ? '请求失败'
+                : '等待检测'}
             </span>
           </div>
           <div className="komari-ip-quality-body" style={{ paddingTop: '8px' }}>
@@ -1503,7 +1537,7 @@ export function NodeDetailPage({
             ) : ipQuality ? (
               <>
                 <div className="komari-ip-quality-grid">
-                  <div><span>IP 类型</span><strong>{ipQuality.ip_type || '—'}</strong></div>
+                  <div><span>IP 类型</span><strong>{formatIPQualityType(ipQuality.ip_type)}</strong></div>
                   <div><span>ASN</span><strong>{ipQuality.asn || '—'}</strong></div>
                   <div><span>地区</span><strong>{[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}</strong></div>
                   <div><span>组织</span><strong>{ipQuality.organization || '—'}</strong></div>
@@ -1518,12 +1552,17 @@ export function NodeDetailPage({
                     {Object.entries(ipQuality.sources).map(([source, score]) => <span key={source}><b>{source}</b><em>{Number(score).toFixed(2)}</em></span>)}
                   </div>
                 )}
+                {publicDetailError && (
+                  <div style={{ color: 'var(--text-warning, #f59e0b)', fontSize: '11px', marginTop: '6px' }}>
+                    检测服务暂时不可用，显示最近一次成功结果
+                  </div>
+                )}
                 <small className="komari-ip-quality-note">多来源评分仅作参考，不合并为单一结论；检测时间：{ipQuality.checked_at ? new Date(Number(ipQuality.checked_at) * 1000).toLocaleString('zh-CN') : '未知'}。</small>
               </>
             ) : (
               <div className="komari-ip-quality-empty" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
                 <ShieldWarning size={16} className="text-amber" />
-                <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '暂无 IP 质量检测样本（等待 Agent 质量探针更新）'}</span>
+                <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '等待 Agent 首次质量检测'}</span>
               </div>
             )}
           </div>

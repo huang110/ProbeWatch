@@ -15,11 +15,23 @@ import (
 	"github.com/probewatch/probewatch/internal/version"
 )
 
-func collectResource() protocol.ResourceSnapshot {
-	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector(), defaultHostHealthCollector())
+var (
+	defaultIPQualityOnce     sync.Once
+	sharedIPQualityCollector IPQualityCollector
+)
+
+func defaultIPQualityCollector() IPQualityCollector {
+	defaultIPQualityOnce.Do(func() {
+		sharedIPQualityCollector = NewIPQualityCollector()
+	})
+	return sharedIPQualityCollector
 }
 
-func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector, health HostHealthCollector) protocol.ResourceSnapshot {
+func collectResource() protocol.ResourceSnapshot {
+	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector(), defaultHostHealthCollector(), defaultIPQualityCollector())
+}
+
+func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector, health HostHealthCollector, ipQuality IPQualityCollector) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
@@ -63,6 +75,11 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 		if health != nil {
 			resource.HealthInfo = health.Collect(&resource)
 		}
+		if ipQuality != nil {
+			if q := ipQuality.Get(); q != nil {
+				resource.IPQuality = q
+			}
+		}
 		return resource
 	}
 	if cpu != nil {
@@ -99,6 +116,11 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 	}
 	if health != nil {
 		resource.HealthInfo = health.Collect(&resource)
+	}
+	if ipQuality != nil {
+		if q := ipQuality.Get(); q != nil {
+			resource.IPQuality = q
+		}
 	}
 	return resource
 }

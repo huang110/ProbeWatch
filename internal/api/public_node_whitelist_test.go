@@ -265,6 +265,29 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 			t.Errorf("SECURITY LEAK in network/history: %q found in %s", forbidden, nBody)
 		}
 	}
+
+	// 10. Test GET /api/public/nodes/:uuid/ip-quality
+	qReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/ip-quality", nil)
+	qRec := httptest.NewRecorder()
+	handler.ServeHTTP(qRec, qReq)
+	if qRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for public ip-quality, got %d: %s", qRec.Code, qRec.Body.String())
+	}
+	qBody := qRec.Body.String()
+	for _, forbidden := range forbiddenStrings {
+		if strings.Contains(qBody, forbidden) {
+			t.Errorf("SECURITY LEAK in public ip-quality: %q found in %s", forbidden, qBody)
+		}
+	}
+	var qParsed struct {
+		IPQuality *publicIPQualityDTO `json:"ip_quality"`
+	}
+	if err := json.Unmarshal(qRec.Body.Bytes(), &qParsed); err != nil {
+		t.Fatalf("failed to unmarshal public ip-quality response: %v", err)
+	}
+	if qParsed.IPQuality == nil || qParsed.IPQuality.ASN != "AS15169" {
+		t.Fatalf("expected valid IPQuality with ASN AS15169, got %+v", qParsed.IPQuality)
+	}
 }
 
 func TestPublicNodeRouteScopeAndBypassRejection(t *testing.T) {
@@ -290,6 +313,7 @@ func TestPublicNodeRouteScopeAndBypassRejection(t *testing.T) {
 	}{
 		{"Valid UUID detail", "/api/public/nodes/" + node.UUID + "/detail", http.StatusOK},
 		{"Valid UUID root path", "/api/public/nodes/" + node.UUID, http.StatusOK},
+		{"Valid UUID ip-quality", "/api/public/nodes/" + node.UUID + "/ip-quality", http.StatusOK},
 		{"Non-existent UUID", "/api/public/nodes/00000000-0000-0000-0000-000000000000/detail", http.StatusNotFound},
 		{"Name matching bypass forbidden", "/api/public/nodes/primary-target/detail", http.StatusNotFound},
 		{"guest- prefix fallback forbidden", "/api/public/nodes/guest-primary-target/detail", http.StatusNotFound},
