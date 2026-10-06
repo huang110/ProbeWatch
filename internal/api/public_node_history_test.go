@@ -29,7 +29,8 @@ func TestPublicNodeNetworkHistoryReturnsReadOnlyProbeSamples(t *testing.T) {
     if response.Code != http.StatusOK { t.Fatalf("public network history status = %d, body = %q", response.Code, response.Body.String()) }
     var payload []historyResultResponse
     if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil { t.Fatal(err) }
-    if len(payload) != 1 || payload[0].TargetID != "public-history-target" || string(payload[0].Result) != `{"status":"success","latency_ms":123}` { t.Fatalf("public network history payload = %+v", payload) }
+    var parsedRes struct { Status string `json:"status"`; LatencyMS int64 `json:"latency_ms"` }
+    if len(payload) != 1 || json.Unmarshal(payload[0].Result, &parsedRes) != nil || payload[0].TargetID != "public-history-target" || parsedRes.Status != "success" || parsedRes.LatencyMS != 123 { t.Fatalf("public network history payload = %+v", payload) }
 }
 
 func TestPublicNodeNetworkHistoryRejectsInvalidRequests(t *testing.T) {

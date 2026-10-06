@@ -441,7 +441,7 @@ export function NodeDetailPage({
         if (Array.isArray(data.media)) {
           setMediaData(data.media)
         }
-        const quality = data.ip_quality || data.resource?.ip_quality
+        const quality = data.ip_quality
         if (quality && typeof quality === 'object') {
           setIpQuality(quality)
         }
@@ -483,7 +483,7 @@ export function NodeDetailPage({
       })
       .then((payload) => {
         if (controller.signal.aborted) return
-        const value = payload?.ip_quality || payload?.resource?.ip_quality || null
+        const value = payload?.ip_quality || null
         if (value && typeof value === 'object') {
           setIpQuality(value)
         }
@@ -608,7 +608,7 @@ export function NodeDetailPage({
   const mounts = Array.isArray(detailResource.mounts) ? detailResource.mounts : (Array.isArray(effectiveNode?.mounts) ? effectiveNode.mounts : [])
   const socketStats = detailResource.socket_stats || effectiveNode?.socketStats || effectiveNode?.socket_stats || {}
   const listeningPorts = Array.isArray(detailResource.listening_ports) ? detailResource.listening_ports : (Array.isArray(effectiveNode?.listeningPorts) ? effectiveNode.listeningPorts : (Array.isArray(effectiveNode?.listening_ports) ? effectiveNode.listening_ports : []))
-  const healthInfo = publicDetail?.health_info || publicDetail?.resource?.health_info || detailResource.health_info || effectiveNode?.healthInfo || effectiveNode?.health_info || null
+  const healthInfo = publicDetail?.health_info || detailResource.health_info || effectiveNode?.healthInfo || effectiveNode?.health_info || null
 
   const [portFilter, setPortFilter] = useState('all')
   const [portSearch, setPortSearch] = useState('')

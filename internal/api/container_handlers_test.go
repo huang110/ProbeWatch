@@ -201,8 +201,8 @@ func TestContainerAndWorkloadHandlers(t *testing.T) {
 	reqPubCont := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+task4NodeUUID1+"/containers", nil)
 	recPubCont := httptest.NewRecorder()
 	handler.ServeHTTP(recPubCont, reqPubCont)
-	if recPubCont.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for public containers, got %d", recPubCont.Code)
+	if recPubCont.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found for public containers, got %d", recPubCont.Code)
 	}
 
 	reqPubOver := httptest.NewRequest(http.MethodGet, "/api/public/containers/overview", nil)

@@ -108,7 +108,6 @@ type publicStatusChecks struct {
 // dashboard cards. It deliberately omits UUIDs, internal IDs, addresses and
 // raw resource payloads while keeping the latest values genuinely live.
 type publicNodeTelemetry struct {
-	UUID              string                 `json:"uuid,omitempty"`
 	Name              string                 `json:"name"`
 	Status            string                 `json:"status"`
 	LastReportedAt   *time.Time             `json:"last_reported_at"`
@@ -217,7 +216,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	for _, node := range nodes {
 		// The resource payload is intentionally discarded here:
 		// only the report timestamp is used for the online count.
-		telemetry := publicNodeTelemetry{UUID: node.UUID, Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
+		telemetry := publicNodeTelemetry{Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
 		if reportedAt, payload, e := s.service.Store().GetResourceLatest(r.Context(), node.ID); e == nil {
 			telemetry.LastReportedAt = &reportedAt
 			if time.Since(reportedAt) <= 2*time.Minute {
@@ -425,8 +424,6 @@ type publicNodeResource struct {
 	HasIPv4             bool                 `json:"has_ipv4,omitempty"`
 	HasIPv6             bool                 `json:"has_ipv6,omitempty"`
 	DualStack           bool                 `json:"dual_stack,omitempty"`
-	IPQuality           *publicIPQualityDTO  `json:"ip_quality,omitempty"`
-	HealthInfo          *publicHealthInfoDTO `json:"health_info,omitempty"`
 }
 
 type publicIPQualityDTO struct {
@@ -463,11 +460,22 @@ type publicMediaResultDTO struct {
 	CheckedAt  int64  `json:"checked_at"`
 }
 
+func sanitizePublicTargetHost(host string) string {
+	trimmed := strings.TrimSpace(host)
+	if h, _, err := net.SplitHostPort(trimmed); err == nil {
+		trimmed = h
+	}
+	if net.ParseIP(trimmed) != nil || publicNameIPv4Pattern.MatchString(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
 type publicCheckSummaryDTO struct {
-	TargetID     string     `json:"target_id"`
-	Name         string     `json:"name"`
-	Kind         string     `json:"kind"`
-	Host         string     `json:"host"`
+	TargetID      string     `json:"target_id"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	Host          string     `json:"host,omitempty"`
 	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
 	Total        *int64     `json:"total,omitempty"`
 	Success      *int64     `json:"success,omitempty"`
@@ -533,11 +541,11 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 6 && parts[4] == "network" && parts[5] == "history" {
-		s.writeNodeHistory(w, r, node.ID, "network")
+		s.writePublicNodeNetworkHistory(w, r, node.ID)
 		return
 	}
 	if len(parts) == 6 && parts[4] == "checks" && parts[5] == "summary" {
-		s.nodeChecksSummary(w, r, node.UUID)
+		s.writePublicNodeChecksSummary(w, r, node.ID)
 		return
 	}
 	if len(parts) == 5 && parts[4] == "traffic" {
@@ -545,7 +553,7 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 5 && parts[4] == "media" {
-		s.writeMediaLatest(w, r, node.ID)
+		s.writePublicMediaLatest(w, r, node.ID)
 		return
 	}
 	if len(parts) == 5 && parts[4] == "ip-quality" {
@@ -638,8 +646,6 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 		HasIPv4:             snapshot.IPv4 != "",
 		HasIPv6:             snapshot.IPv6 != "",
 		DualStack:           snapshot.IPv4 != "" && snapshot.IPv6 != "",
-		IPQuality:           ipQualityDTO,
-		HealthInfo:          healthInfoDTO,
 	}
 
 	// Collect public media results
@@ -672,7 +678,7 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 				TargetID: summary.TargetID,
 				Name:     summary.Name,
 				Kind:     summary.Kind,
-				Host:     summary.Host,
+				Host:     sanitizePublicTargetHost(summary.Host),
 			}
 			if !summary.LastCheckedAt.IsZero() {
 				checkedAt := summary.LastCheckedAt
@@ -753,36 +759,45 @@ func (s *Server) writePublicIPQuality(w http.ResponseWriter, r *http.Request, no
 	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": dto})
 }
 
+type publicDiskStat struct {
+	UsedBytes        uint64  `json:"used_bytes,omitempty"`
+	TotalBytes       uint64  `json:"total_bytes,omitempty"`
+	ReadBytesPerSec  uint64  `json:"read_bytes_per_sec,omitempty"`
+	WriteBytesPerSec uint64  `json:"write_bytes_per_sec,omitempty"`
+	ReadIOPS         float64 `json:"read_iops,omitempty"`
+	WriteIOPS        float64 `json:"write_iops,omitempty"`
+}
+
 // publicHistoryResource is the strict whitelist DTO for historical time-series telemetry in guest mode.
 // Sensitive interface maps, MAC addresses, IPv4/IPv6 literals, open ports, socket lists, processes,
 // hostnames and tokens are strictly excluded.
 type publicHistoryResource struct {
-	OS                   string              `json:"os,omitempty"`
-	Kernel               string              `json:"kernel,omitempty"`
-	Architecture         string              `json:"architecture,omitempty"`
-	Arch                 string              `json:"arch,omitempty"`
-	CPUModel             string              `json:"cpu_model,omitempty"`
-	CPUCores             int                 `json:"cpu_cores,omitempty"`
-	CPUMHz               float64             `json:"cpu_mhz,omitempty"`
-	CPUPercent           *float64            `json:"cpu_percent,omitempty"`
-	CPUTempC             *float64            `json:"cpu_temp_c,omitempty"`
-	Load1                *float64            `json:"load1,omitempty"`
-	Load5                *float64            `json:"load5,omitempty"`
-	Load15               *float64            `json:"load15,omitempty"`
-	MemoryUsedBytes      uint64              `json:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes     uint64              `json:"memory_total_bytes,omitempty"`
-	SwapUsedBytes        uint64              `json:"swap_used_bytes,omitempty"`
-	SwapTotalBytes       uint64              `json:"swap_total_bytes,omitempty"`
-	FilesystemUsedBytes  uint64              `json:"filesystem_used_bytes,omitempty"`
-	FilesystemTotalBytes uint64              `json:"filesystem_total_bytes,omitempty"`
-	NetworkRxBytes       uint64              `json:"network_rx_bytes,omitempty"`
-	NetworkTxBytes       uint64              `json:"network_tx_bytes,omitempty"`
-	NetworkRxBytesDelta  *uint64             `json:"network_rx_bytes_delta,omitempty"`
-	NetworkTxBytesDelta  *uint64             `json:"network_tx_bytes_delta,omitempty"`
-	TCPConnCount         *uint64             `json:"tcp_conn_count,omitempty"`
-	UDPConnCount         *uint64             `json:"udp_conn_count,omitempty"`
-	ProcessCount         *uint64             `json:"process_count,omitempty"`
-	Disks                []protocol.DiskStat `json:"disks,omitempty"`
+	OS                   string           `json:"os,omitempty"`
+	Kernel               string           `json:"kernel,omitempty"`
+	Architecture         string           `json:"architecture,omitempty"`
+	Arch                 string           `json:"arch,omitempty"`
+	CPUModel             string           `json:"cpu_model,omitempty"`
+	CPUCores             int              `json:"cpu_cores,omitempty"`
+	CPUMHz               float64          `json:"cpu_mhz,omitempty"`
+	CPUPercent           *float64         `json:"cpu_percent,omitempty"`
+	CPUTempC             *float64         `json:"cpu_temp_c,omitempty"`
+	Load1                *float64         `json:"load1,omitempty"`
+	Load5                *float64         `json:"load5,omitempty"`
+	Load15               *float64         `json:"load15,omitempty"`
+	MemoryUsedBytes      uint64           `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes     uint64           `json:"memory_total_bytes,omitempty"`
+	SwapUsedBytes        uint64           `json:"swap_used_bytes,omitempty"`
+	SwapTotalBytes       uint64           `json:"swap_total_bytes,omitempty"`
+	FilesystemUsedBytes  uint64           `json:"filesystem_used_bytes,omitempty"`
+	FilesystemTotalBytes uint64           `json:"filesystem_total_bytes,omitempty"`
+	NetworkRxBytes       uint64           `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes       uint64           `json:"network_tx_bytes,omitempty"`
+	NetworkRxBytesDelta  *uint64          `json:"network_rx_bytes_delta,omitempty"`
+	NetworkTxBytesDelta  *uint64          `json:"network_tx_bytes_delta,omitempty"`
+	TCPConnCount         *uint64          `json:"tcp_conn_count,omitempty"`
+	UDPConnCount         *uint64          `json:"udp_conn_count,omitempty"`
+	ProcessCount         *uint64          `json:"process_count,omitempty"`
+	Disks                []publicDiskStat `json:"disks,omitempty"`
 }
 
 type publicHistoryResourceResponse struct {
@@ -828,6 +843,18 @@ func (s *Server) writePublicNodeResourceHistory(w http.ResponseWriter, r *http.R
 				pVal := snapshot.ProcessCount
 				proc = &pVal
 			}
+			var publicDisks []publicDiskStat
+			if len(snapshot.Disks) > 0 {
+				publicDisks = make([]publicDiskStat, 0, len(snapshot.Disks))
+				for _, d := range snapshot.Disks {
+					publicDisks = append(publicDisks, publicDiskStat{
+						ReadBytesPerSec:  d.ReadBytesPerSec,
+						WriteBytesPerSec: d.WriteBytesPerSec,
+						ReadIOPS:         d.ReadIOPS,
+						WriteIOPS:        d.WriteIOPS,
+					})
+				}
+			}
 			item := publicHistoryResourceResponse{
 				ReportedAt: record.ReportedAt,
 				Resource: publicHistoryResource{
@@ -854,11 +881,146 @@ func (s *Server) writePublicNodeResourceHistory(w http.ResponseWriter, r *http.R
 					TCPConnCount:         tcp,
 					UDPConnCount:         udp,
 					ProcessCount:         proc,
-					Disks:                snapshot.Disks,
+					Disks:                publicDisks,
 				},
 			}
 			out = append(out, item)
 		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// writePublicNodeChecksSummary serves sanitized 24h/window checks reliability metrics.
+func (s *Server) writePublicNodeChecksSummary(w http.ResponseWriter, r *http.Request, nodeID string) {
+	from, to, _, ok := parseHistoryWindow(r, time.Now().UTC())
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	summaries, err := s.service.Store().GetCheckSummary(r.Context(), nodeID, from, to)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "checks summary unavailable")
+		return
+	}
+	checksList := make([]publicCheckSummaryDTO, 0, len(summaries))
+	for _, summary := range summaries {
+		item := publicCheckSummaryDTO{
+			TargetID: summary.TargetID,
+			Name:     summary.Name,
+			Kind:     summary.Kind,
+			Host:     sanitizePublicTargetHost(summary.Host),
+		}
+		if !summary.LastCheckedAt.IsZero() {
+			checkedAt := summary.LastCheckedAt
+			item.LastCheckedAt = &checkedAt
+		}
+		if summary.HasWindowData {
+			total, success, failure := summary.Total, summary.Success, summary.Failure
+			item.Total, item.Success, item.Failure = &total, &success, &failure
+			if summary.Total > 0 {
+				lossRate := float64(summary.Failure) / float64(summary.Total)
+				item.LossRate = &lossRate
+			}
+			if summary.LatencyCount > 0 {
+				latencyAvg := summary.LatencyAvgMS
+				item.LatencyAvgMS = &latencyAvg
+			}
+			if summary.HasJitter {
+				jitter := summary.JitterMS
+				item.JitterMS = &jitter
+			}
+			if summary.LatencyP95MS != nil {
+				p95 := *summary.LatencyP95MS
+				item.LatencyP95MS = &p95
+			}
+			item.SampleCount = summary.SampleCount
+			item.WindowHours = int(to.Sub(from).Hours())
+		}
+		checksList = append(checksList, item)
+	}
+	writeJSON(w, http.StatusOK, checksList)
+}
+
+// writePublicMediaLatest returns unauthenticated streaming media unlock status using publicMediaResultDTO.
+func (s *Server) writePublicMediaLatest(w http.ResponseWriter, r *http.Request, nodeID string) {
+	results, err := s.service.Store().ListMediaLatest(r.Context(), nodeID)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node results unavailable")
+		return
+	}
+	mediaList := make([]publicMediaResultDTO, 0, len(results))
+	for _, latest := range results {
+		var result protocol.MediaResult
+		if json.Unmarshal(latest.Payload, &result) == nil {
+			mediaList = append(mediaList, publicMediaResultDTO{
+				DetectorID: latest.ID,
+				Detector:   result.Detector,
+				Status:     result.Status,
+				Region:     result.Region,
+				LatencyMS:  result.LatencyMS,
+				Reason:     result.Reason,
+				CheckedAt:  result.CheckedAt,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, mediaList)
+}
+
+type publicNetworkHistoryResultDTO struct {
+	LatencyMS *int64 `json:"latency_ms,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+type publicNetworkHistoryItemDTO struct {
+	TargetID  string                        `json:"target_id"`
+	CheckedAt time.Time                     `json:"checked_at"`
+	LatencyMS *int64                        `json:"latency_ms,omitempty"`
+	Status    string                        `json:"status,omitempty"`
+	Result    publicNetworkHistoryResultDTO `json:"result"`
+}
+
+// writePublicNodeNetworkHistory serves safe latency history time series without leaking network topologies, DNS records, or IP literals.
+func (s *Server) writePublicNodeNetworkHistory(w http.ResponseWriter, r *http.Request, nodeID string) {
+	from, to, limit, ok := parseHistoryWindow(r, time.Now().UTC())
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	records, err := s.service.Store().GetResultHistory(r.Context(), db.TargetKindTCP, nodeID, from, to, limit)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
+		return
+	}
+	out := make([]publicNetworkHistoryItemDTO, 0, len(records))
+	for _, record := range records {
+		var res struct {
+			Status    string `json:"status"`
+			LatencyMS int64  `json:"latency_ms"`
+			Latency   int64  `json:"latency"`
+		}
+		_ = json.Unmarshal(record.Payload, &res)
+		lat := res.LatencyMS
+		if lat == 0 && res.Latency > 0 {
+			lat = res.Latency
+		}
+		var pLat *int64
+		if lat > 0 {
+			pLat = &lat
+		}
+		status := res.Status
+		if status == "" {
+			status = "success"
+		}
+		out = append(out, publicNetworkHistoryItemDTO{
+			TargetID:  record.TargetID,
+			CheckedAt: record.CheckedAt,
+			LatencyMS: pLat,
+			Status:    status,
+			Result: publicNetworkHistoryResultDTO{
+				LatencyMS: pLat,
+				Status:    status,
+			},
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

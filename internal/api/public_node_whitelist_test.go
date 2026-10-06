@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
 )
 
@@ -72,6 +73,9 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 		"top_processes": [
 			{"pid": 1, "name": "systemd", "user": "root"}
 		],
+		"disks": [
+			{"device": "vda", "read_bytes_per_sec": 1024, "write_bytes_per_sec": 2048, "read_iops": 10, "write_iops": 20}
+		],
 		"ip_quality": {
 			"ip_type": "DataCenter",
 			"country": "US",
@@ -89,6 +93,27 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 		}
 	}`
 	if err := store.UpsertResourceLatest(context.Background(), node.ID, now, []byte(richPayload)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.CreateMediaDetector(context.Background(), db.ResultTargetInput{ID: "netflix", Name: "Netflix", Kind: "media", Host: "netflix.com"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateNetworkTarget(context.Background(), db.ResultTargetInput{ID: "tcp-cf", Name: "Cloudflare", Kind: string(db.TargetKindTCP), Host: "1.1.1.1"}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	mediaPayload := `{"detector": "netflix", "status": "available", "region": "US", "latency_ms": 120, "reason": ""}`
+	if err := store.UpsertMediaLatest(context.Background(), node.ID, "netflix", now, []byte(mediaPayload)); err != nil {
+		t.Fatal(err)
+	}
+	netPayload := `{"status": "success", "latency_ms": 25, "remote_addr": "203.0.113.195:443"}`
+	if err := store.UpsertNetworkLatest(context.Background(), node.ID, "tcp-cf", now, []byte(netPayload)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PersistAgentResult(context.Background(), node.ID, "req-1", now.Add(time.Hour), now, db.AgentResultInput{
+		Kind: db.TargetKindTCP, TargetID: "tcp-cf", CheckedAt: now, Payload: []byte(netPayload),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,6 +145,7 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 		"\"interfaces\"",
 		"\"password\"",
 		"\"secret\"",
+		"\"vda\"",
 	}
 	for _, forbidden := range forbiddenStrings {
 		if strings.Contains(body, forbidden) {
@@ -157,6 +183,20 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 		t.Errorf("expected health score 95, got %+v", parsed.HealthInfo)
 	}
 
+	// Verify no duplicated fields inside Resource
+	var rawDetail map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawDetail); err == nil {
+		var rawRes map[string]json.RawMessage
+		if err := json.Unmarshal(rawDetail["resource"], &rawRes); err == nil {
+			if _, exists := rawRes["ip_quality"]; exists {
+				t.Errorf("DESIGN DEFECT: duplicate ip_quality found inside resource map")
+			}
+			if _, exists := rawRes["health_info"]; exists {
+				t.Errorf("DESIGN DEFECT: duplicate health_info found inside resource map")
+			}
+		}
+	}
+
 	// 6. Test GET /api/public/nodes/:uuid/resource/history
 	hReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/resource/history?range=1h&limit=10", nil)
 	hRec := httptest.NewRecorder()
@@ -179,6 +219,51 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 	}
 	if historyList[0].Resource.CPUModel != "Intel(R) Xeon(R) CPU E5-2680 v3" {
 		t.Errorf("unexpected cpu model in history: %s", historyList[0].Resource.CPUModel)
+	}
+	if len(historyList[0].Resource.Disks) == 0 || historyList[0].Resource.Disks[0].ReadBytesPerSec != 1024 {
+		t.Errorf("expected sanitized disk stats with read rate 1024, got %+v", historyList[0].Resource.Disks)
+	}
+
+	// 7. Test GET /api/public/nodes/:uuid/media
+	mReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/media", nil)
+	mRec := httptest.NewRecorder()
+	handler.ServeHTTP(mRec, mReq)
+	if mRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for media, got %d: %s", mRec.Code, mRec.Body.String())
+	}
+	mBody := mRec.Body.String()
+	for _, forbidden := range forbiddenStrings {
+		if strings.Contains(mBody, forbidden) {
+			t.Errorf("SECURITY LEAK in media: %q found in %s", forbidden, mBody)
+		}
+	}
+
+	// 8. Test GET /api/public/nodes/:uuid/checks/summary
+	cReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/checks/summary", nil)
+	cRec := httptest.NewRecorder()
+	handler.ServeHTTP(cRec, cReq)
+	if cRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for checks/summary, got %d: %s", cRec.Code, cRec.Body.String())
+	}
+	cBody := cRec.Body.String()
+	for _, forbidden := range forbiddenStrings {
+		if strings.Contains(cBody, forbidden) {
+			t.Errorf("SECURITY LEAK in checks/summary: %q found in %s", forbidden, cBody)
+		}
+	}
+
+	// 9. Test GET /api/public/nodes/:uuid/network/history
+	nReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/network/history?range=1h&limit=10", nil)
+	nRec := httptest.NewRecorder()
+	handler.ServeHTTP(nRec, nReq)
+	if nRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for network/history, got %d: %s", nRec.Code, nRec.Body.String())
+	}
+	nBody := nRec.Body.String()
+	for _, forbidden := range forbiddenStrings {
+		if strings.Contains(nBody, forbidden) {
+			t.Errorf("SECURITY LEAK in network/history: %q found in %s", forbidden, nBody)
+		}
 	}
 }
 

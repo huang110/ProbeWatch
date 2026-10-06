@@ -80,18 +80,11 @@ func TestNodeBillingAPIEndpoints(t *testing.T) {
 		t.Fatalf("reset with CSRF code = %d, body = %s", resetRes.Code, resetRes.Body.String())
 	}
 
-	// 6. GET /api/public/nodes/{uuid}/billing (guest endpoint, no auth needed) -> 200
+	// 6. GET /api/public/nodes/{uuid}/billing (protected, no auth -> 404)
 	pubReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+nodeUUID+"/billing", nil)
 	pubRec := httptest.NewRecorder()
 	handler.ServeHTTP(pubRec, pubReq)
-	if pubRec.Code != http.StatusOK {
-		t.Fatalf("public billing code = %d, want 200, body = %s", pubRec.Code, pubRec.Body.String())
-	}
-	var pubInfo map[string]any
-	if err := json.Unmarshal(pubRec.Body.Bytes(), &pubInfo); err != nil {
-		t.Fatalf("unmarshal public billing: %v", err)
-	}
-	if pubInfo["reset_day"] != float64(15) || pubInfo["accounting_method"] != "max" {
-		t.Fatalf("unexpected public info: %+v", pubInfo)
+	if pubRec.Code != http.StatusNotFound {
+		t.Fatalf("public billing code = %d, want 404, body = %s", pubRec.Code, pubRec.Body.String())
 	}
 }

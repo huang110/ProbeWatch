@@ -142,7 +142,7 @@ func TestSystemEventsAndLogQueryHandlers(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+task4NodeUUID1+"/events", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("get public node events failed: %d", rec.Code)
 	}
 
