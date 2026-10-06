@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
 )
 

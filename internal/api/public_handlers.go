@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -467,9 +466,9 @@ type publicCheckSummaryDTO struct {
 	Kind         string     `json:"kind"`
 	Host         string     `json:"host"`
 	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
-	Total        *int       `json:"total,omitempty"`
-	Success      *int       `json:"success,omitempty"`
-	Failure      *int       `json:"failure,omitempty"`
+	Total        *int64     `json:"total,omitempty"`
+	Success      *int64     `json:"success,omitempty"`
+	Failure      *int64     `json:"failure,omitempty"`
 	LossRate     *float64   `json:"loss_rate,omitempty"`
 	LatencyAvgMS *float64   `json:"latency_avg_ms,omitempty"`
 	LatencyP95MS *float64   `json:"latency_p95_ms,omitempty"`
