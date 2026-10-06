@@ -156,6 +156,33 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 	if parsed.HealthInfo == nil || parsed.HealthInfo.HealthScore != 95 {
 		t.Errorf("expected health score 95, got %+v", parsed.HealthInfo)
 	}
+
+	// 6. Test GET /api/public/nodes/:uuid/resource/history
+	if err := store.PersistAgentResource(context.Background(), node.ID, "req-1", now.Add(time.Hour), now, []byte(richPayload)); err != nil {
+		t.Fatal(err)
+	}
+	hReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/resource/history?range=1h&limit=10", nil)
+	hRec := httptest.NewRecorder()
+	handler.ServeHTTP(hRec, hReq)
+	if hRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for public resource history, got %d: %s", hRec.Code, hRec.Body.String())
+	}
+	hBody := hRec.Body.String()
+	for _, forbidden := range forbiddenStrings {
+		if strings.Contains(hBody, forbidden) {
+			t.Errorf("SECURITY LEAK in history: public history response contains forbidden text %q\nResponse body: %s", forbidden, hBody)
+		}
+	}
+	var historyList []publicHistoryResourceResponse
+	if err := json.Unmarshal(hRec.Body.Bytes(), &historyList); err != nil {
+		t.Fatalf("failed to unmarshal public history response: %v", err)
+	}
+	if len(historyList) == 0 {
+		t.Fatalf("expected non-empty history list")
+	}
+	if historyList[0].Resource.CPUModel != "Intel(R) Xeon(R) CPU E5-2680 v3" {
+		t.Errorf("unexpected cpu model in history: %s", historyList[0].Resource.CPUModel)
+	}
 }
 
 func TestPublicNodeRouteScopeAndBypassRejection(t *testing.T) {

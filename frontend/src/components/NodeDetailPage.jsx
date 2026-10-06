@@ -539,8 +539,8 @@ export function NodeDetailPage({
   } : null)
 
   const resource = {
-    ...(publicDetail?.resource || {}),
     ...(effectiveNode?.resource || {}),
+    ...(publicDetail?.resource || {}),
   }
   // Public detail responses expose compact status rows. Reuse the newest historical
   // resource snapshot and publicDetail snapshot so hardware and network cards stay aligned.
@@ -548,12 +548,12 @@ export function NodeDetailPage({
     ? [...history].reverse().find((sample) => sample?.resource && typeof sample.resource === 'object')?.resource || {}
     : {}
   const detailResource = {
-    ...(publicDetail?.resource || {}),
     ...latestHistoryResource,
+    ...(publicDetail?.resource || {}),
   }
   Object.entries(resource).forEach(([key, value]) => {
     const usable = value !== null && value !== undefined && value !== '' && value !== '—' && !(Array.isArray(value) && value.length === 0)
-    if (usable) detailResource[key] = value
+    if (usable && !(key in detailResource)) detailResource[key] = value
   })
   const suppliedRate = rates[nodeUuid] || {}
   const latestHistoryRate = Array.isArray(history)
@@ -591,12 +591,14 @@ export function NodeDetailPage({
   // back to the custom metadata so every public IP label stays consistent.
   const publicIp = detailResource.ip || detailResource.ipv4 || effectiveNode?.hostname || customMeta.ip || '—'
   const visitorIp = clientInfo?.ip || '—'
-  const nodeIPv4 = effectiveNode?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
-  const nodeIPv6 = effectiveNode?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
-  const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
-  const interfaces = Array.isArray(effectiveNode?.interfaces) && effectiveNode.interfaces.length > 0
+  const nodeIPv4 = !isPublic ? (effectiveNode?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')) : ''
+  const nodeIPv6 = !isPublic ? (effectiveNode?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')) : ''
+  const hasDualStack = !isPublic
+    ? Boolean((effectiveNode?.ipv4 || detailResource.ipv4) && (effectiveNode?.ipv6 || detailResource.ipv6))
+    : Boolean(publicDetail?.resource?.dual_stack || (publicDetail?.resource?.has_ipv4 && publicDetail?.resource?.has_ipv6))
+  const interfaces = !isPublic && Array.isArray(effectiveNode?.interfaces) && effectiveNode.interfaces.length > 0
     ? effectiveNode.interfaces
-    : (Array.isArray(detailResource.interfaces) ? detailResource.interfaces : [])
+    : (!isPublic && Array.isArray(detailResource.interfaces) ? detailResource.interfaces : [])
   const cores = numeric(detailResource.cpu_cores) ?? numeric(effectiveNode?.cpu_cores)
   const cpuMhz = numeric(detailResource.cpu_mhz) || numeric(effectiveNode?.cpu_mhz) || null
   const cpuTempC = numeric(detailResource.cpu_temp_c) ?? numeric(effectiveNode?.cpu_temp_c) ?? null
@@ -1580,8 +1582,8 @@ export function NodeDetailPage({
                 ) : (
                   <span className="text-muted text-xs mono">—</span>
                 )}
-                {nodeIPv4 && <span className="mono text-xs text-primary" title={`IPv4: ${nodeIPv4}`}>{nodeIPv4}</span>}
-                {nodeIPv6 && <span className="mono text-xs text-muted" title={`IPv6: ${nodeIPv6}`}>{nodeIPv6.length > 20 ? `${nodeIPv6.slice(0, 18)}…` : nodeIPv6}</span>}
+                {!isPublic && nodeIPv4 && <span className="mono text-xs text-primary" title={`IPv4: ${nodeIPv4}`}>{nodeIPv4}</span>}
+                {!isPublic && nodeIPv6 && <span className="mono text-xs text-muted" title={`IPv6: ${nodeIPv6}`}>{nodeIPv6.length > 20 ? `${nodeIPv6.slice(0, 18)}…` : nodeIPv6}</span>}
               </span>
             </div>
             <div className="komari-info-row">
@@ -1613,7 +1615,7 @@ export function NodeDetailPage({
       </div>
 
       {/* 物理与虚拟网卡矩阵 (Per-NIC Metrics) */}
-      {interfaces.length > 0 && (
+      {!isPublic && interfaces.length > 0 && (
         <div className="komari-info-card" style={{ marginBottom: '16px' }}>
           <div className="komari-info-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2302,7 +2304,7 @@ export function NodeDetailPage({
             {mediaData && mediaData.length > 0 ? `${unlockedMediaCount}/${POPULAR_MEDIA.length} 项已解锁` : (isPublic && publicDetailLoading) || loadingMedia ? '加载中' : '未配置检测任务'}
           </span>
         </div>
-        {loadingMedia || (isPublic && publicDetailLoading) ? (
+        {(loadingMedia || (isPublic && publicDetailLoading)) && mediaData.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '20px', color: 'var(--muted)' }}>
             <CircleNotch size={16} className="spin text-amber" />
             <span style={{ fontSize: '12px' }}>正在加载流媒体与 AI 解锁状态…</span>

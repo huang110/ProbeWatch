@@ -422,6 +422,9 @@ type publicNodeResource struct {
 	UptimeSeconds       int64                `json:"uptime_seconds,omitempty"`
 	Virtualization      string               `json:"virtualization,omitempty"`
 	StartedAt           int64                `json:"started_at,omitempty"`
+	HasIPv4             bool                 `json:"has_ipv4,omitempty"`
+	HasIPv6             bool                 `json:"has_ipv6,omitempty"`
+	DualStack           bool                 `json:"dual_stack,omitempty"`
 	IPQuality           *publicIPQualityDTO  `json:"ip_quality,omitempty"`
 	HealthInfo          *publicHealthInfoDTO `json:"health_info,omitempty"`
 }
@@ -526,7 +529,7 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 6 && parts[4] == "resource" && parts[5] == "history" {
-		s.writeNodeHistory(w, r, node.ID, "resource")
+		s.writePublicNodeResourceHistory(w, r, node.ID)
 		return
 	}
 	if len(parts) == 6 && parts[4] == "network" && parts[5] == "history" {
@@ -632,6 +635,9 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 		UptimeSeconds:       uptimeSeconds,
 		Virtualization:      "",
 		StartedAt:           snapshot.StartedAt,
+		HasIPv4:             snapshot.IPv4 != "",
+		HasIPv6:             snapshot.IPv6 != "",
+		DualStack:           snapshot.IPv4 != "" && snapshot.IPv6 != "",
 		IPQuality:           ipQualityDTO,
 		HealthInfo:          healthInfoDTO,
 	}
@@ -746,3 +752,114 @@ func (s *Server) writePublicIPQuality(w http.ResponseWriter, r *http.Request, no
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": dto})
 }
+
+// publicHistoryResource is the strict whitelist DTO for historical time-series telemetry in guest mode.
+// Sensitive interface maps, MAC addresses, IPv4/IPv6 literals, open ports, socket lists, processes,
+// hostnames and tokens are strictly excluded.
+type publicHistoryResource struct {
+	OS                   string              `json:"os,omitempty"`
+	Kernel               string              `json:"kernel,omitempty"`
+	Architecture         string              `json:"architecture,omitempty"`
+	Arch                 string              `json:"arch,omitempty"`
+	CPUModel             string              `json:"cpu_model,omitempty"`
+	CPUCores             int                 `json:"cpu_cores,omitempty"`
+	CPUMHz               float64             `json:"cpu_mhz,omitempty"`
+	CPUPercent           *float64            `json:"cpu_percent,omitempty"`
+	CPUTempC             *float64            `json:"cpu_temp_c,omitempty"`
+	Load1                *float64            `json:"load1,omitempty"`
+	Load5                *float64            `json:"load5,omitempty"`
+	Load15               *float64            `json:"load15,omitempty"`
+	MemoryUsedBytes      uint64              `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes     uint64              `json:"memory_total_bytes,omitempty"`
+	SwapUsedBytes        uint64              `json:"swap_used_bytes,omitempty"`
+	SwapTotalBytes       uint64              `json:"swap_total_bytes,omitempty"`
+	FilesystemUsedBytes  uint64              `json:"filesystem_used_bytes,omitempty"`
+	FilesystemTotalBytes uint64              `json:"filesystem_total_bytes,omitempty"`
+	NetworkRxBytes       uint64              `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes       uint64              `json:"network_tx_bytes,omitempty"`
+	NetworkRxBytesDelta  *uint64             `json:"network_rx_bytes_delta,omitempty"`
+	NetworkTxBytesDelta  *uint64             `json:"network_tx_bytes_delta,omitempty"`
+	TCPConnCount         *uint64             `json:"tcp_conn_count,omitempty"`
+	UDPConnCount         *uint64             `json:"udp_conn_count,omitempty"`
+	ProcessCount         *uint64             `json:"process_count,omitempty"`
+	Disks                []protocol.DiskStat `json:"disks,omitempty"`
+}
+
+type publicHistoryResourceResponse struct {
+	ReportedAt time.Time             `json:"reported_at"`
+	Resource   publicHistoryResource `json:"resource"`
+}
+
+func (s *Server) writePublicNodeResourceHistory(w http.ResponseWriter, r *http.Request, nodeID string) {
+	from, to, limit, ok := parseHistoryWindow(r, time.Now().UTC())
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
+		return
+	}
+	records, err := s.service.Store().GetResourceHistory(r.Context(), nodeID, from, to, limit)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "node resource history unavailable")
+		return
+	}
+	out := make([]publicHistoryResourceResponse, 0, len(records))
+	for _, record := range records {
+		var snapshot protocol.ResourceSnapshot
+		if err := json.Unmarshal(record.Payload, &snapshot); err == nil {
+			var cpuP *float64
+			cpuVal := snapshot.CPUPercent
+			cpuP = &cpuVal
+
+			var tempC *float64
+			if snapshot.CPUTempC > 0 {
+				tempVal := snapshot.CPUTempC
+				tempC = &tempVal
+			}
+			var load1, load5, load15 *float64
+			if snapshot.Load1 > 0 || snapshot.Load5 > 0 || snapshot.Load15 > 0 {
+				l1, l5, l15 := snapshot.Load1, snapshot.Load5, snapshot.Load15
+				load1, load5, load15 = &l1, &l5, &l15
+			}
+			var tcp, udp, proc *uint64
+			if snapshot.TCPConnCount > 0 || snapshot.UDPConnCount > 0 {
+				tVal, uVal := snapshot.TCPConnCount, snapshot.UDPConnCount
+				tcp, udp = &tVal, &uVal
+			}
+			if snapshot.ProcessCount > 0 {
+				pVal := snapshot.ProcessCount
+				proc = &pVal
+			}
+			item := publicHistoryResourceResponse{
+				ReportedAt: record.ReportedAt,
+				Resource: publicHistoryResource{
+					OS:                   snapshot.OS,
+					Kernel:               snapshot.Kernel,
+					Architecture:         snapshot.Arch,
+					Arch:                 snapshot.Arch,
+					CPUModel:             snapshot.CPUModel,
+					CPUCores:             snapshot.CPUCores,
+					CPUMHz:               snapshot.CPUMHz,
+					CPUPercent:           cpuP,
+					CPUTempC:             tempC,
+					Load1:                load1,
+					Load5:                load5,
+					Load15:               load15,
+					MemoryUsedBytes:      snapshot.MemoryUsedBytes,
+					MemoryTotalBytes:     snapshot.MemoryTotalBytes,
+					SwapUsedBytes:        snapshot.SwapUsedBytes,
+					SwapTotalBytes:       snapshot.SwapTotalBytes,
+					FilesystemUsedBytes:  snapshot.FilesystemUsedBytes,
+					FilesystemTotalBytes: snapshot.FilesystemTotalBytes,
+					NetworkRxBytes:       snapshot.NetworkRxBytes,
+					NetworkTxBytes:       snapshot.NetworkTxBytes,
+					TCPConnCount:         tcp,
+					UDPConnCount:         udp,
+					ProcessCount:         proc,
+					Disks:                snapshot.Disks,
+				},
+			}
+			out = append(out, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
