@@ -93,8 +93,8 @@ func TestCPUTrackerIgnoresSubTickWindows(t *testing.T) {
 }
 
 func TestCollectResourceKeepsStartedAt(t *testing.T) {
-	first := collectResourceWith(1234, nil, nil, nil, nil, nil, nil)
-	second := collectResourceWith(1234, nil, nil, nil, nil, nil, nil)
+	first := collectResourceWith(1234, nil, nil, nil, nil, nil, nil, nil)
+	second := collectResourceWith(1234, nil, nil, nil, nil, nil, nil, nil)
 	if first.StartedAt != 1234 || second.StartedAt != 1234 {
 		t.Fatalf("started_at = %d, %d", first.StartedAt, second.StartedAt)
 	}
@@ -125,6 +125,14 @@ func (m *mockIPQualityCollector) Get() *protocol.IPQualityInfo {
 	return m.quality
 }
 
+type mockIPQACollector struct {
+	info *protocol.IPQAInfo
+}
+
+func (m *mockIPQACollector) Get() *protocol.IPQAInfo {
+	return m.info
+}
+
 func TestCollectResourceWithSockets(t *testing.T) {
 	mock := &mockSocketCollector{
 		stats: &protocol.SocketStats{
@@ -135,7 +143,7 @@ func TestCollectResourceWithSockets(t *testing.T) {
 			{Proto: "tcp", Port: 80, BindIP: "0.0.0.0", Process: "nginx", PID: 123, IsPublic: true},
 		},
 	}
-	snap := collectResourceWith(1234, nil, nil, nil, mock, nil, nil)
+	snap := collectResourceWith(1234, nil, nil, nil, mock, nil, nil, nil)
 	if snap.SocketStats == nil || snap.SocketStats.TCPEstablished != 10 {
 		t.Fatalf("expected TCPEstablished = 10, got %v", snap.SocketStats)
 	}
@@ -151,7 +159,7 @@ func TestCollectResourceWithHealth(t *testing.T) {
 			HealthStatus: "optimal",
 		},
 	}
-	snap := collectResourceWith(1234, nil, nil, nil, nil, mock, nil)
+	snap := collectResourceWith(1234, nil, nil, nil, nil, mock, nil, nil)
 	if snap.HealthInfo == nil || snap.HealthInfo.HealthScore != 95 {
 		t.Fatalf("expected HealthScore = 95, got %v", snap.HealthInfo)
 	}
@@ -171,12 +179,32 @@ func TestCollectResourceWithIPQuality(t *testing.T) {
 			CheckedAt:    1700000000,
 		},
 	}
-	snap := collectResourceWith(1234, nil, nil, nil, nil, nil, mock)
+	snap := collectResourceWith(1234, nil, nil, nil, nil, nil, mock, nil)
 	if snap.IPQuality == nil || snap.IPQuality.ASN != "AS31972" {
 		t.Fatalf("expected ASN = AS31972, got %v", snap.IPQuality)
 	}
 	if snap.IPQuality.IPType != "hosting" || snap.IPQuality.Risk != "low" {
 		t.Fatalf("unexpected IPQuality fields: %+v", snap.IPQuality)
+	}
+}
+
+func TestCollectResourceWithIPQA(t *testing.T) {
+	mock := &mockIPQACollector{
+		info: &protocol.IPQAInfo{
+			Enabled:         true,
+			Installed:       true,
+			HighestSeverity: "WARNING",
+			AlertCount:      3,
+			WarningCount:    2,
+			InfoCount:       1,
+		},
+	}
+	snap := collectResourceWith(1234, nil, nil, nil, nil, nil, nil, mock)
+	if snap.IPQA == nil || snap.IPQA.HighestSeverity != "WARNING" {
+		t.Fatalf("expected IPQA HighestSeverity = WARNING, got %v", snap.IPQA)
+	}
+	if snap.IPQA.AlertCount != 3 {
+		t.Fatalf("expected AlertCount = 3, got %d", snap.IPQA.AlertCount)
 	}
 }
 

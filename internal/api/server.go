@@ -33,6 +33,7 @@ type Server struct {
 	publicLimiter *rateLimiter
 	loginLimiter  *rateLimiter
 	totpLimiter   *rateLimiter
+	ipqaLimiter   *rateLimiter
 	terminalManager *terminal.Manager
 	backupScheduler *backup.Scheduler
 	publicCacheMu sync.RWMutex
@@ -64,6 +65,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		publicLimiter: newRateLimiter(60, time.Minute, 10000),
 		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
+		ipqaLimiter:   newRateLimiter(60, time.Minute, 5000),
 		terminalManager: terminal.NewManager(),
 		backupScheduler: backupSched,
 	}
@@ -311,6 +313,38 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if len(parts) == 4 && parts[3] == "ipqa" {
+			if r.Method == http.MethodGet {
+				s.getNodeIPQA(w, r, uuid)
+				return
+			}
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if len(parts) == 5 && parts[3] == "ipqa" {
+			if parts[4] == "history" && r.Method == http.MethodGet {
+				s.getNodeIPQAHistory(w, r, uuid)
+				return
+			}
+			if parts[4] == "changes" && r.Method == http.MethodGet {
+				s.getNodeIPQAChanges(w, r, uuid)
+				return
+			}
+			if parts[4] == "sync" && r.Method == http.MethodPost {
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.postNodeIPQASync(w, r, uuid)
+				})).ServeHTTP(w, r)
+				return
+			}
+			if parts[4] == "test" && r.Method == http.MethodPost {
+				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					s.postNodeIPQATest(w, r, uuid)
+				})).ServeHTTP(w, r)
+				return
+			}
+			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
 		if r.Method == http.MethodGet {

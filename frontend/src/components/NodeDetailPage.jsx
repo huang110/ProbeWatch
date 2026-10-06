@@ -1707,11 +1707,84 @@ export function NodeDetailPage({
                     </div>
                   </section>
                 </div>
+
+                {/* IPQA 风险变化面板 */}
+                <div className="ipqa-status-strip">
+                  <div className="ipqa-status-header">
+                    <div className="ipqa-status-title">
+                      <ShieldCheck size={14} className="text-mint" />
+                      <span>IPQA 风险变化</span>
+                    </div>
+                    {!ipQuality?.ipqa_enabled ? (
+                      <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
+                    ) : !ipQuality?.ipqa_installed ? (
+                      <span className="ipqa-badge ipqa-badge-gray">节点未安装 IP-Quality-Archive</span>
+                    ) : ipQuality?.collection_error ? (
+                      <span className="ipqa-badge ipqa-badge-orange">采集失败</span>
+                    ) : ipQuality?.highest_severity === 'CRITICAL' ? (
+                      <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重风险</span>
+                    ) : ipQuality?.highest_severity === 'WARNING' ? (
+                      <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
+                    ) : ipQuality?.highest_severity === 'INFO' ? (
+                      <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
+                    ) : (
+                      <span className="ipqa-badge ipqa-badge-green">无变化</span>
+                    )}
+                  </div>
+
+                  <div className="ipqa-status-body">
+                    {!ipQuality?.ipqa_enabled ? (
+                      <div className="ipqa-empty-text">未启用 IPQA</div>
+                    ) : !ipQuality?.ipqa_installed ? (
+                      <div className="ipqa-empty-text">节点未安装 IP-Quality-Archive</div>
+                    ) : ipQuality?.collection_error ? (
+                      <div className="ipqa-empty-text text-amber">IPQA 数据暂时不可用（等待 Agent 质量探针更新）</div>
+                    ) : (
+                      <div className="ipqa-metrics-grid">
+                        <div className="ipqa-metric-item">
+                          <span className="label">最近检测</span>
+                          <span className="value mono">{ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待首次检测'}</span>
+                        </div>
+                        <div className="ipqa-metric-item">
+                          <span className="label">协议簇 / 等级</span>
+                          <span className={`value mono sev-${(ipQuality.highest_severity || 'none').toLowerCase()}`}>
+                            {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {ipQuality.highest_severity || '无'}
+                          </span>
+                        </div>
+                        <div className="ipqa-metric-item">
+                          <span className="label">今日告警</span>
+                          <span className="value mono">
+                            {ipQuality.alert_count ?? 0} 项
+                            {ipQuality.critical_count > 0 && <small className="text-rose"> ({ipQuality.critical_count} 严重)</small>}
+                          </span>
+                        </div>
+                        <div className="ipqa-metric-item ipqa-metric-wide">
+                          <span className="label">变化摘要</span>
+                          <span className="value text-truncate" title={ipQuality.recent_change_summary || (ipQuality.has_recent_changes ? '检测到风险变动' : '与前次归档对比无变化')}>
+                            {ipQuality.has_recent_changes ? (ipQuality.recent_change_summary || '检测到风险变动') : '与前次归档对比无变化'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </>
             ) : (
-              <div className="komari-ip-quality-empty" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
-                <ShieldWarning size={16} className="text-amber" />
-                <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '等待 Agent 首次质量检测'}</span>
+              <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldWarning size={16} className="text-amber" />
+                  <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '等待 Agent 首次质量检测'}</span>
+                </div>
+                <div className="ipqa-status-strip" style={{ marginTop: '4px' }}>
+                  <div className="ipqa-status-header">
+                    <div className="ipqa-status-title">
+                      <ShieldCheck size={14} className="text-mint" />
+                      <span>IPQA 风险变化</span>
+                    </div>
+                    <span className="ipqa-badge ipqa-badge-gray">节点未安装 IPQA</span>
+                  </div>
+                  <div className="ipqa-empty-text">节点未安装 IP-Quality-Archive</div>
+                </div>
               </div>
             )}
           </div>

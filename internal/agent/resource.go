@@ -18,6 +18,8 @@ import (
 var (
 	defaultIPQualityOnce     sync.Once
 	sharedIPQualityCollector IPQualityCollector
+	defaultIPQAOnce          sync.Once
+	sharedIPQACollector      IPQACollector
 )
 
 func defaultIPQualityCollector() IPQualityCollector {
@@ -27,11 +29,18 @@ func defaultIPQualityCollector() IPQualityCollector {
 	return sharedIPQualityCollector
 }
 
-func collectResource() protocol.ResourceSnapshot {
-	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector(), defaultHostHealthCollector(), defaultIPQualityCollector())
+func defaultIPQACollector() IPQACollector {
+	defaultIPQAOnce.Do(func() {
+		sharedIPQACollector = NewIPQACollector()
+	})
+	return sharedIPQACollector
 }
 
-func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector, health HostHealthCollector, ipQuality IPQualityCollector) protocol.ResourceSnapshot {
+func collectResource() protocol.ResourceSnapshot {
+	return collectResourceWith(processStartTime(), newCPUTracker(), defaultHardwareCollector(), newPlatformDiskTracker(), defaultSocketCollector(), defaultHostHealthCollector(), defaultIPQualityCollector(), defaultIPQACollector())
+}
+
+func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, disk DiskIOTracker, sock SocketCollector, health HostHealthCollector, ipQuality IPQualityCollector, ipqa IPQACollector) protocol.ResourceSnapshot {
 	resource := protocol.ResourceSnapshot{
 		OS:           runtime.GOOS,
 		Arch:         runtime.GOARCH,
@@ -80,6 +89,11 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 				resource.IPQuality = q
 			}
 		}
+		if ipqa != nil {
+			if q := ipqa.Get(); q != nil {
+				resource.IPQA = q
+			}
+		}
 		return resource
 	}
 	if cpu != nil {
@@ -120,6 +134,11 @@ func collectResourceWith(startedAt int64, cpu cpuSampler, hw HardwareCollector, 
 	if ipQuality != nil {
 		if q := ipQuality.Get(); q != nil {
 			resource.IPQuality = q
+		}
+	}
+	if ipqa != nil {
+		if q := ipqa.Get(); q != nil {
+			resource.IPQA = q
 		}
 	}
 	return resource

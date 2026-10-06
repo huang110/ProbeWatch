@@ -434,17 +434,27 @@ type publicNodeResource struct {
 }
 
 type publicIPQualityDTO struct {
-	IPType       string `json:"ip_type,omitempty"`
-	Country      string `json:"country,omitempty"`
-	Region       string `json:"region,omitempty"`
-	ASN          string `json:"asn,omitempty"`
-	Organization string `json:"organization,omitempty"`
-	Risk         string `json:"risk,omitempty"`
-	Proxy        *bool  `json:"proxy,omitempty"`
-	VPN          *bool  `json:"vpn,omitempty"`
-	Tor          *bool  `json:"tor,omitempty"`
-	Abuse        *bool  `json:"abuse,omitempty"`
-	CheckedAt    int64  `json:"checked_at,omitempty"`
+	IPType              string `json:"ip_type,omitempty"`
+	Country             string `json:"country,omitempty"`
+	Region              string `json:"region,omitempty"`
+	ASN                 string `json:"asn,omitempty"`
+	Organization        string `json:"organization,omitempty"`
+	Risk                string `json:"risk,omitempty"`
+	Proxy               *bool  `json:"proxy,omitempty"`
+	VPN                 *bool  `json:"vpn,omitempty"`
+	Tor                 *bool  `json:"tor,omitempty"`
+	Abuse               *bool  `json:"abuse,omitempty"`
+	CheckedAt           int64  `json:"checked_at,omitempty"`
+	IPQAEnabled         bool   `json:"ipqa_enabled,omitempty"`
+	IPQAInstalled       bool   `json:"ipqa_installed,omitempty"`
+	HighestSeverity     string `json:"highest_severity,omitempty"`
+	AlertCount          int    `json:"alert_count,omitempty"`
+	CriticalCount       int    `json:"critical_count,omitempty"`
+	WarningCount        int    `json:"warning_count,omitempty"`
+	InfoCount           int    `json:"info_count,omitempty"`
+	LastCheckedAt       *int64 `json:"last_checked_at,omitempty"`
+	HasRecentChanges    bool   `json:"has_recent_changes,omitempty"`
+	RecentChangeSummary string `json:"recent_change_summary,omitempty"`
 }
 
 type publicHealthInfoDTO struct {
@@ -591,22 +601,7 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 		_ = json.Unmarshal(payload, &snapshot)
 	}
 
-	var ipQualityDTO *publicIPQualityDTO
-	if snapshot.IPQuality != nil {
-		ipQualityDTO = &publicIPQualityDTO{
-			IPType:       snapshot.IPQuality.IPType,
-			Country:      snapshot.IPQuality.Country,
-			Region:       snapshot.IPQuality.Region,
-			ASN:          snapshot.IPQuality.ASN,
-			Organization: snapshot.IPQuality.Organization,
-			Risk:         snapshot.IPQuality.Risk,
-			Proxy:        snapshot.IPQuality.Proxy,
-			VPN:          snapshot.IPQuality.VPN,
-			Tor:          snapshot.IPQuality.Tor,
-			Abuse:        snapshot.IPQuality.Abuse,
-			CheckedAt:    snapshot.IPQuality.CheckedAt,
-		}
-	}
+	ipQualityDTO := populatePublicIPQualityDTO(snapshot.IPQuality, snapshot.IPQA)
 
 	var healthInfoDTO *publicHealthInfoDTO
 	if snapshot.HealthInfo != nil {
@@ -746,24 +741,79 @@ func (s *Server) writePublicIPQuality(w http.ResponseWriter, r *http.Request, no
 		return
 	}
 	var snapshot protocol.ResourceSnapshot
-	if json.Unmarshal(payload, &snapshot) != nil || snapshot.IPQuality == nil {
+	if json.Unmarshal(payload, &snapshot) != nil || (snapshot.IPQuality == nil && snapshot.IPQA == nil) {
 		writeJSON(w, http.StatusOK, map[string]any{"ip_quality": nil})
 		return
 	}
-	dto := publicIPQualityDTO{
-		IPType:       snapshot.IPQuality.IPType,
-		Country:      snapshot.IPQuality.Country,
-		Region:       snapshot.IPQuality.Region,
-		ASN:          snapshot.IPQuality.ASN,
-		Organization: snapshot.IPQuality.Organization,
-		Risk:         snapshot.IPQuality.Risk,
-		Proxy:        snapshot.IPQuality.Proxy,
-		VPN:          snapshot.IPQuality.VPN,
-		Tor:          snapshot.IPQuality.Tor,
-		Abuse:        snapshot.IPQuality.Abuse,
-		CheckedAt:    snapshot.IPQuality.CheckedAt,
-	}
+	dto := populatePublicIPQualityDTO(snapshot.IPQuality, snapshot.IPQA)
 	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": dto})
+}
+
+func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo) *publicIPQualityDTO {
+	if q == nil && qa == nil {
+		return nil
+	}
+	dto := &publicIPQualityDTO{}
+	if q != nil {
+		dto.IPType = q.IPType
+		dto.Country = q.Country
+		dto.Region = q.Region
+		dto.ASN = q.ASN
+		dto.Organization = q.Organization
+		dto.Risk = q.Risk
+		dto.Proxy = q.Proxy
+		dto.VPN = q.VPN
+		dto.Tor = q.Tor
+		dto.Abuse = q.Abuse
+		dto.CheckedAt = q.CheckedAt
+	}
+	if qa != nil {
+		dto.IPQAEnabled = qa.Enabled
+		dto.IPQAInstalled = qa.Installed
+		dto.HighestSeverity = qa.HighestSeverity
+		dto.AlertCount = qa.AlertCount
+		dto.CriticalCount = qa.CriticalCount
+		dto.WarningCount = qa.WarningCount
+		dto.InfoCount = qa.InfoCount
+		if qa.LastCheckedAt > 0 {
+			dto.LastCheckedAt = &qa.LastCheckedAt
+		}
+		dto.HasRecentChanges = len(qa.Changes) > 0
+		if len(qa.Changes) > 0 {
+			dto.RecentChangeSummary = qa.Changes[0].After
+			if dto.RecentChangeSummary == "" {
+				dto.RecentChangeSummary = qa.Changes[0].Category
+			}
+		}
+		if dto.IPType == "" && qa.IPv4 != nil && qa.IPv4.IPType != "" {
+			dto.IPType = qa.IPv4.IPType
+		}
+		if dto.Country == "" && qa.IPv4 != nil && qa.IPv4.Country != "" {
+			dto.Country = qa.IPv4.Country
+		}
+		if dto.Region == "" && qa.IPv4 != nil && qa.IPv4.Region != "" {
+			dto.Region = qa.IPv4.Region
+		}
+		if dto.ASN == "" && qa.IPv4 != nil && qa.IPv4.ASN != "" {
+			dto.ASN = qa.IPv4.ASN
+		}
+		if dto.Organization == "" && qa.IPv4 != nil && qa.IPv4.Organization != "" {
+			dto.Organization = qa.IPv4.Organization
+		}
+		if dto.Proxy == nil && qa.IPv4 != nil && qa.IPv4.Proxy != nil {
+			dto.Proxy = qa.IPv4.Proxy
+		}
+		if dto.VPN == nil && qa.IPv4 != nil && qa.IPv4.VPN != nil {
+			dto.VPN = qa.IPv4.VPN
+		}
+		if dto.Tor == nil && qa.IPv4 != nil && qa.IPv4.Tor != nil {
+			dto.Tor = qa.IPv4.Tor
+		}
+		if dto.Abuse == nil && qa.IPv4 != nil && qa.IPv4.Abuse != nil {
+			dto.Abuse = qa.IPv4.Abuse
+		}
+	}
+	return dto
 }
 
 type publicDiskStat struct {

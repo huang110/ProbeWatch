@@ -202,7 +202,9 @@ console.log("=== Testing IP Quality UI State Transitions ===")
 // 7. Verify CSS classes and styles in styles.css
 console.log("=== Testing CSS Rules and Layout Definitions ===")
 {
-  const cssPath = resolve(process.cwd(), "src/styles.css")
+  const cssPath = existsSync(resolve(process.cwd(), "src/styles.css"))
+    ? resolve(process.cwd(), "src/styles.css")
+    : resolve(process.cwd(), "frontend/src/styles.css")
   const css = readFileSync(cssPath, "utf8")
 
   const requiredClasses = [
@@ -252,7 +254,9 @@ console.log("=== Testing CSS Rules and Layout Definitions ===")
 // 8. Verify NodeDetailPage.jsx contains independent media strip card and 2-panel IP quality
 console.log("=== Testing Component Code Security & Structure ===")
 {
-  const compPath = resolve(process.cwd(), "src/components/NodeDetailPage.jsx")
+  const compPath = existsSync(resolve(process.cwd(), "src/components/NodeDetailPage.jsx"))
+    ? resolve(process.cwd(), "src/components/NodeDetailPage.jsx")
+    : resolve(process.cwd(), "frontend/src/components/NodeDetailPage.jsx")
   const comp = readFileSync(compPath, "utf8")
 
   // IP quality card must have summary grid and detail grid two
@@ -339,4 +343,51 @@ console.log("=== Testing Media Field Mapping Logic ===")
   console.log("[PASS] Media field mapping logic verified")
 }
 
-console.log("=== ALL IP QUALITY & STREAMING UI TESTS PASSED ===")
+// 9. IPQA Status Strip Verification
+console.log("=== Testing IPQA Status Strip Logic and CSS ===")
+{
+  const cssPath = existsSync(resolve(process.cwd(), "src/styles.css"))
+    ? resolve(process.cwd(), "src/styles.css")
+    : resolve(process.cwd(), "frontend/src/styles.css")
+  const css = readFileSync(cssPath, "utf8")
+
+  const ipqaClasses = [
+    ".ipqa-status-strip",
+    ".ipqa-status-header",
+    ".ipqa-status-title",
+    ".ipqa-badge",
+    ".ipqa-badge-green",
+    ".ipqa-badge-blue",
+    ".ipqa-badge-yellow",
+    ".ipqa-badge-red",
+    ".ipqa-badge-orange",
+    ".ipqa-badge-gray",
+    ".ipqa-metrics-grid",
+    ".ipqa-metric-item",
+  ]
+  for (const cls of ipqaClasses) {
+    assert.ok(css.includes(cls), `CSS must define ${cls}`)
+  }
+
+  function getIPQABadge(ipQuality) {
+    if (!ipQuality?.ipqa_enabled) return { cls: 'ipqa-badge-gray', text: '未启用 IPQA' }
+    if (!ipQuality?.ipqa_installed) return { cls: 'ipqa-badge-gray', text: '节点未安装 IP-Quality-Archive' }
+    if (ipQuality?.collection_error) return { cls: 'ipqa-badge-orange', text: '采集失败' }
+    if (ipQuality?.highest_severity === 'CRITICAL') return { cls: 'ipqa-badge-red', text: 'CRITICAL 严重风险' }
+    if (ipQuality?.highest_severity === 'WARNING') return { cls: 'ipqa-badge-yellow', text: 'WARNING 警告' }
+    if (ipQuality?.highest_severity === 'INFO') return { cls: 'ipqa-badge-blue', text: 'INFO 提示' }
+    return { cls: 'ipqa-badge-green', text: '无变化' }
+  }
+
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: false }), { cls: 'ipqa-badge-gray', text: '未启用 IPQA' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: false }), { cls: 'ipqa-badge-gray', text: '节点未安装 IP-Quality-Archive' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, collection_error: 'log_too_large' }), { cls: 'ipqa-badge-orange', text: '采集失败' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'CRITICAL' }), { cls: 'ipqa-badge-red', text: 'CRITICAL 严重风险' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'WARNING' }), { cls: 'ipqa-badge-yellow', text: 'WARNING 警告' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'INFO' }), { cls: 'ipqa-badge-blue', text: 'INFO 提示' })
+  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'NONE' }), { cls: 'ipqa-badge-green', text: '无变化' })
+
+  console.log("[PASS] IPQA Status Strip logic and CSS verified")
+}
+
+console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")

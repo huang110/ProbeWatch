@@ -1106,6 +1106,101 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
   line-height: 1.4;
 }
 
+/* IPQA 风险变化状态条 */
+.ipqa-status-strip {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg-card-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.ipqa-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ipqa-status-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.ipqa-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.ipqa-badge-green { background: rgba(16, 185, 129, 0.12); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25); }
+.ipqa-badge-blue { background: rgba(59, 130, 246, 0.12); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.25); }
+.ipqa-badge-yellow { background: rgba(245, 158, 11, 0.12); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.25); }
+.ipqa-badge-red { background: rgba(239, 68, 68, 0.12); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.25); }
+.ipqa-badge-orange { background: rgba(249, 115, 22, 0.12); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25); }
+.ipqa-badge-gray { background: rgba(148, 163, 184, 0.1); color: var(--text-3); border: 1px solid rgba(148, 163, 184, 0.2); }
+
+.ipqa-empty-text {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 2px 0;
+}
+
+.ipqa-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ipqa-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ipqa-metric-item .label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.ipqa-metric-item .value {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.ipqa-metric-item .sev-critical { color: #ef4444; }
+.ipqa-metric-item .sev-warning { color: #f59e0b; }
+.ipqa-metric-item .sev-info { color: #3b82f6; }
+.ipqa-metric-item .sev-none { color: #10b981; }
+
+@media (max-width: 640px) {
+  .ipqa-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+}
+
+[data-theme="light"] .ipqa-status-strip {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+[data-theme="light"] .ipqa-status-title {
+  color: #334155;
+}
+[data-theme="light"] .ipqa-metric-item .value {
+  color: #0f172a;
+}
+
 /* 面板 3: 流媒体 / AI */
 .ip-quality-media-list {
   display: grid;

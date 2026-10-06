@@ -315,6 +315,7 @@ type ResourceSnapshot struct {
 	IPv4                 string          `json:"ipv4,omitempty"`
 	IPv6                 string          `json:"ipv6,omitempty"`
 	IPQuality            *IPQualityInfo  `json:"ip_quality,omitempty"`
+	IPQA                 *IPQAInfo       `json:"ipqa,omitempty"`
 
 	// Hardware Sensing & Storage I/O Diagnostics (v0.8.6)
 	CPUTempC float64      `json:"cpu_temp_c,omitempty"`
@@ -704,6 +705,11 @@ func (r *ReportRequest) Validate() error {
 			r.Resource.IPQuality = nil
 		}
 	}
+	if r.Resource.IPQA != nil {
+		if err := r.Resource.IPQA.Validate(); err != nil {
+			r.Resource.IPQA = nil
+		}
+	}
 	if err := r.Resource.Validate(); err != nil {
 		return fmt.Errorf("resource: %w", err)
 	}
@@ -885,6 +891,11 @@ func (r *ResourceSnapshot) Validate() error {
 	if r.IPQuality != nil {
 		if err := r.IPQuality.Validate(); err != nil {
 			r.IPQuality = nil
+		}
+	}
+	if r.IPQA != nil {
+		if err := r.IPQA.Validate(); err != nil {
+			r.IPQA = nil
 		}
 	}
 	return nil

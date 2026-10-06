@@ -453,6 +453,19 @@ CREATE TABLE IF NOT EXISTS incident_updates (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS incident_updates_incident_idx ON incident_updates(incident_id, created_at ASC);
+CREATE TABLE IF NOT EXISTS ipqa_archives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    archive_date TEXT NOT NULL,
+    family TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    highest_severity TEXT NOT NULL DEFAULT '',
+    alert_count INTEGER NOT NULL DEFAULT 0,
+    checked_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(node_id, archive_date, family)
+);
+CREATE INDEX IF NOT EXISTS ipqa_archives_node_date_idx ON ipqa_archives(node_id, archive_date);
 `
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -518,6 +531,31 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	}
 	if err := ensureAlertSilencesTable(ctx, db); err != nil {
 		return err
+	}
+	if err := ensureIPQASchema(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureIPQASchema(ctx context.Context, db *sql.DB) error {
+	createTableSQL := `
+CREATE TABLE IF NOT EXISTS ipqa_archives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    archive_date TEXT NOT NULL,
+    family TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    highest_severity TEXT NOT NULL DEFAULT '',
+    alert_count INTEGER NOT NULL DEFAULT 0,
+    checked_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(node_id, archive_date, family)
+);
+CREATE INDEX IF NOT EXISTS ipqa_archives_node_date_idx ON ipqa_archives(node_id, archive_date);
+`
+	if _, err := db.ExecContext(ctx, createTableSQL); err != nil {
+		return fmt.Errorf("ensure ipqa_archives schema: %w", err)
 	}
 	return nil
 }

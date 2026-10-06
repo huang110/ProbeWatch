@@ -112,6 +112,9 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "report unavailable")
 		return
 	}
+	if request.Resource.IPQA != nil {
+		s.handleIPQAReport(r.Context(), node, request.Resource.IPQA, now)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
