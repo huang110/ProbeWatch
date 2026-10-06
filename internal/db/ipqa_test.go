@@ -34,7 +34,7 @@ func TestIPQAArchives_UpsertAndGetLatest(t *testing.T) {
 		t.Fatalf("create registration: %v", err)
 	}
 	regNode, err := s.RegisterNode(ctx, reg.Token, NodeInput{
-		UUID: "00000000-0000-0000-0000-000000000001",
+		UUID: "550e8400-e29b-41d4-a716-446655440001",
 		Name: "Test Node 1",
 	}, time.Now().UTC())
 	if err != nil {
@@ -94,7 +94,7 @@ func TestIPQAArchives_RetentionPruning(t *testing.T) {
 		t.Fatalf("create registration: %v", err)
 	}
 	regNode, err := s.RegisterNode(ctx, reg.Token, NodeInput{
-		UUID: "00000000-0000-0000-0000-000000000002",
+		UUID: "550e8400-e29b-41d4-a716-446655440002",
 		Name: "Retention Test Node",
 	}, time.Now().UTC())
 	if err != nil {

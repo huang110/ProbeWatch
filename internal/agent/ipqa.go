@@ -371,9 +371,15 @@ func parseAlertLine(raw string) *parsedAlert {
 		ipVer = strings.TrimSpace(parts[3])
 	}
 
-	dateStr := ""
-	if len(ts) >= 10 {
-		dateStr = ts[:10]
+	if len(ts) < 10 || ts[4] != '-' || ts[7] != '-' {
+		return nil
+	}
+	dateStr := ts[:10]
+
+	switch level {
+	case "CRITICAL", "WARNING", "INFO":
+	default:
+		return nil
 	}
 
 	return &parsedAlert{
