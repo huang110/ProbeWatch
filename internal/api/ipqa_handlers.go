@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -415,7 +416,7 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 }
 
 func (s *Server) checkIPQARateLimit(w http.ResponseWriter, r *http.Request) bool {
-	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(r.RemoteAddr) {
+	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(r.RemoteAddr, time.Now()) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return false
 	}

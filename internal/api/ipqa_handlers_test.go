@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,44 +11,27 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/auth"
-	"github.com/probewatch/probewatch/internal/config"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
 )
 
-func setupTestServerForIPQA(t *testing.T) (*Server, *auth.Service, db.Node) {
+func setupTestServerForIPQA(t *testing.T) (*Server, *auth.Service, *db.Store, db.Node) {
 	t.Helper()
-	sqliteDB, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = sqliteDB.Close() })
-
+	service, store := newTask4Auth(t)
+	srv := NewServer(task4Config(), service)
 	ctx := context.Background()
-	if err := db.MigrateForTest(ctx, sqliteDB); err != nil {
-		t.Fatalf("migrate test db: %v", err)
-	}
 
-	cfg := config.Config{
-		Environment: "testing",
-	}
-	store := db.NewStore(sqliteDB, []byte("pepper-123456789012345678901234"))
-	authSvc := auth.NewService(store, cfg)
-	srv := NewServer(cfg, authSvc)
-
-	// Create a node
-	reg, err := store.CreateRegistrationToken(ctx, time.Hour)
+	// Register test node
+	token, err := store.CreateRegistrationToken(ctx, time.Hour)
 	if err != nil {
-		t.Fatalf("create registration token: %v", err)
+		t.Fatal(err)
 	}
-	regNode, err := store.RegisterNode(ctx, reg.Token, db.NodeInput{
-		UUID: "010ae432-2c08-4eef-9133-18289643549f",
-		Name: "Test Node 1",
-	}, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("register node: %v", err)
-	}
-	node := regNode.Node
+	reg := task4Register(t, srv.Handler(), protocol.RegisterRequest{
+		NodeUUID:          "010ae432-2c08-4eef-9133-18289643549f",
+		Name:              "Test Node 1",
+		RegistrationToken: token.Token,
+	})
+	node := mustNode(t, store, reg.NodeUUID)
 
 	// Persist snapshot with IPQA
 	proxy := true
@@ -92,11 +74,11 @@ func setupTestServerForIPQA(t *testing.T) (*Server, *auth.Service, db.Node) {
 		ResourcePayload: payload,
 	})
 
-	return srv, authSvc, node
+	return srv, service, store, node
 }
 
 func TestPublicIPQualityHandler_IncludesIPQAWithoutLeakingSensitiveData(t *testing.T) {
-	srv, _, node := setupTestServerForIPQA(t)
+	srv, _, _, node := setupTestServerForIPQA(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/ip-quality", nil)
 	rec := httptest.NewRecorder()
@@ -144,7 +126,7 @@ func TestPublicIPQualityHandler_IncludesIPQAWithoutLeakingSensitiveData(t *testi
 }
 
 func TestAdminIPQA_RequiresAuthentication(t *testing.T) {
-	srv, _, node := setupTestServerForIPQA(t)
+	srv, _, _, node := setupTestServerForIPQA(t)
 
 	for _, path := range []string{
 		"/api/nodes/" + node.UUID + "/ipqa",
@@ -161,22 +143,14 @@ func TestAdminIPQA_RequiresAuthentication(t *testing.T) {
 }
 
 func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
-	srv, authSvc, node := setupTestServerForIPQA(t)
+	srv, service, store, node := setupTestServerForIPQA(t)
 	ctx := context.Background()
 
-	// Create admin user and session
-	adminUser, err := authSvc.Store().CreateAdminUser(ctx, "local", "admin1", "admin@probewatch.local")
-	if err != nil {
-		t.Fatalf("create admin user: %v", err)
-	}
-	session, err := authSvc.CreateSession(ctx, adminUser.ID, time.Now().Add(24*time.Hour))
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
+	session, csrfToken := task4AdminSession(t, service, store)
 
 	// 1. GET /api/nodes/:uuid/ipqa
 	req := httptest.NewRequest(http.MethodGet, "/api/nodes/"+node.UUID+"/ipqa", nil)
-	req.AddCookie(&http.Cookie{Name: "pb_session", Value: session.Token})
+	req.AddCookie(task4SessionCookie(session))
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 
@@ -193,7 +167,7 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 
 	// 2. GET /api/nodes/:uuid/ipqa/changes
 	reqChanges := httptest.NewRequest(http.MethodGet, "/api/nodes/"+node.UUID+"/ipqa/changes", nil)
-	reqChanges.AddCookie(&http.Cookie{Name: "pb_session", Value: session.Token})
+	reqChanges.AddCookie(task4SessionCookie(session))
 	recChanges := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recChanges, reqChanges)
 	if recChanges.Code != http.StatusOK {
@@ -202,8 +176,8 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 
 	// 3. POST /api/nodes/:uuid/ipqa/sync (with CSRF)
 	reqSync := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/sync", nil)
-	reqSync.AddCookie(&http.Cookie{Name: "pb_session", Value: session.Token})
-	reqSync.Header.Set("X-CSRF-Token", session.CSRFToken)
+	reqSync.AddCookie(task4SessionCookie(session))
+	reqSync.Header.Set("X-CSRF-Token", csrfToken)
 	recSync := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recSync, reqSync)
 	if recSync.Code != http.StatusOK {
@@ -211,7 +185,7 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 	}
 
 	// Verify audit log entry was created for sync
-	auditLogs, total, err := authSvc.Store().ListAuditLogs(ctx, 10, 0, "node.ipqa_sync")
+	auditLogs, total, err := store.ListAuditLogs(ctx, 10, 0, "node.ipqa_sync")
 	if err != nil || total < 1 || len(auditLogs) < 1 {
 		t.Fatalf("expected audit log entry for node.ipqa_sync, err: %v, total: %d", err, total)
 	}
@@ -219,8 +193,8 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 	// 4. POST /api/nodes/:uuid/ipqa/test (dry-run, default force_send=false)
 	testBody := bytes.NewBufferString(`{"window": "today"}`)
 	reqTest := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/test", testBody)
-	reqTest.AddCookie(&http.Cookie{Name: "pb_session", Value: session.Token})
-	reqTest.Header.Set("X-CSRF-Token", session.CSRFToken)
+	reqTest.AddCookie(task4SessionCookie(session))
+	reqTest.Header.Set("X-CSRF-Token", csrfToken)
 	recTest := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(recTest, reqTest)
 	if recTest.Code != http.StatusOK {
