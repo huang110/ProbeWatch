@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
+	"github.com/probewatch/probewatch/internal/protocol"
 	"github.com/probewatch/probewatch/internal/security"
 )
 
@@ -108,6 +109,7 @@ type publicStatusChecks struct {
 // dashboard cards. It deliberately omits UUIDs, internal IDs, addresses and
 // raw resource payloads while keeping the latest values genuinely live.
 type publicNodeTelemetry struct {
+	UUID              string                 `json:"uuid,omitempty"`
 	Name              string                 `json:"name"`
 	Status            string                 `json:"status"`
 	LastReportedAt   *time.Time             `json:"last_reported_at"`
@@ -216,7 +218,7 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	for _, node := range nodes {
 		// The resource payload is intentionally discarded here:
 		// only the report timestamp is used for the online count.
-		telemetry := publicNodeTelemetry{Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
+		telemetry := publicNodeTelemetry{UUID: node.UUID, Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
 		if reportedAt, payload, e := s.service.Store().GetResourceLatest(r.Context(), node.ID); e == nil {
 			telemetry.LastReportedAt = &reportedAt
 			if time.Since(reportedAt) <= 2*time.Minute {
@@ -399,9 +401,96 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// publicNodeRoute serves unauthenticated, read-only GET requests for node telemetry
-// on the guest dashboard (e.g. /api/public/nodes/{uuid}/resource/history,
-// /api/public/nodes/{uuid}/checks/summary, /api/public/nodes/{uuid}/traffic).
+
+// publicNodeResource is the strict, safe public whitelist representation of node hardware and utilization.
+// Sensitive network configuration, physical MAC addresses, local processes, listening sockets,
+// internal identifiers, and database internals are strictly excluded.
+type publicNodeResource struct {
+	OS                  string               `json:"os,omitempty"`
+	Kernel              string               `json:"kernel,omitempty"`
+	Architecture        string               `json:"architecture,omitempty"`
+	Arch                string               `json:"arch,omitempty"`
+	CPUModel            string               `json:"cpu_model,omitempty"`
+	CPUCores            int                  `json:"cpu_cores,omitempty"`
+	CPUMHz              float64              `json:"cpu_mhz,omitempty"`
+	CPUPercent          *float64             `json:"cpu_percent,omitempty"`
+	MemoryUsedBytes     uint64               `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes    uint64               `json:"memory_total_bytes,omitempty"`
+	FilesystemUsedBytes uint64               `json:"filesystem_used_bytes,omitempty"`
+	FilesystemTotalBytes uint64              `json:"filesystem_total_bytes,omitempty"`
+	NetworkRxBytes      uint64               `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes      uint64               `json:"network_tx_bytes,omitempty"`
+	UptimeSeconds       int64                `json:"uptime_seconds,omitempty"`
+	Virtualization      string               `json:"virtualization,omitempty"`
+	StartedAt           int64                `json:"started_at,omitempty"`
+	IPQuality           *publicIPQualityDTO  `json:"ip_quality,omitempty"`
+	HealthInfo          *publicHealthInfoDTO `json:"health_info,omitempty"`
+}
+
+type publicIPQualityDTO struct {
+	IPType       string `json:"ip_type,omitempty"`
+	Country      string `json:"country,omitempty"`
+	Region       string `json:"region,omitempty"`
+	ASN          string `json:"asn,omitempty"`
+	Organization string `json:"organization,omitempty"`
+	Risk         string `json:"risk,omitempty"`
+	Proxy        *bool  `json:"proxy,omitempty"`
+	VPN          *bool  `json:"vpn,omitempty"`
+	Tor          *bool  `json:"tor,omitempty"`
+	Abuse        *bool  `json:"abuse,omitempty"`
+	CheckedAt    int64  `json:"checked_at,omitempty"`
+}
+
+type publicHealthInfoDTO struct {
+	HealthScore      int      `json:"health_score"`
+	HealthStatus     string   `json:"health_status,omitempty"`
+	RebootRequired   bool     `json:"reboot_required"`
+	SecurityUpdates  int      `json:"security_updates"`
+	TotalUpdates     int      `json:"total_updates"`
+	FailedServices   []string `json:"failed_services,omitempty"`
+	HealthDeductions []string `json:"health_deductions,omitempty"`
+}
+
+type publicMediaResultDTO struct {
+	DetectorID string `json:"detector_id"`
+	Detector   string `json:"detector,omitempty"`
+	Status     string `json:"status"`
+	Region     string `json:"region,omitempty"`
+	LatencyMS  int64  `json:"latency_ms,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	CheckedAt  int64  `json:"checked_at"`
+}
+
+type publicCheckSummaryDTO struct {
+	TargetID     string     `json:"target_id"`
+	Name         string     `json:"name"`
+	Kind         string     `json:"kind"`
+	Host         string     `json:"host"`
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
+	Total        *int       `json:"total,omitempty"`
+	Success      *int       `json:"success,omitempty"`
+	Failure      *int       `json:"failure,omitempty"`
+	LossRate     *float64   `json:"loss_rate,omitempty"`
+	LatencyAvgMS *float64   `json:"latency_avg_ms,omitempty"`
+	LatencyP95MS *float64   `json:"latency_p95_ms,omitempty"`
+	JitterMS     *float64   `json:"jitter_ms,omitempty"`
+	SampleCount  int        `json:"sample_count,omitempty"`
+	WindowHours  int        `json:"window_hours,omitempty"`
+}
+
+type publicNodeDetailResponse struct {
+	UUID           string                  `json:"uuid"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Status         string                  `json:"status"`
+	LastReportedAt *time.Time              `json:"last_reported_at"`
+	Resource       *publicNodeResource     `json:"resource"`
+	IPQuality      *publicIPQualityDTO     `json:"ip_quality,omitempty"`
+	HealthInfo     *publicHealthInfoDTO    `json:"health_info,omitempty"`
+	Media          []publicMediaResultDTO  `json:"media"`
+	Checks         []publicCheckSummaryDTO `json:"checks"`
+}
+
 func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -420,32 +509,21 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uuid := parts[3]
-	var node db.Node
-	var err error
-	if security.IsRFC4122UUID(uuid) {
-		node, err = s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	} else if strings.HasPrefix(uuid, "guest-") {
-		// Guest cards do not expose UUIDs. Resolve their stable, URL-safe name
-		// marker server-side so clicking a public card still loads detail data.
-		name, decodeErr := url.PathUnescape(strings.TrimPrefix(uuid, "guest-"))
-		if decodeErr == nil {
-			nodes, listErr := s.service.Store().ListNodes(r.Context())
-			if listErr == nil {
-				for _, candidate := range nodes {
-					if candidate.Name == name {
-						node, err = candidate, nil
-						break
-					}
-				}
-			}
-		}
+	if !security.IsRFC4122UUID(uuid) {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
 	}
-	if err != nil || node.ID == "" {
-		if errors.Is(err, sql.ErrNoRows) || err == nil {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
+	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
+	if errors.Is(err, sql.ErrNoRows) || node.ID == "" {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
+	if len(parts) == 4 || (len(parts) == 5 && parts[4] == "detail") {
+		s.writePublicNodeDetail(w, r, node)
 		return
 	}
 	if len(parts) == 6 && parts[4] == "resource" && parts[5] == "history" {
@@ -453,18 +531,15 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 6 && parts[4] == "network" && parts[5] == "history" {
-		// Network history is read-only telemetry used by the public node detail
-		// page. Keep the same window and limit validation as the authenticated
-		// endpoint, while exposing only the already-available probe results.
 		s.writeNodeHistory(w, r, node.ID, "network")
 		return
 	}
 	if len(parts) == 6 && parts[4] == "checks" && parts[5] == "summary" {
-		s.nodeChecksSummary(w, r, uuid)
+		s.nodeChecksSummary(w, r, node.UUID)
 		return
 	}
 	if len(parts) == 5 && parts[4] == "traffic" {
-		s.nodeTraffic(w, r, uuid)
+		s.nodeTraffic(w, r, node.UUID)
 		return
 	}
 	if len(parts) == 5 && parts[4] == "media" {
@@ -475,23 +550,168 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		s.writePublicIPQuality(w, r, node.ID)
 		return
 	}
-	if len(parts) == 5 && parts[4] == "billing" {
-		s.publicNodeBilling(w, r, uuid)
-		return
-	}
-	if len(parts) == 5 && parts[4] == "containers" {
-		s.getNodeContainers(w, r, uuid)
-		return
-	}
-	if len(parts) == 5 && parts[4] == "processes" {
-		s.getNodeProcesses(w, r, uuid)
-		return
-	}
-	if len(parts) == 5 && parts[4] == "events" {
-		s.getNodeEvents(w, r, uuid)
-		return
-	}
 	writeJSONError(w, http.StatusNotFound, "not found")
+}
+
+// writePublicNodeDetail serves safe, read-only telemetry for the guest node detail page.
+// Admin tokens, private keys, passwords, physical MACs, interface lists, processes,
+// socket internals, and listening port maps are strictly omitted.
+func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, node db.Node) {
+	reportedAt, payload, err := s.service.Store().GetResourceLatest(r.Context(), node.ID)
+	status := "offline"
+	var lastReportedAt *time.Time
+	if err == nil && !reportedAt.IsZero() {
+		lastReportedAt = &reportedAt
+		if time.Since(reportedAt) <= 2*time.Minute {
+			status = "online"
+		} else if time.Since(reportedAt) <= 10*time.Minute {
+			status = "attention"
+		}
+	}
+
+	var snapshot protocol.ResourceSnapshot
+	if len(payload) > 0 && json.Valid(payload) {
+		_ = json.Unmarshal(payload, &snapshot)
+	}
+
+	var ipQualityDTO *publicIPQualityDTO
+	if snapshot.IPQuality != nil {
+		ipQualityDTO = &publicIPQualityDTO{
+			IPType:       snapshot.IPQuality.IPType,
+			Country:      snapshot.IPQuality.Country,
+			Region:       snapshot.IPQuality.Region,
+			ASN:          snapshot.IPQuality.ASN,
+			Organization: snapshot.IPQuality.Organization,
+			Risk:         snapshot.IPQuality.Risk,
+			Proxy:        snapshot.IPQuality.Proxy,
+			VPN:          snapshot.IPQuality.VPN,
+			Tor:          snapshot.IPQuality.Tor,
+			Abuse:        snapshot.IPQuality.Abuse,
+			CheckedAt:    snapshot.IPQuality.CheckedAt,
+		}
+	}
+
+	var healthInfoDTO *publicHealthInfoDTO
+	if snapshot.HealthInfo != nil {
+		healthInfoDTO = &publicHealthInfoDTO{
+			HealthScore:      snapshot.HealthInfo.HealthScore,
+			HealthStatus:     snapshot.HealthInfo.HealthStatus,
+			RebootRequired:   snapshot.HealthInfo.RebootRequired,
+			SecurityUpdates:  snapshot.HealthInfo.SecurityUpdates,
+			TotalUpdates:     snapshot.HealthInfo.TotalUpdates,
+			FailedServices:   snapshot.HealthInfo.FailedServices,
+			HealthDeductions: snapshot.HealthInfo.HealthDeductions,
+		}
+	}
+
+	uptimeSeconds := int64(0)
+	if snapshot.StartedAt > 0 {
+		nowSec := time.Now().Unix()
+		if nowSec >= snapshot.StartedAt {
+			uptimeSeconds = nowSec - snapshot.StartedAt
+		}
+	}
+
+	cpuP := snapshot.CPUPercent
+	arch := snapshot.Arch
+
+	publicResource := publicNodeResource{
+		OS:                  snapshot.OS,
+		Kernel:              snapshot.Kernel,
+		Architecture:        arch,
+		Arch:                arch,
+		CPUModel:            snapshot.CPUModel,
+		CPUCores:            snapshot.CPUCores,
+		CPUMHz:              snapshot.CPUMHz,
+		CPUPercent:          &cpuP,
+		MemoryUsedBytes:     snapshot.MemoryUsedBytes,
+		MemoryTotalBytes:    snapshot.MemoryTotalBytes,
+		FilesystemUsedBytes: snapshot.FilesystemUsedBytes,
+		FilesystemTotalBytes: snapshot.FilesystemTotalBytes,
+		NetworkRxBytes:      snapshot.NetworkRxBytes,
+		NetworkTxBytes:      snapshot.NetworkTxBytes,
+		UptimeSeconds:       uptimeSeconds,
+		Virtualization:      "",
+		StartedAt:           snapshot.StartedAt,
+		IPQuality:           ipQualityDTO,
+		HealthInfo:          healthInfoDTO,
+	}
+
+	// Collect public media results
+	mediaResults, err := s.service.Store().ListMediaLatest(r.Context(), node.ID)
+	mediaList := make([]publicMediaResultDTO, 0, len(mediaResults))
+	if err == nil {
+		for _, latest := range mediaResults {
+			var result protocol.MediaResult
+			if json.Unmarshal(latest.Payload, &result) == nil {
+				mediaList = append(mediaList, publicMediaResultDTO{
+					DetectorID: latest.ID,
+					Detector:   result.Detector,
+					Status:     result.Status,
+					Region:     result.Region,
+					LatencyMS:  result.LatencyMS,
+					Reason:     result.Reason,
+					CheckedAt:  result.CheckedAt,
+				})
+			}
+		}
+	}
+
+	// Collect 24h checks summary
+	now := time.Now().UTC()
+	summaries, err := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now)
+	checksList := make([]publicCheckSummaryDTO, 0, len(summaries))
+	if err == nil {
+		for _, summary := range summaries {
+			item := publicCheckSummaryDTO{
+				TargetID: summary.TargetID,
+				Name:     summary.Name,
+				Kind:     summary.Kind,
+				Host:     summary.Host,
+			}
+			if !summary.LastCheckedAt.IsZero() {
+				checkedAt := summary.LastCheckedAt
+				item.LastCheckedAt = &checkedAt
+			}
+			if summary.HasWindowData {
+				total, success, failure := summary.Total, summary.Success, summary.Failure
+				item.Total, item.Success, item.Failure = &total, &success, &failure
+				if summary.Total > 0 {
+					lossRate := float64(summary.Failure) / float64(summary.Total)
+					item.LossRate = &lossRate
+				}
+				if summary.LatencyCount > 0 {
+					latencyAvg := summary.LatencyAvgMS
+					item.LatencyAvgMS = &latencyAvg
+				}
+				if summary.HasJitter {
+					jitter := summary.JitterMS
+					item.JitterMS = &jitter
+				}
+				if summary.LatencyP95MS != nil {
+					p95 := *summary.LatencyP95MS
+					item.LatencyP95MS = &p95
+				}
+				item.SampleCount = summary.SampleCount
+				item.WindowHours = 24
+			}
+			checksList = append(checksList, item)
+		}
+	}
+
+	response := publicNodeDetailResponse{
+		UUID:           node.UUID,
+		ID:             node.UUID,
+		Name:           sanitizeNodeName(node.Name),
+		Status:         status,
+		LastReportedAt: lastReportedAt,
+		Resource:       &publicResource,
+		IPQuality:      ipQualityDTO,
+		HealthInfo:     healthInfoDTO,
+		Media:          mediaList,
+		Checks:         checksList,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // writePublicIPQuality exposes only a deliberately small, non-identifying
@@ -507,24 +727,23 @@ func (s *Server) writePublicIPQuality(w http.ResponseWriter, r *http.Request, no
 		writeJSONError(w, http.StatusServiceUnavailable, "node resource unavailable")
 		return
 	}
-	var resource struct {
-		IPQuality *struct {
-			IPType string `json:"ip_type,omitempty"`
-			Country string `json:"country,omitempty"`
-			Region string `json:"region,omitempty"`
-			ASN string `json:"asn,omitempty"`
-			Organization string `json:"organization,omitempty"`
-			Proxy *bool `json:"proxy,omitempty"`
-			VPN *bool `json:"vpn,omitempty"`
-			Tor *bool `json:"tor,omitempty"`
-			Abuse *bool `json:"abuse,omitempty"`
-			Risk string `json:"risk,omitempty"`
-			CheckedAt int64 `json:"checked_at,omitempty"`
-		} `json:"ip_quality,omitempty"`
-	}
-	if json.Unmarshal(payload, &resource) != nil || resource.IPQuality == nil {
+	var snapshot protocol.ResourceSnapshot
+	if json.Unmarshal(payload, &snapshot) != nil || snapshot.IPQuality == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ip_quality": nil})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": resource.IPQuality})
+	dto := publicIPQualityDTO{
+		IPType:       snapshot.IPQuality.IPType,
+		Country:      snapshot.IPQuality.Country,
+		Region:       snapshot.IPQuality.Region,
+		ASN:          snapshot.IPQuality.ASN,
+		Organization: snapshot.IPQuality.Organization,
+		Risk:         snapshot.IPQuality.Risk,
+		Proxy:        snapshot.IPQuality.Proxy,
+		VPN:          snapshot.IPQuality.VPN,
+		Tor:          snapshot.IPQuality.Tor,
+		Abuse:        snapshot.IPQuality.Abuse,
+		CheckedAt:    snapshot.IPQuality.CheckedAt,
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ip_quality": dto})
 }

@@ -457,15 +457,18 @@ export function App() {
   const [rates, setRates] = useState({})
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
   const [historyTimeRange, setHistoryTimeRange] = useState('实时')
   const [pingTimeRange, setPingTimeRange] = useState('1小时')
   const historyAbortRef = useRef(null)
   const [checksSummary, setChecksSummary] = useState(null)
   const [checksLoading, setChecksLoading] = useState(false)
+  const [checksError, setChecksError] = useState(null)
   const [pingHistory, setPingHistory] = useState([])
   const checksAbortRef = useRef(null)
   const [traffic, setTraffic] = useState(null)
   const [trafficLoading, setTrafficLoading] = useState(false)
+  const [trafficError, setTrafficError] = useState(null)
   const [trafficPeriod, setTrafficPeriod] = useState('day')
   const trafficAbortRef = useRef(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -680,6 +683,7 @@ export function App() {
       setRates(computeRates(normalized))
       markSync()
       setApiState(normalized.length ? { kind: 'ok', message: '' } : { kind: 'empty', message: 'API 返回空节点数组，暂无节点数据。' })
+      loadOverview()
     } catch (error) {
       if (error?.name === 'AbortError') return
       if (current === coreRequestRef.current) { setApiState({ kind: 'error', message: '无法加载节点数据，正在自动重试。' }); return false }
@@ -690,6 +694,7 @@ export function App() {
 
   // 历史统计轮询：overview 聚合，独立 5 分钟间隔。
   const loadOverview = useCallback(async () => {
+    if (guestPreview || apiState.kind === 'guest' || !me) return
     overviewAbortRef.current?.abort()
     const controller = new AbortController()
     overviewAbortRef.current = controller
@@ -721,13 +726,12 @@ export function App() {
       // overview 失败保持既有卡片数据，静默等待下一轮。
       return false
     }
-  }, [])
+  }, [me, guestPreview, apiState.kind])
 
   useEffect(() => {
     loadCore(true)
-    loadOverview()
     return () => { coreAbortRef.current?.abort(); overviewAbortRef.current?.abort(); historyAbortRef.current?.abort(); checksAbortRef.current?.abort(); trafficAbortRef.current?.abort() }
-  }, [loadCore, loadOverview])
+  }, [loadCore])
 
   useLivePolling(loadCore, {
     interval: activeNav === 'node-detail' ? 3000 : LIVE_CORE_INTERVAL_MS,
@@ -736,7 +740,7 @@ export function App() {
   })
   useLivePolling(loadOverview, {
     interval: OVERVIEW_INTERVAL_MS,
-    enabled: !(guestPreview || apiState.kind === 'guest'),
+    enabled: Boolean(me && !guestPreview && apiState.kind === 'ok'),
     onStatusChange: setLiveState,
   })
 
@@ -780,6 +784,12 @@ export function App() {
       : '15m'
 
     const fetchHistoryFromApi = async () => {
+      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      if (isGuest) {
+        const response = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/resource/history?range=${rangeParam}`, { credentials: 'same-origin', signal: controller.signal })
+        if (!response.ok) throw new Error(`history:${response.status}`)
+        return response.json()
+      }
       let response
       try {
         response = await fetch(`/api/nodes/${encodeURIComponent(uuid)}/resource/history?range=${rangeParam}`, { credentials: 'same-origin', signal: controller.signal })
@@ -890,14 +900,29 @@ export function App() {
           resource,
         }
       })
-    }).then((points) => { if (!controller.signal.aborted) setHistory(points) }).catch((error) => { if (error?.name !== 'AbortError' && !controller.signal.aborted) setHistory([]) }).finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
+    }).then((points) => {
+      if (!controller.signal.aborted) {
+        setHistory(points)
+        setHistoryError(null)
+      }
+    }).catch((error) => {
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) {
+        const errMsg = String(error?.message || '')
+        const isAuth = errMsg.includes('401')
+        const isNotFound = errMsg.includes('404')
+        setHistoryError(isAuth ? 'unauthorized' : isNotFound ? 'not_reported' : 'request_failed')
+        setHistory([])
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setHistoryLoading(false)
+    })
     return () => controller.abort()
   }, [selectedNode, detailNode, activeNav, targetDetailUuid, historyTimeRange, lastSync])
 
   const analyticsNode = selectedNode || detailNode
   const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
   useEffect(() => {
-    if (!analyticsUuid) { setChecksSummary(null); setPingHistory([]); setChecksLoading(false); return undefined }
+    if (!analyticsUuid) { setChecksSummary(null); setPingHistory([]); setChecksLoading(false); setChecksError(null); return undefined }
     checksAbortRef.current?.abort()
     const controller = new AbortController()
     checksAbortRef.current = controller
@@ -910,6 +935,12 @@ export function App() {
       : '1h'
 
     const fetchChecksFromApi = async () => {
+      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      if (isGuest) {
+        const response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary?range=${pingParam}`, { credentials: 'same-origin', signal: controller.signal })
+        if (!response.ok) throw new Error(`checks:${response.status}`)
+        return response.json()
+      }
       let response
       try {
         response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary?range=${pingParam}`, { credentials: 'same-origin', signal: controller.signal })
@@ -924,6 +955,12 @@ export function App() {
     }
 
     const fetchPingHistory = async () => {
+      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      if (isGuest) {
+        const response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
+        if (!response.ok) throw new Error(`network-history:${response.status}`)
+        return response.json()
+      }
       let response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
       if (response.status === 401 || response.status === 404) {
         response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/network/history?range=${pingParam}&limit=240`, { credentials: 'same-origin', signal: controller.signal })
@@ -934,14 +971,23 @@ export function App() {
 
     Promise.allSettled([fetchChecksFromApi(), fetchPingHistory()]).then(([checksResult, historyResult]) => {
       if (controller.signal.aborted) return
-      if (checksResult.status === 'fulfilled' && Array.isArray(checksResult.value)) setChecksSummary(checksResult.value)
-      else setChecksSummary(null)
+      if (checksResult.status === 'fulfilled' && Array.isArray(checksResult.value)) {
+        setChecksSummary(checksResult.value)
+        setChecksError(null)
+      } else {
+        const errMsg = String(checksResult.reason?.message || '')
+        const isAuth = errMsg.includes('401')
+        const isNotFound = errMsg.includes('404')
+        setChecksError(isAuth ? 'unauthorized' : isNotFound ? 'not_configured' : 'request_failed')
+        setChecksSummary(null)
+      }
       if (historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)) setPingHistory(historyResult.value)
       else setPingHistory([])
     }).catch((error) => {
       if (error?.name !== 'AbortError' && !controller.signal.aborted) {
         setChecksSummary(null)
         setPingHistory([])
+        setChecksError('request_failed')
       }
     }).finally(() => {
       if (!controller.signal.aborted) setChecksLoading(false)
@@ -952,13 +998,19 @@ export function App() {
   useEffect(() => { setTrafficPeriod('day') }, [analyticsUuid])
 
   useEffect(() => {
-    if (!analyticsUuid) { setTraffic(null); setTrafficLoading(false); return undefined }
+    if (!analyticsUuid) { setTraffic(null); setTrafficLoading(false); setTrafficError(null); return undefined }
     trafficAbortRef.current?.abort()
     const controller = new AbortController()
     trafficAbortRef.current = controller
     setTrafficLoading(true)
 
     const fetchTrafficFromApi = async () => {
+      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      if (isGuest) {
+        const response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal })
+        if (!response.ok) throw new Error(`traffic:${response.status}`)
+        return response.json()
+      }
       let response
       try {
         response = await fetch(`/api/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal })
@@ -974,9 +1026,18 @@ export function App() {
 
     fetchTrafficFromApi().then((json) => {
       if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('traffic:invalid-json')
-      if (!controller.signal.aborted) setTraffic(json)
+      if (!controller.signal.aborted) {
+        setTraffic(json)
+        setTrafficError(null)
+      }
     }).catch((error) => {
-      if (error?.name !== 'AbortError' && !controller.signal.aborted) setTraffic(null)
+      if (error?.name !== 'AbortError' && !controller.signal.aborted) {
+        const errMsg = String(error?.message || '')
+        const isAuth = errMsg.includes('401')
+        const isNotFound = errMsg.includes('404')
+        setTrafficError(isAuth ? 'unauthorized' : isNotFound ? 'not_reported' : 'request_failed')
+        setTraffic(null)
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setTrafficLoading(false)
     })
@@ -1076,11 +1137,7 @@ export function App() {
       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
        const os = latestGuestResource.os || custom.os || 'Ubuntu 24.04 LTS'
-      // The public status contract intentionally omits UUIDs. When a public
-      // detail link contains a UUID and there is only one visible node, bind
-      // that URL UUID to the live telemetry row so the detail page can load
-      // its public history/check/traffic endpoints without requiring login.
-      const publicUuid = targetUuid && visibleGuestNames.length === 1 ? targetUuid : null
+      const resolvedUuid = telemetry.uuid || custom.uuid || customKey || `guest-${encodeURIComponent(name)}`
       const cpuPercent = numeric(telemetry.cpu_percent)
       const memUsed = numeric(telemetry.memory_used_bytes)
       const memTotal = numeric(telemetry.memory_total_bytes)
@@ -1089,8 +1146,8 @@ export function App() {
       const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
 
       return {
-        uuid: custom.uuid || publicUuid || customKey || `guest-${encodeURIComponent(name)}`,
-        id: custom.uuid || publicUuid || customKey || `guest-${encodeURIComponent(name)}`,
+        uuid: resolvedUuid,
+        id: resolvedUuid,
         name: name,
         status: safeText(telemetry.status, 'unknown'),
         lastReportedAt: telemetry.last_reported_at || null,
@@ -1120,9 +1177,10 @@ export function App() {
       }
     })
 
-    const currentDetailNode = detailNode || (targetUuid ? guestNodesList.find((n) => (n.uuid || n.id) === targetUuid) : null) || (activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null)
+    const matchedNode = targetUuid ? guestNodesList.find((n) => (n.uuid || n.id) === targetUuid) : null
+    const currentDetailNode = detailNode || matchedNode || (!targetUuid && activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null)
 
-    if (activeNav === 'node-detail' && currentDetailNode) {
+    if (activeNav === 'node-detail') {
       return (
         <main className="guest-shell guest-mjj-shell">
           {guestPreview && (
@@ -1205,12 +1263,15 @@ export function App() {
               checksSummary={checksSummary}
               pingHistory={pingHistory}
               checksLoading={checksLoading}
+              checksError={checksError}
               pingTimeRange={pingTimeRange}
               onPingTimeRangeChange={setPingTimeRange}
               traffic={traffic}
               trafficLoading={trafficLoading}
+              trafficError={trafficError}
               trafficPeriod={trafficPeriod}
               onTrafficPeriodChange={setTrafficPeriod}
+              historyError={historyError}
               onBack={() => {
                 setSelectedNode(null)
                 setDetailNode(null)
@@ -1352,12 +1413,15 @@ export function App() {
             checksSummary={checksSummary}
             pingHistory={pingHistory}
             checksLoading={checksLoading}
+            checksError={checksError}
             pingTimeRange={pingTimeRange}
             onPingTimeRangeChange={setPingTimeRange}
             traffic={traffic}
             trafficLoading={trafficLoading}
+            trafficError={trafficError}
             trafficPeriod={trafficPeriod}
             onTrafficPeriodChange={setTrafficPeriod}
+            historyError={historyError}
             onBack={() => navigate('servers')}
             rates={rates}
             onNavigate={navigate}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   CaretLeft,
@@ -61,6 +61,7 @@ import {
 import { DistroIcon } from './Common.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 import { PosterModal } from './PosterModal.jsx'
+import { fetchPublicNodeDetail } from '../lib/api.js'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -169,6 +170,12 @@ function KomariChartCard({
             )}
           </svg>
 
+          {(!series || !series.some((v) => typeof v === 'number' && Number.isFinite(v))) && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--text-muted, #94a3b8)', pointerEvents: 'none' }}>
+              暂无历史采样数据
+            </div>
+          )}
+
           {/* Time axis labels */}
           <div className="komari-chart-x-axis mono">
             {timeLabels.map((lbl, idx) => (
@@ -272,10 +279,13 @@ export function NodeDetailPage({
   checksLoading = false,
   pingTimeRange = '1小时',
   onPingTimeRangeChange,
+  checksError = null,
   traffic = null,
   trafficLoading = false,
+  trafficError = null,
   trafficPeriod = 'day',
   onTrafficPeriodChange,
+  historyError = null,
   onBack,
   rates = {},
   clientInfo = null,
@@ -397,6 +407,10 @@ export function NodeDetailPage({
 
   const [mediaData, setMediaData] = useState([])
   const [showPosterModal, setShowPosterModal] = useState(false)
+  const [publicDetail, setPublicDetail] = useState(null)
+  const [publicDetailLoading, setPublicDetailLoading] = useState(false)
+  const [publicDetailError, setPublicDetailError] = useState(null)
+  const [lastSyncTime, setLastSyncTime] = useState(null)
 
   // Track recently visited nodes for quick access
   useEffect(() => {
@@ -408,11 +422,50 @@ export function NodeDetailPage({
       localStorage.setItem('probewatch:recent-nodes', JSON.stringify(list.slice(0, 10)))
     } catch {}
   }, [nodeUuid])
+
   const [loadingMedia, setLoadingMedia] = useState(false)
   const [ipQuality, setIpQuality] = useState(null)
   const [loadingIpQuality, setLoadingIpQuality] = useState(false)
 
+  const loadPublicDetail = useCallback(async (signal) => {
+    if (!nodeUuid) return
+    setPublicDetailLoading(true)
+    setPublicDetailError(null)
+    try {
+      const data = await fetchPublicNodeDetail(nodeUuid, signal)
+      if (data && typeof data === 'object') {
+        setPublicDetail(data)
+        setLastSyncTime(new Date())
+        if (Array.isArray(data.media)) {
+          setMediaData(data.media)
+        }
+        const quality = data.ip_quality || data.resource?.ip_quality
+        if (quality && typeof quality === 'object') {
+          setIpQuality(quality)
+        }
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        const is404 = err?.status === 404 || String(err?.message || '').includes('404')
+        const is401 = err?.status === 401 || String(err?.message || '').includes('401')
+        setPublicDetailError(is404 ? 'not_found' : is401 ? 'unauthorized' : 'request_failed')
+      }
+    } finally {
+      setPublicDetailLoading(false)
+    }
+  }, [nodeUuid])
+
   useEffect(() => {
+    if (isPublic && nodeUuid) {
+      const controller = new AbortController()
+      loadPublicDetail(controller.signal)
+      return () => controller.abort()
+    }
+  }, [isPublic, nodeUuid, loadPublicDetail])
+
+  // Admin-only direct IP quality poll (in guest mode, publicDetail supplies it directly)
+  useEffect(() => {
+    if (isPublic) return
     if (!nodeUuid) {
       setIpQuality(null)
       setLoadingIpQuality(false)
@@ -420,16 +473,18 @@ export function NodeDetailPage({
     }
     const controller = new AbortController()
     setLoadingIpQuality(true)
-    const path = isPublic
-      ? `/api/public/nodes/${encodeURIComponent(nodeUuid)}/ip-quality`
-      : `/api/nodes/${encodeURIComponent(nodeUuid)}/resource`
-    fetch(path, { credentials: 'same-origin', signal: controller.signal })
-      .then((res) => res)
-      .then((res) => (res.ok ? res.json() : null))
+    fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/resource`, { credentials: 'same-origin', signal: controller.signal })
+      .then((res) => {
+        if (res.status === 401) throw new Error('unauthorized')
+        if (!res.ok) throw new Error(`ip-quality:${res.status}`)
+        return res.json()
+      })
       .then((payload) => {
         if (controller.signal.aborted) return
         const value = payload?.ip_quality || payload?.resource?.ip_quality || null
-        setIpQuality(value && typeof value === 'object' ? value : null)
+        if (value && typeof value === 'object') {
+          setIpQuality(value)
+        }
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') setIpQuality(null)
@@ -440,26 +495,26 @@ export function NodeDetailPage({
     return () => controller.abort()
   }, [nodeUuid, isPublic])
 
+  // Admin-only direct media results poll (in guest mode, publicDetail supplies it directly)
   useEffect(() => {
+    if (isPublic) return
     if (!nodeUuid) {
       setMediaData([])
       setLoadingMedia(false)
       return undefined
     }
     const controller = new AbortController()
-    setMediaData([])
     setLoadingMedia(true)
-    const fetchPath = `/api/public/nodes/${encodeURIComponent(nodeUuid)}/media`
-    fetch(fetchPath, { credentials: 'same-origin', signal: controller.signal })
+    fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/media`, { credentials: 'same-origin', signal: controller.signal })
       .then((res) => {
-        if (!res.ok) {
-          return fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/media`, { credentials: 'same-origin', signal: controller.signal })
-        }
-        return res
+        if (res.status === 401) throw new Error('unauthorized')
+        if (!res.ok) throw new Error(`media:${res.status}`)
+        return res.json()
       })
-      .then((res) => (res.ok ? res.json() : []))
       .then((list) => {
-        if (!controller.signal.aborted && Array.isArray(list)) setMediaData(list)
+        if (!controller.signal.aborted && Array.isArray(list)) {
+          setMediaData(list)
+        }
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') setMediaData([])
@@ -468,19 +523,25 @@ export function NodeDetailPage({
         if (!controller.signal.aborted) setLoadingMedia(false)
       })
     return () => controller.abort()
-  }, [nodeUuid])
+  }, [nodeUuid, isPublic])
 
   const unlockedMediaCount = POPULAR_MEDIA.filter(
     (p) => getMediaStatus(p, mediaData).tone === 'available'
   ).length
 
-  const resource = node?.resource || {}
+  const resource = {
+    ...(publicDetail?.resource || {}),
+    ...(node?.resource || {}),
+  }
   // Public detail responses expose compact status rows. Reuse the newest historical
-  // resource snapshot so hardware and network cards stay aligned with live charts.
+  // resource snapshot and publicDetail snapshot so hardware and network cards stay aligned.
   const latestHistoryResource = Array.isArray(history)
     ? [...history].reverse().find((sample) => sample?.resource && typeof sample.resource === 'object')?.resource || {}
     : {}
-  const detailResource = { ...latestHistoryResource }
+  const detailResource = {
+    ...(publicDetail?.resource || {}),
+    ...latestHistoryResource,
+  }
   Object.entries(resource).forEach(([key, value]) => {
     const usable = value !== null && value !== undefined && value !== '' && value !== '—' && !(Array.isArray(value) && value.length === 0)
     if (usable) detailResource[key] = value
@@ -535,7 +596,7 @@ export function NodeDetailPage({
   const mounts = Array.isArray(detailResource.mounts) ? detailResource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
   const socketStats = detailResource.socket_stats || node?.socketStats || node?.socket_stats || {}
   const listeningPorts = Array.isArray(detailResource.listening_ports) ? detailResource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
-  const healthInfo = detailResource.health_info || node?.healthInfo || node?.health_info || null
+  const healthInfo = publicDetail?.health_info || publicDetail?.resource?.health_info || detailResource.health_info || node?.healthInfo || node?.health_info || null
 
   const [portFilter, setPortFilter] = useState('all')
   const [portSearch, setPortSearch] = useState('')
@@ -806,10 +867,14 @@ export function NodeDetailPage({
     }
   }, [activePingRange])
 
-  // Dynamic Ping Targets mapped directly from checksSummary API
+  const effectiveChecksSummary = (Array.isArray(checksSummary) && checksSummary.length > 0)
+    ? checksSummary
+    : (Array.isArray(publicDetail?.checks) && publicDetail.checks.length > 0 ? publicDetail.checks : null)
+
+  // Dynamic Ping Targets mapped directly from checksSummary API or publicDetail
   const pingTargets = useMemo(() => {
-    if (Array.isArray(checksSummary)) {
-      return checksSummary.map((item, idx) => {
+    if (Array.isArray(effectiveChecksSummary)) {
+      return effectiveChecksSummary.map((item, idx) => {
         const color = TARGET_COLORS[idx % TARGET_COLORS.length]
         const id = item.target_id || `target-${idx}`
         const name = cleanTargetLabel(item.name || item.host, `目标 ${idx + 1}`)
@@ -837,7 +902,7 @@ export function NodeDetailPage({
     }
 
     return []
-  }, [checksSummary])
+  }, [effectiveChecksSummary])
 
   // Select all targets by default
   useEffect(() => {
@@ -1044,15 +1109,19 @@ export function NodeDetailPage({
   const procYMax = Math.ceil((maxProc * 1.25) / 10) * 10
   const procYMid = Math.round(procYMax / 2)
 
-  if (!node) {
+  if (!node || (isPublic && publicDetailError === 'not_found')) {
     return (
       <section className="subpage node-detail-page">
-        <div className="panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <p style={{ color: 'var(--text-3)', marginBottom: '16px' }}>
-            {loading ? '正在同步节点清单与详情…' : '未找到指定节点的信息或该节点已被移除。'}
+        <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
+          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>
+            <WarningCircle size={40} className="text-amber" />
+          </div>
+          <h3 style={{ margin: '0 0 10px', fontSize: '18px', fontWeight: 600 }}>未找到指定节点</h3>
+          <p style={{ color: 'var(--text-3, #94a3b8)', marginBottom: '24px', fontSize: '13px', lineHeight: 1.6 }}>
+            {loading ? '正在同步节点清单与详情…' : '该节点不存在、已被移除或当前访客模式暂未公开。'}
           </p>
-          <button type="button" className="button button-primary" onClick={onBack}>
-            <ArrowLeft size={15} /> 返回节点列表
+          <button type="button" className="button button-primary" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', margin: '0 auto' }}>
+            <ArrowLeft size={16} /> <span>{isPublic ? '返回大屏' : '返回节点列表'}</span>
           </button>
         </div>
       </section>
@@ -1101,8 +1170,30 @@ export function NodeDetailPage({
             <ClipboardText size={16} />
             <span className="poster-action-label">{markdownCopied ? '已复制' : 'Markdown'}</span>
           </button>
-          {/* 打开远程终端 */}
-          {onNavigate && (
+          {/* 访客同步状态与刷新按钮 */}
+          {isPublic && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '4px' }}>
+              {publicDetailLoading ? (
+                <span className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '3px 8px' }}>
+                  <CircleNotch size={12} className="spin text-blue" /> 同步中
+                </span>
+              ) : lastSyncTime ? (
+                <span className="badge badge-neutral mono text-muted" style={{ fontSize: '11px', padding: '3px 8px' }} title={`最近同步：${lastSyncTime.toLocaleString('zh-CN')}`}>
+                  {lastSyncTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="komari-icon-btn"
+                onClick={() => loadPublicDetail()}
+                title="刷新节点详情数据"
+              >
+                <ArrowsClockwise size={15} />
+              </button>
+            </div>
+          )}
+          {/* 打开远程终端 (管理员模式可见) */}
+          {!isPublic && onNavigate && (
             <button
               type="button"
               className="komari-icon-btn text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
@@ -1339,16 +1430,21 @@ export function NodeDetailPage({
           </div>
         </div>
 
-        {/* 卡片 3: IP 质量（可选上报；没有数据时不伪造评分） */}
-        <details className="komari-info-card komari-ip-quality-card" open={Boolean(ipQuality)}>
-          <summary className="komari-info-header komari-ip-quality-summary">
-            <span className="komari-ip-quality-title"><ShieldCheck size={16} className="text-mint" /> IP 质量</span>
-            <span className={`badge ${ipQuality?.risk === 'high' ? 'badge-rose' : ipQuality?.risk === 'medium' ? 'badge-amber' : ipQuality ? 'badge-mint' : 'badge-neutral'}`}>
-              {loadingIpQuality ? '检测中' : ipQuality?.risk ? `${ipQuality.risk === 'high' ? '高' : ipQuality.risk === 'medium' ? '中' : '低'}风险` : '暂无质量库数据'}
+        {/* 卡片 3: IP 质量（白名单数据安全展示） */}
+        <div className="komari-info-card komari-ip-quality-card">
+          <div className="komari-info-header komari-ip-quality-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} className="text-mint" /> <h3>IP 质量</h3></span>
+            <span className={`badge ${ipQuality?.risk === 'high' ? 'badge-rose' : ipQuality?.risk === 'medium' ? 'badge-amber' : ipQuality ? 'badge-mint' : publicDetailLoading || loadingIpQuality ? 'badge-neutral' : publicDetailError === 'unauthorized' ? 'badge-amber' : publicDetailError ? 'badge-rose' : 'badge-neutral'}`}>
+              {publicDetailLoading || loadingIpQuality ? '检测中' : ipQuality?.risk ? `${ipQuality.risk === 'high' ? '高' : ipQuality.risk === 'medium' ? '中' : '低'}风险` : publicDetailError === 'unauthorized' ? '未授权' : publicDetailError ? '请求失败' : '等待上报'}
             </span>
-          </summary>
-          <div className="komari-ip-quality-body">
-            {ipQuality ? (
+          </div>
+          <div className="komari-ip-quality-body" style={{ paddingTop: '8px' }}>
+            {publicDetailLoading || loadingIpQuality ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+                <CircleNotch size={16} className="spin text-blue" />
+                <span>正在同步 IP 质量检测样本…</span>
+              </div>
+            ) : ipQuality ? (
               <>
                 <div className="komari-ip-quality-grid">
                   <div><span>IP 类型</span><strong>{ipQuality.ip_type || '—'}</strong></div>
@@ -1369,10 +1465,13 @@ export function NodeDetailPage({
                 <small className="komari-ip-quality-note">多来源评分仅作参考，不合并为单一结论；检测时间：{ipQuality.checked_at ? new Date(Number(ipQuality.checked_at) * 1000).toLocaleString('zh-CN') : '未知'}。</small>
               </>
             ) : (
-              <div className="komari-ip-quality-empty"><ShieldWarning size={16} /> 尚未接入 IP 质量库，仅展示节点基础网络信息。</div>
+              <div className="komari-ip-quality-empty" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+                <ShieldWarning size={16} className="text-amber" />
+                <span>{publicDetailError === 'unauthorized' ? '访客模式未开放此项指标' : publicDetailError ? 'IP 质量数据请求失败，正在等待自动重试' : '暂无 IP 质量检测样本（等待 Agent 质量探针更新）'}</span>
+              </div>
             )}
           </div>
-        </details>
+        </div>
 
         {/* 卡片 4: 存储信息 */}
         <div className="komari-info-card">
@@ -1672,17 +1771,37 @@ export function NodeDetailPage({
             <h3 style={{ margin: 0 }}>网络连接栈与服务监听端口全景透视</h3>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-              活跃通信 {socketDisplay(tcpEstablished)}
-            </span>
-            <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
-              开放监听 {listeningPorts.length}
-            </span>
-            <span className="mono text-xs text-muted">内核 /proc/net 实时解析</span>
+            {isPublic ? (
+              <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                访客安全受限
+              </span>
+            ) : (
+              <>
+                <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  活跃通信 {socketDisplay(tcpEstablished)}
+                </span>
+                <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                  开放监听 {listeningPorts.length}
+                </span>
+                <span className="mono text-xs text-muted">内核 /proc/net 实时解析</span>
+              </>
+            )}
           </div>
         </div>
 
-        {/* 顶部：套接字状态细分分布条 */}
+        {isPublic ? (
+          <div style={{ padding: '28px 16px', textAlign: 'center', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', borderRadius: '8px', border: '1px dashed var(--border-subtle, rgba(255, 255, 255, 0.1))' }}>
+            <ShieldCheck size={28} style={{ color: '#06b6d4', margin: '0 auto 10px', display: 'block' }} />
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main, #f8fafc)', marginBottom: '6px' }}>
+              隐私与网络安全保护已生效
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)', maxWidth: '480px', margin: '0 auto', lineHeight: '1.6' }}>
+              公网访客模式下已隐藏节点内部监听端口列表、套接字连接状态及进程详情。管理员登录后可查看内核级网络连接全景。
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* 顶部：套接字状态细分分布条 */}
         <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-subtle, rgba(255, 255, 255, 0.02))', border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.06))', marginBottom: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #cbd5e1)' }}>TCP/UDP 网络套接字状态分布</span>
@@ -1781,8 +1900,8 @@ export function NodeDetailPage({
           </div>
 
           {filteredPorts.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '12px' }}>
-              未检索到符合条件的本地监听端口
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+              {portSearch.trim() || portFilter !== 'all' ? '未检索到符合条件的本地监听端口' : '暂无服务监听端口样本（等待 Agent 上报）'}
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -1943,6 +2062,8 @@ export function NodeDetailPage({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* 主机多维健康评分引擎、系统安全补丁雷达与守护进程诊断 (Host Health Scoring & Maintenance Radar) */}
@@ -1980,7 +2101,7 @@ export function NodeDetailPage({
                 )}
               </>
             ) : (
-              <span className="mono text-xs text-muted">等待 Agent 资源快照诊断上报</span>
+              <span className="mono text-xs text-muted">{isPublic && publicDetailLoading ? '正在同步主机健康诊断…' : '探针未上报系统维护诊断'}</span>
             )}
             <span className="mono text-xs text-muted">启发式多维健康引擎</span>
           </div>
@@ -2139,8 +2260,8 @@ export function NodeDetailPage({
           </div>
         ) : (
           <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted, #94a3b8)', fontSize: '12px' }}>
-            <p style={{ margin: '0 0 6px' }}>尚未接收到该节点的系统健康诊断快照。</p>
-            <p className="mono text-xs" style={{ margin: 0 }}>请确保客户端已升级至 ProbeWatch Agent v0.8.10+，健康引擎将在下次采集时自动生效。</p>
+            <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--text-main, #f8fafc)' }}>探针未上报系统维护诊断</p>
+            <p className="mono text-xs" style={{ margin: 0, color: 'var(--text-muted)' }}>节点探针运行良好，但当前上报快照中未包含系统安全补丁与守护单元诊断指标。</p>
           </div>
         )}
       </div>
@@ -2153,13 +2274,23 @@ export function NodeDetailPage({
             <h3 style={{ margin: 0 }}>全球流媒体与 AI 服务解锁能力</h3>
           </div>
           <span className="mono" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: 'var(--primary, #0284c7)' }}>
-            {unlockedMediaCount}/{POPULAR_MEDIA.length} 项已解锁
+            {mediaData && mediaData.length > 0 ? `${unlockedMediaCount}/${POPULAR_MEDIA.length} 项已解锁` : (isPublic && publicDetailLoading) || loadingMedia ? '加载中' : '未配置检测任务'}
           </span>
         </div>
-        {loadingMedia ? (
+        {loadingMedia || (isPublic && publicDetailLoading) ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '20px', color: 'var(--muted)' }}>
             <CircleNotch size={16} className="spin text-amber" />
             <span style={{ fontSize: '12px' }}>正在加载流媒体与 AI 解锁状态…</span>
+          </div>
+        ) : mediaData.length === 0 ? (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+            <FilmStrip size={28} style={{ color: 'var(--text-muted)', margin: '0 auto 8px', display: 'block', opacity: 0.6 }} />
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main, #f8fafc)', marginBottom: '4px' }}>
+              未配置流媒体解锁检测任务
+            </div>
+            <div style={{ fontSize: '12px', maxWidth: '440px', margin: '0 auto' }}>
+              当前节点尚未启用流媒体与 AI 平台连通性周期性测试，暂无最新解锁上报记录。
+            </div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '10px', paddingTop: '4px' }}>
@@ -2401,9 +2532,28 @@ export function NodeDetailPage({
         <div className="komari-targets-grid">
           {pingTargets.length === 0 ? (
             <div className="komari-targets-empty">
-              <ShareNetwork size={18} />
-              <div><strong>尚未添加三网延迟检测</strong><span>添加电信、联通、移动目标后，这里会显示延迟、丢包和抖动。</span></div>
-              {onNavigate && <button type="button" onClick={() => onNavigate('monitoring')}>去添加检测目标</button>}
+              {checksLoading ? (
+                <>
+                  <CircleNotch size={18} className="spin text-blue" />
+                  <div><strong>正在同步三网检测数据…</strong><span>正在拉取最新延迟、丢包和抖动指标。</span></div>
+                </>
+              ) : checksError === 'unauthorized' ? (
+                <>
+                  <ShieldWarning size={18} className="text-amber" />
+                  <div><strong>三网检测指标需要管理员权限</strong><span>公网访客模式下仅可查看公开概要。</span></div>
+                </>
+              ) : checksError === 'request_failed' ? (
+                <>
+                  <WarningCircle size={18} className="text-rose" />
+                  <div><strong>三网检测数据请求失败</strong><span>服务端异常或网络波动，请稍后刷新重试。</span></div>
+                </>
+              ) : (
+                <>
+                  <ShareNetwork size={18} />
+                  <div><strong>当前节点暂未配置检测目标</strong><span>可在管理员后台配置电信、联通、移动目标以展示实时延迟、丢包与抖动。</span></div>
+                  {!isPublic && onNavigate && <button type="button" onClick={() => onNavigate('monitoring')}>去添加检测目标</button>}
+                </>
+              )}
             </div>
           ) : pingTargets.map((t) => {
             const isChecked = Boolean(selectedTargets[t.id])
@@ -2462,7 +2612,15 @@ export function NodeDetailPage({
 
           <div className="komari-ping-chart-wrap">
             {pingTargets.length === 0 ? (
-              <div className="komari-ping-empty-state komari-ping-empty-config"><ShareNetwork size={22} /><strong>暂无三网检测目标</strong><span>先添加电信、联通、移动检测目标，延迟曲线会在真实采样后自动出现。</span></div>
+              <div className="komari-ping-empty-state komari-ping-empty-config">
+                {checksError === 'unauthorized' ? (
+                  <><ShieldWarning size={22} /><strong>三网检测受限</strong><span>公网访客模式下未授权查看历史采样曲线。</span></>
+                ) : checksError === 'request_failed' ? (
+                  <><WarningCircle size={22} /><strong>检测数据请求异常</strong><span>请稍后刷新重试。</span></>
+                ) : (
+                  <><ShareNetwork size={22} /><strong>暂无三网检测目标</strong><span>先添加电信、联通、移动检测目标，延迟曲线会在真实采样后自动出现。</span></>
+                )}
+              </div>
             ) : pingChartData.targetPaths.length === 0 ? (
               <div className="komari-ping-empty-state komari-ping-empty-config"><Clock size={22} /><strong>等待真实延迟采样</strong><span>检测目标已配置，探针回传数据后会显示曲线。</span></div>
             ) : null}

@@ -444,6 +444,16 @@ export async function fetchPublicNodeBilling(uuid) {
   return await res.json()
 }
 
+export async function fetchPublicNodeDetail(uuid, signal) {
+  const res = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/detail`, { credentials: 'same-origin', signal })
+  if (!res.ok) {
+    const err = new Error(`Failed to fetch public node detail (${res.status})`)
+    err.status = res.status
+    throw err
+  }
+  return await res.json()
+}
+
 export async function fetchPublicVersion() {
   const res = await fetch('/api/public/version', { credentials: 'same-origin' })
   if (!res.ok) throw new Error('Failed to fetch public version')
