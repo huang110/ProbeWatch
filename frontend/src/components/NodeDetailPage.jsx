@@ -38,6 +38,9 @@ import {
   MagnifyingGlass,
   ShieldCheck,
   ShieldWarning,
+  Shield,
+  Gauge,
+  Play,
 } from '@phosphor-icons/react'
 
 // Favorites are session-only by design. Node identifiers must not be written
@@ -109,11 +112,47 @@ function generateSplinePath(points, width = 450, height = 110, padding = 12) {
 function formatIPQualityType(type) {
   if (!type) return '未知 / 未识别'
   const t = String(type).trim().toLowerCase()
-  if (t === 'hosting' || t === 'datacenter') return '数据中心 / 机房'
-  if (t === 'isp') return '宽带 ISP'
-  if (t === 'residential') return '家庭住宅'
+  if (t === 'hosting' || t === 'datacenter') return '机房'
+  if (t === 'isp') return 'ISP'
+  if (t === 'residential') return '家宽'
   if (t === 'unknown') return '未知 / 未识别'
   return type
+}
+
+const IP_QUALITY_SOURCE_MAP = {
+  risk_score: '综合风险',
+  fraud_score: '欺诈风险',
+  abuse_score: '滥用风险',
+  threat_score: '威胁分',
+  scamalytics: 'Scamalytics',
+  ip2location: 'IP2Location',
+  abuseipdb: 'AbuseIPDB',
+  ipqs: 'IPQS',
+  dbip: 'DB-IP',
+}
+
+function formatIPQualitySourceName(key) {
+  if (!key) return '—'
+  if (IP_QUALITY_SOURCE_MAP[key]) return IP_QUALITY_SOURCE_MAP[key]
+  return String(key).replace(/_/g, ' ')
+}
+
+function formatIPQualityDateTime(timestamp) {
+  if (!timestamp) return '未知'
+  const ms = Number(timestamp) > 1e11 ? Number(timestamp) : Number(timestamp) * 1000
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return '未知'
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function formatIPQualityShortTime(timestamp) {
+  if (!timestamp) return '—'
+  const ms = Number(timestamp) > 1e11 ? Number(timestamp) : Number(timestamp) * 1000
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return '—'
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 // Single Chart Card Component
@@ -423,6 +462,7 @@ export function NodeDetailPage({
   const [publicDetailLoading, setPublicDetailLoading] = useState(Boolean(isPublic && nodeUuid))
   const [publicDetailError, setPublicDetailError] = useState(null)
   const [lastSyncTime, setLastSyncTime] = useState(null)
+  const [showAllMedia, setShowAllMedia] = useState(false)
 
   // Track recently visited nodes for quick access
   useEffect(() => {
@@ -1536,28 +1576,206 @@ export function NodeDetailPage({
               </div>
             ) : ipQuality ? (
               <>
-                <div className="komari-ip-quality-grid">
-                  <div><span>IP 类型</span><strong>{formatIPQualityType(ipQuality.ip_type)}</strong></div>
-                  <div><span>ASN</span><strong>{ipQuality.asn || '—'}</strong></div>
-                  <div><span>地区</span><strong>{[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}</strong></div>
-                  <div><span>组织</span><strong>{ipQuality.organization || '—'}</strong></div>
-                </div>
-                <div className="komari-ip-quality-flags">
-                  {[['代理', ipQuality.proxy], ['VPN', ipQuality.vpn], ['Tor', ipQuality.tor], ['滥用', ipQuality.abuse]].map(([label, value]) => (
-                    <span key={label} className={value === true ? 'is-risk' : value === false ? 'is-ok' : 'is-unknown'}>{label}：{value === true ? '是' : value === false ? '否' : '未知'}</span>
-                  ))}
-                </div>
-                {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 && (
-                  <div className="komari-ip-quality-sources">
-                    {Object.entries(ipQuality.sources).map(([source, score]) => <span key={source}><b>{source}</b><em>{Number(score).toFixed(2)}</em></span>)}
-                  </div>
-                )}
                 {publicDetailError && (
-                  <div style={{ color: 'var(--text-warning, #f59e0b)', fontSize: '11px', marginTop: '6px' }}>
+                  <div className="ip-quality-stale-alert">
                     检测服务暂时不可用，显示最近一次成功结果
                   </div>
                 )}
-                <small className="komari-ip-quality-note">多来源评分仅作参考，不合并为单一结论；检测时间：{ipQuality.checked_at ? new Date(Number(ipQuality.checked_at) * 1000).toLocaleString('zh-CN') : '未知'}。</small>
+                {/* 第一行：4 个紧凑摘要格 */}
+                <div className="ip-quality-summary-grid">
+                  <div className="ip-quality-summary-item risk">
+                    <span className="label">综合风险</span>
+                    <span className={`value risk-${ipQuality.risk === 'low' ? 'low' : ipQuality.risk === 'medium' ? 'medium' : ipQuality.risk === 'high' ? 'high' : 'unknown'}`}>
+                      {ipQuality.risk === 'low' ? (
+                        <ShieldCheck size={14} className="text-mint" />
+                      ) : ipQuality.risk === 'medium' ? (
+                        <ShieldWarning size={14} className="text-amber" />
+                      ) : ipQuality.risk === 'high' ? (
+                        <ShieldWarning size={14} className="text-rose" />
+                      ) : (
+                        <Shield size={14} className="text-muted" />
+                      )}
+                      <span>
+                        {ipQuality.risk === 'low'
+                          ? '低风险'
+                          : ipQuality.risk === 'medium'
+                          ? '中风险'
+                          : ipQuality.risk === 'high'
+                          ? '高风险'
+                          : '未知风险'}
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">IP 类型</span>
+                    <span className="value">{formatIPQualityType(ipQuality.ip_type)}</span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">地区</span>
+                    <span className="value" title={[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}>
+                      {[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}
+                    </span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">ASN</span>
+                    <span className="value" title={[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}>
+                      {[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 第二行：三个信息面板 */}
+                <div className="ip-quality-detail-grid">
+                  {/* 面板 1: 风险评分 */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Gauge size={14} />
+                        <span>风险评分（越低越好）</span>
+                      </span>
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 ? (
+                        <div className="ip-quality-score-list">
+                          {Object.entries(ipQuality.sources).map(([sourceKey, scoreVal]) => {
+                            const scoreNum = Number(scoreVal)
+                            const isNum = Number.isFinite(scoreNum)
+                            const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
+                            const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
+                            const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
+                            const label = formatIPQualitySourceName(sourceKey)
+                            return (
+                              <div key={sourceKey} className="ip-quality-score-row">
+                                <span className="ip-quality-score-label" title={label}>{label}</span>
+                                <div className="ip-quality-score-track">
+                                  <div
+                                    className={`ip-quality-score-bar score-${tone}`}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <span className={`ip-quality-score-value score-text-${tone} mono`}>
+                                  {displayVal}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="ip-quality-empty-inline">
+                          <span>暂无多来源评分</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* 面板 2: 数据库标记 */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Database size={14} />
+                        <span>数据库标记（命中 / 有结论的库）</span>
+                      </span>
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      <div className="ip-quality-flag-grid">
+                        {[
+                          ['代理', ipQuality.proxy],
+                          ['VPN', ipQuality.vpn],
+                          ['Tor', ipQuality.tor],
+                          ['滥用', ipQuality.abuse],
+                          ['机房', !ipQuality.ip_type || ipQuality.ip_type === 'unknown' ? null : (ipQuality.ip_type === 'hosting' || ipQuality.ip_type === 'datacenter')],
+                        ].map(([label, val]) => {
+                          const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
+                          return (
+                            <div key={label} className="ip-quality-flag-item">
+                              <span className="flag-label">{label}</span>
+                              <span className={`flag-status flag-${status}`}>
+                                {val === true ? '是' : val === false ? '否' : '未知'}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="ip-quality-panel-footer">
+                        <small className="ip-quality-check-time">
+                          检测时间：{formatIPQualityDateTime(ipQuality.checked_at)} · 来源未提供统计
+                        </small>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* 面板 3: 流媒体 / AI */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Play size={14} />
+                        <span>流媒体 / AI</span>
+                      </span>
+                      {Array.isArray(mediaData) && mediaData.length > 8 && (
+                        <button
+                          type="button"
+                          className="ip-quality-media-toggle-btn"
+                          onClick={() => setShowAllMedia(!showAllMedia)}
+                        >
+                          {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
+                        </button>
+                      )}
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      {Array.isArray(mediaData) && mediaData.length > 0 ? (
+                        <div className="ip-quality-media-list">
+                          {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
+                            const rawName = m.detector || m.detector_id || `item-${idx}`
+                            const matchPopular = POPULAR_MEDIA.find((p) => {
+                              const aliases = p.alias || [p.id]
+                              const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                              const dName = (m.detector || m.result?.detector || '').toLowerCase()
+                              return aliases.some((a) => dId.includes(a) || dName.includes(a))
+                            })
+                            const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
+                            const rawStatus = (m.status || m.result?.status || '').toLowerCase()
+                            let tone = 'unknown'
+                            let statusText = '未知'
+                            if (rawStatus === 'available') {
+                              tone = 'available'
+                              statusText = '已解锁'
+                            } else if (rawStatus === 'unavailable') {
+                              tone = 'unavailable'
+                              statusText = '未解锁'
+                            } else if (rawStatus === 'blocked' || rawStatus === 'error' || rawStatus === 'timeout') {
+                              tone = 'blocked'
+                              statusText = rawStatus === 'blocked' ? '已封锁' : '异常'
+                            }
+                            const region = (m.region || m.result?.region || '—').toUpperCase()
+                            const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+                            const latencyText = lat !== null && lat !== undefined ? `${lat}ms` : '—'
+                            const ts = m.checked_at ?? m.result?.checked_at ?? null
+                            const timeText = formatIPQualityShortTime(ts)
+                            const fullTime = ts ? formatIPQualityDateTime(ts) : '未知'
+                            return (
+                              <div key={m.detector_id || `${name}-${idx}`} className="ip-quality-media-row">
+                                <span className="media-name" title={name}>{name}</span>
+                                <span className={`media-status status-${tone}`}>
+                                  {statusText}
+                                </span>
+                                <span className="media-region mono">{region}</span>
+                                <span className="media-latency mono">{latencyText}</span>
+                                <span className="media-time mono" title={fullTime}>{timeText}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="ip-quality-empty-inline">
+                          <span>暂无流媒体 / AI 检测结果</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
               </>
             ) : (
               <div className="komari-ip-quality-empty" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
