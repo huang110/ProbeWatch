@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,13 +38,18 @@ func setupTestServerForIPQA(t *testing.T) (*Server, *auth.Service, db.Node) {
 	srv := NewServer(cfg, authSvc)
 
 	// Create a node
-	node, err := store.RegisterNode(ctx, db.NodeInput{
+	reg, err := store.CreateRegistrationToken(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("create registration token: %v", err)
+	}
+	regNode, err := store.RegisterNode(ctx, reg.Token, db.NodeInput{
 		UUID: "010ae432-2c08-4eef-9133-18289643549f",
 		Name: "Test Node 1",
-	})
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("register node: %v", err)
 	}
+	node := regNode.Node
 
 	// Persist snapshot with IPQA
 	proxy := true

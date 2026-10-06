@@ -29,18 +29,23 @@ func TestIPQAArchives_UpsertAndGetLatest(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test node
-	node, err := s.RegisterNode(ctx, NodeInput{
-		UUID: "test-node-uuid-1",
+	reg, err := s.CreateRegistrationToken(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	regNode, err := s.RegisterNode(ctx, reg.Token, NodeInput{
+		UUID: "00000000-0000-0000-0000-000000000001",
 		Name: "Test Node 1",
-	})
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("register node: %v", err)
 	}
+	nodeID := regNode.Node.ID
 
 	now := time.Now().UTC()
 	payload1 := []byte(`{"risk_score": 15.5, "level": "low"}`)
 	rec1 := IPQAArchiveRecord{
-		NodeID:          node.ID,
+		NodeID:          nodeID,
 		ArchiveDate:     "2026-10-05",
 		Family:          "IPv4",
 		Payload:         payload1,
@@ -55,7 +60,7 @@ func TestIPQAArchives_UpsertAndGetLatest(t *testing.T) {
 
 	payload2 := []byte(`{"risk_score": 85.0, "level": "high"}`)
 	rec2 := IPQAArchiveRecord{
-		NodeID:          node.ID,
+		NodeID:          nodeID,
 		ArchiveDate:     "2026-10-06",
 		Family:          "IPv4",
 		Payload:         payload2,
@@ -68,7 +73,7 @@ func TestIPQAArchives_UpsertAndGetLatest(t *testing.T) {
 		t.Fatalf("upsert archive 2: %v", err)
 	}
 
-	latest, err := s.GetLatestIPQAArchive(ctx, node.ID, "IPv4")
+	latest, err := s.GetLatestIPQAArchive(ctx, nodeID, "IPv4")
 	if err != nil {
 		t.Fatalf("get latest archive: %v", err)
 	}
@@ -84,19 +89,24 @@ func TestIPQAArchives_RetentionPruning(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()
 
-	node, err := s.RegisterNode(ctx, NodeInput{
-		UUID: "retention-node-uuid",
+	reg, err := s.CreateRegistrationToken(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("create registration: %v", err)
+	}
+	regNode, err := s.RegisterNode(ctx, reg.Token, NodeInput{
+		UUID: "00000000-0000-0000-0000-000000000002",
 		Name: "Retention Test Node",
-	})
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("register node: %v", err)
 	}
+	nodeID := regNode.Node.ID
 
 	now := time.Now().UTC()
 
 	// 1. Fresh archive (1 day old) - should be fully preserved
 	_ = s.UpsertIPQAArchive(ctx, IPQAArchiveRecord{
-		NodeID:          node.ID,
+		NodeID:          nodeID,
 		ArchiveDate:     "2026-10-05",
 		Family:          "IPv4",
 		Payload:         []byte(`{"detailed": true, "sample": 1}`),
@@ -107,7 +117,7 @@ func TestIPQAArchives_RetentionPruning(t *testing.T) {
 
 	// 2. Middle-aged archive (45 days old) - should have payload summarized
 	_ = s.UpsertIPQAArchive(ctx, IPQAArchiveRecord{
-		NodeID:          node.ID,
+		NodeID:          nodeID,
 		ArchiveDate:     "2026-08-20",
 		Family:          "IPv4",
 		Payload:         []byte(`{"detailed": true, "raw_data": [1,2,3]}`),
@@ -118,7 +128,7 @@ func TestIPQAArchives_RetentionPruning(t *testing.T) {
 
 	// 3. Ancient archive (100 days old) - should be completely purged
 	_ = s.UpsertIPQAArchive(ctx, IPQAArchiveRecord{
-		NodeID:          node.ID,
+		NodeID:          nodeID,
 		ArchiveDate:     "2026-06-25",
 		Family:          "IPv4",
 		Payload:         []byte(`{"detailed": true, "old": true}`),
@@ -140,7 +150,7 @@ func TestIPQAArchives_RetentionPruning(t *testing.T) {
 	}
 
 	// Verify records remaining in db
-	archives, err := s.ListIPQAArchives(ctx, node.ID, 10, 0)
+	archives, err := s.ListIPQAArchives(ctx, nodeID, 10, 0)
 	if err != nil {
 		t.Fatalf("list archives: %v", err)
 	}
