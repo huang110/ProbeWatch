@@ -362,7 +362,11 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   const totalTxBytes = telemetryItems.reduce((acc, t) => acc + (numeric(t.network_tx_bytes) || 0), 0)
   const totalDownRate = Object.values(liveRates).reduce((acc, r) => acc + (numeric(r?.down) || 0), 0)
   const totalUpRate = Object.values(liveRates).reduce((acc, r) => acc + (numeric(r?.up) || 0), 0)
-  const avgHealthScore = successRate !== null ? (successRate >= 95 ? 99 : Math.round(successRate)) : (online !== null && total !== null && total > 0 && online === total ? 100 : null)
+  // 必须严格使用 API 真实健康分；若无健康分字段则为 null（UI 显示“暂无评分”），禁止任何硬编码推导
+  const apiHealthScore = numeric(
+    effectiveStatus?.health_score ??
+    effectiveStatus?.checks?.health_score
+  )
   const attentionCount = telemetryItems.filter((item) => item?.status === 'attention').length
   const hasTelemetry = telemetryItems.length > 0
   const latestReportedAt = telemetryItems
@@ -378,11 +382,11 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
 
   return (
     <main className="guest-shell guest-mjj-shell">
-      {visitorInfo.ip && (
-        <aside className={`floating-visitor-card ${visitorExpanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="当前访问者公网信息">
+      {(visitorInfo.platform || visitorInfo.browser || visitorInfo.ip) && (
+        <aside className={`floating-visitor-card ${visitorExpanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="当前访问者信息">
           <div className="floating-visitor-pill" onClick={() => setVisitorExpanded(true)}>
             <GlobeHemisphereWest size={13} className="text-blue" />
-            <span>访客: {maskVisitorIp(visitorInfo.ip)}</span>
+            <span>访客信息</span>
             <span className="pill-arrow">▲</span>
           </div>
           <div className="floating-visitor-full">
@@ -390,7 +394,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
               <div className="floating-public-node-avatar"><GlobeHemisphereWest size={15} /></div>
               <div className="floating-public-node-title">
                 <strong>访客信息</strong>
-                <span>{visitorInfo.location || '公网访客'}</span>
+                <span>{[visitorInfo.location, visitorInfo.isp].filter(Boolean).join(' · ') || '公网访客'}</span>
               </div>
               <button
                 type="button"
@@ -405,8 +409,12 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
             <div className="floating-public-node-divider" />
             <div className="floating-public-node-row"><Desktop size={13} /><span>{visitorInfo.platform || '未知系统'}</span></div>
             <div className="floating-public-node-row"><GlobeHemisphereWest size={13} /><span>{visitorInfo.browser || '浏览器'}</span></div>
-            <div className="floating-public-node-row"><ShareNetwork size={13} /><span className="mono">{maskVisitorIp(visitorInfo.ip)}</span></div>
-            <div className="floating-public-node-row"><ShieldCheck size={13} /><span>{visitorInfo.isp || '公网访客'}</span></div>
+            {visitorInfo.location && (
+              <div className="floating-public-node-row"><GlobeHemisphereWest size={13} /><span>{visitorInfo.location}</span></div>
+            )}
+            {visitorInfo.isp && (
+              <div className="floating-public-node-row"><ShieldCheck size={13} /><span>{visitorInfo.isp}</span></div>
+            )}
             <div className="floating-public-node-row"><Timer size={13} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
           </div>
         </aside>
@@ -505,7 +513,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
         </div>
 
         {/* 关键四项指标看板 (在线节点数、平均健康分、总体下行速率、总体上行速率) */}
-        <div className="guest-stats-grid guest-stats-bar">
+        <div className="guest-stats-grid">
           <div className={`guest-stat-box telemetry-stat-box ${!hasTelemetry ? 'telemetry-pending' : ''}`}>
             <div className="stat-head"><GlobeHemisphereWest size={15} /><span>在线节点数</span></div>
             <div className="stat-main mono">
@@ -519,10 +527,10 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           <div className="guest-stat-box" title="综合服务可用率与线路探测健康分">
             <div className="stat-head"><ShieldCheck size={15} /><span>平均健康分</span></div>
             <div className="stat-main mono">
-              {avgHealthScore !== null ? `${avgHealthScore} 分` : displayPercent(successRate)}
+              {apiHealthScore !== null ? `${Math.round(apiHealthScore)} 分` : '暂无评分'}
             </div>
             <div className="stat-sub">
-              {avgLatency !== null ? `综合延迟 ${formatLatency(avgLatency)}` : successSummary}
+              {avgLatency !== null ? `综合延迟 ${formatLatency(avgLatency)}` : (successSummary || '等待探测样本')}
             </div>
           </div>
 
@@ -562,24 +570,20 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
             <strong className="mono">{guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total}` : '0/0'}</strong>
           </div>
         </div>
-        <div className="guest-media-summary-grid">
-          {guestMediaSummary.platforms.length ? (
-            guestMediaSummary.platforms.map((item) => (
+        {guestMediaSummary.platforms.length > 0 ? (
+          <div className="guest-media-summary-grid">
+            {guestMediaSummary.platforms.map((item) => (
               <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}>
                 <b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>
                 {item.name}
               </span>
-            ))
-          ) : (
-            DEFAULT_MEDIA_PLATFORMS.map((platform) => (
-              <span key={platform} className="is-muted" title="未配置或无上报样本">
-                <b>·</b>
-                {platform}
-                <small className="placeholder-hint">未配置</small>
-              </span>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="guest-media-empty-desc">
+            <span>管理员配置检测目标后，这里会显示最近一次真实结果。</span>
+          </div>
+        )}
       </section>
 
       {/* 节点列表展示 (DStatus 宫格与紧凑表格双视图) */}
@@ -954,15 +958,6 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                             </div>
                           </div>
                         </div>
-                      )}
-                      {hasIspChecks && cmLatency === null && (
-                        <button
-                          type="button"
-                          className="vps-check-action"
-                          onClick={(event) => { event.stopPropagation(); handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry)) }}
-                        >
-                          移动暂无样本 · 检查节点线路
-                        </button>
                       )}
 
                       {/* 卡片底栏: 提示与进入详情按钮 */}
