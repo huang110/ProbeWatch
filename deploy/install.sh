@@ -40,13 +40,171 @@ check_temp_space() {
 
 show_install_help() {
     printf '%s\n' "ProbeWatch Agent 一键安装器 v0.6.0"
-    printf '%s\n' "用法: install.sh --endpoint URL --uuid UUID --token TOKEN"
-    printf '%s\n' "      install.sh --endpoint URL --uuid UUID --registration-token TOKEN"
+    printf '%s\n' "用法: install.sh --endpoint URL --uuid UUID --token TOKEN [选项]"
+    printf '%s\n' "      install.sh --endpoint URL --uuid UUID --registration-token TOKEN [选项]"
     printf '%s\n' "      install.sh uninstall-agent"
-    printf '%s\n' "说明: 支持 amd64/arm64/arm/mips/mipsle/386/riscv64，自动配置 systemd/OpenRC/OpenWrt。"
+    printf '%s\n' ""
+    printf '%s\n' "选项:"
+    printf '%s\n' "  --endpoint URL                      主控上报地址 (如 https://example.com/api/agent/v1)"
+    printf '%s\n' "  --uuid UUID                         节点唯一标识 UUID"
+    printf '%s\n' "  --token TOKEN                       节点长期访问凭据"
+    printf '%s\n' "  --registration-token TOKEN          节点一次性注册凭据 (向主控换取长期凭证)"
+    printf '%s\n' "  --enable-remote-control             启用远程管理终端 (默认关闭)"
+    printf '%s\n' "  --enable-remote-control=true|false  设置是否启用远程管理 (默认: false)"
+    printf '%s\n' "  --remote-control=true|false         --enable-remote-control 的别名"
+    printf '%s\n' "  --dry-run                           仅检查并解析参数，不执行实际下载与安装"
+    printf '%s\n' "  -h, --help                          显示此帮助信息并退出"
+    printf '%s\n' ""
+    printf '%s\n' "说明: 远程管理默认关闭 (false)。参数支持 true/false、1/0、yes/no 或 on/off (大小写不敏感)。"
+    printf '%s\n' "支持环境: amd64/arm64/arm/mips/mipsle/386/riscv64，自动配置 systemd/OpenRC/OpenWrt。"
 }
 
-# 必须以 root 或 sudo 执行
+parse_remote_control_val() {
+    raw_val="$1"
+    val_lower=$(printf '%s' "$raw_val" | tr '[:upper:]' '[:lower:]')
+    case "$val_lower" in
+        true|1|yes|on)
+            REMOTE_CONTROL_ENABLED="true"
+            ;;
+        false|0|no|off)
+            REMOTE_CONTROL_ENABLED="false"
+            ;;
+        *)
+            error "远程管理参数值无效，请使用 true/false、1/0、yes/no 或 on/off"
+            exit 2
+            ;;
+    esac
+}
+
+# 3. 解析命令行参数
+# 支持后台页面生成的无人值守安装命令：
+#   --endpoint URL --uuid UUID --token TOKEN
+# 同时保留交互式安装和卸载入口。
+ACTION="agent"
+CLI_ENDPOINT=""
+CLI_UUID=""
+CLI_TOKEN=""
+CLI_REG_TOKEN=""
+DRY_RUN="false"
+REMOTE_CONTROL_ENABLED="false"
+
+# 环境变量兼容 (若环境变量有定义且合法，先初始化；命令行参数优先级更高)
+if [ -n "${PROBEWATCH_AGENT_ENABLE_TERMINAL:-}" ]; then
+    parse_remote_control_val "$PROBEWATCH_AGENT_ENABLE_TERMINAL"
+elif [ -n "${PROBEWATCH_AGENT_REMOTE_CONTROL:-}" ]; then
+    parse_remote_control_val "$PROBEWATCH_AGENT_REMOTE_CONTROL"
+fi
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --endpoint=*)
+            CLI_ENDPOINT="${1#*=}"
+            shift
+            ;;
+        --endpoint)
+            [ "$#" -ge 2 ] || { error "--endpoint 缺少参数"; exit 2; }
+            CLI_ENDPOINT="$2"
+            shift 2
+            ;;
+        --uuid=*)
+            CLI_UUID="${1#*=}"
+            shift
+            ;;
+        --uuid)
+            [ "$#" -ge 2 ] || { error "--uuid 缺少参数"; exit 2; }
+            CLI_UUID="$2"
+            shift 2
+            ;;
+        --token=*)
+            CLI_TOKEN="${1#*=}"
+            shift
+            ;;
+        --token)
+            [ "$#" -ge 2 ] || { error "--token 缺少参数"; exit 2; }
+            CLI_TOKEN="$2"
+            shift 2
+            ;;
+        --registration-token=*|--reg-token=*)
+            CLI_REG_TOKEN="${1#*=}"
+            shift
+            ;;
+        --registration-token|--reg-token)
+            [ "$#" -ge 2 ] || { error "$1 缺少参数"; exit 2; }
+            CLI_REG_TOKEN="$2"
+            shift 2
+            ;;
+        --enable-remote-control=*|--remote-control=*)
+            val="${1#*=}"
+            parse_remote_control_val "$val"
+            shift
+            ;;
+        --enable-remote-control|--remote-control)
+            if [ "$#" -ge 2 ] && [ -n "$2" ]; then
+                case "$2" in
+                    --*)
+                        REMOTE_CONTROL_ENABLED="true"
+                        shift
+                        ;;
+                    agent|uninstall|uninstall-agent)
+                        REMOTE_CONTROL_ENABLED="true"
+                        shift
+                        ;;
+                    *)
+                        parse_remote_control_val "$2"
+                        shift 2
+                        ;;
+                esac
+            else
+                REMOTE_CONTROL_ENABLED="true"
+                shift
+            fi
+            ;;
+        --dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
+        uninstall|uninstall-agent)
+            ACTION="uninstall-agent"
+            shift
+            ;;
+        agent)
+            ACTION="agent"
+            shift
+            ;;
+        -h|--help)
+            show_install_help
+            exit 0
+            ;;
+        *)
+            error "未知参数: $1"
+            exit 2
+            ;;
+    esac
+done
+
+ENDPOINT="${CLI_ENDPOINT:-${PROBEWATCH_AGENT_ENDPOINT:-}}"
+NODE_UUID="${CLI_UUID:-${PROBEWATCH_AGENT_NODE_UUID:-}}"
+NODE_TOKEN="${CLI_TOKEN:-${PROBEWATCH_AGENT_NODE_TOKEN:-}}"
+REG_TOKEN="${CLI_REG_TOKEN:-${PROBEWATCH_AGENT_REGISTRATION_TOKEN:-}}"
+
+# Dry-run 模式：仅验证参数解析与必填项校验，不下载、不安装、不修改系统、不要求 root
+if [ "$DRY_RUN" = "true" ]; then
+    if [ "$ACTION" = "uninstall-agent" ] || [ "$ACTION" = "uninstall" ]; then
+        ok "参数解析与预检通过 (dry-run: uninstall)"
+        exit 0
+    fi
+    if [ -z "$ENDPOINT" ] || [ -z "$NODE_UUID" ] || { [ -z "$NODE_TOKEN" ] && [ -z "$REG_TOKEN" ]; }; then
+        error "缺少必要的安装参数 (Endpoint, UUID, Token 或 Registration Token)，dry-run 预检未通过"
+        exit 1
+    fi
+    ok "参数解析与预检通过 (dry-run)"
+    info "ENDPOINT: ${ENDPOINT}"
+    info "NODE_UUID: ${NODE_UUID}"
+    info "REMOTE_CONTROL_ENABLED: ${REMOTE_CONTROL_ENABLED}"
+    exit 0
+fi
+
+# 实际安装/卸载操作必须以 root 或 sudo 执行
 if [ "$(id -u 2>/dev/null || echo 1)" -ne 0 ]; then
     error "本脚本必须以 root 权限运行，请使用 sudo 或 root 终端执行"
     exit 1
@@ -100,61 +258,6 @@ else
 fi
 
 info "检测到系统服务管理器: $INIT_SYSTEM"
-
-# 3. 解析命令行参数
-# 支持后台页面生成的无人值守安装命令：
-#   --endpoint URL --uuid UUID --token TOKEN
-# 同时保留交互式安装和卸载入口。
-ACTION="agent"
-CLI_ENDPOINT=""
-CLI_UUID=""
-CLI_TOKEN=""
-CLI_REG_TOKEN=""
-CLI_REMOTE_CONTROL=""
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --endpoint)
-            [ "$#" -ge 2 ] || { error "--endpoint 缺少参数"; exit 2; }
-            CLI_ENDPOINT="$2"
-            shift 2
-            ;;
-        --uuid)
-            [ "$#" -ge 2 ] || { error "--uuid 缺少参数"; exit 2; }
-            CLI_UUID="$2"
-            shift 2
-            ;;
-        --token)
-            [ "$#" -ge 2 ] || { error "--token 缺少参数"; exit 2; }
-            CLI_TOKEN="$2"
-            shift 2
-            ;;
-        --registration-token|--reg-token)
-            [ "$#" -ge 2 ] || { error "$1 缺少参数"; exit 2; }
-            CLI_REG_TOKEN="$2"
-            shift 2
-            ;;
-        --enable-remote-control|--remote-control)
-            CLI_REMOTE_CONTROL="true"
-            shift
-            ;;
-        uninstall|uninstall-agent)
-            ACTION="uninstall-agent"
-            shift
-            ;;
-        agent)
-            ACTION="agent"
-            shift
-            ;;
-        -h|--help)
-            show_install_help
-            exit 0
-            ;;
-        *)
-            error "未知参数: $1"
-            exit 2
-            ;;
-    esac
-done
 
 if [ "$ACTION" = "uninstall-agent" ] || [ "$ACTION" = "uninstall" ]; then
     info "准备卸载 ProbeWatch Agent..."
@@ -299,8 +402,8 @@ PROBEWATCH_ENV=development
 PROBEWATCH_PUBLIC_BASE_URL=${SERVER_BASE:-${ENDPOINT%/api/agent/v1}}
 PROBEWATCH_AGENT_ENDPOINT=${ENDPOINT}
 PROBEWATCH_AGENT_NODE_UUID=${NODE_UUID}
-PROBEWATCH_AGENT_NODE_TOKEN=${NODE_TOKEN}
-PROBEWATCH_AGENT_ENABLE_TERMINAL=${CLI_REMOTE_CONTROL:-false}
+PROBEWATCH_AGENT_ENABLE_TERMINAL=${REMOTE_CONTROL_ENABLED}
+PROBEWATCH_ENABLE_REMOTE_TERMINAL=${REMOTE_CONTROL_ENABLED}
 AGENT_NODE_TOKEN_TTL=8760h
 PROBEWATCH_AGENT_DATA=${DATA_DIR}
 EOF
