@@ -158,9 +158,6 @@ func TestPublicNodeDetailWhitelistSecurity(t *testing.T) {
 	}
 
 	// 6. Test GET /api/public/nodes/:uuid/resource/history
-	if err := store.PersistAgentResource(context.Background(), node.ID, "req-1", now.Add(time.Hour), now, []byte(richPayload)); err != nil {
-		t.Fatal(err)
-	}
 	hReq := httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+node.UUID+"/resource/history?range=1h&limit=10", nil)
 	hRec := httptest.NewRecorder()
 	handler.ServeHTTP(hRec, hReq)
