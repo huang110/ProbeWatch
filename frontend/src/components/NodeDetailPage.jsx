@@ -267,6 +267,7 @@ const getMediaStatus = (platform, mediaList) => {
 
 export function NodeDetailPage({
   node,
+  nodeUuid: propNodeUuid,
   nodes = [],
   onSelectNode,
   loading = false,
@@ -331,7 +332,7 @@ export function NodeDetailPage({
     return () => clearInterval(timer)
   }, [])
 
-  const nodeUuid = node?.uuid || node?.id || ''
+  const nodeUuid = propNodeUuid || node?.uuid || node?.id || ''
   const billing = getNodeBilling(nodeUuid, node?.name)
   const calc = calculateRemainingValue(billing)
   const customMeta = getNodeCustomMeta(nodeUuid, node)
@@ -529,9 +530,17 @@ export function NodeDetailPage({
     (p) => getMediaStatus(p, mediaData).tone === 'available'
   ).length
 
+  const effectiveNode = node || (publicDetail ? {
+    uuid: publicDetail.uuid || nodeUuid,
+    id: publicDetail.uuid || nodeUuid,
+    name: publicDetail.name || 'ProbeWatch 节点',
+    status: publicDetail.status || 'offline',
+    lastReportedAt: publicDetail.last_reported_at || null,
+  } : null)
+
   const resource = {
     ...(publicDetail?.resource || {}),
-    ...(node?.resource || {}),
+    ...(effectiveNode?.resource || {}),
   }
   // Public detail responses expose compact status rows. Reuse the newest historical
   // resource snapshot and publicDetail snapshot so hardware and network cards stay aligned.
@@ -558,19 +567,19 @@ export function NodeDetailPage({
     up: numeric(suppliedRate.up) ?? numeric(latestHistoryRate?.upRate),
   }
 
-  const memUsed = node?.memUsed ?? numeric(detailResource.memory_used_bytes)
-  const memTotal = node?.memTotal ?? numeric(detailResource.memory_total_bytes)
-  const swapUsed = node?.swapUsed ?? numeric(detailResource.swap_used_bytes)
-  const swapTotal = node?.swapTotal ?? numeric(detailResource.swap_total_bytes)
-  const diskUsed = node?.diskUsed ?? numeric(detailResource.filesystem_used_bytes)
-  const diskTotal = node?.diskTotal ?? numeric(detailResource.filesystem_total_bytes)
+  const memUsed = effectiveNode?.memUsed ?? numeric(detailResource.memory_used_bytes)
+  const memTotal = effectiveNode?.memTotal ?? numeric(detailResource.memory_total_bytes)
+  const swapUsed = effectiveNode?.swapUsed ?? numeric(detailResource.swap_used_bytes)
+  const swapTotal = effectiveNode?.swapTotal ?? numeric(detailResource.swap_total_bytes)
+  const diskUsed = effectiveNode?.diskUsed ?? numeric(detailResource.filesystem_used_bytes)
+  const diskTotal = effectiveNode?.diskTotal ?? numeric(detailResource.filesystem_total_bytes)
 
-  const rawTx = numeric(node?.tx) ?? numeric(detailResource.network_tx_bytes)
-  const rawRx = numeric(node?.rx) ?? numeric(detailResource.network_rx_bytes)
+  const rawTx = numeric(effectiveNode?.tx) ?? numeric(detailResource.network_tx_bytes)
+  const rawRx = numeric(effectiveNode?.rx) ?? numeric(detailResource.network_rx_bytes)
   const totalTraffic = rawTx !== null || rawRx !== null ? (rawTx || 0) + (rawRx || 0) : null
 
-  const cpuPercent = numeric(node?.cpu) ?? numeric(detailResource.cpu_percent)
-  const cpuModel = detailResource.cpu_name || detailResource.cpu_model || node?.cpuModel || customMeta.cpuModel || '—'
+  const cpuPercent = numeric(effectiveNode?.cpu) ?? numeric(detailResource.cpu_percent)
+  const cpuModel = detailResource.cpu_name || detailResource.cpu_model || effectiveNode?.cpuModel || customMeta.cpuModel || '—'
   const cleanedCpuModel = (cpuModel || '')
     .replace(/\s*\(\s*\d+\s*(?:vCPU|vCPUs|核|core|cores)\s*\)/gi, '')
     .trim()
@@ -580,23 +589,23 @@ export function NodeDetailPage({
   // Agent snapshots commonly expose the address as ipv4 while the compact
   // public node row leaves ip empty. Prefer either address before falling
   // back to the custom metadata so every public IP label stays consistent.
-  const publicIp = detailResource.ip || detailResource.ipv4 || node?.hostname || customMeta.ip || '—'
+  const publicIp = detailResource.ip || detailResource.ipv4 || effectiveNode?.hostname || customMeta.ip || '—'
   const visitorIp = clientInfo?.ip || '—'
-  const nodeIPv4 = node?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
-  const nodeIPv6 = node?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
+  const nodeIPv4 = effectiveNode?.ipv4 || detailResource.ipv4 || (publicIp !== '—' && !publicIp.includes(':') ? publicIp : '')
+  const nodeIPv6 = effectiveNode?.ipv6 || detailResource.ipv6 || (publicIp !== '—' && publicIp.includes(':') ? publicIp : '')
   const hasDualStack = Boolean(nodeIPv4 && nodeIPv6)
-  const interfaces = Array.isArray(node?.interfaces) && node.interfaces.length > 0
-    ? node.interfaces
+  const interfaces = Array.isArray(effectiveNode?.interfaces) && effectiveNode.interfaces.length > 0
+    ? effectiveNode.interfaces
     : (Array.isArray(detailResource.interfaces) ? detailResource.interfaces : [])
-  const cores = numeric(detailResource.cpu_cores) ?? numeric(node?.cpu_cores)
-  const cpuMhz = numeric(detailResource.cpu_mhz) || numeric(node?.cpu_mhz) || null
-  const cpuTempC = numeric(detailResource.cpu_temp_c) ?? numeric(node?.cpu_temp_c) ?? null
-  const sensors = Array.isArray(detailResource.sensors) ? detailResource.sensors : (Array.isArray(node?.sensors) ? node.sensors : [])
-  const disks = Array.isArray(detailResource.disks) ? detailResource.disks : (Array.isArray(node?.disks) ? node.disks : [])
-  const mounts = Array.isArray(detailResource.mounts) ? detailResource.mounts : (Array.isArray(node?.mounts) ? node.mounts : [])
-  const socketStats = detailResource.socket_stats || node?.socketStats || node?.socket_stats || {}
-  const listeningPorts = Array.isArray(detailResource.listening_ports) ? detailResource.listening_ports : (Array.isArray(node?.listeningPorts) ? node.listeningPorts : (Array.isArray(node?.listening_ports) ? node.listening_ports : []))
-  const healthInfo = publicDetail?.health_info || publicDetail?.resource?.health_info || detailResource.health_info || node?.healthInfo || node?.health_info || null
+  const cores = numeric(detailResource.cpu_cores) ?? numeric(effectiveNode?.cpu_cores)
+  const cpuMhz = numeric(detailResource.cpu_mhz) || numeric(effectiveNode?.cpu_mhz) || null
+  const cpuTempC = numeric(detailResource.cpu_temp_c) ?? numeric(effectiveNode?.cpu_temp_c) ?? null
+  const sensors = Array.isArray(detailResource.sensors) ? detailResource.sensors : (Array.isArray(effectiveNode?.sensors) ? effectiveNode.sensors : [])
+  const disks = Array.isArray(detailResource.disks) ? detailResource.disks : (Array.isArray(effectiveNode?.disks) ? effectiveNode.disks : [])
+  const mounts = Array.isArray(detailResource.mounts) ? detailResource.mounts : (Array.isArray(effectiveNode?.mounts) ? effectiveNode.mounts : [])
+  const socketStats = detailResource.socket_stats || effectiveNode?.socketStats || effectiveNode?.socket_stats || {}
+  const listeningPorts = Array.isArray(detailResource.listening_ports) ? detailResource.listening_ports : (Array.isArray(effectiveNode?.listeningPorts) ? effectiveNode.listeningPorts : (Array.isArray(effectiveNode?.listening_ports) ? effectiveNode.listening_ports : []))
+  const healthInfo = publicDetail?.health_info || publicDetail?.resource?.health_info || detailResource.health_info || effectiveNode?.healthInfo || effectiveNode?.health_info || null
 
   const [portFilter, setPortFilter] = useState('all')
   const [portSearch, setPortSearch] = useState('')
@@ -645,13 +654,13 @@ export function NodeDetailPage({
   const maxIOWait = disks.reduce((max, d) => Math.max(max, numeric(d.io_wait_ms) || 0), 0)
   const maxDiskUtil = disks.reduce((max, d) => Math.max(max, numeric(d.util_percent) || 0), 0)
 
-  const arch = node?.arch || resource.arch || customMeta.arch || 'kvm'
-  const os = node?.os || resource.os || customMeta.os || 'Linux'
-  const kernel = node?.kernel || resource.kernel || customMeta.kernel || '—'
-  const ispText = customMeta.merchant || customMeta.isp || node?.region || '—'
+  const arch = effectiveNode?.arch || resource.arch || customMeta.arch || 'kvm'
+  const os = effectiveNode?.os || resource.os || customMeta.os || 'Linux'
+  const kernel = effectiveNode?.kernel || resource.kernel || customMeta.kernel || '—'
+  const ispText = customMeta.merchant || customMeta.isp || effectiveNode?.region || '—'
 
   // Dynamic ticking uptime
-  const startedAt = numeric(node?.startedAt) ?? numeric(resource.started_at)
+  const startedAt = numeric(effectiveNode?.startedAt) ?? numeric(resource.started_at)
   const uptimeText = useMemo(() => {
     if (startedAt && startedAt > 0) {
       const ms = startedAt < 1e12 ? startedAt * 1000 : startedAt
@@ -664,16 +673,16 @@ export function NodeDetailPage({
       if (hours > 0) return `${hours} 小时 ${minutes} 分钟 ${seconds} 秒`
       return `${minutes} 分钟 ${seconds} 秒`
     }
-    return node?.uptime || '—'
-  }, [startedAt, nowTick, node?.uptime])
+    return effectiveNode?.uptime || '—'
+  }, [startedAt, nowTick, effectiveNode?.uptime])
 
   // Heartbeat status
-  const lastReportedAt = node?.lastReportedAt || node?.last_reported_at || resource.reported_at
+  const lastReportedAt = effectiveNode?.lastReportedAt || effectiveNode?.last_reported_at || resource.reported_at
   const isOnline = useMemo(() => {
-    if (!lastReportedAt) return node?.status === 'online'
+    if (!lastReportedAt) return effectiveNode?.status === 'online'
     const ms = typeof lastReportedAt === 'number' ? (lastReportedAt < 1e12 ? lastReportedAt * 1000 : lastReportedAt) : new Date(lastReportedAt).getTime()
     return (nowTick - ms) <= 120000
-  }, [lastReportedAt, nowTick, node?.status])
+  }, [lastReportedAt, nowTick, effectiveNode?.status])
 
   const heartbeatText = useMemo(() => {
     if (!lastReportedAt) return isOnline ? '在线' : '离线'
@@ -1109,7 +1118,23 @@ export function NodeDetailPage({
   const procYMax = Math.ceil((maxProc * 1.25) / 10) * 10
   const procYMid = Math.round(procYMax / 2)
 
-  if (!node || (isPublic && publicDetailError === 'not_found')) {
+  if (!effectiveNode && (publicDetailLoading || loading)) {
+    return (
+      <section className="subpage node-detail-page">
+        <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
+          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>
+            <CircleNotch size={36} className="spin text-blue" />
+          </div>
+          <h3 style={{ margin: '0 0 10px', fontSize: '18px', fontWeight: 600 }}>正在加载节点详情…</h3>
+          <p style={{ color: 'var(--text-3, #94a3b8)', margin: 0, fontSize: '13px' }}>
+            正在拉取节点资源快照与实时监控指标。
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  if ((!effectiveNode && !publicDetailLoading && !loading) || (isPublic && publicDetailError === 'not_found')) {
     return (
       <section className="subpage node-detail-page">
         <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
@@ -1118,7 +1143,7 @@ export function NodeDetailPage({
           </div>
           <h3 style={{ margin: '0 0 10px', fontSize: '18px', fontWeight: 600 }}>未找到指定节点</h3>
           <p style={{ color: 'var(--text-3, #94a3b8)', marginBottom: '24px', fontSize: '13px', lineHeight: 1.6 }}>
-            {loading ? '正在同步节点清单与详情…' : '该节点不存在、已被移除或当前访客模式暂未公开。'}
+            该节点不存在、已被移除或当前访客模式暂未公开。
           </p>
           <button type="button" className="button button-primary" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', margin: '0 auto' }}>
             <ArrowLeft size={16} /> <span>{isPublic ? '返回大屏' : '返回节点列表'}</span>
@@ -1145,8 +1170,8 @@ export function NodeDetailPage({
           <button type="button" className="komari-back-btn" onClick={onBack} title="返回服务器列表">
             <ArrowLeft size={16} />
           </button>
-          <span className="komari-server-flag">{customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')}</span>
-          <h1 className="komari-server-title">{customMeta.customName || node.name}</h1>
+          <span className="komari-server-flag">{customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (effectiveNode?.flag || '🌐')}</span>
+          <h1 className="komari-server-title">{customMeta.customName || effectiveNode?.name || 'ProbeWatch 节点'}</h1>
           <span className={`komari-status-tag status-pill ${isOnline ? 'online' : 'offline'}`}>
             <span className={`status-dot-pulse ${isOnline ? '' : 'offline'}`} /> {isOnline ? '在线' : '离线'} · {heartbeatText}
           </span>

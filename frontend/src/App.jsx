@@ -627,16 +627,17 @@ export function App() {
     return next
   }, [])
 
-  const enterGuest = useCallback(async (controller, current) => {
-    const [guestStatus, clientInfo] = await Promise.all([
-      fetchGuestStatus(controller.signal).catch(() => null),
-      fetchPublicClientInfo(controller.signal).catch(() => null),
-    ])
-    if (current !== coreRequestRef.current) return
+  const enterGuest = useCallback(async (controller) => {
     setMe(null); setData([]); setOverview(null); setAlerts([]); setRates({}); setLossRates({})
-    setPublicStatus(guestStatus)
-    setPublicClientInfo(clientInfo)
     setApiState({ kind: 'guest', message: '' })
+    try {
+      const [guestStatus, clientInfo] = await Promise.all([
+        fetchGuestStatus(controller?.signal).catch(() => null),
+        fetchPublicClientInfo(controller?.signal).catch(() => null),
+      ])
+      if (guestStatus) setPublicStatus(guestStatus)
+      if (clientInfo) setPublicClientInfo(clientInfo)
+    } catch {}
   }, [])
 
   const refreshGuest = useCallback(async () => {
@@ -662,14 +663,14 @@ export function App() {
     if (manual) setIsRefreshing(true)
     try {
       const meResponse = await fetch('/api/me', { credentials: 'same-origin', signal: controller.signal })
-      if (meResponse.status === 401) { await enterGuest(controller, current); return }
+      if (meResponse.status === 401) { await enterGuest(controller); return }
       if (!meResponse.ok) throw new Error(`me:${meResponse.status}`)
       const meJson = await meResponse.json()
       const [nodesResponse, alertsResponse] = await Promise.all([
         fetch('/api/nodes', { credentials: 'same-origin', signal: controller.signal }),
         fetch('/api/alerts?status=open,acked', { credentials: 'same-origin', signal: controller.signal }),
       ])
-      if (nodesResponse.status === 401 || alertsResponse.status === 401) { await enterGuest(controller, current); return }
+      if (nodesResponse.status === 401 || alertsResponse.status === 401) { await enterGuest(controller); return }
       if (!nodesResponse.ok) throw new Error(`nodes:${nodesResponse.status}`)
       if (!alertsResponse.ok) throw new Error(`alerts:${alertsResponse.status}`)
       const nodesJson = await nodesResponse.json()
@@ -729,9 +730,8 @@ export function App() {
   }, [me, guestPreview, apiState.kind])
 
   useEffect(() => {
-    loadCore(true)
     return () => { coreAbortRef.current?.abort(); overviewAbortRef.current?.abort(); historyAbortRef.current?.abort(); checksAbortRef.current?.abort(); trafficAbortRef.current?.abort() }
-  }, [loadCore])
+  }, [])
 
   useLivePolling(loadCore, {
     interval: activeNav === 'node-detail' ? 3000 : LIVE_CORE_INTERVAL_MS,
@@ -1248,8 +1248,9 @@ export function App() {
           <div className="guest-detail-wrap" style={{ width: '100%', maxWidth: '1440px', minWidth: 0, margin: '0 auto', padding: '16px 20px 48px', boxSizing: 'border-box' }}>
             <Suspense fallback={<PageLoadingFallback />}>
               <NodeDetailPage
-              node={currentDetailNode}
-              nodes={guestNodesList}
+                node={currentDetailNode}
+                nodeUuid={targetUuid}
+                nodes={guestNodesList}
               onSelectNode={(node) => {
                 setSelectedNode(node)
                 setDetailNode(node)
@@ -1400,6 +1401,7 @@ export function App() {
         ) : activeNav === 'node-detail' ? (
           <NodeDetailPage
             node={detailNode}
+            nodeUuid={targetDetailUuid || detailNode?.uuid || detailNode?.id}
             nodes={data}
             onSelectNode={(node) => {
               setDetailNode(node)
