@@ -410,7 +410,7 @@ export function NodeDetailPage({
   const [mediaData, setMediaData] = useState([])
   const [showPosterModal, setShowPosterModal] = useState(false)
   const [publicDetail, setPublicDetail] = useState(null)
-  const [publicDetailLoading, setPublicDetailLoading] = useState(false)
+  const [publicDetailLoading, setPublicDetailLoading] = useState(Boolean(isPublic && nodeUuid))
   const [publicDetailError, setPublicDetailError] = useState(null)
   const [lastSyncTime, setLastSyncTime] = useState(null)
 
@@ -459,6 +459,9 @@ export function NodeDetailPage({
 
   useEffect(() => {
     if (isPublic && nodeUuid) {
+      setPublicDetail(null)
+      setPublicDetailError(null)
+      setPublicDetailLoading(true)
       const controller = new AbortController()
       loadPublicDetail(controller.signal)
       return () => controller.abort()
@@ -1121,7 +1124,9 @@ export function NodeDetailPage({
   const procYMax = Math.ceil((maxProc * 1.25) / 10) * 10
   const procYMid = Math.round(procYMax / 2)
 
-  if (!effectiveNode && (publicDetailLoading || loading)) {
+  const isSyncing = !effectiveNode && (publicDetailLoading || loading || (isPublic && nodeUuid && !publicDetailError))
+
+  if (isSyncing) {
     return (
       <section className="subpage node-detail-page">
         <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
@@ -1137,7 +1142,11 @@ export function NodeDetailPage({
     )
   }
 
-  if ((!effectiveNode && !publicDetailLoading && !loading) || (isPublic && publicDetailError === 'not_found')) {
+  if (
+    (isPublic && publicDetailError === 'not_found') ||
+    (!isPublic && !effectiveNode && !loading) ||
+    (!nodeUuid && !effectiveNode)
+  ) {
     return (
       <section className="subpage node-detail-page">
         <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
@@ -1150,6 +1159,25 @@ export function NodeDetailPage({
           </p>
           <button type="button" className="button button-primary" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', margin: '0 auto' }}>
             <ArrowLeft size={16} /> <span>{isPublic ? '返回大屏' : '返回节点列表'}</span>
+          </button>
+        </div>
+      </section>
+    )
+  }
+
+  if (isPublic && publicDetailError === 'request_failed' && !effectiveNode) {
+    return (
+      <section className="subpage node-detail-page">
+        <div className="panel" style={{ textAlign: 'center', padding: '48px 24px', maxWidth: '540px', margin: '40px auto', borderRadius: '12px' }}>
+          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>
+            <WarningCircle size={40} className="text-rose" />
+          </div>
+          <h3 style={{ margin: '0 0 10px', fontSize: '18px', fontWeight: 600 }}>同步节点详情失败</h3>
+          <p style={{ color: 'var(--text-3, #94a3b8)', marginBottom: '24px', fontSize: '13px', lineHeight: 1.6 }}>
+            网络连接出现异常，未能获取最新指标，请检查网络后重试。
+          </p>
+          <button type="button" className="button button-primary" onClick={() => loadPublicDetail()} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', margin: '0 auto' }}>
+            <ArrowsClockwise size={16} /> <span>重新加载</span>
           </button>
         </div>
       </section>

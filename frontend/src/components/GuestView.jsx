@@ -40,9 +40,11 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const diskUsed = numeric(telemetry.filesystem_used_bytes)
   const diskTotal = numeric(telemetry.filesystem_total_bytes)
 
+  const resolvedUuid = (telemetry?.uuid || custom.uuid || customKey || (name ? `guest-${encodeURIComponent(name)}` : '')).trim()
+
   return {
-    uuid: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
-    id: custom.uuid || customKey || `guest-${encodeURIComponent(name)}`,
+    uuid: resolvedUuid,
+    id: resolvedUuid,
     name: name,
     status: telemetry.status || 'unknown',
     lastReportedAt: telemetry.last_reported_at || null,
@@ -505,20 +507,10 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
         </div>
       </section>
 
-      {visitorInfo.ip && (
-        <aside className="guest-visitor-ip-bar" aria-label="访客公网信息">
-          <GlobeHemisphereWest size={15} />
-          <span>当前访问公网 IP</span>
-          <strong className="mono">{maskVisitorIp(visitorInfo.ip)}</strong>
-          {visitorInfo.location && <span className="guest-visitor-ip-meta">{visitorInfo.location}</span>}
-          {visitorInfo.isp && <span className="guest-visitor-ip-meta">{visitorInfo.isp}</span>}
-        </aside>
-      )}
-
       <section className="guest-media-summary" aria-label="流媒体与 AI 解锁摘要">
         <div className="guest-media-summary-head"><div><h2>流媒体 / AI 解锁</h2><p>按公开遥测汇总最近一次检测结果</p></div><strong className="mono">{guestMediaSummary.total ? guestMediaSummary.available + '/' + guestMediaSummary.total : '暂无样本'}</strong></div>
         <div className="guest-media-summary-grid">
-          {guestMediaSummary.platforms.length ? guestMediaSummary.platforms.map((item) => <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}><b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>{item.name}</span>) : <span className="is-muted">暂无流媒体上报，可在后台流媒体页面一键下发检测规则。</span>}
+          {guestMediaSummary.platforms.length ? guestMediaSummary.platforms.map((item) => <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}><b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>{item.name}</span>) : <span className="is-muted">暂无流媒体检测样本</span>}
         </div>
       </section>
 

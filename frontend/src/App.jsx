@@ -1117,7 +1117,7 @@ export function App() {
       const meta = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name)
       return !meta?.hidden
     })
-    const targetUuid = parseRouteFromHash()?.nodeUuid
+    const targetUuid = (parseRouteFromHash()?.nodeUuid || '').trim()
     // The public status payload intentionally stays compact.  When the detail
     // route is open, reuse the newest resource snapshot already fetched for the
     // charts so the node object itself also has complete hardware metadata.
@@ -1137,7 +1137,7 @@ export function App() {
       const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
        const os = latestGuestResource.os || custom.os || 'Ubuntu 24.04 LTS'
-      const resolvedUuid = telemetry.uuid || custom.uuid || customKey || `guest-${encodeURIComponent(name)}`
+      const resolvedUuid = (telemetry.uuid || custom.uuid || (name ? `guest-${encodeURIComponent(name)}` : '')).trim()
       const cpuPercent = numeric(telemetry.cpu_percent)
       const memUsed = numeric(telemetry.memory_used_bytes)
       const memTotal = numeric(telemetry.memory_total_bytes)
@@ -1177,8 +1177,16 @@ export function App() {
       }
     })
 
-    const matchedNode = targetUuid ? guestNodesList.find((n) => (n.uuid || n.id) === targetUuid) : null
-    const currentDetailNode = detailNode || matchedNode || (!targetUuid && activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null)
+    const matchedNode = targetUuid
+      ? guestNodesList.find((n) => {
+          const u = (n.uuid || n.id || '').trim().toLowerCase()
+          return u === targetUuid.toLowerCase()
+        })
+      : null
+    const isDetailNodeMatching = detailNode && targetUuid && (detailNode.uuid || detailNode.id || '').trim().toLowerCase() === targetUuid.toLowerCase()
+    const currentDetailNode = isDetailNodeMatching
+      ? detailNode
+      : (matchedNode || (!targetUuid && activeNav === 'node-detail' && guestNodesList.length > 0 ? guestNodesList[0] : null))
 
     if (activeNav === 'node-detail') {
       return (
@@ -1256,7 +1264,7 @@ export function App() {
                 setDetailNode(node)
                 navigate('node-detail', { uuid: node.uuid || node.id })
               }}
-              loading={false}
+              loading={!publicStatus && !currentDetailNode}
               history={history}
               historyLoading={historyLoading}
               historyTimeRange={historyTimeRange}

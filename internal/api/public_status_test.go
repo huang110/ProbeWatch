@@ -51,9 +51,13 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	}
 	var payload struct {
 		Nodes struct {
-			Online int      `json:"online"`
-			Total  int      `json:"total"`
-			Names  []string `json:"names"`
+			Online    int      `json:"online"`
+			Total     int      `json:"total"`
+			Names     []string `json:"names"`
+			Telemetry []struct {
+				UUID string `json:"uuid"`
+				Name string `json:"name"`
+			} `json:"telemetry"`
 		} `json:"nodes"`
 		Checks struct {
 			SuccessRate  *float64 `json:"success_rate"`
@@ -74,6 +78,9 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	if len(payload.Nodes.Names) != 2 || payload.Nodes.Names[0] != "edge-01 [已脱敏]" || payload.Nodes.Names[1] != "edge-02" {
 		t.Fatalf("public status node names = %#v", payload.Nodes.Names)
 	}
+	if len(payload.Nodes.Telemetry) != 2 || payload.Nodes.Telemetry[0].UUID != onlineNode.UUID || payload.Nodes.Telemetry[1].UUID != quietNode.UUID {
+		t.Fatalf("public status telemetry uuids mismatch: %#v", payload.Nodes.Telemetry)
+	}
 	if payload.Checks.SuccessRate == nil || *payload.Checks.SuccessRate != 100 {
 		t.Fatalf("public status success rate = %#v, want 100", payload.Checks.SuccessRate)
 	}
@@ -88,9 +95,9 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	}
 	body := response.Body.String()
 	for _, leaked := range []string{
-		onlineNode.ID, onlineNode.UUID, quietNode.ID, quietNode.UUID,
+		onlineNode.ID, quietNode.ID,
 		"secret-host", "public-target",
-		"192.0.2.10", "uuid", "node_id", "target_id", "detector_id", "token", "resource", "alert",
+		"192.0.2.10", "node_id", "target_id", "detector_id", "token", "resource", "alert",
 	} {
 		if strings.Contains(body, leaked) {
 			t.Fatalf("public status body leaked %q: %s", leaked, body)

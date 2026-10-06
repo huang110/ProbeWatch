@@ -105,9 +105,11 @@ type publicStatusChecks struct {
 }
 
 // publicNodeTelemetry is the allow-listed, read-only data used by the public
-// dashboard cards. It deliberately omits UUIDs, internal IDs, addresses and
-// raw resource payloads while keeping the latest values genuinely live.
+// dashboard cards. It includes the public UUID for detail navigation while
+// deliberately omitting internal database IDs, secret tokens, passwords, hostnames,
+// listening ports, and raw network payloads.
 type publicNodeTelemetry struct {
+	UUID              string                 `json:"uuid"`
 	Name              string                 `json:"name"`
 	Status            string                 `json:"status"`
 	LastReportedAt   *time.Time             `json:"last_reported_at"`
@@ -216,7 +218,12 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	for _, node := range nodes {
 		// The resource payload is intentionally discarded here:
 		// only the report timestamp is used for the online count.
-		telemetry := publicNodeTelemetry{Name: sanitizeNodeName(node.Name), Status: "offline", Checks: make([]publicNodeCheck, 0, 3)}
+		telemetry := publicNodeTelemetry{
+			UUID:   node.UUID,
+			Name:   sanitizeNodeName(node.Name),
+			Status: "offline",
+			Checks: make([]publicNodeCheck, 0, 3),
+		}
 		if reportedAt, payload, e := s.service.Store().GetResourceLatest(r.Context(), node.ID); e == nil {
 			telemetry.LastReportedAt = &reportedAt
 			if time.Since(reportedAt) <= 2*time.Minute {
