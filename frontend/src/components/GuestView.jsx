@@ -78,10 +78,7 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
 }
 
 export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
-  const [viewMode, setViewMode] = useState(() => {
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) return 'compact'
-    return 'grid'
-  }) // 'grid' | 'table' | 'compact'
+  const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table' | 'compact'
   const [showLogin, setShowLogin] = useState(false)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
