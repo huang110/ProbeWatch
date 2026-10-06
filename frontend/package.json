@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
     "test:smoke": "node tests/smoke.mjs",
     "test:browser:live": "python tests/browser_live_regression.py",
     "test:browser:real": "python tests/browser_real_regression.py",
