@@ -445,8 +445,8 @@ type publicIPQualityDTO struct {
 	Tor                 *bool  `json:"tor,omitempty"`
 	Abuse               *bool  `json:"abuse,omitempty"`
 	CheckedAt           int64  `json:"checked_at,omitempty"`
-	IPQAEnabled         bool   `json:"ipqa_enabled,omitempty"`
-	IPQAInstalled       bool   `json:"ipqa_installed,omitempty"`
+	IPQAEnabled         bool   `json:"ipqa_enabled"`
+	IPQAInstalled       bool   `json:"ipqa_installed"`
 	HighestSeverity     string `json:"highest_severity,omitempty"`
 	AlertCount          int    `json:"alert_count,omitempty"`
 	CriticalCount       int    `json:"critical_count,omitempty"`
