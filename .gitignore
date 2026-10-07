@@ -10,7 +10,10 @@ __pycache__/
 .env.*
 !.env.example
 /data/
+data/
+**/data/
 *.db
+*.db.gz
 *.db-wal
 *.db-shm
 *.db-journal
