@@ -535,6 +535,19 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := ensureIPQASchema(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureMediaTargetsDisabled(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureMediaTargetsDisabled(ctx context.Context, db *sql.DB) error {
+	// One-time safe transition: disable media_detectors scheduled check tasks.
+	// Preserves all rows, IDs, names, hosts, payloads, and history records without deleting anything.
+	_, err := db.ExecContext(ctx, `UPDATE media_detectors SET enabled = 0 WHERE enabled != 0;`)
+	if err != nil {
+		return fmt.Errorf("disable media detector targets: %w", err)
+	}
 	return nil
 }
 

@@ -613,7 +613,7 @@ func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
 			Name:    p.name,
 			Kind:    db.TargetKindMediaHTTP,
 			Host:    p.host,
-			Enabled: true,
+			Enabled: false,
 			Payload: rawPayload,
 		}
 		if _, err := s.service.Store().CreateTarget(r.Context(), def, now); err == nil {
@@ -626,5 +626,39 @@ func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
 		"created": createdCount,
 		"enabled": enabledCount,
 		"total":   len(presets),
+	})
+}
+
+func (s *Server) disableMediaTargets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	now := time.Now().UTC()
+	targets, err := s.service.Store().ListTargets(r.Context(), db.TargetKindMediaHTTP)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "targets unavailable")
+		return
+	}
+	disabledCount := 0
+	for _, target := range targets {
+		if target.Enabled {
+			def := db.TargetDefinition{
+				ID:      target.ID,
+				Name:    target.Name,
+				Kind:    target.Kind,
+				Host:    target.Host,
+				Enabled: false,
+				Payload: target.Payload,
+			}
+			if _, err := s.service.Store().UpdateTarget(r.Context(), db.TargetKindMediaHTTP, target.ID, def, now); err == nil {
+				disabledCount++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"disabled": disabledCount,
+		"total":    len(targets),
 	})
 }

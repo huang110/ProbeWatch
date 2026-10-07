@@ -114,6 +114,7 @@ export function normalizeIPQuality(raw) {
     vpn: flags.vpn,
     tor: flags.tor,
     abuse: flags.abuse,
+    media: Array.isArray(data.media) ? data.media : (Array.isArray(ipqaRaw.media) ? ipqaRaw.media : (Array.isArray(raw.media) ? raw.media : [])),
   }
 }
 

@@ -52,7 +52,7 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, target := range targets {
-			if !target.Enabled {
+			if !target.Enabled || target.Kind == db.TargetKindMediaHTTP {
 				continue
 			}
 			task, matches, err := targetToCheckTaskForNode(target, node)

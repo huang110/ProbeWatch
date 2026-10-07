@@ -297,6 +297,12 @@ func (c *DefaultIPQACollector) collect() (*protocol.IPQAInfo, error) {
 		}
 	}
 
+	if v4Info != nil && len(v4Info.Media) > 0 {
+		info.Media = v4Info.Media
+	} else if v6Info != nil && len(v6Info.Media) > 0 {
+		info.Media = v6Info.Media
+	}
+
 	if len(changes) > maxIPQAChanges {
 		changes = changes[:maxIPQAChanges]
 	}
@@ -454,6 +460,7 @@ func parseAlertLine(raw string) *parsedAlert {
 
 // rawIPQAArchive holds raw fields deserialized from IPQA daily JSON files.
 type rawIPQAArchive struct {
+	Head   map[string]any            `json:"Head"`
 	Info   map[string]any            `json:"Info"`
 	Score  map[string]any            `json:"Score"`
 	Type   map[string]any            `json:"Type"`
@@ -626,6 +633,58 @@ func normalizeArchive(raw *rawIPQAArchive) (*protocol.IPQAFamilyInfo, []string) 
 				info.Abuse = &detected
 			}
 		}
+	}
+
+	// Media extraction from raw.Media
+	if raw.Media != nil {
+		var archiveCheckTime int64
+		if raw.Head != nil {
+			if tStr, ok := raw.Head["Time"].(string); ok && tStr != "" {
+				if t, err := time.ParseInLocation("2006-01-02 15:04:05 MST", tStr, beijingLocation); err == nil {
+					archiveCheckTime = t.UTC().Unix()
+				}
+			}
+		}
+		if archiveCheckTime <= 0 {
+			archiveCheckTime = time.Now().UTC().Unix()
+		}
+
+		for platformName, platformVal := range raw.Media {
+			item := protocol.IPQAMediaItem{
+				Name:      platformName,
+				CheckedAt: archiveCheckTime,
+			}
+			if m, ok := platformVal.(map[string]any); ok {
+				if s, ok := m["Status"].(string); ok {
+					item.StatusRaw = strings.TrimSpace(s)
+				}
+				if r, ok := m["Region"].(string); ok {
+					item.Region = strings.ToUpper(strings.TrimSpace(r))
+				}
+				if t, ok := m["Type"].(string); ok {
+					item.Type = strings.TrimSpace(t)
+				}
+			} else if s, ok := platformVal.(string); ok {
+				item.StatusRaw = strings.TrimSpace(s)
+			}
+
+			rawLower := strings.ToLower(item.StatusRaw)
+			switch {
+			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制"):
+				item.Status = "available"
+			case strings.Contains(rawLower, "未") || strings.Contains(rawLower, "unavailable") || strings.Contains(rawLower, "no") || strings.Contains(rawLower, "false"):
+				item.Status = "unavailable"
+			case strings.Contains(rawLower, "不可用") || strings.Contains(rawLower, "失败") || strings.Contains(rawLower, "blocked") || strings.Contains(rawLower, "ban"):
+				item.Status = "blocked"
+			default:
+				item.Status = "unknown"
+			}
+
+			info.Media = append(info.Media, item)
+		}
+		sort.Slice(info.Media, func(i, j int) bool {
+			return info.Media[i].Name < info.Media[j].Name
+		})
 	}
 
 	sort.Strings(sources)

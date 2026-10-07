@@ -5,7 +5,15 @@ import { numeric, safeObject, safeText } from '../lib/format.js'
 import { EmptyState } from './Common.jsx'
 
 const TARGET_KINDS = ['tcp', 'http', 'https', 'dns', 'mtr', 'media_http']
+const CREATE_TARGET_KINDS = ['tcp', 'http', 'https', 'dns', 'mtr']
 const KIND_LABELS = { tcp: 'TCP', http: 'HTTP', https: 'HTTPS', dns: 'DNS', mtr: 'MTR', media_http: '流媒体' }
+const FILTER_TABS = [
+  { key: 'all', label: '全部' },
+  { key: 'enabled', label: '启用' },
+  { key: 'disabled', label: '停用' },
+  { key: 'network', label: '普通检测' },
+  { key: 'media_http', label: '流媒体' },
+]
 const KIND_PORT_DEFAULTS = { tcp: 80, http: 80, https: 443, dns: 53, mtr: 80, media_http: 80 }
 const HTTP_LIKE_KINDS = ['http', 'https', 'media_http']
 const DNS_TYPES = ['A', 'AAAA', 'CNAME']
@@ -108,19 +116,31 @@ export function TargetTable({ targets, readOnly = false, loading = false, mutati
         <tr><th>ID</th><th>名称</th><th>类型</th><th>主机</th><th>端口</th><th>路径</th><th>间隔</th><th>启用</th>{!readOnly && <th aria-hidden="true" />}</tr>
       </thead>
       <tbody>
-        {targets.map((target, index) => <tr key={target.id || `target-${index}`} data-target-id={target.id || undefined}>
-          <td>{target.id || '—'}</td>
-          <td>{target.name}</td>
-          <td><span className="target-kind">{KIND_LABELS[target.kind] || target.kind}</span></td>
-          <td>{target.host}</td>
-          <td>{target.port ?? '—'}</td>
-          <td>{target.path || '—'}</td>
-          <td>{target.intervalSeconds !== null ? `${target.intervalSeconds}s` : '—'}</td>
-          <td>{readOnly
-            ? <span className="target-state"><span className={`status-dot status-${target.enabled ? 'online' : 'offline'}`} />{target.enabled ? '已启用' : '已停用'}</span>
-            : <button type="button" className={`target-toggle ${target.enabled ? 'target-toggle-on' : ''}`} disabled={mutatingId === target.id} aria-pressed={target.enabled} onClick={() => onToggle(target)}>{mutatingId === target.id ? '切换中…' : target.enabled ? '已启用' : '已停用'}</button>}</td>
-          {!readOnly && <td className="target-cell-action"><button type="button" className="text-button target-delete" aria-label={`删除检测目标 ${target.id || target.name}`} disabled={mutatingId === target.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDelete?.(target) }}>{mutatingId === target.id ? '处理中…' : '删除'}</button></td>}
-        </tr>)}
+        {targets.map((target, index) => {
+          const isMediaDisabled = target.kind === 'media_http' && !target.enabled
+          return (
+            <tr
+              key={target.id || `target-${index}`}
+              data-target-id={target.id || undefined}
+              className={isMediaDisabled ? 'target-row-media-disabled' : undefined}
+            >
+              <td>{target.id || '—'}</td>
+              <td>
+                <span className="target-name-cell">{target.name}</span>
+                {isMediaDisabled && <span className="target-tag-ipqa-muted" title="周期探测已停用，由 IPQA 历史归档统一提供流媒体状态">IPQA 接管</span>}
+              </td>
+              <td><span className="target-kind">{KIND_LABELS[target.kind] || target.kind}</span></td>
+              <td>{target.host}</td>
+              <td>{target.port ?? '—'}</td>
+              <td>{target.path || '—'}</td>
+              <td>{target.intervalSeconds !== null ? `${target.intervalSeconds}s` : '—'}</td>
+              <td>{readOnly
+                ? <span className="target-state"><span className={`status-dot status-${target.enabled ? 'online' : 'offline'}`} />{target.enabled ? '已启用' : '已停用'}</span>
+                : <button type="button" className={`target-toggle ${target.enabled ? 'target-toggle-on' : ''}`} disabled={mutatingId === target.id} aria-pressed={target.enabled} onClick={() => onToggle(target)}>{mutatingId === target.id ? '切换中…' : target.enabled ? '已启用' : '已停用'}</button>}</td>
+              {!readOnly && <td className="target-cell-action"><button type="button" className="text-button target-delete" aria-label={`删除检测目标 ${target.id || target.name}`} disabled={mutatingId === target.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDelete?.(target) }}>{mutatingId === target.id ? '处理中…' : '删除'}</button></td>}
+            </tr>
+          )
+        })}
       </tbody>
     </table>
     {!targets.length && <EmptyState title={loading ? '正在加载检测目标' : '暂无检测目标'} detail={loading ? '正在从 API 读取检测目标列表。' : emptyDetail} />}
@@ -167,8 +187,47 @@ export function TargetManage({ readOnly = false, kinds = null, title = '检测�
   const visible = useMemo(() => {
     if (kinds) return targets.filter((target) => kinds.includes(target.kind))
     if (filter === 'all') return targets
+    if (filter === 'enabled') return targets.filter((target) => target.enabled)
+    if (filter === 'disabled') return targets.filter((target) => !target.enabled)
+    if (filter === 'network') return targets.filter((target) => target.kind !== 'media_http')
+    if (filter === 'media_http') return targets.filter((target) => target.kind === 'media_http')
     return targets.filter((target) => target.kind === filter)
   }, [targets, kinds, filter])
+
+  const hasActiveMediaTargets = useMemo(() => {
+    return targets.some((t) => t.kind === 'media_http' && t.enabled)
+  }, [targets])
+
+  const hasDisabledMediaTargets = useMemo(() => {
+    return targets.some((t) => t.kind === 'media_http' && !t.enabled)
+  }, [targets])
+
+  const disableAllMediaTargets = async () => {
+    if (!window.confirm('确定停用所有流媒体检测目标？\n停用后将不再周期消耗节点 CPU 与流量，流媒体状态已由 IPQA 归档统一接管。历史检测数据与审计记录将完整保留。')) {
+      return
+    }
+    setMutatingId('batch-disable-media')
+    setError('')
+    setStatus({ kind: 'info', message: '正在停用流媒体检测目标…' })
+    try {
+      const csrfToken = await fetchCsrfToken()
+      const response = await fetch('/api/targets/disable-media', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      })
+      if (response.status === 401) throw new Error('auth')
+      if (!response.ok) throw new Error((await readErrorDetail(response)) || `停用失败（${response.status}）`)
+      const res = await response.json()
+      setTargets((current) => current.map((item) => item.kind === 'media_http' ? { ...item, enabled: false } : item))
+      setStatus({ kind: 'ok', message: `已成功停用 ${res.disabled || 0} 个流媒体检测目标，流媒体状态已交由 IPQA 归档统一接管。` })
+    } catch (caught) {
+      const messages = { auth: '需要登录后才能停用检测目标。', csrf: '无法获取安全令牌，请刷新后重试。' }
+      setError(messages[caught?.message] || caught?.message || '停用失败，请稍后重试。')
+    } finally {
+      setMutatingId(null)
+    }
+  }
 
   const toggleEnabled = async (target) => {
     setMutatingId(target.id)
@@ -270,28 +329,53 @@ export function TargetManage({ readOnly = false, kinds = null, title = '检测�
   return <>
     <div className="panel target-panel">
       <div className="panel-header">
-        <div><h2>全部检测目标</h2><p>共 {targets.length} 个目标{filter === 'all' ? '' : ` · 筛选 ${KIND_LABELS[filter] || filter}`}</p></div>
+        <div><h2>全部检测目标</h2><p>共 {targets.length} 个目标{filter === 'all' ? '' : ` · 筛选 ${FILTER_TABS.find((f) => f.key === filter)?.label || filter}`}</p></div>
         <div className="target-actions">
           <div className="filter-group" aria-label="按类型筛选">
-            <button type="button" className={filter === 'all' ? 'filter-active' : ''} aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部</button>
-            {TARGET_KINDS.map((kind) => <button key={kind} type="button" className={filter === kind ? 'filter-active' : ''} aria-pressed={filter === kind} onClick={() => setFilter(kind)}>{KIND_LABELS[kind]}</button>)}
+            {FILTER_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={filter === tab.key ? 'filter-active' : ''}
+                aria-pressed={filter === tab.key}
+                onClick={() => setFilter(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
+          {hasActiveMediaTargets && (
+            <button
+              type="button"
+              className="button button-warning target-btn-disable-media"
+              onClick={disableAllMediaTargets}
+              disabled={mutatingId === 'batch-disable-media'}
+              title="一键停用所有流媒体检测目标，由 IPQA 历史归档统一接管"
+            >
+              {mutatingId === 'batch-disable-media' ? '正在停用…' : '停用流媒体目标'}
+            </button>
+          )}
           <button type="button" className={`button ${formOpen ? 'button-quiet' : 'button-primary'}`} onClick={() => { setFormOpen((open) => !open); setFormError('') }}><Plus size={14} weight="bold" />{formOpen ? '收起表单' : '新建目标'}</button>
         </div>
       </div>
       {(error || status) && <div className={`api-state ${error ? 'api-state-error' : 'api-state-ok'}`} role="status">{error || status?.message}</div>}
-      <TargetTable targets={visible} loading={loading} mutatingId={mutatingId} onToggle={toggleEnabled} onDelete={deleteTarget} emptyDetail={filter === 'all' ? '还没有检测目标，点击“新建目标”添加第一个探测项。' : '当前类型下没有检测目标。'} />
+      {hasDisabledMediaTargets && (filter === 'all' || filter === 'disabled' || filter === 'media_http') && (
+        <div className="target-media-notice">
+          <span>流媒体探测已转由节点 IPQA 历史归档统一提供，原 <code>media-*</code> 目标已停用且不再消耗节点资源。历史检测结果及审计记录完整保留。</span>
+        </div>
+      )}
+      <TargetTable targets={visible} loading={loading} mutatingId={mutatingId} onToggle={toggleEnabled} onDelete={deleteTarget} emptyDetail={filter === 'all' ? '还没有检测目标，点击“新建目标”添加第一个探测项。' : '当前筛选条件下没有检测目标。'} />
     </div>
     {formOpen && <div className="panel target-form-panel">
       <div className="panel-header">
-        <div><h2>新建检测目标</h2><p>按类型填写探测参数，提交后立即生效。</p></div>
+        <div><h2>新建检测目标</h2><p>按类型填写探测参数，提交后立即生效。（流媒体目标由 IPQA 统一提供，无需在此创建）</p></div>
       </div>
       {formError && <div className="api-state api-state-error" role="alert">{formError}</div>}
       <form className="target-form" onSubmit={submit} noValidate>
         <div className="target-form-grid">
           <label className="field"><span className="field-label">类型 *</span>
             <select className="field-select" value={form.kind} onChange={changeKind}>
-              {TARGET_KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABELS[kind]}（{kind}）</option>)}
+              {CREATE_TARGET_KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABELS[kind]}（{kind}）</option>)}
             </select>
           </label>
           <label className="field"><span className="field-label">名称 *</span><input className="field-input" value={form.name} onChange={setField('name')} maxLength={128} placeholder="例如：上海 HTTP 探测" /></label>

@@ -470,9 +470,10 @@ type publicIPQualityDTO struct {
 	LatestArchiveDate   string             `json:"latest_archive_date,omitempty"`
 	Sources             []string           `json:"sources,omitempty"`
 	RiskScore           *float64           `json:"risk_score,omitempty"`
-	RiskLevel           string             `json:"risk_level,omitempty"`
-	HasIPv4             bool               `json:"has_ipv4,omitempty"`
-	HasIPv6             bool               `json:"has_ipv6,omitempty"`
+	RiskLevel           string                   `json:"risk_level,omitempty"`
+	HasIPv4             bool                     `json:"has_ipv4,omitempty"`
+	HasIPv6             bool                     `json:"has_ipv6,omitempty"`
+	Media               []protocol.IPQAMediaItem `json:"media,omitempty"`
 }
 
 type publicHealthInfoDTO struct {
@@ -668,22 +669,35 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 		DualStack:           snapshot.IPv4 != "" && snapshot.IPv6 != "",
 	}
 
-	// Collect public media results
-	mediaResults, err := s.service.Store().ListMediaLatest(r.Context(), node.ID)
-	mediaList := make([]publicMediaResultDTO, 0, len(mediaResults))
-	if err == nil {
-		for _, latest := range mediaResults {
-			var result protocol.MediaResult
-			if json.Unmarshal(latest.Payload, &result) == nil {
-				mediaList = append(mediaList, publicMediaResultDTO{
-					DetectorID: latest.ID,
-					Detector:   result.Detector,
-					Status:     result.Status,
-					Region:     result.Region,
-					LatencyMS:  result.LatencyMS,
-					Reason:     result.Reason,
-					CheckedAt:  result.CheckedAt,
-				})
+	// Collect public media results: prioritize real IPQA archive results
+	mediaList := make([]publicMediaResultDTO, 0)
+	if snapshot.IPQA != nil && len(snapshot.IPQA.Media) > 0 {
+		for _, m := range snapshot.IPQA.Media {
+			mediaList = append(mediaList, publicMediaResultDTO{
+				DetectorID: "ipqa-" + strings.ToLower(m.Name),
+				Detector:   m.Name,
+				Status:     m.Status,
+				Region:     m.Region,
+				Reason:     m.Type,
+				CheckedAt:  m.CheckedAt,
+			})
+		}
+	} else {
+		mediaResults, err := s.service.Store().ListMediaLatest(r.Context(), node.ID)
+		if err == nil {
+			for _, latest := range mediaResults {
+				var result protocol.MediaResult
+				if json.Unmarshal(latest.Payload, &result) == nil {
+					mediaList = append(mediaList, publicMediaResultDTO{
+						DetectorID: latest.ID,
+						Detector:   result.Detector,
+						Status:     result.Status,
+						Region:     result.Region,
+						LatencyMS:  result.LatencyMS,
+						Reason:     result.Reason,
+						CheckedAt:  result.CheckedAt,
+					})
+				}
 			}
 		}
 	}
@@ -812,6 +826,9 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		dto.LatestArchiveDate = qa.LatestArchiveDate
 		if len(qa.Sources) > 0 {
 			dto.Sources = qa.Sources
+		}
+		if len(qa.Media) > 0 {
+			dto.Media = qa.Media
 		}
 		dto.HasIPv4 = qa.IPv4 != nil
 		dto.HasIPv6 = qa.IPv6 != nil
@@ -1082,6 +1099,26 @@ func (s *Server) writePublicNodeChecksSummary(w http.ResponseWriter, r *http.Req
 
 // writePublicMediaLatest returns unauthenticated streaming media unlock status using publicMediaResultDTO.
 func (s *Server) writePublicMediaLatest(w http.ResponseWriter, r *http.Request, nodeID string) {
+	_, payload, err := s.service.Store().GetResourceLatest(r.Context(), nodeID)
+	if err == nil {
+		var snapshot protocol.ResourceSnapshot
+		if json.Unmarshal(payload, &snapshot) == nil && snapshot.IPQA != nil && len(snapshot.IPQA.Media) > 0 {
+			mediaList := make([]publicMediaResultDTO, 0, len(snapshot.IPQA.Media))
+			for _, m := range snapshot.IPQA.Media {
+				mediaList = append(mediaList, publicMediaResultDTO{
+					DetectorID: "ipqa-" + strings.ToLower(m.Name),
+					Detector:   m.Name,
+					Status:     m.Status,
+					Region:     m.Region,
+					Reason:     m.Type,
+					CheckedAt:  m.CheckedAt,
+				})
+			}
+			writeJSON(w, http.StatusOK, mediaList)
+			return
+		}
+	}
+
 	results, err := s.service.Store().ListMediaLatest(r.Context(), nodeID)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "node results unavailable")

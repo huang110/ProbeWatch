@@ -271,7 +271,10 @@ console.log("=== Testing Component Code Security & Structure ===")
   // Redundant standalone media strip card must be removed from NodeDetailPage.jsx
   assert.ok(!comp.includes('<section className="komari-media-strip-card">'), "Component must NOT render redundant standalone komari-media-strip-card")
 
-  assert.ok(comp.includes("暂无流媒体 / AI 检测结果"), "Component must handle empty media with 暂无流媒体 / AI 检测结果")
+  assert.ok(comp.includes("IPQA 未启用，暂无媒体归档"), "Component must handle empty media with IPQA 未启用，暂无媒体归档")
+  assert.ok(comp.includes("暂无媒体检测数据"), "Component must handle empty media with 暂无媒体检测数据")
+  assert.ok(comp.includes("查看全部"), "Component must provide 查看全部 button")
+  assert.ok(comp.includes("ip-quality-media-modal-backdrop"), "Component must provide media modal")
   assert.ok(comp.includes("正在同步流媒体 / AI 检测结果…"), "Component must handle loading with 正在同步流媒体 / AI 检测结果…")
 
   // Security: No public IP in media cards, no hardcoded fake scores

@@ -25,7 +25,18 @@ type IPQAInfo struct {
 	IPv6              *IPQAFamilyInfo `json:"ipv6,omitempty"`
 	Changes           []IPQAChange    `json:"changes,omitempty"`
 	Sources           []string        `json:"sources,omitempty"`
+	Media             []IPQAMediaItem `json:"media,omitempty"`
 	CollectionError   string          `json:"collection_error,omitempty"`
+}
+
+// IPQAMediaItem represents an unlocked/locked status for a streaming/AI service from IPQA archive.
+type IPQAMediaItem struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"` // "available", "unavailable", "blocked", "unknown"
+	StatusRaw string `json:"status_raw,omitempty"`
+	Region    string `json:"region,omitempty"`
+	Type      string `json:"type,omitempty"`
+	CheckedAt int64  `json:"checked_at,omitempty"`
 }
 
 // IPQAFamilyInfo contains provider intelligence for a specific IP family (IPv4 / IPv6).
@@ -42,6 +53,7 @@ type IPQAFamilyInfo struct {
 	Tor          *bool              `json:"tor,omitempty"`
 	Abuse        *bool              `json:"abuse,omitempty"`
 	SourceScores map[string]float64 `json:"source_scores,omitempty"`
+	Media        []IPQAMediaItem    `json:"media,omitempty"`
 }
 
 // IPQAChange describes a semantic difference detected between consecutive archives.
@@ -102,6 +114,14 @@ func (q IPQAInfo) Validate() error {
 			return err
 		}
 	}
+	if len(q.Media) > 64 {
+		return errors.New("media items count exceeds 64")
+	}
+	for _, m := range q.Media {
+		if err := m.Validate(); err != nil {
+			return err
+		}
+	}
 	if q.IPv4 != nil {
 		if err := q.IPv4.Validate(); err != nil {
 			return fmt.Errorf("ipv4: %w", err)
@@ -111,6 +131,26 @@ func (q IPQAInfo) Validate() error {
 		if err := q.IPv6.Validate(); err != nil {
 			return fmt.Errorf("ipv6: %w", err)
 		}
+	}
+	return nil
+}
+
+// Validate checks boundaries for an IPQAMediaItem struct.
+func (m IPQAMediaItem) Validate() error {
+	if err := validateString("media name", m.Name, 64, true); err != nil {
+		return err
+	}
+	if err := validateString("media status", m.Status, 32, true); err != nil {
+		return err
+	}
+	if err := validateString("media region", m.Region, 16, false); err != nil {
+		return err
+	}
+	if err := validateString("media type", m.Type, 32, false); err != nil {
+		return err
+	}
+	if m.CheckedAt < 0 {
+		return errors.New("media checked_at must not be negative")
 	}
 	return nil
 }
@@ -154,6 +194,14 @@ func (f IPQAFamilyInfo) Validate() error {
 		}
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
 			return fmt.Errorf("source score %q must be a finite number between 0 and 100", k)
+		}
+	}
+	if len(f.Media) > 64 {
+		return errors.New("media items count exceeds 64")
+	}
+	for _, m := range f.Media {
+		if err := m.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil

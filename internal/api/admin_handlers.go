@@ -1068,6 +1068,29 @@ func (s *Server) writeMTRLatest(w http.ResponseWriter, r *http.Request, nodeID s
 }
 
 func (s *Server) writeMediaLatest(w http.ResponseWriter, r *http.Request, nodeID string) {
+	_, payload, err := s.service.Store().GetResourceLatest(r.Context(), nodeID)
+	if err == nil {
+		var snapshot protocol.ResourceSnapshot
+		if json.Unmarshal(payload, &snapshot) == nil && snapshot.IPQA != nil && len(snapshot.IPQA.Media) > 0 {
+			response := make([]mediaLatestResponse, 0, len(snapshot.IPQA.Media))
+			for _, m := range snapshot.IPQA.Media {
+				response = append(response, mediaLatestResponse{
+					DetectorID: "ipqa-" + strings.ToLower(m.Name),
+					CheckedAt:  time.Unix(m.CheckedAt, 0).UTC(),
+					Result: protocol.MediaResult{
+						Detector:  m.Name,
+						Status:    m.Status,
+						Region:    m.Region,
+						Reason:    m.Type,
+						CheckedAt: m.CheckedAt,
+					},
+				})
+			}
+			writeJSON(w, http.StatusOK, response)
+			return
+		}
+	}
+
 	results, err := s.service.Store().ListMediaLatest(r.Context(), nodeID)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "node results unavailable")

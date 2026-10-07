@@ -43,6 +43,7 @@ import {
   Play,
   ArrowDown,
   ArrowUp,
+  X,
 } from '@phosphor-icons/react'
 
 // Favorites are session-only by design. Node identifiers must not be written
@@ -274,11 +275,75 @@ const POPULAR_MEDIA = [
   { id: 'claude', name: 'Claude', iconBg: '#D97706', symbol: 'CL', alias: ['claude', 'anthropic'] },
   { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT', alias: ['youtube'] },
   { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF', alias: ['netflix'] },
-  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney'] },
+  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney', 'disneyplus'] },
   { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK', alias: ['tiktok'] },
+  { id: 'amazonpv', name: 'Prime Video', iconBg: '#00A8E1', symbol: 'PV', alias: ['amazon', 'primevideo', 'amazonprimevideo', 'amazonpv'] },
+  { id: 'reddit', name: 'Reddit', iconBg: '#FF4500', symbol: 'RD', alias: ['reddit'] },
   { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP', alias: ['spotify'] },
   { id: 'bilibili', name: 'Bilibili', iconBg: '#00A1D6', symbol: 'Bili', alias: ['bilibili'] },
 ]
+
+export function parseMediaItemDetails(m, nowSec = Math.floor(Date.now() / 1000)) {
+  const rawStatus = (m.status || m.result?.status || m.status_raw || '').toLowerCase()
+  const rawType = (m.type || m.result?.type || m.reason || '').toLowerCase()
+  const checkedAt = m.checked_at || m.result?.checked_at || 0
+  const isStale = checkedAt > 0 && nowSec > 0 && (nowSec - checkedAt > 7 * 86400)
+
+  let tone = 'unknown'
+  let statusText = '未知'
+
+  if (isStale) {
+    tone = 'stale'
+    statusText = '数据较旧'
+  } else if (
+    rawStatus.includes('解锁') || rawStatus.includes('原生') || rawStatus.includes('自制') ||
+    rawStatus === 'available' || rawStatus === 'yes' || rawStatus === 'true' ||
+    rawType.includes('原生') || rawType.includes('自制')
+  ) {
+    tone = 'available'
+    statusText = '已解锁'
+  } else if (
+    rawStatus.includes('未') || rawStatus === 'unavailable' || rawStatus === 'no' || rawStatus === 'false'
+  ) {
+    tone = 'unavailable'
+    statusText = '未解锁'
+  } else if (
+    rawStatus.includes('不可用') || rawStatus.includes('屏蔽') || rawStatus.includes('blocked') ||
+    rawStatus.includes('ban') || rawStatus.includes('失败') || rawStatus === 'error'
+  ) {
+    tone = 'blocked'
+    statusText = '不可用'
+  } else if (rawStatus === 'timeout') {
+    tone = 'timeout'
+    statusText = '超时'
+  } else {
+    tone = 'unknown'
+    statusText = '未知'
+  }
+
+  const rawRegion = m.region || m.result?.region
+  const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : ''
+  const displayStatus = regionText && tone === 'available' ? `已解锁 · ${regionText}` : statusText
+
+  const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+  const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
+    ? `${Math.round(Number(lat))}ms`
+    : null
+
+  const typeText = m.type || m.result?.type || (latencyText ? latencyText : '—')
+  const checkTime = checkedAt > 0 ? formatIPQualityDateTime(checkedAt) : '—'
+
+  return {
+    tone,
+    statusText,
+    displayStatus,
+    regionText,
+    latencyText,
+    typeText,
+    checkTime,
+    isStale,
+  }
+}
 
 const getMediaStatus = (platform, mediaList) => {
   const platformId = typeof platform === 'string' ? platform : platform.id
@@ -291,30 +356,12 @@ const getMediaStatus = (platform, mediaList) => {
     return aliases.some((a) => dId.includes(a) || dName.includes(a))
   })
   if (!match) return { text: '未测试', tone: 'muted', latency: null }
-  const res = match.result || match || {}
-  const status = res.status || match.status
-  const latency = res.latency_ms ?? match.latency_ms ?? null
-  const region = res.region || match.region
-  const reason = res.reason || match.reason
-
-  if (status === 'available') {
-    return {
-      text: region ? `${region} 解锁` : '原生解锁',
-      tone: 'available',
-      latency,
-    }
+  const details = parseMediaItemDetails(match)
+  return {
+    text: details.displayStatus,
+    tone: details.tone,
+    latency: details.latencyText,
   }
-  if (status === 'unavailable') {
-    return { text: '未解锁', tone: 'unavailable', latency }
-  }
-  if (status === 'error' || status === 'blocked' || status === 'timeout') {
-    return {
-      text: reason === 'body exceeds limit' ? '仅自制剧' : '超时/异常',
-      tone: 'warning',
-      latency,
-    }
-  }
-  return { text: status || '未知', tone: 'muted', latency }
 }
 
 export function NodeDetailPage({
@@ -414,7 +461,7 @@ export function NodeDetailPage({
     const memory = memTotal ? `${Math.round((memUsed / memTotal) * 100)}%` : '暂无'
     const disk = diskTotal ? `${Math.round((diskUsed / diskTotal) * 100)}%` : '暂无'
     const mediaBadges = POPULAR_MEDIA.map((item) => {
-      const result = getMediaStatus(item, mediaData)
+      const result = getMediaStatus(item, effectiveMediaData)
       return `${result.tone === 'available' ? '✅' : '❌'} ${item.label || item.name}`
     }).join(' · ')
     const markdown = [
@@ -476,6 +523,19 @@ export function NodeDetailPage({
       localStorage.setItem('probewatch:recent-nodes', JSON.stringify(list.slice(0, 10)))
     } catch {}
   }, [nodeUuid])
+
+  const [isMediaModalOpen, setIsMediaModalOpen] = useState(false)
+
+  useEffect(() => {
+    if (!isMediaModalOpen) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsMediaModalOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isMediaModalOpen])
 
   const [loadingMedia, setLoadingMedia] = useState(false)
   const [ipQuality, setIpQuality] = useState(null)
@@ -588,8 +648,29 @@ export function NodeDetailPage({
     return () => controller.abort()
   }, [nodeUuid, isPublic])
 
+  const effectiveMediaData = useMemo(() => {
+    // Priority 1: IPQA media from ipQuality DTO
+    if (Array.isArray(ipQuality?.media) && ipQuality.media.length > 0) {
+      return ipQuality.media.map((m) => ({
+        detector: m.name,
+        detector_id: `ipqa-${(m.name || '').toLowerCase()}`,
+        status: m.status,
+        status_raw: m.status_raw,
+        region: m.region,
+        type: m.type,
+        latency_ms: null,
+        checked_at: m.checked_at,
+      }))
+    }
+    // Priority 2: direct mediaData from API
+    if (Array.isArray(mediaData) && mediaData.length > 0) {
+      return mediaData
+    }
+    return []
+  }, [ipQuality, mediaData])
+
   const unlockedMediaCount = POPULAR_MEDIA.filter(
-    (p) => getMediaStatus(p, mediaData).tone === 'available'
+    (p) => getMediaStatus(p, effectiveMediaData).tone === 'available'
   ).length
 
   const effectiveNode = node || (publicDetail ? {
@@ -1918,36 +1999,65 @@ export function NodeDetailPage({
                         <span>流媒体 / AI 解锁</span>
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {Array.isArray(mediaData) && mediaData.length > 0 && (
+                        {effectiveMediaData.length > 0 && (
                           <span className="ip-quality-media-count mono">
-                            {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
+                            {effectiveMediaData.filter((m) => parseMediaItemDetails(m).tone === 'available').length}/{effectiveMediaData.length} 已解锁
                           </span>
                         )}
-                        {Array.isArray(mediaData) && mediaData.length > 8 && (
+                        {effectiveMediaData.length > 8 && (
                           <button
                             type="button"
-                            className="ip-quality-media-toggle-btn"
-                            onClick={() => setShowAllMedia(!showAllMedia)}
+                            className="ip-quality-media-view-all-btn"
+                            onClick={() => setIsMediaModalOpen(true)}
+                            title="查看全部流媒体与 AI 解锁检测详情"
                           >
-                            {showAllMedia ? '收起' : `全部 (${mediaData.length})`}
+                            查看全部 ({effectiveMediaData.length})
                           </button>
                         )}
                       </div>
                     </div>
                     <div className="ip-quality-panel-body">
-                      {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
+                      {(loadingMedia || (isPublic && publicDetailLoading)) && effectiveMediaData.length === 0 ? (
                         <div className="ip-quality-empty-inline">
                           <CircleNotch size={14} className="spin text-blue" />
                           <span>正在同步流媒体 / AI 检测结果…</span>
                         </div>
-                      ) : !mediaData || mediaData.length === 0 ? (
-                        <div className="ip-quality-empty-inline">
-                          <Play size={16} className="text-muted" style={{ opacity: 0.5 }} />
-                          <span>暂无流媒体 / AI 检测结果</span>
-                        </div>
+                      ) : effectiveMediaData.length === 0 ? (
+                        (() => {
+                          const isInstalled = Boolean(qIpqa.installed)
+                          const isEnabled = Boolean(qIpqa.enabled)
+                          const hasArchive = isInstalled && isEnabled && Boolean(
+                            qIpqa.latestArchiveDate || (ipQuality?.latest_archive_date)
+                          )
+
+                          if (!isEnabled) {
+                            return (
+                              <div className="ip-quality-empty-inline">
+                                <Play size={14} className="text-muted" style={{ opacity: 0.5 }} />
+                                <span>IPQA 未启用，暂无媒体归档</span>
+                              </div>
+                            )
+                          }
+
+                          if (isEnabled && !hasArchive) {
+                            return (
+                              <div className="ip-quality-empty-inline">
+                                <CircleNotch size={14} className="spin text-blue" />
+                                <span>IPQA 已启用，等待媒体归档</span>
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <div className="ip-quality-empty-inline">
+                              <Play size={14} className="text-muted" style={{ opacity: 0.5 }} />
+                              <span>暂无媒体检测数据</span>
+                            </div>
+                          )
+                        })()
                       ) : (
                         <div className="ip-quality-media-list">
-                          {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
+                          {effectiveMediaData.slice(0, 8).map((m, idx) => {
                             const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
                             const matchPopular = POPULAR_MEDIA.find((p) => {
                               const aliases = p.alias || [p.id]
@@ -1959,42 +2069,13 @@ export function NodeDetailPage({
                             const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
                             const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
 
-                            const rawStatus = (m.status || m.result?.status || '').toLowerCase()
-                            let tone = 'unknown'
-                            let statusText = '未知'
-                            if (rawStatus === 'available') {
-                              tone = 'available'
-                              statusText = '已解锁'
-                            } else if (rawStatus === 'unavailable') {
-                              tone = 'unavailable'
-                              statusText = '未解锁'
-                            } else if (rawStatus === 'blocked') {
-                              tone = 'blocked'
-                              statusText = '已封锁'
-                            } else if (rawStatus === 'error') {
-                              tone = 'error'
-                              statusText = '检测失败'
-                            } else if (rawStatus === 'timeout') {
-                              tone = 'timeout'
-                              statusText = '超时'
-                            }
-
-                            const rawRegion = m.region || m.result?.region
-                            const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : ''
-                            const statusWithRegion = regionText && tone === 'available' ? `已解锁 · ${regionText}` : statusText
-
-                            const lat = m.latency_ms ?? m.result?.latency_ms ?? null
-                            const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
-                              ? `${Math.round(Number(lat))}ms`
-                              : null
-
-                            const checkTime = m.checked_at ? formatIPQualityDateTime(m.checked_at) : null
+                            const details = parseMediaItemDetails(m)
 
                             return (
                               <div
                                 key={m.detector_id || `${name}-${idx}`}
                                 className="ip-quality-media-row"
-                                title={checkTime ? `检测时间: ${checkTime}${regionText ? ` · 地区: ${regionText}` : ''}` : undefined}
+                                title={details.checkTime !== '—' ? `检测时间: ${details.checkTime}${details.regionText ? ` · 地区: ${details.regionText}` : ''}` : undefined}
                               >
                                 <div className="ip-quality-media-left">
                                   <div className="ip-quality-media-icon" style={{ backgroundColor: iconBg }}>
@@ -2005,12 +2086,12 @@ export function NodeDetailPage({
                                   </span>
                                 </div>
                                 <div className="ip-quality-media-right">
-                                  <span className={`ip-quality-media-status status-${tone}`}>
-                                    {statusWithRegion}
+                                  <span className={`ip-quality-media-status status-${details.tone}`}>
+                                    {details.displayStatus}
                                   </span>
-                                  {latencyText && (
-                                    <span className="ip-quality-media-latency mono" title={`延迟: ${latencyText}`}>
-                                      {latencyText}
+                                  {details.latencyText && (
+                                    <span className="ip-quality-media-latency mono" title={`延迟: ${details.latencyText}`}>
+                                      {details.latencyText}
                                     </span>
                                   )}
                                 </div>
@@ -3389,10 +3470,93 @@ export function NodeDetailPage({
       {showPosterModal && (
         <PosterModal
           node={node}
-          mediaData={mediaData}
+          mediaData={effectiveMediaData}
           pingHistory={pingHistory}
           onClose={() => setShowPosterModal(false)}
         />
+      )}
+
+      {/* 全量流媒体与 AI 解锁弹窗 */}
+      {isMediaModalOpen && (
+        <div
+          className="ip-quality-media-modal-backdrop"
+          onClick={() => setIsMediaModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ipqa-media-modal-title"
+        >
+          <div
+            className="ip-quality-media-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="ip-quality-media-modal-header">
+              <div className="ip-quality-media-modal-title" id="ipqa-media-modal-title">
+                <Play size={16} weight="fill" className="text-blue" />
+                <span>全部流媒体 / AI 解锁状态</span>
+                <span className="ip-quality-media-modal-badge mono">{effectiveMediaData.length} 项</span>
+              </div>
+              <button
+                type="button"
+                className="ip-quality-media-modal-close"
+                onClick={() => setIsMediaModalOpen(false)}
+                aria-label="关闭弹窗"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="ip-quality-media-modal-body">
+              <div className="ip-quality-media-modal-table-wrap">
+                <table className="ip-quality-media-modal-table">
+                  <thead>
+                    <tr>
+                      <th>平台 / 服务</th>
+                      <th>解锁状态</th>
+                      <th>地区</th>
+                      <th>类型 / 延迟</th>
+                      <th>最后检测时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {effectiveMediaData.map((m, idx) => {
+                      const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
+                      const matchPopular = POPULAR_MEDIA.find((p) => {
+                        const aliases = p.alias || [p.id]
+                        const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                        const dName = (m.detector || m.result?.detector || '').toLowerCase()
+                        return aliases.some((a) => dId.includes(a) || dName.includes(a))
+                      })
+                      const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
+                      const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
+                      const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
+                      const details = parseMediaItemDetails(m)
+
+                      return (
+                        <tr key={m.detector_id || `${name}-${idx}`}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div className="ip-quality-media-icon" style={{ backgroundColor: iconBg }}>
+                                {symbol}
+                              </div>
+                              <span style={{ fontWeight: 500, color: 'var(--text-1)' }}>{name}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`ip-quality-media-status status-${details.tone}`}>
+                              {details.statusText}
+                            </span>
+                          </td>
+                          <td className="mono">{details.regionText || '—'}</td>
+                          <td className="mono">{details.typeText}</td>
+                          <td className="mono" style={{ fontSize: '11px', color: 'var(--text-3)' }}>{details.checkTime}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   )

@@ -390,3 +390,84 @@ func TestIPQACollector_RetainsPreviousCacheOnError(t *testing.T) {
 		t.Fatalf("expected CollectionError = collect_failed, got %s", second.CollectionError)
 	}
 }
+
+func TestIPQACollector_ParsesMediaArchive(t *testing.T) {
+	tmpDir := t.TempDir()
+	v4Dir := filepath.Join(tmpDir, "data", "v4")
+	if err := os.MkdirAll(v4Dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := map[string]any{
+		"Head": map[string]any{
+			"Time": "2026-10-07 15:01:36 CST",
+		},
+		"Media": map[string]any{
+			"TikTok": map[string]any{
+				"Status": "解锁",
+				"Region": "TW",
+				"Type":   "原生",
+			},
+			"DisneyPlus": map[string]any{
+				"Status": "未解锁",
+			},
+			"Netflix": map[string]any{
+				"Status": "不可用",
+			},
+			"ChatGPT": map[string]any{
+				"Status": "available",
+				"Region": "US",
+			},
+		},
+		"IPinfo": map[string]any{
+			"Country": "Taiwan",
+		},
+	}
+
+	b, _ := json.Marshal(archive)
+	if err := os.WriteFile(filepath.Join(v4Dir, "2026-10-07_150136.json"), b, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &DefaultIPQACollector{
+		enabled: true,
+		baseDir: tmpDir,
+	}
+
+	info, err := c.collect()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected non-nil info")
+	}
+	if len(info.Media) != 4 {
+		t.Fatalf("expected 4 media items, got %d: %+v", len(info.Media), info.Media)
+	}
+
+	mediaMap := make(map[string]protocol.IPQAMediaItem)
+	for _, m := range info.Media {
+		mediaMap[m.Name] = m
+	}
+
+	tk := mediaMap["TikTok"]
+	if tk.Status != "available" || tk.Region != "TW" || tk.Type != "原生" {
+		t.Fatalf("unexpected TikTok item: %+v", tk)
+	}
+
+	dp := mediaMap["DisneyPlus"]
+	if dp.Status != "unavailable" {
+		t.Fatalf("unexpected DisneyPlus item: %+v", dp)
+	}
+
+	nf := mediaMap["Netflix"]
+	if nf.Status != "blocked" {
+		t.Fatalf("unexpected Netflix item: %+v", nf)
+	}
+
+	cg := mediaMap["ChatGPT"]
+	if cg.Status != "available" || cg.Region != "US" {
+		t.Fatalf("unexpected ChatGPT item: %+v", cg)
+	}
+}
+

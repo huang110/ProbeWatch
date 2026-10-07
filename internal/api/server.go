@@ -271,6 +271,10 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 				s.seedMediaTargets(w, r)
 				return
 			}
+			if r.URL.Path == "/api/targets/disable-media" {
+				s.disableMediaTargets(w, r)
+				return
+			}
 			if r.URL.Path == "/api/targets" {
 				s.targetCollection(w, r)
 				return

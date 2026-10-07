@@ -47,6 +47,7 @@ type AdminIPQAResponse struct {
 	IPv6              *protocol.IPQAFamilyInfo `json:"ipv6,omitempty"`
 	Changes           []protocol.IPQAChange    `json:"changes,omitempty"`
 	Sources           []string                 `json:"sources,omitempty"`
+	Media             []protocol.IPQAMediaItem `json:"media,omitempty"`
 	CollectionError   string                   `json:"collection_error,omitempty"`
 }
 
@@ -93,6 +94,7 @@ func (s *Server) getNodeIPQA(w http.ResponseWriter, r *http.Request, uuid string
 		resp.IPv6 = snapshot.IPQA.IPv6
 		resp.Changes = snapshot.IPQA.Changes
 		resp.Sources = snapshot.IPQA.Sources
+		resp.Media = snapshot.IPQA.Media
 		resp.CollectionError = snapshot.IPQA.CollectionError
 	}
 
