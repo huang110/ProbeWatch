@@ -1729,6 +1729,7 @@ export function NodeDetailPage({
             const qIpqa = ipQuality.ipqa || {
               enabled: Boolean(ipQuality.ipqa_enabled),
               installed: Boolean(ipQuality.ipqa_installed),
+              state: ipQuality.ipqa_state || '',
               highestSeverity: ipQuality.highest_severity || '',
               alertCount: Number(ipQuality.alert_count || 0),
               criticalCount: Number(ipQuality.critical_count || 0),
@@ -1890,60 +1891,98 @@ export function NodeDetailPage({
                 </div>
 
                 {/* 第三行：IPQA 告警报告独立板块 / 状态提示 */}
-                {qIpqa.enabled && qIpqa.installed ? (
-                  <div className="ipqa-status-strip" style={{ marginTop: '10px' }}>
-                    <div className="ipqa-status-header">
-                      <div className="ipqa-status-title">
-                        <ShieldCheck size={14} className="text-mint" />
-                        <span>IPQA 历史归档比对与告警</span>
+                {(() => {
+                  const isInstalled = Boolean(qIpqa.installed)
+                  const isEnabled = Boolean(qIpqa.enabled)
+                  const hasArchive = isInstalled && isEnabled && Boolean(
+                    qIpqa.alertCount > 0 ||
+                    qIpqa.criticalCount > 0 ||
+                    qIpqa.hasRecentChanges ||
+                    qIpqa.recentChangeSummary ||
+                    qIpqa.lastChangeAt
+                  )
+
+                  if (isInstalled && isEnabled && hasArchive) {
+                    return (
+                      <div className="ipqa-status-strip" style={{ marginTop: '10px' }}>
+                        <div className="ipqa-status-header">
+                          <div className="ipqa-status-title">
+                            <ShieldCheck size={14} className="text-mint" />
+                            <span>IPQA 历史归档比对与告警</span>
+                          </div>
+                          {qIpqa.highestSeverity === 'CRITICAL' ? (
+                            <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
+                          ) : qIpqa.highestSeverity === 'WARNING' ? (
+                            <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
+                          ) : qIpqa.highestSeverity === 'INFO' ? (
+                            <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
+                          ) : (
+                            <span className="ipqa-badge ipqa-badge-green">无异常</span>
+                          )}
+                        </div>
+                        <div className="ipqa-metrics-grid" style={{ marginTop: '8px' }}>
+                          <div className="ipqa-metric-item">
+                            <span className="label">最近检测</span>
+                            <span className="value mono">{qIpqa.lastChangeAt ? formatIPQualityDateTime(qIpqa.lastChangeAt) : '等待检测'}</span>
+                          </div>
+                          <div className="ipqa-metric-item">
+                            <span className="label">协议簇 / 等级</span>
+                            <span className={`value mono sev-${(qIpqa.highestSeverity || 'none').toLowerCase()}`}>
+                              {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {qIpqa.highestSeverity || '正常'}
+                            </span>
+                          </div>
+                          <div className="ipqa-metric-item">
+                            <span className="label">今日告警</span>
+                            <span className="value mono">
+                              {qIpqa.alertCount ?? 0} 项
+                              {qIpqa.criticalCount > 0 && <small className="text-rose"> ({qIpqa.criticalCount} 严重)</small>}
+                            </span>
+                          </div>
+                          <div className="ipqa-metric-item">
+                            <span className="label">变化摘要</span>
+                            <span className="value text-truncate" title={qIpqa.recentChangeSummary || (qIpqa.hasRecentChanges ? '检测到风险变动' : '与前次归档对比无变化')}>
+                              {qIpqa.hasRecentChanges ? (qIpqa.recentChangeSummary || '检测到风险变动') : '与前次归档对比无变化'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      {qIpqa.highestSeverity === 'CRITICAL' ? (
-                        <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
-                      ) : qIpqa.highestSeverity === 'WARNING' ? (
-                        <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
-                      ) : qIpqa.highestSeverity === 'INFO' ? (
-                        <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
-                      ) : (
-                        <span className="ipqa-badge ipqa-badge-green">无异常</span>
-                      )}
+                    )
+                  }
+
+                  let badgeText = '未安装'
+                  let badgeClass = 'ipqa-badge-gray'
+                  let descText = '未安装 IPQA（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）'
+                  let iconColor = 'text-muted'
+
+                  if (!isInstalled) {
+                    badgeText = '未安装'
+                    badgeClass = 'ipqa-badge-gray'
+                    descText = '未安装 IPQA（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）'
+                    iconColor = 'text-muted'
+                  } else if (!isEnabled) {
+                    badgeText = '已安装，未开启采集'
+                    badgeClass = 'ipqa-badge-yellow'
+                    descText = '已安装，未开启采集（节点已安装 IPQA 归档目录，但 Agent 暂未开启上报）'
+                    iconColor = 'text-amber'
+                  } else {
+                    badgeText = '等待首次归档'
+                    badgeClass = 'ipqa-badge-blue'
+                    descText = 'IPQA 已启用，等待首次归档（节点 Agent 正在监听归档数据）'
+                    iconColor = 'text-blue'
+                  }
+
+                  return (
+                    <div className="ipqa-status-strip" style={{ marginTop: '8px' }}>
+                      <div className="ipqa-status-header">
+                        <div className="ipqa-status-title">
+                          <ShieldCheck size={14} className={iconColor} />
+                          <span className={iconColor === 'text-muted' ? 'text-muted' : ''}>IPQA 历史归档比对：{descText}</span>
+                        </div>
+                        <span className={`ipqa-badge ${badgeClass}`}>{badgeText}</span>
+                      </div>
                     </div>
-                    <div className="ipqa-metrics-grid" style={{ marginTop: '8px' }}>
-                      <div className="ipqa-metric-item">
-                        <span className="label">最近检测</span>
-                        <span className="value mono">{qIpqa.lastChangeAt ? formatIPQualityDateTime(qIpqa.lastChangeAt) : '等待检测'}</span>
-                      </div>
-                      <div className="ipqa-metric-item">
-                        <span className="label">协议簇 / 等级</span>
-                        <span className={`value mono sev-${(qIpqa.highestSeverity || 'none').toLowerCase()}`}>
-                          {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {qIpqa.highestSeverity || '正常'}
-                        </span>
-                      </div>
-                      <div className="ipqa-metric-item">
-                        <span className="label">今日告警</span>
-                        <span className="value mono">
-                          {qIpqa.alertCount ?? 0} 项
-                          {qIpqa.criticalCount > 0 && <small className="text-rose"> ({qIpqa.criticalCount} 严重)</small>}
-                        </span>
-                      </div>
-                      <div className="ipqa-metric-item">
-                        <span className="label">变化摘要</span>
-                        <span className="value text-truncate" title={qIpqa.recentChangeSummary || (qIpqa.hasRecentChanges ? '检测到风险变动' : '与前次归档对比无变化')}>
-                          {qIpqa.hasRecentChanges ? (qIpqa.recentChangeSummary || '检测到风险变动') : '与前次归档对比无变化'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="ipqa-status-strip" style={{ marginTop: '8px' }}>
-                    <div className="ipqa-status-header">
-                      <div className="ipqa-status-title">
-                        <ShieldCheck size={14} className="text-muted" />
-                        <span className="text-muted">IPQA 历史归档比对：未启用（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）</span>
-                      </div>
-                      <span className="ipqa-badge ipqa-badge-gray">未启用</span>
-                    </div>
-                  </div>
-                )}
+                  )
+                })()}
               </>
             )
           })() : (

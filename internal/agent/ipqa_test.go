@@ -34,8 +34,10 @@ func TestIPQACollector_NotInstalledGraceful(t *testing.T) {
 }
 
 func TestIPQACollector_Disabled(t *testing.T) {
+	tmpDir := t.TempDir()
 	c := &DefaultIPQACollector{
 		enabled: false,
+		baseDir: filepath.Join(tmpDir, "non_existent"),
 	}
 	info := c.Get()
 	if info == nil {
@@ -43,6 +45,61 @@ func TestIPQACollector_Disabled(t *testing.T) {
 	}
 	if info.Enabled || info.Installed {
 		t.Fatalf("expected Enabled=false and Installed=false, got %+v", info)
+	}
+	if info.State != "not_installed" {
+		t.Fatalf("expected State=not_installed, got %q", info.State)
+	}
+}
+
+func TestIPQACollector_FourStateMatrix(t *testing.T) {
+	// Case 1: PROBEWATCH_IPQA_ENABLED=false, dir not exist -> enabled=false, installed=false, state="not_installed"
+	tmp1 := t.TempDir()
+	c1 := &DefaultIPQACollector{
+		enabled: false,
+		baseDir: filepath.Join(tmp1, "non_existent"),
+	}
+	info1 := c1.Get()
+	if info1 == nil || info1.Enabled || info1.Installed || info1.State != "not_installed" {
+		t.Fatalf("case 1 failed: %+v", info1)
+	}
+
+	// Case 2: PROBEWATCH_IPQA_ENABLED=false, data dir exists -> enabled=false, installed=true, state="installed_disabled"
+	tmp2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp2, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	c2 := &DefaultIPQACollector{
+		enabled: false,
+		baseDir: tmp2,
+	}
+	info2 := c2.Get()
+	if info2 == nil || info2.Enabled || !info2.Installed || info2.State != "installed_disabled" {
+		t.Fatalf("case 2 failed: %+v", info2)
+	}
+
+	// Case 3: PROBEWATCH_IPQA_ENABLED=true, data dir exists -> enabled=true, installed=true
+	tmp3 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp3, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	c3 := &DefaultIPQACollector{
+		enabled: true,
+		baseDir: tmp3,
+	}
+	info3 := c3.Get()
+	if info3 == nil || !info3.Enabled || !info3.Installed || info3.State != "enabled_waiting_archive" {
+		t.Fatalf("case 3 failed: %+v", info3)
+	}
+
+	// Case 4: PROBEWATCH_IPQA_ENABLED=true, dir not exist -> enabled=true, installed=false, state="not_installed"
+	tmp4 := t.TempDir()
+	c4 := &DefaultIPQACollector{
+		enabled: true,
+		baseDir: filepath.Join(tmp4, "non_existent"),
+	}
+	info4 := c4.Get()
+	if info4 == nil || !info4.Enabled || info4.Installed || info4.State != "not_installed" {
+		t.Fatalf("case 4 failed: %+v", info4)
 	}
 }
 

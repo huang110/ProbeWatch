@@ -35,6 +35,7 @@ type AdminIPQAResponse struct {
 	NodeName          string                   `json:"node_name"`
 	Enabled           bool                     `json:"enabled"`
 	Installed         bool                     `json:"installed"`
+	State             string                   `json:"state,omitempty"`
 	LastCheckedAt     *int64                   `json:"last_checked_at,omitempty"`
 	LatestArchiveDate string                   `json:"latest_archive_date,omitempty"`
 	HighestSeverity   string                   `json:"highest_severity,omitempty"`
@@ -78,6 +79,7 @@ func (s *Server) getNodeIPQA(w http.ResponseWriter, r *http.Request, uuid string
 	if snapshot.IPQA != nil {
 		resp.Enabled = snapshot.IPQA.Enabled
 		resp.Installed = snapshot.IPQA.Installed
+		resp.State = snapshot.IPQA.State
 		if snapshot.IPQA.LastCheckedAt > 0 {
 			resp.LastCheckedAt = &snapshot.IPQA.LastCheckedAt
 		}

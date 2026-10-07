@@ -58,6 +58,38 @@ type DefaultIPQACollector struct {
 	customReader func(ctx context.Context, baseDir string) (*protocol.IPQAInfo, error)
 }
 
+// resolveIPQABaseDir determines the effective IPQA directory path safely.
+func resolveIPQABaseDir() string {
+	if dir := strings.TrimSpace(os.Getenv("PROBEWATCH_IPQA_DIR")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		candidate := filepath.Join(home, defaultIPQADir)
+		if isIPQADataDirInstalled(candidate) {
+			return candidate
+		}
+	}
+	// Fallback to /root/.ipqa if accessible and home was different
+	if home != "/root" && isIPQADataDirInstalled(filepath.Join("/root", defaultIPQADir)) {
+		return filepath.Join("/root", defaultIPQADir)
+	}
+	if home != "" {
+		return filepath.Join(home, defaultIPQADir)
+	}
+	return filepath.Join("/root", defaultIPQADir)
+}
+
+// isIPQADataDirInstalled checks safely if the IPQA data directory exists and is a directory.
+func isIPQADataDirInstalled(baseDir string) bool {
+	if strings.TrimSpace(baseDir) == "" {
+		return false
+	}
+	dataPath := filepath.Join(baseDir, "data")
+	fi, err := os.Stat(dataPath)
+	return err == nil && fi.IsDir()
+}
+
 // NewIPQACollector constructs a new IPQACollector with environment variables.
 func NewIPQACollector() *DefaultIPQACollector {
 	enabled := false
@@ -65,15 +97,7 @@ func NewIPQACollector() *DefaultIPQACollector {
 		enabled = parseBool(raw)
 	}
 
-	dir := strings.TrimSpace(os.Getenv("PROBEWATCH_IPQA_DIR"))
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil && home != "" {
-			dir = filepath.Join(home, defaultIPQADir)
-		} else {
-			dir = filepath.Join("/root", defaultIPQADir)
-		}
-	}
+	dir := resolveIPQABaseDir()
 
 	ttl := defaultIPQACacheTTL
 	if rawTTL := strings.TrimSpace(os.Getenv("PROBEWATCH_IPQA_CACHE_TTL")); rawTTL != "" {
@@ -105,16 +129,42 @@ func NewIPQACollector() *DefaultIPQACollector {
 	}
 }
 
-// Get returns the latest IPQAInfo. If disabled, returns a minimal disabled struct.
+func (c *DefaultIPQACollector) isInstalled() bool {
+	if c == nil {
+		return false
+	}
+	if c.customReader != nil {
+		return true
+	}
+	return isIPQADataDirInstalled(c.baseDir)
+}
+
+// Get returns the latest IPQAInfo.
 // Does not block if a refresh is in progress.
 func (c *DefaultIPQACollector) Get() *protocol.IPQAInfo {
 	if c == nil {
 		return nil
 	}
+
+	installed := c.isInstalled()
+
 	if !c.enabled {
+		state := "not_installed"
+		if installed {
+			state = "installed_disabled"
+		}
 		return &protocol.IPQAInfo{
 			Enabled:   false,
+			Installed: installed,
+			State:     state,
+		}
+	}
+
+	if !installed {
+		return &protocol.IPQAInfo{
+			Enabled:   true,
 			Installed: false,
+			State:     "not_installed",
 		}
 	}
 
@@ -165,7 +215,11 @@ func (c *DefaultIPQACollector) Get() *protocol.IPQAInfo {
 		copyInfo := *c.cached
 		return &copyInfo
 	}
-	return nil
+	return &protocol.IPQAInfo{
+		Enabled:   true,
+		Installed: true,
+		State:     "enabled_waiting_archive",
+	}
 }
 
 // collect synchronously performs safe local file reading with timeout bounds.
@@ -266,6 +320,13 @@ func (c *DefaultIPQACollector) collect() (*protocol.IPQAInfo, error) {
 			info.HighestSeverity = "NONE"
 		}
 	}
+
+	hasArchive := info.AlertCount > 0 || len(info.Changes) > 0 || info.LatestArchiveDate != "" || info.IPv4 != nil || info.IPv6 != nil
+	state := "enabled_waiting_archive"
+	if hasArchive {
+		state = "enabled"
+	}
+	info.State = state
 
 	return info, nil
 }

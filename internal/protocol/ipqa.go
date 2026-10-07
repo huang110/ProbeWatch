@@ -11,8 +11,9 @@ import (
 // IPQAInfo holds sanitized, bounded IP-Quality-Archive telemetry from an agent.
 // Raw alerts.log content, node filesystem paths, and plain public IPs are strictly excluded.
 type IPQAInfo struct {
-	Enabled           bool            `json:"enabled,omitempty"`
-	Installed         bool            `json:"installed,omitempty"`
+	Enabled           bool            `json:"enabled"`
+	Installed         bool            `json:"installed"`
+	State             string          `json:"state,omitempty"`
 	LastCheckedAt     int64           `json:"last_checked_at,omitempty"`
 	LatestArchiveDate string          `json:"latest_archive_date,omitempty"`
 	HighestSeverity   string          `json:"highest_severity,omitempty"`
@@ -64,6 +65,9 @@ func (q IPQAInfo) Validate() error {
 		}
 	}
 	if err := validateString("latest_archive_date", q.LatestArchiveDate, 32, false); err != nil {
+		return err
+	}
+	if err := validateString("state", q.State, 64, false); err != nil {
 		return err
 	}
 	if q.HighestSeverity != "" {

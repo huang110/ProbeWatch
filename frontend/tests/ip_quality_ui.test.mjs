@@ -369,25 +369,34 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
     assert.ok(css.includes(cls), `CSS must define ${cls}`)
   }
 
-  function getIPQABadge(ipQuality) {
-    if (!ipQuality?.ipqa_enabled) return { cls: 'ipqa-badge-gray', text: '未启用 IPQA' }
-    if (!ipQuality?.ipqa_installed) return { cls: 'ipqa-badge-gray', text: '节点未安装 IP-Quality-Archive' }
-    if (ipQuality?.collection_error) return { cls: 'ipqa-badge-orange', text: '采集失败' }
-    if (ipQuality?.highest_severity === 'CRITICAL') return { cls: 'ipqa-badge-red', text: 'CRITICAL 严重风险' }
-    if (ipQuality?.highest_severity === 'WARNING') return { cls: 'ipqa-badge-yellow', text: 'WARNING 警告' }
-    if (ipQuality?.highest_severity === 'INFO') return { cls: 'ipqa-badge-blue', text: 'INFO 提示' }
-    return { cls: 'ipqa-badge-green', text: '无变化' }
+  // 4 States Matrix Validation
+  function getIPQAStateInfo(ipQuality) {
+    const installed = Boolean(ipQuality?.ipqa_installed ?? ipQuality?.ipqa?.installed)
+    const enabled = Boolean(ipQuality?.ipqa_enabled ?? ipQuality?.ipqa?.enabled)
+    const alertCount = Number(ipQuality?.alert_count ?? ipQuality?.ipqa?.alertCount ?? 0)
+    const criticalCount = Number(ipQuality?.critical_count ?? ipQuality?.ipqa?.criticalCount ?? 0)
+    const hasRecentChanges = Boolean(ipQuality?.has_recent_changes ?? ipQuality?.ipqa?.hasRecentChanges)
+    const hasArchive = installed && enabled && Boolean(alertCount > 0 || criticalCount > 0 || hasRecentChanges || ipQuality?.latest_archive_date)
+
+    if (!installed) {
+      return { badge: '未安装', desc: '未安装 IPQA', state: 'not_installed' }
+    }
+    if (!enabled) {
+      return { badge: '已安装，未开启采集', desc: '已安装，未开启采集', state: 'installed_disabled' }
+    }
+    if (!hasArchive) {
+      return { badge: '等待首次归档', desc: 'IPQA 已启用，等待首次归档', state: 'enabled_waiting_archive' }
+    }
+    return { badge: '已启用', desc: 'IPQA 已启用', state: 'enabled' }
   }
 
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: false }), { cls: 'ipqa-badge-gray', text: '未启用 IPQA' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: false }), { cls: 'ipqa-badge-gray', text: '节点未安装 IP-Quality-Archive' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, collection_error: 'log_too_large' }), { cls: 'ipqa-badge-orange', text: '采集失败' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'CRITICAL' }), { cls: 'ipqa-badge-red', text: 'CRITICAL 严重风险' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'WARNING' }), { cls: 'ipqa-badge-yellow', text: 'WARNING 警告' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'INFO' }), { cls: 'ipqa-badge-blue', text: 'INFO 提示' })
-  assert.deepEqual(getIPQABadge({ ipqa_enabled: true, ipqa_installed: true, highest_severity: 'NONE' }), { cls: 'ipqa-badge-green', text: '无变化' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: false, ipqa_enabled: false }), { badge: '未安装', desc: '未安装 IPQA', state: 'not_installed' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: false, ipqa_enabled: true }), { badge: '未安装', desc: '未安装 IPQA', state: 'not_installed' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: false }), { badge: '已安装，未开启采集', desc: '已安装，未开启采集', state: 'installed_disabled' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: true, alert_count: 0 }), { badge: '等待首次归档', desc: 'IPQA 已启用，等待首次归档', state: 'enabled_waiting_archive' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: true, alert_count: 2 }), { badge: '已启用', desc: 'IPQA 已启用', state: 'enabled' })
 
-  console.log("[PASS] IPQA Status Strip logic and CSS verified")
+  console.log("[PASS] IPQA Status Strip logic and 4-state matrix verified")
 }
 
 console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")

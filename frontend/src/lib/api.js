@@ -27,6 +27,7 @@ export function normalizeIPQuality(raw) {
   const ipqaRaw = data.ipqa && typeof data.ipqa === 'object' ? data.ipqa : data
   const enabled = Boolean(data.ipqaEnabled ?? data.ipqa_enabled ?? ipqaRaw.enabled)
   const installed = Boolean(data.ipqaInstalled ?? data.ipqa_installed ?? ipqaRaw.installed)
+  const state = data.ipqaState || data.ipqa_state || ipqaRaw.state || (installed ? (enabled ? 'enabled' : 'installed_disabled') : 'not_installed')
   const alertCount = Number(data.alertCount ?? data.alert_count ?? ipqaRaw.alertCount ?? ipqaRaw.alert_count ?? 0)
   const criticalCount = Number(data.criticalCount ?? data.critical_count ?? ipqaRaw.criticalCount ?? ipqaRaw.critical_count ?? 0)
   const warningCount = Number(data.warningCount ?? data.warning_count ?? ipqaRaw.warningCount ?? ipqaRaw.warning_count ?? 0)
@@ -53,6 +54,7 @@ export function normalizeIPQuality(raw) {
   const ipqaObj = {
     enabled,
     installed,
+    state,
     alertCount,
     criticalCount,
     warningCount,
@@ -70,6 +72,7 @@ export function normalizeIPQuality(raw) {
     checked_at: checkedAt,
     ipqa_enabled: enabled,
     ipqa_installed: installed,
+    ipqa_state: state,
     alert_count: alertCount,
     critical_count: criticalCount,
     warning_count: warningCount,

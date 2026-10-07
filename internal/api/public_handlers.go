@@ -458,6 +458,7 @@ type publicIPQualityDTO struct {
 	Source              string             `json:"source,omitempty"`
 	IPQAEnabled         bool               `json:"ipqa_enabled"`
 	IPQAInstalled       bool               `json:"ipqa_installed"`
+	IPQAState           string             `json:"ipqa_state,omitempty"`
 	HighestSeverity     string             `json:"highest_severity,omitempty"`
 	AlertCount          int                `json:"alert_count,omitempty"`
 	CriticalCount       int                `json:"critical_count,omitempty"`
@@ -796,6 +797,7 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 	if qa != nil {
 		dto.IPQAEnabled = qa.Enabled
 		dto.IPQAInstalled = qa.Installed
+		dto.IPQAState = qa.State
 		dto.HighestSeverity = qa.HighestSeverity
 		dto.AlertCount = qa.AlertCount
 		dto.CriticalCount = qa.CriticalCount
