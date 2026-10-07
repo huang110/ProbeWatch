@@ -613,7 +613,7 @@ func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
 			Name:    p.name,
 			Kind:    db.TargetKindMediaHTTP,
 			Host:    p.host,
-			Enabled: false,
+			Enabled: true,
 			Payload: rawPayload,
 		}
 		if _, err := s.service.Store().CreateTarget(r.Context(), def, now); err == nil {

@@ -670,12 +670,12 @@ func normalizeArchive(raw *rawIPQAArchive) (*protocol.IPQAFamilyInfo, []string) 
 
 			rawLower := strings.ToLower(item.StatusRaw)
 			switch {
-			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制"):
-				item.Status = "available"
-			case strings.Contains(rawLower, "未") || strings.Contains(rawLower, "unavailable") || strings.Contains(rawLower, "no") || strings.Contains(rawLower, "false"):
-				item.Status = "unavailable"
 			case strings.Contains(rawLower, "不可用") || strings.Contains(rawLower, "失败") || strings.Contains(rawLower, "blocked") || strings.Contains(rawLower, "ban"):
 				item.Status = "blocked"
+			case strings.Contains(rawLower, "未") || strings.Contains(rawLower, "unavailable") || strings.Contains(rawLower, "no") || strings.Contains(rawLower, "false"):
+				item.Status = "unavailable"
+			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制"):
+				item.Status = "available"
 			default:
 				item.Status = "unknown"
 			}
