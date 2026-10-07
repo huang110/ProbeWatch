@@ -1814,8 +1814,8 @@ export function NodeDetailPage({
                   </div>
                 </div>
 
-                {/* 第二行：两个信息面板（纯风险评分 + 数据库标记） */}
-                <div className="ip-quality-detail-grid ip-quality-detail-grid-two">
+                {/* 第二行：三个信息面板（风险评分 + 数据库标记 + 流媒体/AI 解锁） */}
+                <div className="ip-quality-detail-grid ip-quality-detail-grid-three">
                   {/* 面板 1: 风险评分 */}
                   <section className="ip-quality-panel">
                     <div className="ip-quality-panel-title">
@@ -1828,9 +1828,10 @@ export function NodeDetailPage({
                       {scoresObj && Object.keys(scoresObj).length > 0 ? (
                         <div className="ip-quality-score-list">
                           {Object.entries(scoresObj).map(([sourceKey, scoreVal]) => {
+                            const isNullish = scoreVal === null || scoreVal === undefined || scoreVal === ''
                             const scoreNum = Number(scoreVal)
-                            const isNum = Number.isFinite(scoreNum)
-                            const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
+                            const isNum = !isNullish && Number.isFinite(scoreNum)
+                            const displayVal = isNullish ? '未知' : (isNum ? String(Math.round(scoreNum * 100) / 100) : '—')
                             const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
                             const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
                             const label = formatIPQualitySourceName(sourceKey)
@@ -1867,30 +1868,157 @@ export function NodeDetailPage({
                       </span>
                     </div>
                     <div className="ip-quality-panel-body">
-                      <div className="ip-quality-flag-grid">
-                        {[
+                      {(() => {
+                        const flagsList = [
                           ['代理', qFlags.proxy],
                           ['VPN', qFlags.vpn],
                           ['Tor', qFlags.tor],
                           ['滥用', qFlags.abuse],
-                          ['机房', !qIpType || qIpType === 'unknown' ? null : (qIpType === 'hosting' || qIpType === 'datacenter')],
-                        ].map(([label, val]) => {
-                          const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
+                          ['机房', typeof qFlags.hosting === 'boolean' ? qFlags.hosting : (!qIpType || qIpType === 'unknown' ? null : (qIpType === 'hosting' || qIpType === 'datacenter'))],
+                        ]
+                        const hasAnyFlag = flagsList.some(([, val]) => val !== null && val !== undefined)
+                        if (!hasAnyFlag) {
                           return (
-                            <div key={label} className="ip-quality-flag-item">
-                              <span className="flag-label">{label}</span>
-                              <span className={`flag-status flag-${status}`}>
-                                {val === true ? '是' : val === false ? '否' : '未知'}
-                              </span>
+                            <div className="ip-quality-empty-inline">
+                              <span>暂无检测结果</span>
                             </div>
                           )
-                        })}
+                        }
+                        return (
+                          <>
+                            <div className="ip-quality-flag-grid">
+                              {flagsList.map(([label, val]) => {
+                                const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
+                                return (
+                                  <div key={label} className="ip-quality-flag-item">
+                                    <span className="flag-label">{label}</span>
+                                    <span className={`flag-status flag-${status}`}>
+                                      {val === true ? '是' : val === false ? '否' : '未知'}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <div className="ip-quality-panel-footer">
+                              <small className="ip-quality-check-time">
+                                检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · 来源未提供统计
+                              </small>
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </section>
+
+                  {/* 面板 3: 流媒体 / AI 解锁 */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Play size={14} />
+                        <span>流媒体 / AI 解锁</span>
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {Array.isArray(mediaData) && mediaData.length > 0 && (
+                          <span className="ip-quality-media-count mono">
+                            {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
+                          </span>
+                        )}
+                        {Array.isArray(mediaData) && mediaData.length > 8 && (
+                          <button
+                            type="button"
+                            className="ip-quality-media-toggle-btn"
+                            onClick={() => setShowAllMedia(!showAllMedia)}
+                          >
+                            {showAllMedia ? '收起' : `全部 (${mediaData.length})`}
+                          </button>
+                        )}
                       </div>
-                      <div className="ip-quality-panel-footer">
-                        <small className="ip-quality-check-time">
-                          检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · 来源未提供统计
-                        </small>
-                      </div>
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
+                        <div className="ip-quality-empty-inline">
+                          <CircleNotch size={14} className="spin text-blue" />
+                          <span>正在同步流媒体 / AI 检测结果…</span>
+                        </div>
+                      ) : !mediaData || mediaData.length === 0 ? (
+                        <div className="ip-quality-empty-inline">
+                          <Play size={16} className="text-muted" style={{ opacity: 0.5 }} />
+                          <span>暂无流媒体 / AI 检测结果</span>
+                        </div>
+                      ) : (
+                        <div className="ip-quality-media-list">
+                          {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
+                            const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
+                            const matchPopular = POPULAR_MEDIA.find((p) => {
+                              const aliases = p.alias || [p.id]
+                              const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                              const dName = (m.detector || m.result?.detector || '').toLowerCase()
+                              return aliases.some((a) => dId.includes(a) || dName.includes(a))
+                            })
+                            const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
+                            const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
+                            const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
+
+                            const rawStatus = (m.status || m.result?.status || '').toLowerCase()
+                            let tone = 'unknown'
+                            let statusText = '未知'
+                            if (rawStatus === 'available') {
+                              tone = 'available'
+                              statusText = '已解锁'
+                            } else if (rawStatus === 'unavailable') {
+                              tone = 'unavailable'
+                              statusText = '未解锁'
+                            } else if (rawStatus === 'blocked') {
+                              tone = 'blocked'
+                              statusText = '已封锁'
+                            } else if (rawStatus === 'error') {
+                              tone = 'error'
+                              statusText = '检测失败'
+                            } else if (rawStatus === 'timeout') {
+                              tone = 'timeout'
+                              statusText = '超时'
+                            }
+
+                            const rawRegion = m.region || m.result?.region
+                            const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : ''
+                            const statusWithRegion = regionText && tone === 'available' ? `已解锁 · ${regionText}` : statusText
+
+                            const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+                            const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
+                              ? `${Math.round(Number(lat))}ms`
+                              : null
+
+                            const checkTime = m.checked_at ? formatIPQualityDateTime(m.checked_at) : null
+
+                            return (
+                              <div
+                                key={m.detector_id || `${name}-${idx}`}
+                                className="ip-quality-media-row"
+                                title={checkTime ? `检测时间: ${checkTime}${regionText ? ` · 地区: ${regionText}` : ''}` : undefined}
+                              >
+                                <div className="ip-quality-media-left">
+                                  <div className="ip-quality-media-icon" style={{ backgroundColor: iconBg }}>
+                                    {symbol}
+                                  </div>
+                                  <span className="ip-quality-media-name" title={name}>
+                                    {name}
+                                  </span>
+                                </div>
+                                <div className="ip-quality-media-right">
+                                  <span className={`ip-quality-media-status status-${tone}`}>
+                                    {statusWithRegion}
+                                  </span>
+                                  {latencyText && (
+                                    <span className="ip-quality-media-latency mono" title={`延迟: ${latencyText}`}>
+                                      {latencyText}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   </section>
                 </div>
@@ -1915,14 +2043,14 @@ export function NodeDetailPage({
 
                   if (isInstalled && isEnabled && hasArchive) {
                     return (
-                      <div className="ipqa-status-strip" style={{ marginTop: '10px' }}>
+                      <div className="ipqa-status-strip" style={{ marginTop: '8px' }}>
                         <div className="ipqa-status-header">
                           <div className="ipqa-status-title">
-                            <ShieldCheck size={14} className="text-mint" />
+                            <ShieldCheck size={14} className={hasRiskChanges ? "text-amber" : "text-mint"} />
                             <span>
                               {hasRiskChanges
                                 ? `IPQA 风险变化（发现 ${qIpqa.alertCount || 1} 项变化 · 最高等级：${qIpqa.highestSeverity || '提示'}）`
-                                : 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）'}
+                                : 'IPQA 已启用（暂无风险变化）'}
                             </span>
                           </div>
                           {hasRiskChanges ? (
@@ -1937,7 +2065,7 @@ export function NodeDetailPage({
                             <span className="ipqa-badge ipqa-badge-green">IPQA 已启用</span>
                           )}
                         </div>
-                        <div className="ipqa-metrics-grid" style={{ marginTop: '8px' }}>
+                        <div className="ipqa-metrics-grid">
                           <div className="ipqa-metric-item">
                             <span className="label">最新归档</span>
                             <span className="value mono">
@@ -1970,38 +2098,53 @@ export function NodeDetailPage({
 
                   let badgeText = '未安装'
                   let badgeClass = 'ipqa-badge-gray'
-                  let descText = '未安装 IPQA（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）'
+                  let titleText = 'IPQA 未安装'
+                  let tooltipText = '节点未安装 IPQA 增强插件，基础 IP 质量正常生效'
                   let iconColor = 'text-muted'
 
                   if (!isInstalled) {
                     badgeText = '未安装'
                     badgeClass = 'ipqa-badge-gray'
-                    descText = '未安装 IPQA（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）'
+                    titleText = 'IPQA 未安装'
+                    tooltipText = '节点未安装 IPQA 增强插件，基础 IP 质量正常生效'
                     iconColor = 'text-muted'
                   } else if (!isEnabled) {
-                    badgeText = '已安装，未开启采集'
+                    badgeText = '未开启采集'
                     badgeClass = 'ipqa-badge-yellow'
-                    descText = '已安装，未开启采集（节点已安装 IPQA 归档目录，但 Agent 暂未开启上报）'
+                    titleText = 'IPQA 已安装，未开启采集'
+                    tooltipText = '节点已安装 IPQA 归档目录，但 Agent 暂未开启上报'
                     iconColor = 'text-amber'
                   } else {
-                    badgeText = '等待首次归档'
+                    badgeText = '等待归档'
                     badgeClass = 'ipqa-badge-blue'
-                    descText = 'IPQA 已启用，等待首次归档（节点 Agent 正在监听归档数据）'
+                    titleText = 'IPQA 已启用，等待首次归档'
+                    tooltipText = '节点 Agent 正在监听归档数据'
                     iconColor = 'text-blue'
                   }
 
                   return (
-                    <div className="ipqa-status-strip" style={{ marginTop: '8px' }}>
+                    <div className="ipqa-status-strip" style={{ marginTop: '8px' }} title={tooltipText}>
                       <div className="ipqa-status-header">
                         <div className="ipqa-status-title">
                           <ShieldCheck size={14} className={iconColor} />
-                          <span className={iconColor === 'text-muted' ? 'text-muted' : ''}>IPQA 历史归档比对：{descText}</span>
+                          <span className={iconColor === 'text-muted' ? 'text-muted' : ''}>{titleText}</span>
                         </div>
                         <span className={`ipqa-badge ${badgeClass}`}>{badgeText}</span>
                       </div>
                     </div>
                   )
                 })()}
+
+                {/* 底部数据来源和检测状态 */}
+                <div className="ip-quality-card-footer">
+                  <span className="ip-quality-footer-source">
+                    数据来源：{qIpqa.enabled && qIpqa.installed ? 'IPQA' : (qBase.source || 'ipwho.is')}
+                  </span>
+                  <span className="ip-quality-footer-divider">·</span>
+                  <span className="ip-quality-footer-time mono">
+                    最后检测：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'}
+                  </span>
+                </div>
               </>
             )
           })() : (
@@ -2013,119 +2156,17 @@ export function NodeDetailPage({
               <div className="ipqa-status-strip" style={{ marginTop: '4px' }}>
                 <div className="ipqa-status-header">
                   <div className="ipqa-status-title">
-                    <ShieldCheck size={14} className="text-mint" />
-                    <span>IPQA 风险变化</span>
+                    <ShieldCheck size={14} className="text-muted" />
+                    <span>IPQA 未安装</span>
                   </div>
-                  <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
+                  <span className="ipqa-badge ipqa-badge-gray">未安装</span>
                 </div>
-                <div className="ipqa-empty-text">未启用 IPQA</div>
+                <div className="ipqa-empty-text">节点暂未检测到 IPQA 历史归档</div>
               </div>
             </div>
           )}
         </div>
       </div>
-
-
-{/* 全球流媒体与 AI 服务解锁能力横向卡片 */}
-      <section className="komari-media-strip-card">
-        <div className="komari-media-strip-header">
-          <div className="komari-media-strip-title">
-            <Play size={15} className="text-mint" />
-            <h3>全球流媒体与 AI 服务解锁能力</h3>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {Array.isArray(mediaData) && mediaData.length > 0 && (
-              <span className="komari-media-strip-summary mono">
-                {mediaData.filter((m) => (m.status || m.result?.status || '').toLowerCase() === 'available').length}/{mediaData.length} 已解锁
-              </span>
-            )}
-            {Array.isArray(mediaData) && mediaData.length > 8 && (
-              <button
-                type="button"
-                className="komari-media-strip-toggle-btn"
-                onClick={() => setShowAllMedia(!showAllMedia)}
-              >
-                {showAllMedia ? '收起' : `查看全部 (${mediaData.length})`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {(loadingMedia || (isPublic && publicDetailLoading)) && (!mediaData || mediaData.length === 0) ? (
-          <div className="komari-media-strip-loading">
-            <CircleNotch size={16} className="spin text-blue" />
-            <span>正在同步流媒体 / AI 检测结果…</span>
-          </div>
-        ) : !mediaData || mediaData.length === 0 ? (
-          <div className="komari-media-strip-empty">
-            <Play size={18} className="text-muted" style={{ opacity: 0.5 }} />
-            <span>暂无流媒体 / AI 检测结果</span>
-          </div>
-        ) : (
-          <div className="komari-media-strip-list">
-            {(showAllMedia ? mediaData : mediaData.slice(0, 8)).map((m, idx) => {
-              const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
-              const matchPopular = POPULAR_MEDIA.find((p) => {
-                const aliases = p.alias || [p.id]
-                const dId = (m.detector_id || m.target_id || '').toLowerCase()
-                const dName = (m.detector || m.result?.detector || '').toLowerCase()
-                return aliases.some((a) => dId.includes(a) || dName.includes(a))
-              })
-              const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
-              const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
-              const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
-
-              const rawStatus = (m.status || m.result?.status || '').toLowerCase()
-              let tone = 'unknown'
-              let statusText = '未知'
-              if (rawStatus === 'available') {
-                tone = 'available'
-                statusText = '已解锁'
-              } else if (rawStatus === 'unavailable') {
-                tone = 'unavailable'
-                statusText = '未解锁'
-              } else if (rawStatus === 'blocked') {
-                tone = 'blocked'
-                statusText = '已封锁'
-              } else if (rawStatus === 'error') {
-                tone = 'error'
-                statusText = '异常'
-              } else if (rawStatus === 'timeout') {
-                tone = 'timeout'
-                statusText = '超时'
-              }
-
-              const rawRegion = m.region || m.result?.region
-              const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : '—'
-
-              const lat = m.latency_ms ?? m.result?.latency_ms ?? null
-              const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
-                ? `${Math.round(Number(lat))}ms`
-                : '—'
-
-              return (
-                <div key={m.detector_id || `${name}-${idx}`} className="komari-media-service-card">
-                  <div className="komari-media-service-icon" style={{ backgroundColor: iconBg }}>
-                    {symbol}
-                  </div>
-                  <div className="komari-media-service-name" title={name}>
-                    {name}
-                  </div>
-                  <div className={`komari-media-service-status status-${tone}`}>
-                    {statusText}
-                  </div>
-                  <div className="komari-media-service-region mono" title={regionText !== '—' ? `检测地区: ${regionText}` : undefined}>
-                    {regionText}
-                  </div>
-                  <div className="komari-media-service-latency mono">
-                    {latencyText}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
 
       {/* 4. 历史时序折线图表区 (带时间范围切换器) */}
       <div className="komari-charts-section">

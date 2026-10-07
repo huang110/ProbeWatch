@@ -210,48 +210,43 @@ console.log("=== Testing CSS Rules and Layout Definitions ===")
   const requiredClasses = [
     ".komari-ip-quality-card",
     ".ip-quality-summary-grid",
+    ".ip-quality-summary-grid-five",
     ".ip-quality-summary-item",
     ".ip-quality-detail-grid",
-    ".ip-quality-detail-grid-two",
+    ".ip-quality-detail-grid-three",
     ".ip-quality-panel",
     ".ip-quality-panel-title",
     ".ip-quality-score-row",
     ".ip-quality-score-bar",
     ".ip-quality-flag-grid",
-    ".komari-media-strip-card",
-    ".komari-media-strip-header",
-    ".komari-media-strip-title",
-    ".komari-media-strip-summary",
-    ".komari-media-strip-list",
-    ".komari-media-service-card",
-    ".komari-media-service-icon",
-    ".komari-media-service-name",
-    ".komari-media-service-status",
-    ".komari-media-service-region",
-    ".komari-media-service-latency",
+    ".ip-quality-media-list",
+    ".ip-quality-media-row",
+    ".ip-quality-media-left",
+    ".ip-quality-media-icon",
+    ".ip-quality-media-right",
+    ".ip-quality-media-status",
+    ".ip-quality-card-footer",
   ]
 
   for (const cls of requiredClasses) {
     assert.ok(css.includes(cls), `CSS must define ${cls}`)
   }
 
-  // Check 2 columns in desktop detail grid two
-  assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "Desktop detail grid two must use 2 columns")
-  // Check 4 columns in summary grid
-  assert.ok(css.includes("repeat(4, minmax(0, 1fr))"), "Desktop summary grid must use 4 columns")
-  // Check responsive single column for detail grid two
-  assert.ok(css.includes(".ip-quality-detail-grid.ip-quality-detail-grid-two"), "Must support responsive single column for detail grid two")
-  // Check mobile scroll for media strip list
-  assert.ok(css.includes("overflow-x: auto"), "Mobile media strip list must support horizontal scroll")
-  assert.ok(css.includes("min-width: 148px"), "Mobile media service card must have min-width 148px")
+  // Check 3 columns in desktop detail grid three
+  assert.ok(css.includes("repeat(3, minmax(0, 1fr))"), "Desktop detail grid three must use 3 columns")
+  // Check 5 columns in summary grid
+  assert.ok(css.includes("repeat(5, minmax(0, 1fr))"), "Desktop summary grid must use 5 columns")
+  // Check responsive breakpoints for detail grid three
+  assert.ok(css.includes(".ip-quality-detail-grid-three"), "Must define .ip-quality-detail-grid-three")
   // Check light theme support
   assert.ok(css.includes('[data-theme="light"] .komari-ip-quality-card'), "Must support light theme for IP quality card")
-  assert.ok(css.includes('[data-theme="light"] .komari-media-strip-card'), "Must support light theme for media strip card")
+  assert.ok(css.includes('[data-theme="light"] .ip-quality-media-row'), "Must support light theme for media row")
+  assert.ok(css.includes('[data-theme="light"] .ip-quality-card-footer'), "Must support light theme for card footer")
 
   console.log("[PASS] All required CSS classes and responsive layout rules verified")
 }
 
-// 8. Verify NodeDetailPage.jsx contains independent media strip card and 2-panel IP quality
+// 8. Verify NodeDetailPage.jsx contains 3-column IP quality card and NO standalone media strip
 console.log("=== Testing Component Code Security & Structure ===")
 {
   const compPath = existsSync(resolve(process.cwd(), "src/components/NodeDetailPage.jsx"))
@@ -259,33 +254,23 @@ console.log("=== Testing Component Code Security & Structure ===")
     : resolve(process.cwd(), "frontend/src/components/NodeDetailPage.jsx")
   const comp = readFileSync(compPath, "utf8")
 
-  // IP quality card must have summary grid and detail grid two
+  // IP quality card must have 5-item summary grid and 3-column detail grid
   assert.ok(comp.includes("ip-quality-summary-grid"), "Component must render ip-quality-summary-grid")
-  assert.ok(comp.includes("ip-quality-detail-grid ip-quality-detail-grid-two"), "Component must render ip-quality-detail-grid-two")
+  assert.ok(comp.includes("ip-quality-summary-grid-five"), "Component must render 5-item summary grid")
+  assert.ok(comp.includes("ip-quality-detail-grid ip-quality-detail-grid-three"), "Component must render ip-quality-detail-grid-three")
   assert.ok(comp.includes("风险评分（越低越好）"), "Component must render 风险评分（越低越好）")
   assert.ok(comp.includes("数据库标记（命中 / 有结论的库）"), "Component must render 数据库标记")
+  assert.ok(comp.includes("流媒体 / AI 解锁"), "Component must render 流媒体 / AI 解锁 as 3rd column")
   assert.ok(comp.includes("暂无多来源评分"), "Component must handle empty sources")
 
-  // Streaming / AI must NOT be inside IP quality detail grid
-  const ipQualityGridIdx = comp.indexOf("ip-quality-detail-grid ip-quality-detail-grid-two")
-  const ipQualityGridEnd = comp.indexOf("komari-ip-quality-empty", ipQualityGridIdx)
-  const ipQualitySection = comp.substring(ipQualityGridIdx, ipQualityGridEnd > 0 ? ipQualityGridEnd : ipQualityGridIdx + 3000)
-  assert.ok(!ipQualitySection.includes("流媒体 / AI"), "IP Quality section must NOT contain 流媒体 / AI")
+  // Streaming / AI is now in column 3 of IP quality detail grid
+  assert.ok(comp.includes("ip-quality-media-list"), "Component must render ip-quality-media-list")
+  assert.ok(comp.includes("ip-quality-media-row"), "Component must render ip-quality-media-row")
+  assert.ok(comp.includes("ip-quality-card-footer"), "Component must render ip-quality-card-footer")
 
-  // Independent horizontal streaming card
-  assert.ok(comp.includes("komari-media-strip-card"), "Component must render komari-media-strip-card")
-  assert.ok(comp.includes("komari-media-strip-header"), "Component must render komari-media-strip-header")
-  assert.ok(comp.includes("komari-media-strip-title"), "Component must render komari-media-strip-title")
-  assert.ok(comp.includes("komari-media-strip-summary"), "Component must render komari-media-strip-summary")
-  assert.ok(comp.includes("komari-media-strip-list"), "Component must render komari-media-strip-list")
-  assert.ok(comp.includes("komari-media-service-card"), "Component must render komari-media-service-card")
-  assert.ok(comp.includes("komari-media-service-icon"), "Component must render komari-media-service-icon")
-  assert.ok(comp.includes("komari-media-service-name"), "Component must render komari-media-service-name")
-  assert.ok(comp.includes("komari-media-service-status"), "Component must render komari-media-service-status")
-  assert.ok(comp.includes("komari-media-service-region"), "Component must render komari-media-service-region")
-  assert.ok(comp.includes("komari-media-service-latency"), "Component must render komari-media-service-latency")
+  // Redundant standalone media strip card must be removed from NodeDetailPage.jsx
+  assert.ok(!comp.includes('<section className="komari-media-strip-card">'), "Component must NOT render redundant standalone komari-media-strip-card")
 
-  assert.ok(comp.includes("全球流媒体与 AI 服务解锁能力"), "Component must render title 全球流媒体与 AI 服务解锁能力")
   assert.ok(comp.includes("暂无流媒体 / AI 检测结果"), "Component must handle empty media with 暂无流媒体 / AI 检测结果")
   assert.ok(comp.includes("正在同步流媒体 / AI 检测结果…"), "Component must handle loading with 正在同步流媒体 / AI 检测结果…")
 
@@ -419,7 +404,7 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
         }
       }
       return {
-        title: 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）',
+        title: 'IPQA 已启用（暂无风险变化）',
         badge: 'IPQA 已启用',
       }
     }
@@ -434,7 +419,7 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
     alert_count: 0,
   })
   assert.equal(liveNodeDisplay?.badge, 'IPQA 已启用')
-  assert.equal(liveNodeDisplay?.title, 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）')
+  assert.equal(liveNodeDisplay?.title, 'IPQA 已启用（暂无风险变化）')
 
   const riskNodeDisplay = getIPQAStripDisplay({
     ipqa_installed: true,
