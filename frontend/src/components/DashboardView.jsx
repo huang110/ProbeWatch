@@ -828,13 +828,23 @@ export function DashboardView({
         {/* 卡片 5: 流媒体解锁摘要 */}
         <div
           className="panel p-3.5 cursor-pointer hover:border-blue/50 transition-all rounded-xl mjj-card dashboard-media-compact"
-          onClick={() => onNavigate && onNavigate('media')}
+          onClick={() => {
+            const firstNode = (nodes || [])[0]
+            if (firstNode && onSelectNode) onSelectNode(firstNode)
+            if (onNavigate) onNavigate('node-detail')
+          }}
           role="button"
           tabIndex={0}
-          onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && onNavigate) onNavigate('media') }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              const firstNode = (nodes || [])[0]
+              if (firstNode && onSelectNode) onSelectNode(firstNode)
+              if (onNavigate) onNavigate('node-detail')
+            }
+          }}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">流媒体解锁</span>
+            <span className="text-xs text-muted">流媒体解锁（来自 IPQA 归档）</span>
             <span className="p-1 rounded bg-emerald-500/10 text-emerald-400">
               <CloudArrowDown size={15} />
             </span>
@@ -861,10 +871,12 @@ export function DashboardView({
                 className="button button-quiet btn-sm mt-2 text-xs py-1"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (onNavigate) onNavigate('media')
+                  const firstNode = (nodes || [])[0]
+                  if (firstNode && onSelectNode) onSelectNode(firstNode)
+                  if (onNavigate) onNavigate('node-detail')
                 }}
               >
-                前往流媒体配置
+                查看节点详情
               </button>
             </div>
           )}

@@ -40,7 +40,6 @@ import {
   GlobeHemisphereWest,
   WifiHigh,
   Broadcast,
-  CloudArrowDown,
   SquaresFour,
   SlidersHorizontal,
   Database,
@@ -115,7 +114,7 @@ const pageTitleFor = (page) =>
         'notify-latency': '延迟监测告警',
         'notify-general': '通用设置',
         logs: '系统日志',
-        media: '流媒体',
+        media: '流媒体与 AI 解锁',
         targets: '检测目标',
         settings: '系统设置',
         backups: '数据备份',
@@ -413,7 +412,6 @@ function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, o
         })}
         <span className="nav-section-label nav-section-spaced">拓展与配置</span>
         <button type="button" title="公开服务状态页与 SLA" className={`nav-item ${activeNav === 'status' || activeNav === 'status-page' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('status')}><Broadcast size={18} /><span>公开状态页</span></button>
-        <button type="button" title="流媒体矩阵" className={`nav-item ${activeNav === 'media' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('media')}><CloudArrowDown size={18} /><span>流媒体</span></button>
         <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
         <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('settings')}><Database size={18} /><span>系统设置</span></button>
         <span className="nav-section-label nav-section-spaced">模式切换</span>

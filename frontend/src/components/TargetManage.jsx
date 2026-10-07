@@ -117,7 +117,8 @@ export function TargetTable({ targets, readOnly = false, loading = false, mutati
       </thead>
       <tbody>
         {targets.map((target, index) => {
-          const isMediaDisabled = target.kind === 'media_http' && !target.enabled
+          const isMedia = target.kind === 'media_http' || String(target.id).startsWith('media-')
+          const isMediaDisabled = isMedia && !target.enabled
           return (
             <tr
               key={target.id || `target-${index}`}
@@ -127,15 +128,15 @@ export function TargetTable({ targets, readOnly = false, loading = false, mutati
               <td>{target.id || '—'}</td>
               <td>
                 <span className="target-name-cell">{target.name}</span>
-                {isMediaDisabled && <span className="target-tag-ipqa-muted" title="周期探测已停用，由 IPQA 历史归档统一提供流媒体状态">IPQA 接管</span>}
+                {isMedia && <span className="target-tag-ipqa-muted" title="周期探测已停用，由 IPQA 历史归档统一提供流媒体状态">IPQA 接管</span>}
               </td>
               <td><span className="target-kind">{KIND_LABELS[target.kind] || target.kind}</span></td>
               <td>{target.host}</td>
               <td>{target.port ?? '—'}</td>
               <td>{target.path || '—'}</td>
               <td>{target.intervalSeconds !== null ? `${target.intervalSeconds}s` : '—'}</td>
-              <td>{readOnly
-                ? <span className="target-state"><span className={`status-dot status-${target.enabled ? 'online' : 'offline'}`} />{target.enabled ? '已启用' : '已停用'}</span>
+              <td>{readOnly || isMedia
+                ? <span className="target-state target-state-ipqa-disabled" title="流媒体探测已停用，由 IPQA 历史归档统一提供"><span className="status-dot status-offline" />{target.enabled ? '已启用' : '已停用 · IPQA 接管'}</span>
                 : <button type="button" className={`target-toggle ${target.enabled ? 'target-toggle-on' : ''}`} disabled={mutatingId === target.id} aria-pressed={target.enabled} onClick={() => onToggle(target)}>{mutatingId === target.id ? '切换中…' : target.enabled ? '已启用' : '已停用'}</button>}</td>
               {!readOnly && <td className="target-cell-action"><button type="button" className="text-button target-delete" aria-label={`删除检测目标 ${target.id || target.name}`} disabled={mutatingId === target.id} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onDelete?.(target) }}>{mutatingId === target.id ? '处理中…' : '删除'}</button></td>}
             </tr>
@@ -230,6 +231,10 @@ export function TargetManage({ readOnly = false, kinds = null, title = '检测�
   }
 
   const toggleEnabled = async (target) => {
+    if (target.kind === 'media_http' || String(target.id).startsWith('media-')) {
+      setError('流媒体检测已统一由节点 IPQA 历史归档接管，不再支持重新启用独立 media-* 周期探测。')
+      return
+    }
     setMutatingId(target.id)
     setError('')
     setStatus(null)
@@ -276,6 +281,10 @@ export function TargetManage({ readOnly = false, kinds = null, title = '检测�
 
   const submit = async (event) => {
     event.preventDefault()
+    if (form.kind === 'media_http') {
+      setFormError('流媒体检测已转由节点 IPQA 历史归档统一提供，不再支持新建 media_http 检测目标。')
+      return
+    }
     const detail = validateForm(form)
     if (detail) {
       setFormError(detail)

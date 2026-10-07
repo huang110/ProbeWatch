@@ -95,10 +95,10 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
   const mediaReports = safeArray(mediaData).map((item) => {
     const res = safeObject(item.result || item)
     return {
-      name: safeText(res.detector || item.detector_id || item.target_id || '').replace(/^media-/, ''),
-      status: safeText(res.status),
-      region: safeText(res.region),
-      latency: numeric(res.latency_ms),
+      name: safeText(item.name || item.service || item.platform || item.key || res.detector || item.detector_id || item.target_id || '').replace(/^media-/, ''),
+      status: safeText(res.status || item.status),
+      region: safeText(res.region || item.region),
+      latency: numeric(res.latency_ms ?? item.latency_ms),
     }
   })
 

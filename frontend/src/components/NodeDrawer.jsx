@@ -57,20 +57,27 @@ const getMediaStatus = (platform, mediaList) => {
     ? platform.alias
     : [platformId, platformId === 'chatgpt' ? 'openai' : platformId]
   const match = (mediaList || []).find((m) => {
-    const dId = (m.detector_id || m.target_id || '').toLowerCase()
-    const dName = (m.result?.detector || '').toLowerCase()
+    const dId = (m.detector_id || m.target_id || m.name || m.service || m.platform || m.key || '').toLowerCase()
+    const dName = (m.result?.detector || m.name || '').toLowerCase()
     return aliases.some((a) => dId.includes(a) || dName.includes(a))
   })
   if (!match) return { text: '未测试', tone: 'muted', latency: null }
-  const res = match.result || {}
+  const res = match.result || match || {}
   const status = res.status
   const latency = res.latency_ms ?? null
   const region = res.region
 
-  if (status === 'available') {
+  if (status === 'available' || status === 'unlocked' || status === 'ok' || status === 'success') {
     return {
       text: region ? `${region} 解锁` : '原生解锁',
       tone: 'available',
+      latency,
+    }
+  }
+  if (status === 'partial') {
+    return {
+      text: region ? `${region} 部分解锁` : '仅自制剧/部分解锁',
+      tone: 'partial',
       latency,
     }
   }
@@ -837,7 +844,7 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
             <div className="section-card-title justify-between">
               <div className="inline-flex items-center gap-1.5">
                 <FilmStrip size={15} className="text-amber" />
-                <span>全球流媒体与 AI 解锁能力</span>
+                <span>全球流媒体与 AI 解锁能力（来自 IPQA 归档）</span>
               </div>
               <span className="drawer-count-badge mono">
                 {mediaData.length > 0 ? `${unlockedMediaCount}/${POPULAR_MEDIA.length} 解锁` : `—/${POPULAR_MEDIA.length} 待测`}
@@ -883,16 +890,16 @@ export function NodeDrawer({ node, rates = {}, latestAgentVersion = '', onClose,
               </div>
             )}
 
-            {onNavigate && (
+            {onOpenDetails && (
               <button
                 type="button"
                 className="drawer-card-footer-link"
                 onClick={() => {
                   onClose()
-                  onNavigate('media')
+                  onOpenDetails(node)
                 }}
               >
-                <span>查看全网流媒体矩阵大屏</span>
+                <span>在节点详情查看 IPQA 流媒体归档</span>
                 <ArrowUpRight size={13} />
               </button>
             )}

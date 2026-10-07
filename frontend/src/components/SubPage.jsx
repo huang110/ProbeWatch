@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { AlertCenterView } from './AlertCenterView.jsx'
-import { MediaMatrix } from './MediaMatrix.jsx'
 import { TOTPSettingsCard } from './TOTPSettingsCard.jsx'
 import { PasskeySettingsCard } from './PasskeySettingsCard.jsx'
 import { BackupManagementCard } from './BackupManagementCard.jsx'
@@ -56,7 +55,7 @@ export function SubPage({
     notifications: ['通知与告警', 'Telegram 结构化带图卡片与深层直达排障链接、单机单规则临时静音 (Snooze) 与新机规则继承。'],
     alerts: ['通知与告警', 'Telegram 结构化带图卡片与深层直达排障链接、单机单规则临时静音 (Snooze) 与新机规则继承。'],
     logs: ['系统日志', '系统运行、管理操作行为、网络事件与安全拦截全量日志 · 本地时区显示 · 支持详情展开。'],
-    media: ['流媒体矩阵', '全球主流流媒体与 AI 服务（Netflix, YouTube, OpenAI 等）解锁能力矩阵。'],
+    media: ['流媒体与 AI 解锁', '流媒体检测已统一由节点 IPQA 历史归档全面提供。独立 media-* 周期检测已停用。'],
     targets: ['检测目标', '管理全部检测目标：新建、启停或删除探测项。'],
     users: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
     team: ['团队与权限', '多租户协作管理：成员账号、超级管理员/运维/只读角色及节点白名单作用域。'],
@@ -153,7 +152,36 @@ export function SubPage({
       ) : page === 'logs' || page === 'events' || page === 'journal' ? (
         <LogsView nodes={data} />
       ) : page === 'media' ? (
-        <MediaMatrix nodes={data} />
+        <div className="panel placeholder-panel media-deprecated-notice-card" style={{ maxWidth: '680px', margin: '40px auto', padding: '36px 24px', textAlign: 'center' }}>
+          <div className="placeholder-icon" style={{ margin: '0 auto 16px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', width: '52px', height: '52px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Pulse size={28} weight="duotone" />
+          </div>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>流媒体与 AI 解锁已统一升级</h2>
+          <p style={{ color: 'var(--text-muted, #94a3b8)', lineHeight: 1.6, marginBottom: '24px' }}>
+            流媒体与 AI 解锁能力已统一由节点 IPQA 历史归档全面提供。<br />
+            独立 <code>media-*</code> 周期探测任务已停用并不再占用节点资源，请前往节点详情页查看真实解锁结果。
+          </p>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => {
+                const firstNode = (data || [])[0]
+                if (firstNode && onSelectNode) onSelectNode(firstNode)
+                if (onNavigate) onNavigate('node-detail')
+              }}
+            >
+              查看节点详情（IP 质量与流媒体）
+            </button>
+            <button
+              type="button"
+              className="button button-quiet"
+              onClick={onBack}
+            >
+              返回仪表盘
+            </button>
+          </div>
+        </div>
       ) : page === 'targets' ? (
         <TargetManage />
       ) : page === 'settings' ? (

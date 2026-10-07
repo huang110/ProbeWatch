@@ -437,4 +437,50 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
   console.log("[PASS] IPQA Status Strip logic and 4-state matrix verified")
 }
 
+// Test 6: Media Matrix Removal and IPQA Streaming Integration Contract
+{
+  console.log("=== Testing Media Matrix Removal & IPQA Unification ===")
+  const srcDir = existsSync(resolve(process.cwd(), "src"))
+    ? resolve(process.cwd(), "src")
+    : resolve(process.cwd(), "frontend/src")
+  const appSrc = readFileSync(resolve(srcDir, 'App.jsx'), 'utf8')
+  const subPageSrc = readFileSync(resolve(srcDir, 'components/SubPage.jsx'), 'utf8')
+  const mediaMatrixSrc = readFileSync(resolve(srcDir, 'components/MediaMatrix.jsx'), 'utf8')
+  const dashboardSrc = readFileSync(resolve(srcDir, 'components/DashboardView.jsx'), 'utf8')
+  const nodeDrawerSrc = readFileSync(resolve(srcDir, 'components/NodeDrawer.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(srcDir, 'components/TargetManage.jsx'), 'utf8')
+
+  // 1. App.jsx sidebar must not have media button
+  assert.ok(!appSrc.includes('title="流媒体矩阵"'), 'App.jsx must not have 流媒体矩阵 button in sidebar')
+  assert.ok(!appSrc.includes("onNavigate('media')"), 'App.jsx sidebar must not have onNavigate("media")')
+
+  // 2. SubPage.jsx must not render old MediaMatrix and page === 'media' must have read-only notice
+  assert.ok(!subPageSrc.includes("import { MediaMatrix }"), 'SubPage.jsx must not import MediaMatrix')
+  assert.ok(subPageSrc.includes("media-deprecated-notice-card"), 'SubPage.jsx must contain media-deprecated-notice-card')
+  assert.ok(subPageSrc.includes("流媒体与 AI 解锁已统一升级"), 'SubPage.jsx must display upgrade title')
+  assert.ok(subPageSrc.includes("node-detail"), 'SubPage.jsx must direct users to node-detail')
+
+  // 3. MediaMatrix.jsx must be defanged: no mutate calls, no seed-media
+  assert.ok(!mediaMatrixSrc.includes("seed-media"), 'MediaMatrix.jsx must not call seed-media')
+  assert.ok(!mediaMatrixSrc.includes("handleAddMediaPresets"), 'MediaMatrix.jsx must not have handleAddMediaPresets')
+  assert.ok(!mediaMatrixSrc.includes("POST"), 'MediaMatrix.jsx must not make POST requests')
+
+  // 4. DashboardView.jsx must not navigate to 'media' and must point to node-detail
+  assert.ok(!dashboardSrc.includes("onNavigate('media')"), 'DashboardView.jsx must not navigate to media')
+  assert.ok(dashboardSrc.includes("流媒体解锁（来自 IPQA 归档）"), 'DashboardView.jsx must display IPQA archive label')
+  assert.ok(dashboardSrc.includes("查看节点详情"), 'DashboardView.jsx must offer 查看节点详情 button')
+
+  // 5. NodeDrawer.jsx must not navigate to 'media'
+  assert.ok(!nodeDrawerSrc.includes("onNavigate('media')"), 'NodeDrawer.jsx must not navigate to media')
+  assert.ok(nodeDrawerSrc.includes("在节点详情查看 IPQA 流媒体归档"), 'NodeDrawer.jsx footer must link to node details IPQA archive')
+  assert.ok(nodeDrawerSrc.includes("来自 IPQA 归档"), 'NodeDrawer.jsx header must mention 来自 IPQA 归档')
+
+  // 6. TargetManage.jsx must show IPQA disabled state and forbid toggling/creating media targets
+  assert.ok(targetManageSrc.includes("已停用 · IPQA 接管"), 'TargetManage.jsx must render 已停用 · IPQA 接管')
+  assert.ok(targetManageSrc.includes("不再支持重新启用独立 media-* 周期探测"), 'TargetManage.jsx must prevent enabling media targets')
+  assert.ok(targetManageSrc.includes("不再支持新建 media_http 检测目标"), 'TargetManage.jsx must reject creating media_http targets')
+
+  console.log("[PASS] Media matrix removal, navigation redirection, and IPQA unification contracts verified")
+}
+
 console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")
