@@ -324,11 +324,18 @@ function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, o
     }
   }, [activeNav])
 
+  const handleNavClick = (id) => {
+    onNavigate(id)
+    if (mobileOpen && onCloseMobile) {
+      onCloseMobile()
+    }
+  }
+
   const handleToggleMenu = (itemId, firstChildId, isChildActive) => {
     setOpenMenus((prev) => {
       const willOpen = !prev[itemId]
       if (willOpen && !isChildActive) {
-        onNavigate(firstChildId)
+        handleNavClick(firstChildId)
       }
       return { ...prev, [itemId]: willOpen }
     })
@@ -387,7 +394,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, o
                             ? 'nav-sub-item-active'
                             : ''
                         }`}
-                        onClick={() => onNavigate(child.id)}
+                        onClick={() => handleNavClick(child.id)}
                       >
                         <span>{child.label}</span>
                       </button>
@@ -403,7 +410,7 @@ function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, o
               type="button"
               title={item.label}
               className={`nav-item ${activeNav === item.id ? 'nav-item-active' : ''}`}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => handleNavClick(item.id)}
             >
               <Icon size={item.id === activeNav ? 18 : 18} weight={activeNav === item.id ? 'fill' : 'regular'} />
               <span>{item.label}</span>
@@ -411,11 +418,11 @@ function Sidebar({ activeNav, onNavigate, me, apiState, apiVersion, collapsed, o
           )
         })}
         <span className="nav-section-label nav-section-spaced">拓展与配置</span>
-        <button type="button" title="公开服务状态页与 SLA" className={`nav-item ${activeNav === 'status' || activeNav === 'status-page' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('status')}><Broadcast size={18} /><span>公开状态页</span></button>
-        <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
-        <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => onNavigate('settings')}><Database size={18} /><span>系统设置</span></button>
+        <button type="button" title="公开服务状态页与 SLA" className={`nav-item ${activeNav === 'status' || activeNav === 'status-page' ? 'nav-item-active' : ''}`} onClick={() => handleNavClick('status')}><Broadcast size={18} /><span>公开状态页</span></button>
+        <button type="button" title="检测目标" className={`nav-item ${activeNav === 'targets' ? 'nav-item-active' : ''}`} onClick={() => handleNavClick('targets')}><SlidersHorizontal size={18} /><span>检测目标</span></button>
+        <button type="button" title="系统设置" className={`nav-item ${activeNav === 'settings' ? 'nav-item-active' : ''}`} onClick={() => handleNavClick('settings')}><Database size={18} /><span>系统设置</span></button>
         <span className="nav-section-label nav-section-spaced">模式切换</span>
-        <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={onSwitchToGuest}><Eye size={18} /><span>游客大屏</span></button>
+        <button type="button" title="切换至访客只读大屏" className="nav-item nav-item-guest-switch" onClick={() => { onSwitchToGuest(); if (mobileOpen && onCloseMobile) onCloseMobile() }}><Eye size={18} /><span>游客大屏</span></button>
       </nav>
       <div className="sidebar-footer">
         <div className="health-chip"><span className={`status-dot status-${apiState.kind === 'ok' ? 'online' : apiState.kind === 'loading' ? 'attention' : 'offline'}`} /><span>{apiState.kind === 'ok' ? 'API 已连接' : apiState.kind === 'auth' ? '需要登录' : apiState.kind === 'loading' ? '正在连接 API' : 'API 不可用'}</span><span className="mono health-version">{apiVersion ? `v${apiVersion}` : '—'}</span></div>
@@ -472,7 +479,7 @@ export function App() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastSync, setLastSync] = useState(null)
   const [liveState, setLiveState] = useState('connecting')
-  const [apiState, setApiState] = useState({ kind: 'guest', message: '' })
+  const [apiState, setApiState] = useState({ kind: 'loading', message: '' })
   const [apiVersion, setApiVersion] = useState('')
   const [latestAgentVersion, setLatestAgentVersion] = useState('')
   const [me, setMe] = useState(null)
