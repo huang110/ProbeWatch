@@ -340,6 +340,7 @@ type IPQualityInfo struct {
 	IPType       string             `json:"ip_type,omitempty"`
 	Country      string             `json:"country,omitempty"`
 	Region       string             `json:"region,omitempty"`
+	City         string             `json:"city,omitempty"`
 	ASN          string             `json:"asn,omitempty"`
 	Organization string             `json:"organization,omitempty"`
 	Proxy        *bool              `json:"proxy,omitempty"`
@@ -367,6 +368,9 @@ func (q IPQualityInfo) Validate() error {
 		return err
 	}
 	if err := validateString("region", q.Region, 128, false); err != nil {
+		return err
+	}
+	if err := validateString("city", q.City, 128, false); err != nil {
 		return err
 	}
 	if err := validateString("asn", q.ASN, 64, false); err != nil {

@@ -126,6 +126,7 @@ type publicNodeTelemetry struct {
 	LossRate          *float64               `json:"loss_rate"`
 	LastCheckedAt     *time.Time             `json:"last_checked_at"`
 	Checks            []publicNodeCheck      `json:"checks"`
+	IPQuality         *publicIPQualityDTO    `json:"ip_quality,omitempty"`
 }
 
 type publicNodeCheck struct {
@@ -241,6 +242,8 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				NetworkRxBytes uint64 `json:"network_rx_bytes"`
 				NetworkTxBytes uint64 `json:"network_tx_bytes"`
 				StartedAt int64 `json:"started_at"`
+				IPQuality *protocol.IPQualityInfo `json:"ip_quality"`
+				IPQA      *protocol.IPQAInfo      `json:"ipqa"`
 			}
 			if json.Unmarshal(payload, &resource) == nil {
 				telemetry.CPUPercent = &resource.CPUPercent
@@ -252,6 +255,9 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				telemetry.NetworkRxBytes = &resource.NetworkRxBytes
 				telemetry.NetworkTxBytes = &resource.NetworkTxBytes
 				telemetry.StartedAt = &resource.StartedAt
+				if resource.IPQuality != nil || resource.IPQA != nil {
+					telemetry.IPQuality = populatePublicIPQualityDTO(resource.IPQuality, resource.IPQA)
+				}
 			}
 			if lastUpdated.IsZero() || reportedAt.After(lastUpdated) {
 				lastUpdated = reportedAt
@@ -434,27 +440,32 @@ type publicNodeResource struct {
 }
 
 type publicIPQualityDTO struct {
-	IPType              string `json:"ip_type,omitempty"`
-	Country             string `json:"country,omitempty"`
-	Region              string `json:"region,omitempty"`
-	ASN                 string `json:"asn,omitempty"`
-	Organization        string `json:"organization,omitempty"`
-	Risk                string `json:"risk,omitempty"`
-	Proxy               *bool  `json:"proxy,omitempty"`
-	VPN                 *bool  `json:"vpn,omitempty"`
-	Tor                 *bool  `json:"tor,omitempty"`
-	Abuse               *bool  `json:"abuse,omitempty"`
-	CheckedAt           int64  `json:"checked_at,omitempty"`
-	IPQAEnabled         bool   `json:"ipqa_enabled"`
-	IPQAInstalled       bool   `json:"ipqa_installed"`
-	HighestSeverity     string `json:"highest_severity,omitempty"`
-	AlertCount          int    `json:"alert_count,omitempty"`
-	CriticalCount       int    `json:"critical_count,omitempty"`
-	WarningCount        int    `json:"warning_count,omitempty"`
-	InfoCount           int    `json:"info_count,omitempty"`
-	LastCheckedAt       *int64 `json:"last_checked_at,omitempty"`
-	HasRecentChanges    bool   `json:"has_recent_changes,omitempty"`
-	RecentChangeSummary string `json:"recent_change_summary,omitempty"`
+	IPType              string             `json:"ip_type,omitempty"`
+	Country             string             `json:"country,omitempty"`
+	Region              string             `json:"region,omitempty"`
+	City                string             `json:"city,omitempty"`
+	ASN                 string             `json:"asn,omitempty"`
+	Organization        string             `json:"organization,omitempty"`
+	Risk                string             `json:"risk,omitempty"`
+	Proxy               *bool              `json:"proxy,omitempty"`
+	VPN                 *bool              `json:"vpn,omitempty"`
+	Tor                 *bool              `json:"tor,omitempty"`
+	Abuse               *bool              `json:"abuse,omitempty"`
+	Scores              map[string]float64 `json:"scores,omitempty"`
+	Flags               map[string]*bool   `json:"flags,omitempty"`
+	CheckedAt           int64              `json:"checked_at,omitempty"`
+	Stale               bool               `json:"stale"`
+	Source              string             `json:"source,omitempty"`
+	IPQAEnabled         bool               `json:"ipqa_enabled"`
+	IPQAInstalled       bool               `json:"ipqa_installed"`
+	HighestSeverity     string             `json:"highest_severity,omitempty"`
+	AlertCount          int                `json:"alert_count,omitempty"`
+	CriticalCount       int                `json:"critical_count,omitempty"`
+	WarningCount        int                `json:"warning_count,omitempty"`
+	InfoCount           int                `json:"info_count,omitempty"`
+	LastCheckedAt       *int64             `json:"last_checked_at,omitempty"`
+	HasRecentChanges    bool               `json:"has_recent_changes,omitempty"`
+	RecentChangeSummary string             `json:"recent_change_summary,omitempty"`
 }
 
 type publicHealthInfoDTO struct {
@@ -754,10 +765,12 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		return nil
 	}
 	dto := &publicIPQualityDTO{}
+	now := time.Now().UTC().Unix()
 	if q != nil {
 		dto.IPType = q.IPType
 		dto.Country = q.Country
 		dto.Region = q.Region
+		dto.City = q.City
 		dto.ASN = q.ASN
 		dto.Organization = q.Organization
 		dto.Risk = q.Risk
@@ -766,6 +779,19 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		dto.Tor = q.Tor
 		dto.Abuse = q.Abuse
 		dto.CheckedAt = q.CheckedAt
+		if len(q.Sources) > 0 {
+			dto.Scores = q.Sources
+		}
+		dto.Flags = map[string]*bool{
+			"proxy": q.Proxy,
+			"vpn":   q.VPN,
+			"tor":   q.Tor,
+			"abuse": q.Abuse,
+		}
+		if q.CheckedAt > 0 {
+			dto.Stale = (now - q.CheckedAt) > int64(12*time.Hour/time.Second)
+		}
+		dto.Source = "ipwho.is"
 	}
 	if qa != nil {
 		dto.IPQAEnabled = qa.Enabled
@@ -777,6 +803,9 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		dto.InfoCount = qa.InfoCount
 		if qa.LastCheckedAt > 0 {
 			dto.LastCheckedAt = &qa.LastCheckedAt
+			if dto.CheckedAt == 0 {
+				dto.CheckedAt = qa.LastCheckedAt
+			}
 		}
 		dto.HasRecentChanges = len(qa.Changes) > 0
 		if len(qa.Changes) > 0 {
@@ -785,7 +814,10 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 				dto.RecentChangeSummary = qa.Changes[0].Category
 			}
 		}
-		if dto.IPType == "" && qa.IPv4 != nil && qa.IPv4.IPType != "" {
+		if qa.Enabled && qa.Installed {
+			dto.Source = "IPQA"
+		}
+		if (dto.IPType == "" || dto.IPType == "unknown") && qa.IPv4 != nil && qa.IPv4.IPType != "" {
 			dto.IPType = qa.IPv4.IPType
 		}
 		if dto.Country == "" && qa.IPv4 != nil && qa.IPv4.Country != "" {
@@ -794,24 +826,40 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		if dto.Region == "" && qa.IPv4 != nil && qa.IPv4.Region != "" {
 			dto.Region = qa.IPv4.Region
 		}
+		if dto.City == "" && qa.IPv4 != nil && qa.IPv4.Region != "" {
+			dto.City = qa.IPv4.Region
+		}
 		if dto.ASN == "" && qa.IPv4 != nil && qa.IPv4.ASN != "" {
 			dto.ASN = qa.IPv4.ASN
 		}
 		if dto.Organization == "" && qa.IPv4 != nil && qa.IPv4.Organization != "" {
 			dto.Organization = qa.IPv4.Organization
 		}
+		if dto.Flags == nil {
+			dto.Flags = make(map[string]*bool)
+		}
 		if dto.Proxy == nil && qa.IPv4 != nil && qa.IPv4.Proxy != nil {
 			dto.Proxy = qa.IPv4.Proxy
+			dto.Flags["proxy"] = qa.IPv4.Proxy
 		}
 		if dto.VPN == nil && qa.IPv4 != nil && qa.IPv4.VPN != nil {
 			dto.VPN = qa.IPv4.VPN
+			dto.Flags["vpn"] = qa.IPv4.VPN
 		}
 		if dto.Tor == nil && qa.IPv4 != nil && qa.IPv4.Tor != nil {
 			dto.Tor = qa.IPv4.Tor
+			dto.Flags["tor"] = qa.IPv4.Tor
 		}
 		if dto.Abuse == nil && qa.IPv4 != nil && qa.IPv4.Abuse != nil {
 			dto.Abuse = qa.IPv4.Abuse
+			dto.Flags["abuse"] = qa.IPv4.Abuse
 		}
+	}
+	if dto.IPType == "" {
+		dto.IPType = "unknown"
+	}
+	if dto.Risk == "" {
+		dto.Risk = "unknown"
 	}
 	return dto
 }

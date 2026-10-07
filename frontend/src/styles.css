@@ -2679,6 +2679,65 @@ h1 { margin: 6px 0 4px; color: var(--text-1); font-size: clamp(22px, 2.2vw, 30px
 .vps-sub-pill.cursor-pointer:hover {
   background: rgba(148, 163, 184, 0.22);
 }
+
+/* 2.5 VPS 首页 IP 质量概览条 */
+.vps-ipqa-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 3px 7px;
+  margin: 0 0 8px;
+  border-radius: 4px;
+  background: var(--bg-card-subtle, rgba(255, 255, 255, 0.025));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+  font-size: 10px;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+[data-theme="light"] .vps-ipqa-strip {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+.vps-ipqa-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.vps-ipqa-label {
+  color: var(--text-3);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+.vps-ipqa-val {
+  color: var(--text-2);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 65px;
+}
+.vps-ipqa-risk {
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.vps-ipqa-risk.risk-mint { color: var(--mint, #10b981); }
+.vps-ipqa-risk.risk-amber { color: var(--amber, #f59e0b); }
+.vps-ipqa-risk.risk-rose { color: var(--rose, #ef4444); }
+.vps-ipqa-risk.risk-muted { color: var(--text-3, #94a3b8); }
+
+@media (max-width: 640px) {
+  .vps-ipqa-strip {
+    padding: 2px 5px;
+    margin-bottom: 5px;
+    font-size: 9.5px;
+  }
+  .vps-ipqa-val {
+    max-width: 48px;
+  }
+}
 .guest-status-filters { display: inline-flex; align-items: center; gap: 3px; padding: 2px; border: 1px solid var(--border-subtle, var(--border)); border-radius: 8px; background: var(--surface-card, var(--bg-panel)); }
 .guest-status-filters .button { margin: 0; }
 .vps-state-label { display: inline-flex; align-items: center; min-height: 19px; padding: 0 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }

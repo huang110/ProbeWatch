@@ -29,6 +29,27 @@ function getIspRating(latency, loss) {
   return { text: '严重异常', tone: 'rose' }
 }
 
+function formatCardIPType(type) {
+  if (!type) return '未知'
+  const t = String(type).trim().toLowerCase()
+  if (t === 'hosting' || t === 'datacenter') return '机房'
+  if (t === 'isp') return 'ISP'
+  if (t === 'residential') return '家宽'
+  if (t === 'unknown') return '未知'
+  return type
+}
+
+function formatCardIPRisk(risk) {
+  if (!risk) return { label: '未知', tone: 'muted' }
+  const r = String(risk).trim().toLowerCase()
+  if (r === 'low' || r === 'clean' || r === 'safe' || r.includes('低')) return { label: '低风险', tone: 'mint' }
+  if (r === 'medium' || r === 'moderate' || r.includes('中')) return { label: '中风险', tone: 'amber' }
+  if (r === 'high' || r.includes('高')) return { label: '高风险', tone: 'rose' }
+  if (r === 'critical' || r.includes('极高')) return { label: '极高', tone: 'rose' }
+  if (r === 'unknown' || r === 'none') return { label: '未知', tone: 'muted' }
+  return { label: risk, tone: 'muted' }
+}
+
 function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
   const customKey = allCustomMeta[name] ? name : (Object.keys(allCustomMeta).find((k) => allCustomMeta[k]?.customName === name) || name)
@@ -767,6 +788,12 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                     ? [cuCheck?.label || '联通', ctCheck?.label || '电信', cmCheck?.label || '移动']
                     : ['TCP', 'HTTPS', 'DNS']
 
+                  const ipQ = telemetry.ipQuality || telemetry.ip_quality || null
+                  const ipTypeDisplay = formatCardIPType(ipQ?.ipType || ipQ?.ip_type)
+                  const locationDisplay = [ipQ?.city, ipQ?.region, ipQ?.country].filter(Boolean)[0] || meta.region || '未知'
+                  const asnDisplay = ipQ?.asn ? (String(ipQ.asn).toUpperCase().startsWith('AS') ? ipQ.asn : `AS${ipQ.asn}`) : '未知'
+                  const riskInfo = formatCardIPRisk(ipQ?.risk)
+
                   return (
                     <article
                       className={`guest-node-card nezha-vps-card ${nodeStatus === 'offline' ? 'is-offline' : nodeStatus === 'attention' ? 'is-attention' : ''}`}
@@ -801,6 +828,26 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         <span className="vps-sub-pill">{nodeStatus === 'offline' ? '历史在线 ' : '在线 '}{uptimeText}</span>
                         <span className="vps-sub-pill">{priceText}</span>
                         <span className={`vps-sub-pill ${nodeStatus === 'offline' ? 'is-stale' : ''}`}>{statusDetail}</span>
+                      </div>
+
+                      {/* 2.5 IP 质量概览条 */}
+                      <div className="vps-ipqa-strip" title={`IP 质量: ${ipTypeDisplay} · ${locationDisplay} · ${asnDisplay} · ${riskInfo.label}`}>
+                        <span className="vps-ipqa-item">
+                          <span className="vps-ipqa-label">类型</span>
+                          <b className="vps-ipqa-val">{ipTypeDisplay}</b>
+                        </span>
+                        <span className="vps-ipqa-item">
+                          <span className="vps-ipqa-label">地区</span>
+                          <b className="vps-ipqa-val" title={locationDisplay}>{locationDisplay}</b>
+                        </span>
+                        <span className="vps-ipqa-item">
+                          <span className="vps-ipqa-label">ASN</span>
+                          <b className="vps-ipqa-val mono">{asnDisplay}</b>
+                        </span>
+                        <span className="vps-ipqa-item">
+                          <span className="vps-ipqa-label">风险</span>
+                          <b className={`vps-ipqa-risk risk-${riskInfo.tone}`}>{riskInfo.label}</b>
+                        </span>
                       </div>
 
                       {/* 3. 2x2 核心硬件宫格 (CPU, 内存, 硬盘, 流量) */}
@@ -1039,6 +1086,12 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                           <span className="compact-metric-lbl">丢包</span>
                           <span className={`compact-metric-val ${rawLoss !== null && rawLoss > 0 ? 'text-rose' : ''}`}>{lossDisplay}</span>
                         </span>
+                        {Boolean(telemetry.ipQuality || telemetry.ip_quality) && (
+                          <span className="compact-metric-pill mono" title={`IP 类别: ${formatCardIPType((telemetry.ipQuality || telemetry.ip_quality).ipType || (telemetry.ipQuality || telemetry.ip_quality).ip_type)}`}>
+                            <span className="compact-metric-lbl">IP</span>
+                            <span className="compact-metric-val">{formatCardIPType((telemetry.ipQuality || telemetry.ip_quality).ipType || (telemetry.ipQuality || telemetry.ip_quality).ip_type)}</span>
+                          </span>
+                        )}
                         {remainDays !== null && (
                           <span className="compact-metric-pill compact-days-pill mono">
                             剩{remainDays}天

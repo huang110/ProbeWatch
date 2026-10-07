@@ -215,15 +215,26 @@ func ParseIPQualityResponse(body []byte) (*protocol.IPQualityInfo, error) {
 		}
 	}
 
-	// 2. Region
+	// 2. Region and City
 	if r := getString(raw, "region", "regionName", "state"); r != "" {
 		info.Region = truncateString(r, 128)
 	} else if loc, ok := raw["location"].(map[string]any); ok {
-		if r := getString(loc, "region", "regionName", "state", "city"); r != "" {
+		if r := getString(loc, "region", "regionName", "state"); r != "" {
 			info.Region = truncateString(r, 128)
 		}
-	} else if city := getString(raw, "city"); city != "" {
-		info.Region = truncateString(city, 128)
+	}
+	if city := getString(raw, "city"); city != "" {
+		info.City = truncateString(city, 128)
+	} else if loc, ok := raw["location"].(map[string]any); ok {
+		if city := getString(loc, "city"); city != "" {
+			info.City = truncateString(city, 128)
+		}
+	}
+	if info.Region == "" && info.City != "" {
+		info.Region = info.City
+	}
+	if info.City == "" && info.Region != "" {
+		info.City = info.Region
 	}
 
 	// 3. ASN
@@ -274,17 +285,19 @@ func parseIPType(raw map[string]any) string {
 	}
 
 	// Check string type indicators
-	typeVal := getString(raw, "type", "ip_type", "usage_type", "connection_type")
+	typeVal := getString(raw, "ip_type", "usage_type", "connection_type", "type")
 	if typeVal != "" {
 		lower := strings.ToLower(typeVal)
-		if strings.Contains(lower, "datacenter") || strings.Contains(lower, "hosting") || strings.Contains(lower, "cloud") || strings.Contains(lower, "server") || strings.Contains(lower, "vps") {
-			return "hosting"
-		}
-		if strings.Contains(lower, "residential") || strings.Contains(lower, "home") {
-			return "residential"
-		}
-		if strings.Contains(lower, "isp") || strings.Contains(lower, "business") || strings.Contains(lower, "commercial") {
-			return "isp"
+		if lower != "ipv4" && lower != "ipv6" {
+			if strings.Contains(lower, "datacenter") || strings.Contains(lower, "hosting") || strings.Contains(lower, "cloud") || strings.Contains(lower, "server") || strings.Contains(lower, "vps") {
+				return "hosting"
+			}
+			if strings.Contains(lower, "residential") || strings.Contains(lower, "home") {
+				return "residential"
+			}
+			if strings.Contains(lower, "isp") || strings.Contains(lower, "business") || strings.Contains(lower, "commercial") {
+				return "isp"
+			}
 		}
 	}
 

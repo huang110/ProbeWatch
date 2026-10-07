@@ -66,7 +66,7 @@ import {
 import { DistroIcon } from './Common.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 import { PosterModal } from './PosterModal.jsx'
-import { fetchPublicNodeDetail } from '../lib/api.js'
+import { fetchPublicNodeDetail, normalizeIPQuality } from '../lib/api.js'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -493,9 +493,9 @@ export function NodeDetailPage({
         if (Array.isArray(data.media)) {
           setMediaData(data.media)
         }
-        const quality = data.ip_quality
+        const quality = data.ip_quality || data.ipQuality
         if (quality && typeof quality === 'object') {
-          setIpQuality(quality)
+          setIpQuality(normalizeIPQuality(quality))
         } else {
           setIpQuality(null)
         }
@@ -541,9 +541,10 @@ export function NodeDetailPage({
       })
       .then((payload) => {
         if (controller.signal.aborted) return
-        const value = payload?.resource?.ip_quality || payload?.ip_quality || null
-        if (value && typeof value === 'object') {
-          setIpQuality(value)
+        const qRaw = payload?.resource?.ip_quality || payload?.ip_quality || null
+        const qaRaw = payload?.resource?.ipqa || payload?.ipqa || null
+        if (qRaw || qaRaw) {
+          setIpQuality(normalizeIPQuality({ ip_quality: qRaw, ipqa: qaRaw }))
         } else {
           setIpQuality(null)
         }
@@ -1723,215 +1724,229 @@ export function NodeDetailPage({
               <CircleNotch size={16} className="spin text-blue" />
               <span>正在同步 IP 质量检测样本…</span>
             </div>
-          ) : ipQuality ? (
-            <>
-              {publicDetailError && (
-                <div className="ip-quality-stale-alert">
-                  检测服务暂时不可用，显示最近一次成功结果
-                </div>
-              )}
-              {/* 第一行：5 个紧凑摘要格 */}
-              <div className="ip-quality-summary-grid ip-quality-summary-grid-five">
-                <div className="ip-quality-summary-item risk">
-                  <span className="label">综合风险</span>
-                  <span className={`value risk-${ipQuality.risk === 'low' ? 'low' : ipQuality.risk === 'medium' ? 'medium' : ipQuality.risk === 'high' ? 'high' : 'unknown'}`}>
-                    {ipQuality.risk === 'low' ? (
-                      <ShieldCheck size={14} className="text-mint" />
-                    ) : ipQuality.risk === 'medium' ? (
-                      <ShieldWarning size={14} className="text-amber" />
-                    ) : ipQuality.risk === 'high' ? (
-                      <ShieldWarning size={14} className="text-rose" />
-                    ) : (
-                      <Shield size={14} className="text-muted" />
-                    )}
-                    <span>
-                      {ipQuality.risk === 'low'
-                        ? '低风险'
-                        : ipQuality.risk === 'medium'
-                        ? '中风险'
-                        : ipQuality.risk === 'high'
-                        ? '高风险'
-                        : '未知风险'}
-                    </span>
-                  </span>
-                </div>
+          ) : ipQuality ? (() => {
+            const qBase = ipQuality.ipQuality || ipQuality
+            const qIpqa = ipQuality.ipqa || {
+              enabled: Boolean(ipQuality.ipqa_enabled),
+              installed: Boolean(ipQuality.ipqa_installed),
+              highestSeverity: ipQuality.highest_severity || '',
+              alertCount: Number(ipQuality.alert_count || 0),
+              criticalCount: Number(ipQuality.critical_count || 0),
+              lastChangeAt: ipQuality.last_checked_at || ipQuality.checked_at || null,
+              hasRecentChanges: Boolean(ipQuality.has_recent_changes),
+              recentChangeSummary: ipQuality.recent_change_summary || '',
+            }
+            const qIpType = qBase.ipType || qBase.ip_type || ''
+            const qLocation = [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
+            const qAsnOrg = [qBase.asn ? (String(qBase.asn).toUpperCase().startsWith('AS') ? qBase.asn : `AS${qBase.asn}`) : '', qBase.organization].filter(Boolean).join(' ') || '—'
+            const qCheckedAt = qBase.checkedAt || qBase.checked_at || qIpqa.lastChangeAt || null
+            const qFlags = qBase.flags || {
+              proxy: qBase.proxy ?? null,
+              vpn: qBase.vpn ?? null,
+              tor: qBase.tor ?? null,
+              abuse: qBase.abuse ?? null,
+            }
+            const scoresObj = qBase.scores || qBase.sources || {}
 
-                <div className="ip-quality-summary-item">
-                  <span className="label">IP 类型</span>
-                  <span className="value">{formatIPQualityType(ipQuality.ip_type)}</span>
-                </div>
-
-                <div className="ip-quality-summary-item">
-                  <span className="label">地区</span>
-                  <span className="value" title={[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}>
-                    {[ipQuality.region, ipQuality.country].filter(Boolean).join(' · ') || '—'}
-                  </span>
-                </div>
-
-                <div className="ip-quality-summary-item">
-                  <span className="label">ASN / 组织</span>
-                  <span className="value" title={[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}>
-                    {[ipQuality.asn, ipQuality.organization].filter(Boolean).join(' ') || '—'}
-                  </span>
-                </div>
-
-                <div className="ip-quality-summary-item">
-                  <span className="label">最后检测</span>
-                  <span className="value mono" title={ipQuality.checked_at ? formatIPQualityDateTime(ipQuality.checked_at) : '等待检测'}>
-                    {ipQuality.checked_at ? formatIPQualityDateTime(ipQuality.checked_at) : (ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待检测')}
-                  </span>
-                </div>
-              </div>
-
-              {/* 第二行：三个信息面板 */}
-              <div className="ip-quality-detail-grid ip-quality-detail-grid-two ip-quality-detail-grid-three">
-                {/* 面板 1: 风险评分 */}
-                <section className="ip-quality-panel">
-                  <div className="ip-quality-panel-title">
-                    <span className="panel-title-text">
-                      <Gauge size={14} />
-                      <span>风险评分（越低越好）</span>
+            return (
+              <>
+                {publicDetailError && (
+                  <div className="ip-quality-stale-alert">
+                    检测服务暂时不可用，显示最近一次成功结果
+                  </div>
+                )}
+                {/* 第一行：5 个紧凑摘要格 */}
+                <div className="ip-quality-summary-grid ip-quality-summary-grid-five">
+                  <div className="ip-quality-summary-item risk">
+                    <span className="label">综合风险</span>
+                    <span className={`value risk-${qBase.risk === 'low' ? 'low' : qBase.risk === 'medium' ? 'medium' : qBase.risk === 'high' ? 'high' : 'unknown'}`}>
+                      {qBase.risk === 'low' ? (
+                        <ShieldCheck size={14} className="text-mint" />
+                      ) : qBase.risk === 'medium' ? (
+                        <ShieldWarning size={14} className="text-amber" />
+                      ) : qBase.risk === 'high' ? (
+                        <ShieldWarning size={14} className="text-rose" />
+                      ) : (
+                        <Shield size={14} className="text-muted" />
+                      )}
+                      <span>
+                        {qBase.risk === 'low'
+                          ? '低风险'
+                          : qBase.risk === 'medium'
+                          ? '中风险'
+                          : qBase.risk === 'high'
+                          ? '高风险'
+                          : '未知风险'}
+                      </span>
                     </span>
                   </div>
-                  <div className="ip-quality-panel-body">
-                    {ipQuality.sources && Object.keys(ipQuality.sources).length > 0 ? (
-                      <div className="ip-quality-score-list">
-                        {Object.entries(ipQuality.sources).map(([sourceKey, scoreVal]) => {
-                          const scoreNum = Number(scoreVal)
-                          const isNum = Number.isFinite(scoreNum)
-                          const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
-                          const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
-                          const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
-                          const label = formatIPQualitySourceName(sourceKey)
-                          return (
-                            <div key={sourceKey} className="ip-quality-score-row">
-                              <span className="ip-quality-score-label" title={label}>{label}</span>
-                              <div className="ip-quality-score-track">
-                                <div
-                                  className={`ip-quality-score-bar score-${tone}`}
-                                  style={{ width: `${pct}%` }}
-                                />
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">IP 类型</span>
+                    <span className="value">{formatIPQualityType(qIpType)}</span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">地区</span>
+                    <span className="value" title={qLocation}>
+                      {qLocation}
+                    </span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">ASN / 组织</span>
+                    <span className="value" title={qAsnOrg}>
+                      {qAsnOrg}
+                    </span>
+                  </div>
+
+                  <div className="ip-quality-summary-item">
+                    <span className="label">最后检测</span>
+                    <span className="value mono" title={qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'}>
+                      {qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 第二行：两个信息面板（纯风险评分 + 数据库标记） */}
+                <div className="ip-quality-detail-grid ip-quality-detail-grid-two">
+                  {/* 面板 1: 风险评分 */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Gauge size={14} />
+                        <span>风险评分（越低越好）</span>
+                      </span>
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      {scoresObj && Object.keys(scoresObj).length > 0 ? (
+                        <div className="ip-quality-score-list">
+                          {Object.entries(scoresObj).map(([sourceKey, scoreVal]) => {
+                            const scoreNum = Number(scoreVal)
+                            const isNum = Number.isFinite(scoreNum)
+                            const displayVal = isNum ? String(Math.round(scoreNum * 100) / 100) : '—'
+                            const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
+                            const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
+                            const label = formatIPQualitySourceName(sourceKey)
+                            return (
+                              <div key={sourceKey} className="ip-quality-score-row">
+                                <span className="ip-quality-score-label" title={label}>{label}</span>
+                                <div className="ip-quality-score-track">
+                                  <div
+                                    className={`ip-quality-score-bar score-${tone}`}
+                                    style={{ width: `${pct}%` }}
+                                  />
+                                </div>
+                                <span className={`ip-quality-score-value score-text-${tone} mono`}>
+                                  {displayVal}
+                                </span>
                               </div>
-                              <span className={`ip-quality-score-value score-text-${tone} mono`}>
-                                {displayVal}
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="ip-quality-empty-inline">
+                          <span>暂无多来源评分</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* 面板 2: 数据库标记 */}
+                  <section className="ip-quality-panel">
+                    <div className="ip-quality-panel-title">
+                      <span className="panel-title-text">
+                        <Database size={14} />
+                        <span>数据库标记（命中 / 有结论的库）</span>
+                      </span>
+                    </div>
+                    <div className="ip-quality-panel-body">
+                      <div className="ip-quality-flag-grid">
+                        {[
+                          ['代理', qFlags.proxy],
+                          ['VPN', qFlags.vpn],
+                          ['Tor', qFlags.tor],
+                          ['滥用', qFlags.abuse],
+                          ['机房', !qIpType || qIpType === 'unknown' ? null : (qIpType === 'hosting' || qIpType === 'datacenter')],
+                        ].map(([label, val]) => {
+                          const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
+                          return (
+                            <div key={label} className="ip-quality-flag-item">
+                              <span className="flag-label">{label}</span>
+                              <span className={`flag-status flag-${status}`}>
+                                {val === true ? '是' : val === false ? '否' : '未知'}
                               </span>
                             </div>
                           )
                         })}
                       </div>
-                    ) : (
-                      <div className="ip-quality-empty-inline">
-                        <span>暂无多来源评分</span>
+                      <div className="ip-quality-panel-footer">
+                        <small className="ip-quality-check-time">
+                          检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · 来源未提供统计
+                        </small>
                       </div>
-                    )}
-                  </div>
-                </section>
-
-                {/* 面板 2: 数据库标记 */}
-                <section className="ip-quality-panel">
-                  <div className="ip-quality-panel-title">
-                    <span className="panel-title-text">
-                      <Database size={14} />
-                      <span>数据库标记（命中 / 有结论的库）</span>
-                    </span>
-                  </div>
-                  <div className="ip-quality-panel-body">
-                    <div className="ip-quality-flag-grid">
-                      {[
-                        ['代理', ipQuality.proxy],
-                        ['VPN', ipQuality.vpn],
-                        ['Tor', ipQuality.tor],
-                        ['滥用', ipQuality.abuse],
-                        ['机房', !ipQuality.ip_type || ipQuality.ip_type === 'unknown' ? null : (ipQuality.ip_type === 'hosting' || ipQuality.ip_type === 'datacenter')],
-                      ].map(([label, val]) => {
-                        const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
-                        return (
-                          <div key={label} className="ip-quality-flag-item">
-                            <span className="flag-label">{label}</span>
-                            <span className={`flag-status flag-${status}`}>
-                              {val === true ? '是' : val === false ? '否' : '未检测'}
-                            </span>
-                          </div>
-                        )
-                      })}
                     </div>
-                    <div className="ip-quality-panel-footer">
-                      <small className="ip-quality-check-time">
-                        检测时间：{formatIPQualityDateTime(ipQuality.checked_at)} · 来源未提供统计
-                      </small>
+                  </section>
+                </div>
+
+                {/* 第三行：IPQA 告警报告独立板块 / 状态提示 */}
+                {qIpqa.enabled && qIpqa.installed ? (
+                  <div className="ipqa-status-strip" style={{ marginTop: '10px' }}>
+                    <div className="ipqa-status-header">
+                      <div className="ipqa-status-title">
+                        <ShieldCheck size={14} className="text-mint" />
+                        <span>IPQA 历史归档比对与告警</span>
+                      </div>
+                      {qIpqa.highestSeverity === 'CRITICAL' ? (
+                        <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
+                      ) : qIpqa.highestSeverity === 'WARNING' ? (
+                        <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
+                      ) : qIpqa.highestSeverity === 'INFO' ? (
+                        <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
+                      ) : (
+                        <span className="ipqa-badge ipqa-badge-green">无异常</span>
+                      )}
+                    </div>
+                    <div className="ipqa-metrics-grid" style={{ marginTop: '8px' }}>
+                      <div className="ipqa-metric-item">
+                        <span className="label">最近检测</span>
+                        <span className="value mono">{qIpqa.lastChangeAt ? formatIPQualityDateTime(qIpqa.lastChangeAt) : '等待检测'}</span>
+                      </div>
+                      <div className="ipqa-metric-item">
+                        <span className="label">协议簇 / 等级</span>
+                        <span className={`value mono sev-${(qIpqa.highestSeverity || 'none').toLowerCase()}`}>
+                          {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {qIpqa.highestSeverity || '正常'}
+                        </span>
+                      </div>
+                      <div className="ipqa-metric-item">
+                        <span className="label">今日告警</span>
+                        <span className="value mono">
+                          {qIpqa.alertCount ?? 0} 项
+                          {qIpqa.criticalCount > 0 && <small className="text-rose"> ({qIpqa.criticalCount} 严重)</small>}
+                        </span>
+                      </div>
+                      <div className="ipqa-metric-item">
+                        <span className="label">变化摘要</span>
+                        <span className="value text-truncate" title={qIpqa.recentChangeSummary || (qIpqa.hasRecentChanges ? '检测到风险变动' : '与前次归档对比无变化')}>
+                          {qIpqa.hasRecentChanges ? (qIpqa.recentChangeSummary || '检测到风险变动') : '与前次归档对比无变化'}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </section>
-
-                {/* 面板 3: IPQA 状态与历史变化 */}
-                <section className="ip-quality-panel">
-                  <div className="ip-quality-panel-title">
-                    <span className="panel-title-text">
-                      <ShieldCheck size={14} className="text-mint" />
-                      <span>IPQA 风险变化</span>
-                    </span>
-                    {!ipQuality?.ipqa_enabled ? (
-                      <span className="ipqa-badge ipqa-badge-gray">未启用 IPQA</span>
-                    ) : !ipQuality?.ipqa_installed ? (
-                      <span className="ipqa-badge ipqa-badge-gray">未安装</span>
-                    ) : ipQuality?.collection_error ? (
-                      <span className="ipqa-badge ipqa-badge-orange">采集失败</span>
-                    ) : ipQuality?.highest_severity === 'CRITICAL' ? (
-                      <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
-                    ) : ipQuality?.highest_severity === 'WARNING' ? (
-                      <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
-                    ) : ipQuality?.highest_severity === 'INFO' ? (
-                      <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
-                    ) : (
-                      <span className="ipqa-badge ipqa-badge-green">无变化</span>
-                    )}
+                ) : (
+                  <div className="ipqa-status-strip" style={{ marginTop: '8px' }}>
+                    <div className="ipqa-status-header">
+                      <div className="ipqa-status-title">
+                        <ShieldCheck size={14} className="text-muted" />
+                        <span className="text-muted">IPQA 历史归档比对：未启用（节点未安装 IPQA 增强插件，基础 IP 质量正常生效）</span>
+                      </div>
+                      <span className="ipqa-badge ipqa-badge-gray">未启用</span>
+                    </div>
                   </div>
-                  <div className="ipqa-panel-body">
-                    {!ipQuality?.ipqa_enabled ? (
-                      <div className="ip-quality-empty-inline" style={{ minHeight: '80px', flexDirection: 'column', gap: '4px' }}>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>未启用 IPQA</span>
-                        <span className="text-muted" style={{ fontSize: '10px' }}>支持 IP-Quality-Archive 历史比对</span>
-                      </div>
-                    ) : !ipQuality?.ipqa_installed ? (
-                      <div className="ip-quality-empty-inline" style={{ minHeight: '80px' }}>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>节点未安装 IP-Quality-Archive</span>
-                      </div>
-                    ) : ipQuality?.collection_error ? (
-                      <div className="ip-quality-empty-inline text-amber" style={{ minHeight: '80px' }}>
-                        <span style={{ fontSize: '12px' }}>IPQA 数据暂时不可用</span>
-                      </div>
-                    ) : (
-                      <div className="ipqa-panel-metrics">
-                        <div className="ipqa-metric-row">
-                          <span className="label">最近检测</span>
-                          <span className="value mono">{ipQuality.last_checked_at ? formatIPQualityDateTime(ipQuality.last_checked_at) : '等待检测'}</span>
-                        </div>
-                        <div className="ipqa-metric-row">
-                          <span className="label">协议簇 / 等级</span>
-                          <span className={`value mono sev-${(ipQuality.highest_severity || 'none').toLowerCase()}`}>
-                            {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {ipQuality.highest_severity || '无'}
-                          </span>
-                        </div>
-                        <div className="ipqa-metric-row">
-                          <span className="label">今日告警</span>
-                          <span className="value mono">
-                            {ipQuality.alert_count ?? 0} 项
-                            {ipQuality.critical_count > 0 && <small className="text-rose"> ({ipQuality.critical_count} 严重)</small>}
-                          </span>
-                        </div>
-                        <div className="ipqa-metric-row">
-                          <span className="label">变化摘要</span>
-                          <span className="value text-truncate" title={ipQuality.recent_change_summary || (ipQuality.has_recent_changes ? '检测到风险变动' : '与前次归档对比无变化')}>
-                            {ipQuality.has_recent_changes ? (ipQuality.recent_change_summary || '检测到风险变动') : '与前次归档对比无变化'}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-            </>
-          ) : (
+                )}
+              </>
+            )
+          })() : (
             <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldWarning size={16} className="text-amber" />

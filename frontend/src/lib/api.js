@@ -1,9 +1,107 @@
+export function normalizeIPQuality(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+  const data = raw.ip_quality || raw.ipQuality || raw
+
+  const ipType = data.ipType || data.ip_type || ''
+  const country = data.country || ''
+  const region = data.region || ''
+  const city = data.city || ''
+  const asn = data.asn || ''
+  const organization = data.organization || data.org || ''
+  const risk = data.risk || ''
+  const checkedAt = data.checkedAt ?? data.checked_at ?? null
+  const stale = Boolean(data.stale)
+  const source = data.source || ''
+
+  const scores = data.scores && typeof data.scores === 'object' ? data.scores : {}
+  const rawFlags = data.flags && typeof data.flags === 'object' ? data.flags : {}
+  const flags = {
+    proxy: typeof rawFlags.proxy === 'boolean' ? rawFlags.proxy : (typeof data.proxy === 'boolean' ? data.proxy : null),
+    vpn: typeof rawFlags.vpn === 'boolean' ? rawFlags.vpn : (typeof data.vpn === 'boolean' ? data.vpn : null),
+    tor: typeof rawFlags.tor === 'boolean' ? rawFlags.tor : (typeof data.tor === 'boolean' ? data.tor : null),
+    abuse: typeof rawFlags.abuse === 'boolean' ? rawFlags.abuse : (typeof data.abuse === 'boolean' ? data.abuse : null),
+  }
+
+  const ipqaRaw = data.ipqa && typeof data.ipqa === 'object' ? data.ipqa : data
+  const enabled = Boolean(data.ipqaEnabled ?? data.ipqa_enabled ?? ipqaRaw.enabled)
+  const installed = Boolean(data.ipqaInstalled ?? data.ipqa_installed ?? ipqaRaw.installed)
+  const alertCount = Number(data.alertCount ?? data.alert_count ?? ipqaRaw.alertCount ?? ipqaRaw.alert_count ?? 0)
+  const criticalCount = Number(data.criticalCount ?? data.critical_count ?? ipqaRaw.criticalCount ?? ipqaRaw.critical_count ?? 0)
+  const warningCount = Number(data.warningCount ?? data.warning_count ?? ipqaRaw.warningCount ?? ipqaRaw.warning_count ?? 0)
+  const lastChangeAt = data.lastChangeAt ?? data.last_change_at ?? data.lastCheckedAt ?? data.last_checked_at ?? ipqaRaw.lastChangeAt ?? ipqaRaw.last_change_at ?? null
+  const highestSeverity = data.highestSeverity || data.highest_severity || ipqaRaw.highestSeverity || ''
+  const hasRecentChanges = Boolean(data.hasRecentChanges ?? data.has_recent_changes ?? ipqaRaw.hasRecentChanges)
+  const recentChangeSummary = data.recentChangeSummary || data.recent_change_summary || ipqaRaw.recentChangeSummary || ''
+
+  const ipQualityObj = {
+    ipType,
+    country,
+    region,
+    city,
+    asn,
+    organization,
+    risk,
+    checkedAt,
+    scores,
+    flags,
+    stale,
+    source,
+  }
+
+  const ipqaObj = {
+    enabled,
+    installed,
+    alertCount,
+    criticalCount,
+    warningCount,
+    lastChangeAt,
+    highestSeverity,
+    hasRecentChanges,
+    recentChangeSummary,
+  }
+
+  return {
+    ipQuality: ipQualityObj,
+    ipqa: ipqaObj,
+    ...ipQualityObj,
+    ip_type: ipType,
+    checked_at: checkedAt,
+    ipqa_enabled: enabled,
+    ipqa_installed: installed,
+    alert_count: alertCount,
+    critical_count: criticalCount,
+    warning_count: warningCount,
+    last_checked_at: lastChangeAt,
+    highest_severity: highestSeverity,
+    has_recent_changes: hasRecentChanges,
+    recent_change_summary: recentChangeSummary,
+    proxy: flags.proxy,
+    vpn: flags.vpn,
+    tor: flags.tor,
+    abuse: flags.abuse,
+  }
+}
+
 export async function fetchGuestStatus(signal) {
   try {
     const response = await fetch('/api/public/status', { credentials: 'same-origin', signal })
     if (!response.ok) return null
     const json = await response.json()
-    return json && typeof json === 'object' && !Array.isArray(json) ? json : null
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+      if (Array.isArray(json.nodes?.telemetry)) {
+        json.nodes.telemetry.forEach((t) => {
+          if (t && (t.ip_quality || t.ipQuality)) {
+            const normalized = normalizeIPQuality(t.ip_quality || t.ipQuality)
+            t.ipQuality = normalized
+            t.ip_quality = normalized
+          }
+        })
+      }
+      return json
+    }
+    return null
   } catch (error) {
     if (error?.name === 'AbortError') throw error
     return null
@@ -451,7 +549,28 @@ export async function fetchPublicNodeDetail(uuid, signal) {
     err.status = res.status
     throw err
   }
-  return await res.json()
+  const data = await res.json()
+  if (data && typeof data === 'object') {
+    if (data.ip_quality || data.ipQuality) {
+      const normalized = normalizeIPQuality(data.ip_quality || data.ipQuality)
+      data.ipQuality = normalized
+      data.ip_quality = normalized
+    }
+  }
+  return data
+}
+
+export async function fetchPublicNodeIPQuality(uuid, signal) {
+  try {
+    const res = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/ip-quality`, { credentials: 'same-origin', signal })
+    if (!res.ok) return null
+    const json = await res.json()
+    const quality = json?.ip_quality || json?.ipQuality || json
+    return normalizeIPQuality(quality)
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+    return null
+  }
 }
 
 export async function fetchPublicVersion() {
