@@ -1327,7 +1327,7 @@ export function App() {
       />
     )
   }
-  return <div className="app-shell">
+  return <div className={`app-shell ${sidebarCollapsed ? 'app-shell-sidebar-collapsed' : ''}`}>
     <Sidebar
       activeNav={activeNav}
       onNavigate={navigate}

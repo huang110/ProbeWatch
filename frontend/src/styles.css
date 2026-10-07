@@ -13646,6 +13646,41 @@ main.guest-shell { max-width: 100vw; width: 100%; }
   max-width: var(--admin-page-max);
   padding: 26px 30px 34px;
 }
+
+/* 固定左侧导航：桌面端始终驻留视口，主内容按展开/折叠状态避让。
+   移动端在下方断点恢复为抽屉式导航。 */
+@media (min-width: 821px) {
+  .app-shell > .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-width);
+    height: 100dvh;
+    flex: none;
+    overflow: hidden;
+    z-index: 40;
+  }
+
+  .app-shell > .sidebar.sidebar-collapsed {
+    width: var(--sidebar-narrow);
+  }
+
+  .app-shell > .main-content {
+    width: calc(100% - var(--sidebar-width));
+    max-width: calc(100% - var(--sidebar-width));
+    margin-left: var(--sidebar-width);
+    transition: margin-left 180ms ease, width 180ms ease, max-width 180ms ease;
+  }
+
+  .app-shell.app-shell-sidebar-collapsed > .main-content {
+    width: calc(100% - var(--sidebar-narrow));
+    max-width: calc(100% - var(--sidebar-narrow));
+    margin-left: var(--sidebar-narrow);
+  }
+
+  .app-shell > .main-content .topbar {
+    width: 100%;
+  }
+}
 .app-shell .content-wrap > * { min-width: 0; }
 .app-shell .subpage,
 .app-shell .dashboard-lite-container,
@@ -14852,6 +14887,15 @@ main.guest-shell { max-width: 100vw; width: 100%; }
   .content-wrap,
   .app-shell .content-wrap {
     padding: 14px 12px 24px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .app-shell > .main-content,
+  .app-shell.app-shell-sidebar-collapsed > .main-content {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
   }
 }
 
