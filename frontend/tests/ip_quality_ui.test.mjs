@@ -395,6 +395,56 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
   assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: false }), { badge: '已安装，未开启采集', desc: '已安装，未开启采集', state: 'installed_disabled' })
   assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: true, alert_count: 0 }), { badge: '等待首次归档', desc: 'IPQA 已启用，等待首次归档', state: 'enabled_waiting_archive' })
   assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: true, alert_count: 2 }), { badge: '已启用', desc: 'IPQA 已启用', state: 'enabled' })
+  assert.deepEqual(getIPQAStateInfo({ ipqa_installed: true, ipqa_enabled: true, latest_archive_date: '2026-10-07', alert_count: 0 }), { badge: '已启用', desc: 'IPQA 已启用', state: 'enabled' })
+
+  // Detailed strip title & badge matching NodeDetailPage.jsx
+  function getIPQAStripDisplay(ipQuality) {
+    const isInstalled = Boolean(ipQuality?.ipqa_installed ?? ipQuality?.ipqa?.installed)
+    const isEnabled = Boolean(ipQuality?.ipqa_enabled ?? ipQuality?.ipqa?.enabled)
+    const alertCount = Number(ipQuality?.alert_count ?? ipQuality?.ipqa?.alertCount ?? 0)
+    const highestSeverity = ipQuality?.highest_severity || ipQuality?.ipqa?.highestSeverity || ''
+    const hasRecentChanges = Boolean(ipQuality?.has_recent_changes ?? ipQuality?.ipqa?.hasRecentChanges)
+    const hasArchive = isInstalled && isEnabled && Boolean(
+      alertCount > 0 || hasRecentChanges || ipQuality?.latest_archive_date
+    )
+    const hasRiskChanges = Boolean(
+      hasRecentChanges || alertCount > 0 || (highestSeverity && highestSeverity !== 'NONE' && highestSeverity !== 'NORMAL')
+    )
+
+    if (isInstalled && isEnabled && hasArchive) {
+      if (hasRiskChanges) {
+        return {
+          title: `IPQA 风险变化（发现 ${alertCount || 1} 项变化 · 最高等级：${highestSeverity || '提示'}）`,
+          badge: highestSeverity === 'CRITICAL' ? 'CRITICAL 严重' : highestSeverity === 'WARNING' ? 'WARNING 警告' : `发现 ${alertCount || 1} 项变化`,
+        }
+      }
+      return {
+        title: 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）',
+        badge: 'IPQA 已启用',
+      }
+    }
+    return null
+  }
+
+  const liveNodeDisplay = getIPQAStripDisplay({
+    ipqa_installed: true,
+    ipqa_enabled: true,
+    latest_archive_date: '2026-10-07',
+    highest_severity: 'NONE',
+    alert_count: 0,
+  })
+  assert.equal(liveNodeDisplay?.badge, 'IPQA 已启用')
+  assert.equal(liveNodeDisplay?.title, 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）')
+
+  const riskNodeDisplay = getIPQAStripDisplay({
+    ipqa_installed: true,
+    ipqa_enabled: true,
+    latest_archive_date: '2026-10-07',
+    highest_severity: 'WARNING',
+    alert_count: 2,
+  })
+  assert.equal(riskNodeDisplay?.badge, 'WARNING 警告')
+  assert.ok(riskNodeDisplay?.title.includes('IPQA 风险变化'))
 
   console.log("[PASS] IPQA Status Strip logic and 4-state matrix verified")
 }

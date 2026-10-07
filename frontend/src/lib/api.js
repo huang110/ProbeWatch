@@ -42,6 +42,12 @@ export function normalizeIPQuality(raw) {
   const highestSeverity = data.highestSeverity || data.highest_severity || ipqaRaw.highestSeverity || ''
   const hasRecentChanges = Boolean(data.hasRecentChanges ?? data.has_recent_changes ?? ipqaRaw.hasRecentChanges)
   const recentChangeSummary = data.recentChangeSummary || data.recent_change_summary || ipqaRaw.recentChangeSummary || ''
+  const latestArchiveDate = data.latestArchiveDate || data.latest_archive_date || ipqaRaw.latestArchiveDate || ipqaRaw.latest_archive_date || ''
+  const sources = Array.isArray(data.sources) ? data.sources : (Array.isArray(ipqaRaw.sources) ? ipqaRaw.sources : [])
+  const riskScore = typeof data.riskScore === 'number' ? data.riskScore : (typeof data.risk_score === 'number' ? data.risk_score : (typeof ipqaRaw.riskScore === 'number' ? ipqaRaw.riskScore : (typeof ipqaRaw.risk_score === 'number' ? ipqaRaw.risk_score : null)))
+  const riskLevel = data.riskLevel || data.risk_level || ipqaRaw.riskLevel || ipqaRaw.risk_level || ''
+  const hasIPv4 = Boolean(data.hasIPv4 ?? data.has_ipv4 ?? ipqaRaw.hasIPv4 ?? ipqaRaw.has_ipv4 ?? true)
+  const hasIPv6 = Boolean(data.hasIPv6 ?? data.has_ipv6 ?? ipqaRaw.hasIPv6 ?? ipqaRaw.has_ipv6 ?? false)
 
   const ipQualityObj = {
     ipType,
@@ -69,6 +75,12 @@ export function normalizeIPQuality(raw) {
     highestSeverity,
     hasRecentChanges,
     recentChangeSummary,
+    latestArchiveDate,
+    sources,
+    riskScore,
+    riskLevel,
+    hasIPv4,
+    hasIPv6,
   }
 
   return {
@@ -87,6 +99,17 @@ export function normalizeIPQuality(raw) {
     highest_severity: highestSeverity,
     has_recent_changes: hasRecentChanges,
     recent_change_summary: recentChangeSummary,
+    latest_archive_date: latestArchiveDate,
+    latestArchiveDate,
+    sources,
+    risk_score: riskScore,
+    riskScore,
+    risk_level: riskLevel,
+    riskLevel,
+    has_ipv4: hasIPv4,
+    hasIPv4,
+    has_ipv6: hasIPv6,
+    hasIPv6,
     proxy: flags.proxy,
     vpn: flags.vpn,
     tor: flags.tor,

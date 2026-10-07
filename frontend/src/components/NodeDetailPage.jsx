@@ -1726,16 +1726,21 @@ export function NodeDetailPage({
             </div>
           ) : ipQuality ? (() => {
             const qBase = ipQuality.ipQuality || ipQuality
-            const qIpqa = ipQuality.ipqa || {
-              enabled: Boolean(ipQuality.ipqa_enabled),
-              installed: Boolean(ipQuality.ipqa_installed),
-              state: ipQuality.ipqa_state || '',
-              highestSeverity: ipQuality.highest_severity || '',
-              alertCount: Number(ipQuality.alert_count || 0),
-              criticalCount: Number(ipQuality.critical_count || 0),
-              lastChangeAt: ipQuality.last_checked_at || ipQuality.checked_at || null,
-              hasRecentChanges: Boolean(ipQuality.has_recent_changes),
-              recentChangeSummary: ipQuality.recent_change_summary || '',
+            const qIpqa = {
+              enabled: Boolean(ipQuality.ipqa_enabled ?? ipQuality.ipqa?.enabled),
+              installed: Boolean(ipQuality.ipqa_installed ?? ipQuality.ipqa?.installed),
+              state: ipQuality.ipqa_state || ipQuality.ipqa?.state || '',
+              highestSeverity: ipQuality.highest_severity || ipQuality.ipqa?.highestSeverity || '',
+              alertCount: Number(ipQuality.alert_count ?? ipQuality.ipqa?.alertCount ?? 0),
+              criticalCount: Number(ipQuality.critical_count ?? ipQuality.ipqa?.criticalCount ?? 0),
+              warningCount: Number(ipQuality.warning_count ?? ipQuality.ipqa?.warningCount ?? 0),
+              lastChangeAt: ipQuality.last_checked_at || ipQuality.checked_at || ipQuality.ipqa?.lastChangeAt || null,
+              latestArchiveDate: ipQuality.latest_archive_date || ipQuality.ipqa?.latestArchiveDate || '',
+              sources: Array.isArray(ipQuality.sources) ? ipQuality.sources : (Array.isArray(ipQuality.ipqa?.sources) ? ipQuality.ipqa?.sources : []),
+              riskScore: typeof ipQuality.risk_score === 'number' ? ipQuality.risk_score : (typeof ipQuality.ipqa?.riskScore === 'number' ? ipQuality.ipqa?.riskScore : null),
+              riskLevel: ipQuality.risk_level || ipQuality.ipqa?.riskLevel || '',
+              hasRecentChanges: Boolean(ipQuality.has_recent_changes ?? ipQuality.ipqa?.hasRecentChanges),
+              recentChangeSummary: ipQuality.recent_change_summary || ipQuality.ipqa?.recentChangeSummary || '',
             }
             const qIpType = qBase.ipType || qBase.ip_type || ''
             const qLocation = [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
@@ -1895,11 +1900,17 @@ export function NodeDetailPage({
                   const isInstalled = Boolean(qIpqa.installed)
                   const isEnabled = Boolean(qIpqa.enabled)
                   const hasArchive = isInstalled && isEnabled && Boolean(
+                    qIpqa.latestArchiveDate ||
                     qIpqa.alertCount > 0 ||
                     qIpqa.criticalCount > 0 ||
                     qIpqa.hasRecentChanges ||
                     qIpqa.recentChangeSummary ||
                     qIpqa.lastChangeAt
+                  )
+                  const hasRiskChanges = Boolean(
+                    qIpqa.hasRecentChanges ||
+                    (qIpqa.alertCount > 0) ||
+                    (qIpqa.highestSeverity && qIpqa.highestSeverity !== 'NONE' && qIpqa.highestSeverity !== 'NORMAL')
                   )
 
                   if (isInstalled && isEnabled && hasArchive) {
@@ -1908,27 +1919,35 @@ export function NodeDetailPage({
                         <div className="ipqa-status-header">
                           <div className="ipqa-status-title">
                             <ShieldCheck size={14} className="text-mint" />
-                            <span>IPQA 历史归档比对与告警</span>
+                            <span>
+                              {hasRiskChanges
+                                ? `IPQA 风险变化（发现 ${qIpqa.alertCount || 1} 项变化 · 最高等级：${qIpqa.highestSeverity || '提示'}）`
+                                : 'IPQA 历史归档比对：IPQA 已启用（暂无风险变化）'}
+                            </span>
                           </div>
-                          {qIpqa.highestSeverity === 'CRITICAL' ? (
-                            <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
-                          ) : qIpqa.highestSeverity === 'WARNING' ? (
-                            <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
-                          ) : qIpqa.highestSeverity === 'INFO' ? (
-                            <span className="ipqa-badge ipqa-badge-blue">INFO 提示</span>
+                          {hasRiskChanges ? (
+                            qIpqa.highestSeverity === 'CRITICAL' ? (
+                              <span className="ipqa-badge ipqa-badge-red">CRITICAL 严重</span>
+                            ) : qIpqa.highestSeverity === 'WARNING' ? (
+                              <span className="ipqa-badge ipqa-badge-yellow">WARNING 警告</span>
+                            ) : (
+                              <span className="ipqa-badge ipqa-badge-blue">发现 {qIpqa.alertCount || 1} 项变化</span>
+                            )
                           ) : (
-                            <span className="ipqa-badge ipqa-badge-green">无异常</span>
+                            <span className="ipqa-badge ipqa-badge-green">IPQA 已启用</span>
                           )}
                         </div>
                         <div className="ipqa-metrics-grid" style={{ marginTop: '8px' }}>
                           <div className="ipqa-metric-item">
-                            <span className="label">最近检测</span>
-                            <span className="value mono">{qIpqa.lastChangeAt ? formatIPQualityDateTime(qIpqa.lastChangeAt) : '等待检测'}</span>
+                            <span className="label">最新归档</span>
+                            <span className="value mono">
+                              {qIpqa.latestArchiveDate || (qIpqa.lastChangeAt ? formatIPQualityDateTime(qIpqa.lastChangeAt) : '今日归档')}
+                            </span>
                           </div>
                           <div className="ipqa-metric-item">
-                            <span className="label">协议簇 / 等级</span>
+                            <span className="label">协议簇 / 状态</span>
                             <span className={`value mono sev-${(qIpqa.highestSeverity || 'none').toLowerCase()}`}>
-                              {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {qIpqa.highestSeverity || '正常'}
+                              {hasDualStack ? '双栈' : (detailResource.ipv6 || publicDetail?.resource?.has_ipv6 ? 'IPv6' : 'IPv4')} · {hasRiskChanges ? (qIpqa.highestSeverity || '告警') : '正常'}
                             </span>
                           </div>
                           <div className="ipqa-metric-item">
@@ -1939,9 +1958,9 @@ export function NodeDetailPage({
                             </span>
                           </div>
                           <div className="ipqa-metric-item">
-                            <span className="label">变化摘要</span>
-                            <span className="value text-truncate" title={qIpqa.recentChangeSummary || (qIpqa.hasRecentChanges ? '检测到风险变动' : '与前次归档对比无变化')}>
-                              {qIpqa.hasRecentChanges ? (qIpqa.recentChangeSummary || '检测到风险变动') : '与前次归档对比无变化'}
+                            <span className="label">风险变化</span>
+                            <span className="value text-truncate" title={hasRiskChanges ? (qIpqa.recentChangeSummary || '发现风险变动') : '暂无风险变化'}>
+                              {hasRiskChanges ? (qIpqa.recentChangeSummary || '发现风险变动') : '暂无风险变化'}
                             </span>
                           </div>
                         </div>

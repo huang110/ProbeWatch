@@ -467,6 +467,12 @@ type publicIPQualityDTO struct {
 	LastCheckedAt       *int64             `json:"last_checked_at,omitempty"`
 	HasRecentChanges    bool               `json:"has_recent_changes,omitempty"`
 	RecentChangeSummary string             `json:"recent_change_summary,omitempty"`
+	LatestArchiveDate   string             `json:"latest_archive_date,omitempty"`
+	Sources             []string           `json:"sources,omitempty"`
+	RiskScore           *float64           `json:"risk_score,omitempty"`
+	RiskLevel           string             `json:"risk_level,omitempty"`
+	HasIPv4             bool               `json:"has_ipv4,omitempty"`
+	HasIPv6             bool               `json:"has_ipv6,omitempty"`
 }
 
 type publicHealthInfoDTO struct {
@@ -803,6 +809,26 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		dto.CriticalCount = qa.CriticalCount
 		dto.WarningCount = qa.WarningCount
 		dto.InfoCount = qa.InfoCount
+		dto.LatestArchiveDate = qa.LatestArchiveDate
+		if len(qa.Sources) > 0 {
+			dto.Sources = qa.Sources
+		}
+		dto.HasIPv4 = qa.IPv4 != nil
+		dto.HasIPv6 = qa.IPv6 != nil
+		if qa.IPv4 != nil {
+			if qa.IPv4.RiskScore != nil {
+				dto.RiskScore = qa.IPv4.RiskScore
+			}
+			if qa.IPv4.RiskLevel != "" {
+				dto.RiskLevel = qa.IPv4.RiskLevel
+				if dto.Risk == "" || dto.Risk == "unknown" {
+					dto.Risk = qa.IPv4.RiskLevel
+				}
+			}
+			if len(qa.IPv4.SourceScores) > 0 && len(dto.Scores) == 0 {
+				dto.Scores = qa.IPv4.SourceScores
+			}
+		}
 		if qa.LastCheckedAt > 0 {
 			dto.LastCheckedAt = &qa.LastCheckedAt
 			if dto.CheckedAt == 0 {
@@ -818,6 +844,12 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		}
 		if qa.Enabled && qa.Installed {
 			dto.Source = "IPQA"
+			if qa.IPv4 != nil && qa.IPv4.RiskLevel != "" {
+				dto.Risk = qa.IPv4.RiskLevel
+			}
+			if qa.IPv4 != nil && len(qa.IPv4.SourceScores) > 0 {
+				dto.Scores = qa.IPv4.SourceScores
+			}
 		}
 		if (dto.IPType == "" || dto.IPType == "unknown") && qa.IPv4 != nil && qa.IPv4.IPType != "" {
 			dto.IPType = qa.IPv4.IPType
