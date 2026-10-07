@@ -2,6 +2,9 @@ export function normalizeIPQuality(raw) {
   if (!raw || typeof raw !== 'object') {
     return null
   }
+  if (raw.ipQuality && raw.ipqa && typeof raw.ipqa === 'object' && typeof raw.ipQuality === 'object') {
+    return raw
+  }
   const data = raw.ip_quality || raw.ipQuality || raw
 
   const ipType = data.ipType || data.ip_type || ''
@@ -24,10 +27,14 @@ export function normalizeIPQuality(raw) {
     abuse: typeof rawFlags.abuse === 'boolean' ? rawFlags.abuse : (typeof data.abuse === 'boolean' ? data.abuse : null),
   }
 
-  const ipqaRaw = data.ipqa && typeof data.ipqa === 'object' ? data.ipqa : data
-  const enabled = Boolean(data.ipqaEnabled ?? data.ipqa_enabled ?? ipqaRaw.enabled)
-  const installed = Boolean(data.ipqaInstalled ?? data.ipqa_installed ?? ipqaRaw.installed)
-  const state = data.ipqaState || data.ipqa_state || ipqaRaw.state || (installed ? (enabled ? 'enabled' : 'installed_disabled') : 'not_installed')
+  const ipqaRaw = (raw.ipqa && typeof raw.ipqa === 'object')
+    ? raw.ipqa
+    : (data.ipqa && typeof data.ipqa === 'object')
+      ? data.ipqa
+      : (typeof raw === 'object' ? raw : data)
+  const enabled = Boolean(raw.ipqa_enabled ?? raw.ipqaEnabled ?? data.ipqaEnabled ?? data.ipqa_enabled ?? ipqaRaw.enabled)
+  const installed = Boolean(raw.ipqa_installed ?? raw.ipqaInstalled ?? data.ipqaInstalled ?? data.ipqa_installed ?? ipqaRaw.installed)
+  const state = raw.ipqa_state || raw.ipqaState || data.ipqaState || data.ipqa_state || ipqaRaw.state || (installed ? (enabled ? 'enabled' : 'installed_disabled') : 'not_installed')
   const alertCount = Number(data.alertCount ?? data.alert_count ?? ipqaRaw.alertCount ?? ipqaRaw.alert_count ?? 0)
   const criticalCount = Number(data.criticalCount ?? data.critical_count ?? ipqaRaw.criticalCount ?? ipqaRaw.critical_count ?? 0)
   const warningCount = Number(data.warningCount ?? data.warning_count ?? ipqaRaw.warningCount ?? ipqaRaw.warning_count ?? 0)
