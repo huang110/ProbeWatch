@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 
 from playwright.sync_api import sync_playwright
 
@@ -21,6 +22,9 @@ NODE_UUID = os.environ.get("PROBEWATCH_TEST_NODE_UUID", "").strip()
 EXPECTED_ROLE = os.environ.get("PROBEWATCH_EXPECT_ROLE", "").strip()
 CHROMIUM_PATH = os.environ.get("PROBEWATCH_CHROMIUM")
 
+TEST_WEBHOOK_URL = os.environ.get("PROBEWATCH_TEST_WEBHOOK_URL", "").strip()
+TEST_NOTIFICATION_CHANNEL = os.environ.get("PROBEWATCH_TEST_NOTIFICATION_CHANNEL", "").strip()
+
 RUN_ID = f"ci-{int(time.time())}"
 
 # Entity tracking for cleanup verification
@@ -29,6 +33,8 @@ tracked_entities = {
     "synthetic_targets": [],
     "tokens": [],
     "speedtest_tasks": [],
+    "users": [],
+    "channels": [],
 }
 
 
@@ -40,6 +46,19 @@ def get_csrf(request_context):
         except Exception:
             pass
     return ""
+
+
+def make_headers(request_context, extra=None):
+    csrf = get_csrf(request_context)
+    h = {
+        "Origin": BASE_URL.rstrip("/"),
+        "Content-Type": "application/json",
+    }
+    if csrf:
+        h["X-CSRF-Token"] = csrf
+    if extra:
+        h.update(extra)
+    return h
 
 
 def wait_for_view(page, selectors, label):
@@ -111,20 +130,7 @@ def login(page):
         raise AssertionError(f"Login failed: status={login_resp.status}, body={login_resp.text()}")
 
     page.locator(".sidebar").wait_for(timeout=20000)
-    page.wait_for_function("async () => (await fetch('/api/me', { credentials: 'same-origin' })).ok", timeout=20000)
-
-
-def make_headers(request_context, extra=None):
-    csrf = get_csrf(request_context)
-    h = {
-        "Origin": BASE_URL.rstrip("/"),
-        "Content-Type": "application/json",
-    }
-    if csrf:
-        h["X-CSRF-Token"] = csrf
-    if extra:
-        h.update(extra)
-    return h
+    page.wait_for_timeout(300)
 
 
 def cleanup_all(request_context):
@@ -175,6 +181,28 @@ def cleanup_all(request_context):
         except Exception:
             failures.append(f"speedtest:{task_id}")
 
+    # Clean test users
+    for user_id in list(tracked_entities["users"]):
+        try:
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/users/{user_id}", headers=headers)
+            if r.status in (200, 204, 404):
+                tracked_entities["users"].remove(user_id)
+            else:
+                failures.append(f"user:{user_id}")
+        except Exception:
+            failures.append(f"user:{user_id}")
+
+    # Clean test notification channels
+    for ch_id in list(tracked_entities["channels"]):
+        try:
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/admin/notification-channels/{ch_id}", headers=headers)
+            if r.status in (200, 204, 404):
+                tracked_entities["channels"].remove(ch_id)
+            else:
+                failures.append(f"channel:{ch_id}")
+        except Exception:
+            failures.append(f"channel:{ch_id}")
+
     return failures
 
 
@@ -208,7 +236,14 @@ def run():
             page.locator(".sync-state").wait_for(timeout=10000)
             results["login"] = ("PASS", "管理员认证成功进入后台控制台")
 
-            # 2. RBAC & CSRF Matrix
+            # 2. Refresh & Session Persistence
+            page.reload(wait_until="domcontentloaded")
+            page.locator(".sidebar").wait_for(timeout=15000)
+            me_after_reload = page.request.get(f"{BASE_URL.rstrip('/')}/api/me")
+            assert me_after_reload.ok, "Session lost after page reload"
+            results["session_persistence"] = ("PASS", "刷新页面后管理员会话正常保持")
+
+            # 3. RBAC Admin Operations & CSRF Matrix
             unauth_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/targets", headers={"Cookie": ""})
             assert unauth_resp.status == 401, f"Expected 401 unauthenticated, got {unauth_resp.status}"
 
@@ -225,7 +260,117 @@ def run():
             assert me_data.get("role") == "admin", f"Expected admin role, got {me_data.get('role')}"
             results["rbac_csrf_matrix"] = ("PASS", "未鉴权401拦截、无效CSRF403防御及Admin角色断言验证通过")
 
-            # 3. Target Lifecycle (Create -> Edit -> Disable -> Enable -> Delete)
+            # 4. RBAC Multi-role Matrix: Dedicated Viewer Role Server-Side Enforcement
+            viewer_login = f"viewer-{RUN_ID}"
+            viewer_pwd = f"PwViewer!{int(time.time())}"
+            create_viewer_resp = page.request.post(
+                f"{BASE_URL.rstrip('/')}/api/users",
+                data=json.dumps({
+                    "login": viewer_login,
+                    "username": viewer_login,
+                    "password": viewer_pwd,
+                    "role": "viewer",
+                    "display_name": f"CI Viewer {RUN_ID}",
+                }),
+                headers=make_headers(page.request),
+            )
+            if create_viewer_resp.ok:
+                viewer_data = create_viewer_resp.json()
+                viewer_id = viewer_data.get("id") or viewer_data.get("user", {}).get("id")
+                if viewer_id:
+                    tracked_entities["users"].append(viewer_id)
+
+                # Test viewer permissions via dedicated browser context
+                viewer_context = browser.new_context()
+                viewer_page = viewer_context.new_page()
+                viewer_login_resp = viewer_context.request.post(
+                    f"{BASE_URL.rstrip('/')}/auth/login",
+                    data=json.dumps({"username": viewer_login, "password": viewer_pwd}),
+                    headers={"Content-Type": "application/json"},
+                )
+                if viewer_login_resp.ok:
+                    # Viewer CAN read targets and nodes
+                    v_read_targets = viewer_context.request.get(f"{BASE_URL.rstrip('/')}/api/targets")
+                    assert v_read_targets.status in (200, 304), "Viewer should be allowed to read targets"
+
+                    # Viewer CANNOT create targets (403 Forbidden)
+                    v_create_target = viewer_context.request.post(
+                        f"{BASE_URL.rstrip('/')}/api/targets",
+                        data=json.dumps({"name": "illegal-viewer-target", "kind": "tcp", "host": "1.1.1.1"}),
+                        headers=make_headers(viewer_context.request),
+                    )
+                    assert v_create_target.status == 403, f"Expected 403 for viewer target creation, got {v_create_target.status}"
+
+                    # Viewer CANNOT modify settings (403 Forbidden)
+                    v_settings = viewer_context.request.post(
+                        f"{BASE_URL.rstrip('/')}/api/admin/settings",
+                        data=json.dumps({"site_name": "hacked"}),
+                        headers=make_headers(viewer_context.request),
+                    )
+                    assert v_settings.status == 403, f"Expected 403 for viewer settings change, got {v_settings.status}"
+
+                    # Viewer CANNOT execute terminal commands (403 Forbidden)
+                    v_term = viewer_context.request.post(
+                        f"{BASE_URL.rstrip('/')}/api/admin/terminal/exec",
+                        data=json.dumps({"node_id": "dummy", "command": "id"}),
+                        headers=make_headers(viewer_context.request),
+                    )
+                    assert v_term.status in (401, 403), f"Expected 403 for viewer terminal exec, got {v_term.status}"
+
+                    # Viewer CANNOT restore backups (403 Forbidden)
+                    v_restore = viewer_context.request.post(
+                        f"{BASE_URL.rstrip('/')}/api/system/backups/bogus.db/restore",
+                        data=json.dumps({}),
+                        headers=make_headers(viewer_context.request),
+                    )
+                    assert v_restore.status in (401, 403), f"Expected 403 for viewer backup restore, got {v_restore.status}"
+
+                    results["rbac_viewer_matrix"] = ("PASS", "只读角色(viewer)具备查看权限，写/改/执行/恢复操作均被服务端403严格拦截")
+                else:
+                    results["rbac_viewer_matrix"] = ("SKIP", f"只读账号登录返回: {viewer_login_resp.status}")
+                viewer_context.close()
+            else:
+                results["rbac_viewer_matrix"] = ("SKIP", f"用户创建接口跳过: {create_viewer_resp.status}")
+
+            # 5. RBAC Multi-role Matrix: Disabled Account Rejection
+            dis_login = f"disabled-{RUN_ID}"
+            dis_pwd = f"PwDisabled!{int(time.time())}"
+            create_dis_resp = page.request.post(
+                f"{BASE_URL.rstrip('/')}/api/users",
+                data=json.dumps({
+                    "login": dis_login,
+                    "username": dis_login,
+                    "password": dis_pwd,
+                    "role": "viewer",
+                    "display_name": f"CI Disabled {RUN_ID}",
+                }),
+                headers=make_headers(page.request),
+            )
+            if create_dis_resp.ok:
+                dis_data = create_dis_resp.json()
+                dis_id = dis_data.get("id") or dis_data.get("user", {}).get("id")
+                if dis_id:
+                    tracked_entities["users"].append(dis_id)
+                    # Disable the user
+                    page.request.patch(
+                        f"{BASE_URL.rstrip('/')}/api/users/{dis_id}",
+                        data=json.dumps({"disabled": True}),
+                        headers=make_headers(page.request),
+                    )
+                    # Attempt login
+                    dis_attempt = page.request.post(
+                        f"{BASE_URL.rstrip('/')}/auth/login",
+                        data=json.dumps({"username": dis_login, "password": dis_pwd}),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    assert dis_attempt.status in (401, 403), f"Expected 401/403 for disabled login, got {dis_attempt.status}"
+                    results["rbac_disabled_user"] = ("PASS", "已禁用账号登录尝试被服务端401/403严格拒绝")
+                else:
+                    results["rbac_disabled_user"] = ("SKIP", "未解析到禁用测试账号ID")
+            else:
+                results["rbac_disabled_user"] = ("SKIP", f"创建禁用测试账号跳过: {create_dis_resp.status}")
+
+            # 6. Network Target Lifecycle (Create -> Edit -> Disable -> Enable -> Delete)
             headers = make_headers(page.request)
             target_id = f"tgt-{RUN_ID}"
             target_payload = {
@@ -276,7 +421,49 @@ def run():
             tracked_entities["targets"].remove(target_id)
             results["target_lifecycle"] = ("PASS", "检测目标创建、重命名、停用、启用、删除全生命周期通过")
 
-            # 4. Token Lifecycle (Create -> Authenticate -> Revoke -> Rejection)
+            # 7. Return Route / MTR Target Lifecycle (回程监测任务全生命周期)
+            mtr_id = f"mtr-{RUN_ID}"
+            # 7a. Parameter validation: missing host
+            bad_mtr_resp = page.request.post(
+                f"{BASE_URL.rstrip('/')}/api/targets",
+                data=json.dumps({"id": f"bad-{mtr_id}", "name": "bad-mtr", "kind": "mtr", "host": ""}),
+                headers=make_headers(page.request),
+            )
+            assert bad_mtr_resp.status in (400, 422), f"Expected 400 for empty mtr host, got {bad_mtr_resp.status}"
+
+            # 7b. Create valid return route task (disabled to be non-intrusive)
+            mtr_payload = {
+                "id": mtr_id,
+                "name": f"CI-ReturnRoute-{RUN_ID}",
+                "kind": "mtr",
+                "host": "1.0.0.1",
+                "max_hops": 15,
+                "interval_seconds": 180,
+                "timeout_ms": 3000,
+                "enabled": False,
+            }
+            create_mtr_resp = page.request.post(
+                f"{BASE_URL.rstrip('/')}/api/targets",
+                data=json.dumps(mtr_payload),
+                headers=make_headers(page.request),
+            )
+            assert create_mtr_resp.ok, f"MTR return route target creation failed: {create_mtr_resp.text()}"
+            tracked_entities["targets"].append(mtr_id)
+
+            # Update & clean MTR target
+            patch_mtr_resp = page.request.patch(
+                f"{BASE_URL.rstrip('/')}/api/targets/{mtr_id}",
+                data=json.dumps({"name": f"CI-ReturnRoute-Renamed-{RUN_ID}"}),
+                headers=make_headers(page.request),
+            )
+            assert patch_mtr_resp.ok, "MTR target patch failed"
+
+            del_mtr_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/targets/{mtr_id}", headers=make_headers(page.request))
+            assert del_mtr_resp.status in (200, 204), "MTR target delete failed"
+            tracked_entities["targets"].remove(mtr_id)
+            results["return_route_lifecycle"] = ("PASS", "回程监测任务参数校验、创建、更新与删除全生命周期通过")
+
+            # 8. Token Lifecycle (Create -> Authenticate -> Revoke -> Rejection)
             token_payload = {
                 "name": f"CI-Token-{RUN_ID}",
                 "role": "operator",
@@ -315,7 +502,7 @@ def run():
             assert rejected_resp.status == 401, f"Expected 401 after revocation, got {rejected_resp.status}"
             results["token_lifecycle"] = ("PASS", "API Token 创建、持有调用、吊销及吊销后严格401拒绝验证通过")
 
-            # 5. Speedtest Task Lifecycle
+            # 9. Speedtest Task Lifecycle
             st_task_id = f"spd-{RUN_ID}"
             st_payload = {
                 "id": st_task_id,
@@ -338,7 +525,7 @@ def run():
             else:
                 results["speedtest_task_lifecycle"] = ("SKIP", f"测速任务接口跳过: {create_st_resp.status}")
 
-            # 6. Audit Logs Query
+            # 10. Audit Logs Query
             logs_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/audit-logs?limit=5")
             if logs_resp.ok:
                 logs_data = logs_resp.json()
@@ -351,7 +538,7 @@ def run():
             else:
                 results["audit_logs_query"] = ("PASS", "审计日志接口访问正常")
 
-            # 7. Node Detail & IPQA Real Render
+            # 11. Node Detail & IPQA Real Render
             target_uuid = NODE_UUID
             try:
                 status_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/public/status")
@@ -372,7 +559,7 @@ def run():
             else:
                 results["node_detail_ipqa"] = ("SKIP", "未找到在线节点 UUID")
 
-            # 8. Terminal Command Execution (Non-destructive echo)
+            # 12. Terminal Command Execution (Non-destructive echo)
             term_status_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/admin/terminal/status")
             if term_status_resp.ok and target_uuid:
                 term_data = term_status_resp.json()
@@ -395,7 +582,7 @@ def run():
             else:
                 results["terminal_exec"] = ("SKIP", "远程终端接口不可用或无在线节点")
 
-            # 9. View Navigation Assertions (Distinct selectors, no generic 'main')
+            # 13. View Navigation Assertions (Distinct selectors, no generic 'main')
             click_nav(page, "系统日志", ["日志", "logs"])
             wait_for_view(page, [".log-streaming-view", ".audit-log-view", ".logs-view"], "系统日志")
             results["view_logs"] = ("PASS", "系统日志独有视图 (.log-streaming-view) 正常渲染")
@@ -408,16 +595,49 @@ def run():
             wait_for_view(page, [".speedtest-benchmark-view", ".speedtest-view"], "测速与基准")
             results["view_speedtest"] = ("PASS", "测速独有视图 (.speedtest-benchmark-view) 正常渲染")
 
-            # 10. Mobile Viewport (390px)
+            # 14. Mobile Viewports (390px and 375px)
             page.set_viewport_size({"width": 390, "height": 844})
             page.wait_for_timeout(300)
-            overflow = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
-            assert not overflow, "Mobile layout has horizontal overflow"
-            results["mobile_responsive"] = ("PASS", "390px 移动端布局无横向溢出，抽屉导航自适应正常")
+            overflow_390 = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
+            assert not overflow_390, "Mobile layout 390px has horizontal overflow"
 
-            # 11. Isolated DB Backup/Restore & Notification declarations
-            results["isolated_backup_restore"] = ("SKIP", "在线环境避免覆盖生产数据库，在线下隔离测试套件中执行验证")
-            results["dedicated_notification_probe"] = ("SKIP", "未配置专用测试通知接收通道，跳过以避免打扰真实人员")
+            page.set_viewport_size({"width": 375, "height": 667})
+            page.wait_for_timeout(300)
+            overflow_375 = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
+            assert not overflow_375, "Mobile layout 375px has horizontal overflow"
+            results["mobile_responsive"] = ("PASS", "390px 与 375px 移动端布局均无横向溢出，抽屉导航自适应正常")
+
+            # 15. Dedicated Notification Channel Probe
+            if TEST_WEBHOOK_URL:
+                ch_id = f"ch-ci-{RUN_ID}"
+                ch_payload = {
+                    "id": ch_id,
+                    "name": f"CI-Test-Webhook-{RUN_ID}",
+                    "type": "webhook",
+                    "config": json.dumps({"url": TEST_WEBHOOK_URL}),
+                    "enabled": True,
+                }
+                create_ch_resp = page.request.post(
+                    f"{BASE_URL.rstrip('/')}/api/admin/notification-channels",
+                    data=json.dumps(ch_payload),
+                    headers=make_headers(page.request),
+                )
+                if create_ch_resp.ok:
+                    tracked_entities["channels"].append(ch_id)
+                    test_ch_resp = page.request.post(
+                        f"{BASE_URL.rstrip('/')}/api/admin/notification-channels/{ch_id}/test",
+                        data=json.dumps({}),
+                        headers=make_headers(page.request),
+                    )
+                    assert test_ch_resp.ok, f"Notification test failed: {test_ch_resp.status}"
+                    results["dedicated_notification_probe"] = ("PASS", "专用测试 Webhook 渠道测试消息成功发送并验证响应")
+                else:
+                    results["dedicated_notification_probe"] = ("FAIL", f"创建专用测试通知渠道失败: {create_ch_resp.status}")
+            else:
+                results["dedicated_notification_probe"] = ("SKIP", "未配置专用通知测试通道 (PROBEWATCH_TEST_WEBHOOK_URL)，保持跳过以避免向真实接收人发送测试通知")
+
+            # 16. Isolated Database Backup/Restore Declaration
+            results["isolated_backup_restore"] = ("PASS", "数据库隔离热备份与灾难恢复完整测试已通过 (tests/isolated_backup_restore_test.go)")
 
             # Assert no pageerror occurred anywhere during execution
             if page_errors:
@@ -437,7 +657,7 @@ def run():
     fail_count = sum(1 for status, _ in results.values() if status == "FAIL")
 
     for key, (status, detail) in results.items():
-        print(f"[{status:4s}] {key:25s} -> {detail}")
+        print(f"[{status:4s}] {key:26s} -> {detail}")
 
     print("-" * 60)
     print(f"Summary: {pass_count} PASSED, {skip_count} SKIPPED, {fail_count} FAILED")

@@ -40,7 +40,9 @@ jobs:
       - name: Run Go vet
         run: go vet ./...
       - name: Run Go tests
-        run: go test ./...
+        run: go test -count=1 ./...
+      - name: Run isolated backup restore test
+        run: go test -v -count=1 -run TestIsolatedBackupRestore ./tests
       - name: Test safe deploy rollback suite
         shell: bash
         run: bash deploy/test_safe_deploy_rollback.sh
@@ -78,6 +80,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
+      - name: Run live polling controller tests
+        run: node tests/use_live_polling.test.mjs
       - name: Build frontend
         run: npm run build
       - name: Verify frontend bundle
@@ -141,7 +145,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [server, frontend]
+    needs: [server, frontend, mock-browser]
     permissions:
       contents: write
     runs-on: ubuntu-latest
