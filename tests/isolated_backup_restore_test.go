@@ -60,14 +60,14 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 		t.Fatalf("UpsertAdminUser: %v", err)
 	}
 
-	reg1, err := store.CreateRegistrationToken(ctx, 1*time.Hour, now)
+	reg1, err := store.CreateRegistrationToken(ctx, 1*time.Hour)
 	if err != nil {
 		t.Fatalf("CreateRegistrationToken: %v", err)
 	}
 	regNode1, err := store.RegisterNode(ctx, reg1.Token, db.NodeInput{
 		UUID: "550e8400-e29b-41d4-a716-446655440011",
 		Name: "Test Seed Node 1",
-	}, 24*time.Hour, now)
+	}, now)
 	if err != nil {
 		t.Fatalf("RegisterNode: %v", err)
 	}
@@ -144,14 +144,14 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 	}
 
 	// 7. Mutate state after backup
-	regPost, err := store.CreateRegistrationToken(ctx, 1*time.Hour, time.Now().UTC())
+	regPost, err := store.CreateRegistrationToken(ctx, 1*time.Hour)
 	if err != nil {
 		t.Fatalf("CreateRegistrationToken post-backup: %v", err)
 	}
 	_, err = store.RegisterNode(ctx, regPost.Token, db.NodeInput{
 		UUID: "550e8400-e29b-41d4-a716-446655440099",
 		Name: "Node Created After Backup",
-	}, 24*time.Hour, time.Now().UTC())
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("RegisterNode post-backup: %v", err)
 	}
@@ -186,20 +186,20 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 		t.Fatalf("restored alert rule mismatch: got %v, err: %v", gotRule1, err)
 	}
 
-	gotSetting, err := restoredStore.GetSetting(ctx, "site_name")
+	gotSetting, err := restoredStore.GetSetting(ctx, "site_name", "")
 	if err != nil || gotSetting != "Isolated CI ProbeWatch" {
 		t.Fatalf("restored setting mismatch: got %q, err: %v", gotSetting, err)
 	}
 
 	// 10. Verify restored database is fully writable
-	reg3, err := restoredStore.CreateRegistrationToken(ctx, 1*time.Hour, time.Now().UTC())
+	reg3, err := restoredStore.CreateRegistrationToken(ctx, 1*time.Hour)
 	if err != nil {
 		t.Fatalf("failed to create registration token in restored db: %v", err)
 	}
 	regNode3, err := restoredStore.RegisterNode(ctx, reg3.Token, db.NodeInput{
 		UUID: "550e8400-e29b-41d4-a716-446655440033",
 		Name: "Test Node Created Post Restore",
-	}, 24*time.Hour, time.Now().UTC())
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("failed to register node in restored db: %v", err)
 	}
