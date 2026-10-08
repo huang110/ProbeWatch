@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # 可配置参数与合理默认值
-STAGE_DIR="${STAGE_DIR:-/opt/probewatch/.deploy-stage-current}"
+STAGE_DIR="${STAGE_DIR:-.}"
 TARGET_DIR="${TARGET_DIR:-/opt/probewatch}"
 TARGET_BIN="${TARGET_DIR}/probewatch"
 NEW_BIN="${1:-${STAGE_DIR}/probewatch-bin-new}"
@@ -342,6 +342,9 @@ if [ -z "${NEW_COMMIT}" ] && [ -f "${STAGE_DIR}/.commit" ]; then
 fi
 if [ -z "${NEW_COMMIT}" ] && [ -d "${STAGE_DIR}/.git" ]; then
   NEW_COMMIT=$(git -C "${STAGE_DIR}" rev-parse HEAD 2>/dev/null || true)
+fi
+if [ -z "${NEW_COMMIT}" ] && git rev-parse HEAD >/dev/null 2>&1; then
+  NEW_COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
 fi
 if [ -n "${NEW_COMMIT}" ]; then
   if ! echo "${NEW_COMMIT}" > "${TARGET_DIR}/CURRENT_COMMIT"; then
