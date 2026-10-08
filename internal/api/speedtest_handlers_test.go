@@ -67,6 +67,7 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 	}
 
 	// 3. Patch Speedtest Task
+	csrf = task4CSRF(t, handler, session)
 	patchPayload := map[string]any{
 		"interval_seconds": 3600,
 	}

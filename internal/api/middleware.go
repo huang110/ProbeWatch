@@ -191,9 +191,11 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		if !isJSONContentType(r.Header.Get("Content-Type")) {
-			writeJSONError(w, http.StatusBadRequest, "content type must be application/json")
-			return
+		if r.Method != http.MethodDelete || (r.Body != nil && r.ContentLength > 0) {
+			if !isJSONContentType(r.Header.Get("Content-Type")) {
+				writeJSONError(w, http.StatusBadRequest, "content type must be application/json")
+				return
+			}
 		}
 
 		// API Token authentication skips browser CSRF check and same-origin requirement
