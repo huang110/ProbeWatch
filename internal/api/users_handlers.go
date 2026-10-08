@@ -60,7 +60,7 @@ func (s *Server) usersRoute(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 4 && parts[1] == "api" && parts[2] == "users" {
 		userID := parts[3]
 		switch r.Method {
-		case http.MethodPut:
+		case http.MethodPut, http.MethodPatch:
 			adminCheck(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.updateUser(w, r, userID)
 			}))).ServeHTTP(w, r)

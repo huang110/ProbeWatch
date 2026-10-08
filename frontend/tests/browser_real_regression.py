@@ -134,13 +134,12 @@ def login(page):
 
 
 def cleanup_all(request_context):
-    headers = make_headers(request_context)
     failures = []
 
     # Clean targets
     for target_id in list(tracked_entities["targets"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/targets/{target_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/targets/{target_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["targets"].remove(target_id)
             else:
@@ -151,7 +150,7 @@ def cleanup_all(request_context):
     # Clean synthetic targets
     for target_id in list(tracked_entities["synthetic_targets"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/synthetic/targets/{target_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/synthetic/targets/{target_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["synthetic_targets"].remove(target_id)
             else:
@@ -162,7 +161,7 @@ def cleanup_all(request_context):
     # Clean tokens
     for token_id in list(tracked_entities["tokens"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/tokens/{token_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/tokens/{token_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["tokens"].remove(token_id)
             else:
@@ -173,7 +172,7 @@ def cleanup_all(request_context):
     # Clean speedtest tasks
     for task_id in list(tracked_entities["speedtest_tasks"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/speedtest/tasks/{task_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/speedtest/tasks/{task_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["speedtest_tasks"].remove(task_id)
             else:
@@ -184,7 +183,7 @@ def cleanup_all(request_context):
     # Clean test users
     for user_id in list(tracked_entities["users"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/users/{user_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/users/{user_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["users"].remove(user_id)
             else:
@@ -195,7 +194,7 @@ def cleanup_all(request_context):
     # Clean test notification channels
     for ch_id in list(tracked_entities["channels"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/alerts/channels/{ch_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/alerts/channels/{ch_id}", headers=make_headers(request_context))
             if r.status in (200, 204, 404):
                 tracked_entities["channels"].remove(ch_id)
             else:
@@ -352,11 +351,12 @@ def run():
                 if dis_id:
                     tracked_entities["users"].append(dis_id)
                     # Disable the user
-                    page.request.patch(
+                    dis_patch_resp = page.request.patch(
                         f"{BASE_URL.rstrip('/')}/api/users/{dis_id}",
                         data=json.dumps({"disabled": True}),
                         headers=make_headers(page.request),
                     )
+                    assert dis_patch_resp.ok, f"Failed to disable user: {dis_patch_resp.status} {dis_patch_resp.text()}"
                     # Attempt login
                     dis_attempt = page.request.post(
                         f"{BASE_URL.rstrip('/')}/auth/login",
