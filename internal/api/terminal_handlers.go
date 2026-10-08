@@ -89,11 +89,16 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		writeAuthenticationError(w, err)
 		return
 	}
-	if session.Disabled {
+	user, err := s.service.Store().GetAdminUser(r.Context(), session.AdminUserID)
+	if err != nil {
+		writeAuthenticationError(w, err)
+		return
+	}
+	if user.Disabled {
 		writeJSONError(w, http.StatusForbidden, "user account is disabled")
 		return
 	}
-	if session.Role != db.RoleAdmin {
+	if user.Role != db.RoleAdmin {
 		writeJSONError(w, http.StatusForbidden, "insufficient role permissions")
 		return
 	}
@@ -182,11 +187,16 @@ func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
 		writeAuthenticationError(w, err)
 		return
 	}
-	if sessionUser.Disabled {
+	user, err := s.service.Store().GetAdminUser(r.Context(), sessionUser.AdminUserID)
+	if err != nil {
+		writeAuthenticationError(w, err)
+		return
+	}
+	if user.Disabled {
 		writeJSONError(w, http.StatusForbidden, "user account is disabled")
 		return
 	}
-	if sessionUser.Role != db.RoleAdmin {
+	if user.Role != db.RoleAdmin {
 		writeJSONError(w, http.StatusForbidden, "insufficient role permissions")
 		return
 	}
