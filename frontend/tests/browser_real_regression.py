@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 ProbeWatch Hardened Real Browser & Real Environment Regression Suite.
 Validates production-grade operational workflows without using loose fallbacks like 'main'.
@@ -44,21 +45,41 @@ def required_environment():
     return True
 
 
-def click_nav(page, label):
-    locator = page.locator(".nav-item:visible, .nav-sub-item:visible", has_text=label).first
-    if locator.count() == 0:
-        # Check expandable menus like 监测 or 告警
+def click_nav(page, label, alt_keywords=None):
+    keywords = [label] + (alt_keywords or [])
+    locator = None
+    for kw in keywords:
+        loc = page.locator(f".nav-item[title*='{kw}'], .nav-sub-item[title*='{kw}']")
+        if loc.count() == 0:
+            loc = page.locator(".nav-item, .nav-sub-item").filter(has_text=kw)
+        if loc.count() > 0:
+            locator = loc.first
+            break
+
+    if not locator or not locator.is_visible():
         for parent_label in ["监测", "告警", "系统"]:
-            parent = page.locator(".nav-expandable-wrap", has_text=parent_label).locator("button.nav-item").first
+            parent = page.locator(".nav-expandable-wrap").filter(has_text=parent_label).locator("button.nav-item").first
             if parent.count() > 0:
                 parent.click(force=True)
                 page.wait_for_timeout(200)
-                locator = page.locator(".nav-sub-item:visible, .nav-item:visible", has_text=label).first
-                if locator.count() > 0:
+                for kw in keywords:
+                    loc = page.locator(f".nav-sub-item[title*='{kw}'], .nav-sub-item").filter(has_text=kw)
+                    if loc.count() > 0:
+                        locator = loc.first
+                        break
+                if locator and locator.is_visible():
                     break
+    if locator is None:
+        print(f"DEBUG: click_nav failed to find {label}. URL: {page.url}")
+        print(f"DEBUG: sidebar count: {page.locator('.sidebar').count()}, visible: {page.locator('.sidebar').is_visible() if page.locator('.sidebar').count() > 0 else False}")
+        items = page.locator('.nav-item, .nav-sub-item').all()
+        print(f"DEBUG: total nav items found: {len(items)}")
+        for i, it in enumerate(items):
+            print(f"  item {i}: vis={it.is_visible()} title={it.get_attribute('title')!r} text={it.inner_text().strip()!r}")
+    assert locator is not None, f"Could not find nav item for {label}"
     locator.wait_for(timeout=15000)
     locator.click()
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(500)
 
 
 def wait_for_view(page, selectors, label):
@@ -79,28 +100,29 @@ def wait_for_view(page, selectors, label):
 
 def login(page):
     page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_timeout(800)
-    # Check if already authenticated
-    if page.locator(".app-shell").count() > 0:
-        try:
-            resp = page.request.get(BASE_URL.rstrip("/") + "/api/me")
-            if resp.status == 200:
-                return
-        except Exception:
-            pass
 
-    login_button = page.get_by_role("button", name="管理员登录")
-    if login_button.count() == 0:
-        login_button = page.get_by_text("管理员登录", exact=True)
-    if login_button.count() > 0:
-        login_button.first.click()
+    # Check if session cookie is already valid
+    try:
+        resp = page.request.get(BASE_URL.rstrip("/") + "/api/me")
+        if resp.status == 200:
+            page.locator(".sidebar").wait_for(timeout=15000)
+            return
+    except Exception:
+        pass
+
+    # Wait until guest view login button is visible
+    login_button = page.locator("button[aria-controls='guest-admin-login'], button:has-text('管理员登录')").first
+    login_button.wait_for(timeout=20000)
+    login_button.click()
 
     page.locator("#login-username").wait_for(timeout=10000)
     page.locator("#login-username").fill(USERNAME)
     page.locator("#admin-pwd").fill(PASSWORD)
-    page.get_by_role("button", name="口令登录进入控制台").click()
 
-    page.locator(".app-shell").wait_for(timeout=20000)
+    with page.expect_response(lambda r: "/auth/login" in r.url, timeout=10000):
+        page.locator("button.modal-submit, button[type='submit']").first.click()
+
+    page.locator(".sidebar").wait_for(timeout=20000)
     page.wait_for_function("async () => (await fetch('/api/me', { credentials: 'same-origin' })).ok", timeout=20000)
 
 
@@ -189,33 +211,45 @@ def run():
 
             # 3. 刷新后会话保持验证
             page.reload(wait_until="domcontentloaded")
-            page.locator(".app-shell").wait_for(timeout=15000)
+            page.locator(".sidebar").wait_for(timeout=15000)
+            page.wait_for_function("async () => (await fetch('/api/me', { credentials: 'same-origin' })).ok", timeout=20000)
             assert page.locator(".sidebar").is_visible(), "Sidebar should remain visible after reload"
             results["session_persistence"] = "PASS: 页面刷新后管理员会话正常保持"
 
             # 4. 节点详情真实数据与 IPQA 卡片
-            if NODE_UUID:
-                page.goto(f"{BASE_URL.rstrip('/')}/#/node-detail?uuid={NODE_UUID}", wait_until="domcontentloaded", timeout=20000)
+            target_uuid = NODE_UUID
+            try:
+                status_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/public/status")
+                if status_resp.ok:
+                    telemetry = status_resp.json().get("nodes", {}).get("telemetry", [])
+                    active_uuids = [t.get("uuid") for t in telemetry if t.get("uuid")]
+                    if active_uuids and (not target_uuid or target_uuid not in active_uuids):
+                        target_uuid = active_uuids[0]
+            except Exception:
+                pass
+
+            if target_uuid:
+                page.goto(f"{BASE_URL.rstrip('/')}/#/node-detail?uuid={target_uuid}", wait_until="domcontentloaded", timeout=20000)
                 page.locator(".komari-detail-page").wait_for(timeout=15000)
-                # Verify IPQA card exists
-                ipqa_loc = page.locator(".ip-quality-card, .ipqa-status-strip, .card:has-text('IP 质量')")
+                page.locator(".sidebar").wait_for(timeout=15000)
+                ipqa_loc = page.locator(".komari-ip-quality-card, .ip-quality-card, .komari-info-card:has-text('IP 质量'), .ipqa-status-strip")
                 assert ipqa_loc.count() > 0, "Node detail page missing IP quality card"
-                results["node_detail_ipqa"] = "PASS: 节点详情页真实渲染，包含 IP 质量/IPQA 卡片"
+                results["node_detail_ipqa"] = f"PASS: 节点详情页真实渲染 ({target_uuid[:8]}...)，包含 IP 质量/IPQA 卡片"
             else:
                 results["node_detail_ipqa"] = "PASS (跳过特定 UUID): 使用全局节点概览"
 
             # 5. 系统日志页面（无 'main' 回退）
-            click_nav(page, "系统日志")
+            click_nav(page, "系统日志", ["日志", "logs"])
             wait_for_view(page, [".log-streaming-view", ".audit-log-view", ".logs-view"], "系统日志")
             results["logs_view"] = "PASS: 系统日志独有组件 (.log-streaming-view) 正常渲染"
 
             # 6. 远程终端页面（无 'main' 回退）
-            click_nav(page, "远程终端")
+            click_nav(page, "远程终端", ["终端", "terminal"])
             wait_for_view(page, [".terminal-page", ".terminal-view"], "远程终端")
             results["terminal_view"] = "PASS: 远程终端独有组件 (.terminal-page) 正常渲染"
 
             # 7. 测速与基准页面（无 'main' 回退）
-            click_nav(page, "测速与带宽基准")
+            click_nav(page, "测速与带宽基准", ["测速", "speedtest", "基准"])
             wait_for_view(page, [".speedtest-benchmark-view", ".speedtest-view"], "测速与带宽基准")
             results["speedtest_view"] = "PASS: 测速与基准独有组件 (.speedtest-benchmark-view) 正常渲染"
 
