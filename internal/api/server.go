@@ -137,6 +137,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/alerts/", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
 	mux.Handle("/api/settings", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
 	mux.Handle("/api/settings/", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
+	mux.Handle("/api/admin/settings", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
+	mux.Handle("/api/admin/settings/", middleware.RequireAuth(http.HandlerFunc(s.settingsRoute)))
 	mux.Handle("/api/nodes/", middleware.RequireAuth(http.HandlerFunc(s.nodeRoute)))
 	mux.Handle("/api/targets", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
 	mux.Handle("/api/targets/", middleware.RequireAuth(http.HandlerFunc(s.targetRoute)))
@@ -158,13 +160,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/speedtest/results", middleware.RequireAuth(http.HandlerFunc(s.speedtestResultsHandler)))
 	mux.HandleFunc("/api/public/speedtest/results", s.publicSpeedtestResultsHandler)
 	mux.Handle("/api/speedtest/history", middleware.RequireAuth(http.HandlerFunc(s.speedtestHistoryHandler)))
-	mux.Handle("/api/speedtest/run", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.speedtestRunHandler))))
-	mux.Handle("/api/synthetic/targets", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTargetsRoute))))
-	mux.Handle("/api/synthetic/targets/", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTargetsRoute))))
+	mux.Handle("/api/speedtest/run", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.speedtestRunHandler)))))
+	mux.Handle("/api/synthetic/targets", middleware.RequireAuth(http.HandlerFunc(s.syntheticTargetsRoute)))
+	mux.Handle("/api/synthetic/targets/", middleware.RequireAuth(http.HandlerFunc(s.syntheticTargetsRoute)))
 	mux.Handle("/api/synthetic/results", middleware.RequireAuth(http.HandlerFunc(s.syntheticResultsHandler)))
 	mux.HandleFunc("/api/public/synthetic/results", s.publicSyntheticResultsHandler)
 	mux.Handle("/api/synthetic/history", middleware.RequireAuth(http.HandlerFunc(s.syntheticHistoryHandler)))
-	mux.Handle("/api/synthetic/test", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTestHandler))))
+	mux.Handle("/api/synthetic/test", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.syntheticTestHandler)))))
 	mux.Handle("/api/containers/overview", middleware.RequireAuth(http.HandlerFunc(s.fleetContainerOverviewHandler)))
 	mux.HandleFunc("/api/public/containers/overview", s.publicFleetContainerOverviewHandler)
 	mux.Handle("/api/events/overview", middleware.RequireAuth(http.HandlerFunc(s.eventsOverviewHandler)))
@@ -214,7 +216,7 @@ func (s *Server) Handler() http.Handler {
 	// Terminal & Remote Execution endpoints
 	mux.HandleFunc("/api/agent/v1/terminal/tunnel", s.agentTerminalTunnel)
 	mux.Handle("/api/admin/terminal/status", middleware.RequireAuth(http.HandlerFunc(s.terminalStatus)))
-	mux.Handle("/api/admin/terminal/exec", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.terminalExec))))
+	mux.Handle("/api/admin/terminal/exec", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.terminalExec)))))
 	mux.HandleFunc("/api/admin/terminal/ws", s.terminalWS)
 	mux.HandleFunc("/deploy/install.sh", s.installScriptHandler)
 	mux.HandleFunc("/install.sh", s.installScriptHandler)
@@ -269,8 +271,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
+	mw := NewMiddleware(s.service, s.cfg)
 	if isWriteMethod(r.Method) {
-		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/targets/seed-media" {
 				s.seedMediaTargets(w, r)
 				return
@@ -284,7 +287,7 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.targetAction(w, r)
-		})).ServeHTTP(w, r)
+		}))).ServeHTTP(w, r)
 		return
 	}
 	if r.URL.Path == "/api/targets" {
@@ -295,6 +298,7 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
+	mw := NewMiddleware(s.service, s.cfg)
 	trimmed := strings.Trim(r.URL.Path, "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) >= 3 && parts[0] == "api" && parts[1] == "nodes" {
@@ -305,9 +309,9 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if r.Method == http.MethodPut || r.Method == http.MethodPost {
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.putNodeBilling(w, r, uuid)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 				return
 			}
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -315,9 +319,9 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(parts) == 5 && parts[3] == "billing" && parts[4] == "reset" {
 			if r.Method == http.MethodPost {
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.resetNodeBilling(w, r, uuid)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 				return
 			}
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -341,15 +345,15 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if parts[4] == "sync" && r.Method == http.MethodPost {
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.postNodeIPQASync(w, r, uuid)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 				return
 			}
 			if parts[4] == "test" && r.Method == http.MethodPost {
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.postNodeIPQATest(w, r, uuid)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 				return
 			}
 			writeJSONError(w, http.StatusNotFound, "not found")
@@ -386,9 +390,9 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodPatch && len(parts) == 3 {
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.patchNode(w, r, uuid)
-			})).ServeHTTP(w, r)
+			}))).ServeHTTP(w, r)
 			return
 		}
 	}
@@ -402,7 +406,7 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.nodeAction)).ServeHTTP(w, r)
+	mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.nodeAction))).ServeHTTP(w, r)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {

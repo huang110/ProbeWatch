@@ -28,18 +28,20 @@ func (s *Server) backupDir() string {
 }
 
 func (s *Server) backupRoute(w http.ResponseWriter, r *http.Request) {
+	mw := NewMiddleware(s.service, s.cfg)
+	adminOnly := mw.RequireRole(db.RoleAdmin)
 	trimmed := strings.Trim(r.URL.Path, "/")
 	parts := strings.Split(trimmed, "/")
 	// Expected parts: ["api", "system", "backups", ...]
 	if len(parts) == 4 && parts[3] == "upload" && r.Method == http.MethodPost {
-		s.uploadBackup(w, r)
+		adminOnly(mw.RequireCSRF(http.HandlerFunc(s.uploadBackup))).ServeHTTP(w, r)
 		return
 	}
 	if isWriteMethod(r.Method) {
-		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.backupWriteAction)).ServeHTTP(w, r)
+		adminOnly(mw.RequireCSRF(http.HandlerFunc(s.backupWriteAction))).ServeHTTP(w, r)
 		return
 	}
-	s.backupReadAction(w, r)
+	adminOnly(http.HandlerFunc(s.backupReadAction)).ServeHTTP(w, r)
 }
 
 func (s *Server) backupReadAction(w http.ResponseWriter, r *http.Request) {

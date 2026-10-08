@@ -133,12 +133,13 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Channel endpoints
+	mw := NewMiddleware(s.service, s.cfg)
 	if cleanPath == "/api/alerts/channels" {
 		switch r.Method {
 		case http.MethodGet:
 			s.listNotificationChannels(w, r)
 		case http.MethodPost:
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createNotificationChannel)).ServeHTTP(w, r)
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createNotificationChannel))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -153,13 +154,13 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 			case http.MethodGet:
 				s.getNotificationChannel(w, r, channelID)
 			case http.MethodPut:
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.updateNotificationChannel(w, r, channelID)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 			case http.MethodDelete:
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.deleteNotificationChannel(w, r, channelID)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 			default:
 				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			}
@@ -171,9 +172,9 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 				return
 			}
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.testNotificationChannel(w, r, channelID)
-			})).ServeHTTP(w, r)
+			}))).ServeHTTP(w, r)
 			return
 		}
 	}
@@ -184,7 +185,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.testNotificationDirect)).ServeHTTP(w, r)
+		mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.testNotificationDirect))).ServeHTTP(w, r)
 		return
 	}
 
@@ -194,7 +195,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			s.getAlertSettings(w, r)
 		case http.MethodPost, http.MethodPut:
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.saveAlertSettings)).ServeHTTP(w, r)
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.saveAlertSettings))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -209,7 +210,8 @@ func (s *Server) settingsRoute(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.getAlertSettings(w, r)
 	case http.MethodPost, http.MethodPut:
-		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.saveAlertSettings)).ServeHTTP(w, r)
+		mw := NewMiddleware(s.service, s.cfg)
+		mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.saveAlertSettings))).ServeHTTP(w, r)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

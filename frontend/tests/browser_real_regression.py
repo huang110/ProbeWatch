@@ -195,7 +195,7 @@ def cleanup_all(request_context):
     # Clean test notification channels
     for ch_id in list(tracked_entities["channels"]):
         try:
-            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/admin/notification-channels/{ch_id}", headers=headers)
+            r = request_context.delete(f"{BASE_URL.rstrip('/')}/api/alerts/channels/{ch_id}", headers=headers)
             if r.status in (200, 204, 404):
                 tracked_entities["channels"].remove(ch_id)
             else:
@@ -303,7 +303,7 @@ def run():
 
                     # Viewer CANNOT modify settings (403 Forbidden)
                     v_settings = viewer_context.request.post(
-                        f"{BASE_URL.rstrip('/')}/api/admin/settings",
+                        f"{BASE_URL.rstrip('/')}/api/settings",
                         data=json.dumps({"site_name": "hacked"}),
                         headers=make_headers(viewer_context.request),
                     )
@@ -618,14 +618,14 @@ def run():
                     "enabled": True,
                 }
                 create_ch_resp = page.request.post(
-                    f"{BASE_URL.rstrip('/')}/api/admin/notification-channels",
+                    f"{BASE_URL.rstrip('/')}/api/alerts/channels",
                     data=json.dumps(ch_payload),
                     headers=make_headers(page.request),
                 )
                 if create_ch_resp.ok:
                     tracked_entities["channels"].append(ch_id)
                     test_ch_resp = page.request.post(
-                        f"{BASE_URL.rstrip('/')}/api/admin/notification-channels/{ch_id}/test",
+                        f"{BASE_URL.rstrip('/')}/api/alerts/channels/{ch_id}/test",
                         data=json.dumps({}),
                         headers=make_headers(page.request),
                     )

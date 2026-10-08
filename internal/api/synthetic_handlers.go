@@ -424,6 +424,9 @@ func (s *Server) syntheticTargetsRoute(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/synthetic/targets")
 	path = strings.TrimPrefix(path, "/")
 
+	mw := NewMiddleware(s.service, s.cfg)
+	adminAction := mw.RequireRole(db.RoleAdmin)
+
 	switch r.Method {
 	case http.MethodGet:
 		if path == "" {
@@ -436,19 +439,23 @@ func (s *Server) syntheticTargetsRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.createSyntheticTarget(w, r)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(s.createSyntheticTarget))).ServeHTTP(w, r)
 	case http.MethodPatch:
 		if path == "" {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.updateSyntheticTarget(w, r, path)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.updateSyntheticTarget(w, r, path)
+		}))).ServeHTTP(w, r)
 	case http.MethodDelete:
 		if path == "" {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.deleteSyntheticTarget(w, r, path)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.deleteSyntheticTarget(w, r, path)
+		}))).ServeHTTP(w, r)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

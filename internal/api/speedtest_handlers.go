@@ -61,6 +61,9 @@ func (s *Server) speedtestTasksRoute(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/speedtest/tasks")
 	path = strings.TrimPrefix(path, "/")
 
+	mw := NewMiddleware(s.service, s.cfg)
+	adminAction := mw.RequireRole(db.RoleAdmin)
+
 	switch r.Method {
 	case http.MethodGet:
 		if path == "" {
@@ -73,19 +76,23 @@ func (s *Server) speedtestTasksRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.createSpeedtestTask(w, r)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(s.createSpeedtestTask))).ServeHTTP(w, r)
 	case http.MethodPatch:
 		if path == "" {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.updateSpeedtestTask(w, r, path)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.updateSpeedtestTask(w, r, path)
+		}))).ServeHTTP(w, r)
 	case http.MethodDelete:
 		if path == "" {
 			writeJSONError(w, http.StatusNotFound, "not found")
 			return
 		}
-		s.deleteSpeedtestTask(w, r, path)
+		adminAction(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.deleteSpeedtestTask(w, r, path)
+		}))).ServeHTTP(w, r)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

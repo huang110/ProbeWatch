@@ -89,6 +89,14 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		writeAuthenticationError(w, err)
 		return
 	}
+	if session.Disabled {
+		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+		return
+	}
+	if session.Role != db.RoleAdmin {
+		writeJSONError(w, http.StatusForbidden, "insufficient role permissions")
+		return
+	}
 
 	if !s.cfg.EnableRemoteTerminal {
 		writeJSONError(w, http.StatusServiceUnavailable, "remote terminal is disabled by server configuration")
@@ -172,6 +180,14 @@ func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
 	sessionUser, err := s.service.AuthenticateWithError(r, time.Now().UTC())
 	if err != nil {
 		writeAuthenticationError(w, err)
+		return
+	}
+	if sessionUser.Disabled {
+		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+		return
+	}
+	if sessionUser.Role != db.RoleAdmin {
+		writeJSONError(w, http.StatusForbidden, "insufficient role permissions")
 		return
 	}
 
