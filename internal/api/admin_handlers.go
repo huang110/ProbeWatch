@@ -869,14 +869,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		"shm_bytes":   uint64(0),
 		"total_bytes": uint64(0),
 	}
-	if s.cfg.DatabasePath != "" {
-		if fi, err := os.Stat(s.cfg.DatabasePath); err == nil {
+	dbPath := s.cfg.DatabasePath
+	if dbPath == "" && s.service != nil && s.service.Store() != nil {
+		dbPath = s.service.Store().DatabasePath()
+	}
+	if dbPath != "" {
+		if fi, err := os.Stat(dbPath); err == nil {
 			database["file_bytes"] = uint64(fi.Size())
 		}
-		if fi, err := os.Stat(s.cfg.DatabasePath + "-wal"); err == nil {
+		if fi, err := os.Stat(dbPath + "-wal"); err == nil {
 			database["wal_bytes"] = uint64(fi.Size())
 		}
-		if fi, err := os.Stat(s.cfg.DatabasePath + "-shm"); err == nil {
+		if fi, err := os.Stat(dbPath + "-shm"); err == nil {
 			database["shm_bytes"] = uint64(fi.Size())
 		}
 		database["total_bytes"] = database["file_bytes"].(uint64) + database["wal_bytes"].(uint64) + database["shm_bytes"].(uint64)

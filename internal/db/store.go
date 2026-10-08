@@ -399,10 +399,11 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 	if err := tx.Commit(); err != nil {
 		return LifecycleCleanupResult{}, fmt.Errorf("commit lifecycle cleanup: %w", err)
 	}
-	// PASSIVE never blocks writers and lets SQLite reclaim WAL pages when it is
-	// safe. A later lifecycle pass can retry if another reader is active.
-	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
-		return result, fmt.Errorf("checkpoint sqlite wal: %w", err)
+	// TRUNCATE reclaims and truncates WAL file on disk when possible; falls back to PASSIVE if active readers exist.
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		if _, passiveErr := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); passiveErr != nil {
+			return result, fmt.Errorf("checkpoint sqlite wal: %w", passiveErr)
+		}
 	}
 	return result, nil
 }

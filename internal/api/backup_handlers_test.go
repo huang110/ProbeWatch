@@ -12,6 +12,7 @@ func TestBackupHandlersCRUDAndSecurity(t *testing.T) {
 	service, store := newTask4Auth(t)
 	defer store.Close()
 	cfg := task4Config()
+	cfg.DatabasePath = store.DatabasePath()
 	handler := NewServer(cfg, service).Handler()
 	session, csrf := task4AdminSession(t, service, store)
 
@@ -104,6 +105,7 @@ func TestBackupConfigAndRemoteOperations(t *testing.T) {
 	service, store := newTask4Auth(t)
 	defer store.Close()
 	cfg := task4Config()
+	cfg.DatabasePath = store.DatabasePath()
 	server := NewServer(cfg, service)
 	handler := server.Handler()
 	session, csrf := task4AdminSession(t, service, store)

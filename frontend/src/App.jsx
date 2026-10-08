@@ -288,7 +288,7 @@ function Topbar({ activeNav, clockText, lastSyncText, apiState, liveState, me, o
       </button>
       <span className="guest-live-indicator" title="节点、告警和概览数据会自动同步"><span className="status-dot status-online" />实时同步</span>
       <span className="last-sync">最后同步 <b>{lastSyncText}</b></span>
-      <span className="sync-state"><span className={`status-dot status-${liveState === 'online' ? 'online' : liveState === 'offline' ? 'offline' : 'attention'}`} />{liveState === 'online' ? '实时连接中' : liveState === 'retrying' ? '重试中' : liveState === 'offline' ? '网络离线' : liveState === 'paused' ? '页面已暂停' : '正在同步'}</span>
+      <span className="sync-state"><span className={`status-dot status-${liveState === 'online' ? 'online' : liveState === 'offline' ? 'offline' : 'attention'}`} />{liveState === 'online' ? '同步正常' : liveState === 'retrying' ? '同步重试中' : liveState === 'offline' ? '网络离线' : liveState === 'paused' ? '页面已暂停' : '正在同步'}</span>
       <button className="icon-button" aria-label="查看告警" onClick={() => onNavigate('alerts')}><Bell size={19} /></button>
       <button type="button" className="button button-quiet btn-sm text-rose top-logout-btn" onClick={onLogout} title="退出当前管理员登录">
         <SignOut size={15} />
@@ -654,6 +654,9 @@ export function App() {
         markSync()
       }
       if (clientInfo) setPublicClientInfo(clientInfo)
+      return true
+    } catch {
+      return false
     } finally {
       setIsRefreshing(false)
     }
@@ -690,9 +693,18 @@ export function App() {
       markSync()
       setApiState(normalized.length ? { kind: 'ok', message: '' } : { kind: 'empty', message: 'API 返回空节点数组，暂无节点数据。' })
       loadOverview()
+      return true
     } catch (error) {
       if (error?.name === 'AbortError') return
-      if (current === coreRequestRef.current) { setApiState({ kind: 'error', message: '无法加载节点数据，正在自动重试。' }); return false }
+      if (current === coreRequestRef.current) {
+        setApiState((prev) => {
+          if (prev.kind === 'ok') {
+            return { ...prev, message: '无法加载节点数据，正在自动重试…' }
+          }
+          return { kind: 'error', message: '无法加载节点数据，正在自动重试…' }
+        })
+        return false
+      }
     } finally {
       if (current === coreRequestRef.current) setIsRefreshing(false)
     }
@@ -746,7 +758,6 @@ export function App() {
   useLivePolling(loadOverview, {
     interval: OVERVIEW_INTERVAL_MS,
     enabled: Boolean(me && !guestPreview && apiState.kind === 'ok'),
-    onStatusChange: setLiveState,
   })
 
   useEffect(() => {
@@ -1093,6 +1104,7 @@ export function App() {
   useLivePolling(refreshGuest, {
     interval: activeNav === 'node-detail' ? 3000 : 5000,
     enabled: guestPreview || apiState.kind === 'guest',
+    onStatusChange: setLiveState,
   })
 
   const refreshAll = () => { loadCore(true); loadOverview() }

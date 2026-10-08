@@ -37,8 +37,13 @@ jobs:
           server_version=$(sed -n 's/^[[:space:]]*ServerVersion[[:space:]]*= ["'"'"']\([0-9.]*\)["'"'"']$/\1/p' internal/version/version.go)
           frontend_version=$(node -p "require('./frontend/package.json').version")
           test "$server_version" = "$frontend_version"
+      - name: Run Go vet
+        run: go vet ./...
       - name: Run Go tests
         run: go test ./...
+      - name: Test safe deploy rollback suite
+        shell: bash
+        run: bash deploy/test_safe_deploy_rollback.sh
       - name: Build server
         run: go build ./cmd/probewatch ./cmd/probewatch-agent
       - name: Validate installer script
@@ -69,7 +74,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Dependency audit
+      - name: Full toolchain audit
+        run: npm audit --audit-level=high
+      - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
       - name: Build frontend
         run: npm run build

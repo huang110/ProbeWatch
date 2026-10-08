@@ -334,7 +334,7 @@ func newServerAuth(t *testing.T, provider *httptest.Server, users []string, orga
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", GitHubClientID: "client-id", GitHubClientSecret: "client-secret", GitHubRedirectURL: "http://127.0.0.1:8080/auth/github/callback", GitHubAllowedUsers: users, GitHubAllowedOrg: organization, SessionSecret: "test-session-secret-that-is-long-enough"}
+	cfg := config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", DatabasePath: store.DatabasePath(), GitHubClientID: "client-id", GitHubClientSecret: "client-secret", GitHubRedirectURL: "http://127.0.0.1:8080/auth/github/callback", GitHubAllowedUsers: users, GitHubAllowedOrg: organization, SessionSecret: "test-session-secret-that-is-long-enough"}
 	return auth.NewService(cfg, store, auth.ProviderEndpoints{AuthorizeURL: provider.URL + "/login/oauth/authorize", TokenURL: provider.URL + "/login/oauth/access_token", UserURL: provider.URL + "/user", OrganizationsURL: provider.URL + "/user/orgs"}), store
 }
 

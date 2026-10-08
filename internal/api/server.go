@@ -50,7 +50,11 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		aiSvc = ai.NewAIService(service.Store(), &cfg)
 		bDir := filepath.Join(filepath.Dir(cfg.DatabasePath), "backups")
 		if cfg.DatabasePath == "" {
-			bDir = filepath.Join("data", "backups")
+			if service.Store().DatabasePath() != "" {
+				bDir = filepath.Join(filepath.Dir(service.Store().DatabasePath()), "backups")
+			} else {
+				bDir = filepath.Join("data", "backups")
+			}
 		}
 		backupSched = backup.NewScheduler(service.Store(), bDir)
 	}

@@ -18,6 +18,9 @@ import (
 
 func (s *Server) backupDir() string {
 	dbPath := s.cfg.DatabasePath
+	if dbPath == "" && s.service != nil && s.service.Store() != nil {
+		dbPath = s.service.Store().DatabasePath()
+	}
 	if dbPath == "" {
 		dbPath = "data/probewatch.db"
 	}
