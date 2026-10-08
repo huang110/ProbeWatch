@@ -85,6 +85,7 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 	}
 
 	// 4. Register a Node and submit speedtest result via /api/agent/v1/speedtest-result
+	csrf = task4CSRF(t, handler, session)
 	reg, _ := task4CreateRegistration(t, handler, session, csrf)
 	regResp := task4Register(t, handler, protocol.RegisterRequest{
 		RegistrationToken: reg.Token,
