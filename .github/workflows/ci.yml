@@ -34,7 +34,7 @@ jobs:
       - name: Verify server and frontend versions
         shell: bash
         run: |
-          server_version=$(sed -n 's/^[[:space:]]*ServerVersion[[:space:]]*= ["'"'"']\([0-9.]*\)["'"'"']$/\1/p' internal/version/version.go)
+          server_version=$(sed -n 's/^[[:space:]]*ServerVersion[[:space:]]*= ["'"'"']\([^"'"'"']*\)["'"'"']$/\1/p' internal/version/version.go)
           frontend_version=$(node -p "require('./frontend/package.json').version")
           test "$server_version" = "$frontend_version"
       - name: Run Go vet
@@ -82,6 +82,34 @@ jobs:
         run: npm run build
       - name: Verify frontend bundle
         run: npm run test:smoke
+
+  mock-browser:
+    name: Mock browser regression
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          python -m pip install --upgrade pip playwright
+          python -m playwright install --with-deps chromium
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run mock browser regression
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npx vite preview --port 4173 &
+          sleep 4
+          python tests/browser_live_regression.py
 
   real-browser:
     name: Real browser regression (manual)

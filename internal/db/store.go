@@ -399,9 +399,11 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 	if err := tx.Commit(); err != nil {
 		return LifecycleCleanupResult{}, fmt.Errorf("commit lifecycle cleanup: %w", err)
 	}
-	// TRUNCATE reclaims and truncates WAL file on disk when possible; falls back to PASSIVE if active readers exist.
-	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		if _, passiveErr := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)"); passiveErr != nil {
+	// TRUNCATE reclaims and truncates WAL file on disk when possible; falls back to PASSIVE if active readers/writers exist.
+	var busy, logPages, checkpointedPages int
+	if cpErr := s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logPages, &checkpointedPages); cpErr != nil || busy != 0 {
+		var pBusy, pLogPages, pCheckpointedPages int
+		if passiveErr := s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&pBusy, &pLogPages, &pCheckpointedPages); passiveErr != nil {
 			return result, fmt.Errorf("checkpoint sqlite wal: %w", passiveErr)
 		}
 	}

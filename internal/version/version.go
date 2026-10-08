@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ServerVersion   = "0.9.3"
+	ServerVersion   = "0.9.3-rc"
 	AgentVersion    = "0.8.13"
 	MinAgentVersion = "0.5.0"
 )
@@ -35,10 +35,12 @@ func Compare(v1, v2 string) int {
 	for i := 0; i < maxLen; i++ {
 		var n1, n2 int
 		if i < len(p1) {
-			n1, _ = strconv.Atoi(p1[i])
+			part1 := strings.Split(p1[i], "-")[0]
+			n1, _ = strconv.Atoi(part1)
 		}
 		if i < len(p2) {
-			n2, _ = strconv.Atoi(p2[i])
+			part2 := strings.Split(p2[i], "-")[0]
+			n2, _ = strconv.Atoi(part2)
 		}
 		if n1 > n2 {
 			return 1
