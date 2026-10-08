@@ -103,17 +103,32 @@ def login(page):
     page.locator("#login-username").wait_for(timeout=10000)
     page.locator("#login-username").fill(USERNAME)
     page.locator("#admin-pwd").fill(PASSWORD)
-
-    with page.expect_response(lambda r: "/auth/login" in r.url, timeout=10000):
+    with page.expect_response(lambda r: "/auth/login" in r.url, timeout=10000) as resp_info:
         page.locator("button.modal-submit, button[type='submit']").first.click()
+
+    login_resp = resp_info.value
+    if login_resp.status != 200:
+        raise AssertionError(f"Login failed: status={login_resp.status}, body={login_resp.text()}")
 
     page.locator(".sidebar").wait_for(timeout=20000)
     page.wait_for_function("async () => (await fetch('/api/me', { credentials: 'same-origin' })).ok", timeout=20000)
 
 
-def cleanup_all(request_context):
+def make_headers(request_context, extra=None):
     csrf = get_csrf(request_context)
-    headers = {"X-CSRF-Token": csrf} if csrf else {}
+    h = {
+        "Origin": BASE_URL.rstrip("/"),
+        "Content-Type": "application/json",
+    }
+    if csrf:
+        h["X-CSRF-Token"] = csrf
+    if extra:
+        h.update(extra)
+    return h
+
+
+def cleanup_all(request_context):
+    headers = make_headers(request_context)
     failures = []
 
     # Clean targets
@@ -211,8 +226,7 @@ def run():
             results["rbac_csrf_matrix"] = ("PASS", "未鉴权401拦截、无效CSRF403防御及Admin角色断言验证通过")
 
             # 3. Target Lifecycle (Create -> Edit -> Disable -> Enable -> Delete)
-            csrf = get_csrf(page.request)
-            headers = {"X-CSRF-Token": csrf, "Content-Type": "application/json"}
+            headers = make_headers(page.request)
             target_id = f"tgt-{RUN_ID}"
             target_payload = {
                 "id": target_id,
@@ -236,7 +250,7 @@ def run():
             edit_resp = page.request.patch(
                 f"{BASE_URL.rstrip('/')}/api/targets/{target_id}",
                 data=json.dumps({"name": f"CI-Target-Renamed-{RUN_ID}"}),
-                headers=headers,
+                headers=make_headers(page.request),
             )
             assert edit_resp.ok, "Target edit failed"
 
@@ -244,7 +258,7 @@ def run():
             dis_resp = page.request.patch(
                 f"{BASE_URL.rstrip('/')}/api/targets/{target_id}",
                 data=json.dumps({"enabled": False}),
-                headers=headers,
+                headers=make_headers(page.request),
             )
             assert dis_resp.ok, "Target disable failed"
 
@@ -252,12 +266,12 @@ def run():
             en_resp = page.request.patch(
                 f"{BASE_URL.rstrip('/')}/api/targets/{target_id}",
                 data=json.dumps({"enabled": True}),
-                headers=headers,
+                headers=make_headers(page.request),
             )
             assert en_resp.ok, "Target enable failed"
 
             # Delete target
-            del_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/targets/{target_id}", headers=headers)
+            del_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/targets/{target_id}", headers=make_headers(page.request))
             assert del_resp.status in (200, 204), "Target delete failed"
             tracked_entities["targets"].remove(target_id)
             results["target_lifecycle"] = ("PASS", "检测目标创建、重命名、停用、启用、删除全生命周期通过")
@@ -272,13 +286,13 @@ def run():
             create_token_resp = page.request.post(
                 f"{BASE_URL.rstrip('/')}/api/tokens",
                 data=json.dumps(token_payload),
-                headers=headers,
+                headers=make_headers(page.request),
             )
-            assert create_token_resp.ok, f"Token creation failed: {create_token_resp.text()}"
             token_data = create_token_resp.json()
-            tok_id = token_data.get("id")
-            raw_token = token_data.get("token")
-            assert tok_id and raw_token, "Token creation response missing ID or raw token"
+            token_obj = token_data.get("token", {})
+            tok_id = token_obj.get("id") if isinstance(token_obj, dict) else token_data.get("id")
+            raw_token = token_data.get("raw_token") or (token_obj if isinstance(token_obj, str) else "")
+            assert tok_id and raw_token, f"Token creation response invalid: {token_data}"
             tracked_entities["tokens"].append(tok_id)
 
             # Authenticate with token
@@ -289,7 +303,7 @@ def run():
             assert auth_token_resp.ok, "Token authentication failed"
 
             # Revoke token
-            del_tok_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/tokens/{tok_id}", headers=headers)
+            del_tok_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/tokens/{tok_id}", headers=make_headers(page.request))
             assert del_tok_resp.status in (200, 204), "Token revocation failed"
             tracked_entities["tokens"].remove(tok_id)
 
@@ -307,17 +321,17 @@ def run():
                 "id": st_task_id,
                 "name": f"CI-Speed-{RUN_ID}",
                 "server_url": "https://speed.cloudflare.com/__down?bytes=1000000",
-                "interval_sec": 3600,
+                "interval_seconds": 3600,
                 "enabled": False,
             }
             create_st_resp = page.request.post(
                 f"{BASE_URL.rstrip('/')}/api/speedtest/tasks",
                 data=json.dumps(st_payload),
-                headers=headers,
+                headers=make_headers(page.request),
             )
             if create_st_resp.ok:
                 tracked_entities["speedtest_tasks"].append(st_task_id)
-                del_st_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/speedtest/tasks/{st_task_id}", headers=headers)
+                del_st_resp = page.request.delete(f"{BASE_URL.rstrip('/')}/api/speedtest/tasks/{st_task_id}", headers=make_headers(page.request))
                 if del_st_resp.status in (200, 204):
                     tracked_entities["speedtest_tasks"].remove(st_task_id)
                 results["speedtest_task_lifecycle"] = ("PASS", "测速任务独立创建并安全清理通过")
@@ -327,7 +341,11 @@ def run():
             # 6. Audit Logs Query
             logs_resp = page.request.get(f"{BASE_URL.rstrip('/')}/api/audit-logs?limit=5")
             if logs_resp.ok:
-                logs_list = logs_resp.json()
+                logs_data = logs_resp.json()
+                if isinstance(logs_data, dict):
+                    logs_list = logs_data.get("logs", [])
+                else:
+                    logs_list = logs_data
                 assert isinstance(logs_list, list), "Audit logs should return a list"
                 results["audit_logs_query"] = ("PASS", f"审计日志真实查询接口返回 {len(logs_list)} 条记录")
             else:
@@ -363,11 +381,12 @@ def run():
                     exec_resp = page.request.post(
                         f"{BASE_URL.rstrip('/')}/api/admin/terminal/exec",
                         data=json.dumps({"node_id": target_uuid, "command": "echo ci-terminal-probe-ok", "timeout_sec": 5}),
-                        headers=headers,
+                        headers=make_headers(page.request),
                     )
                     if exec_resp.ok:
-                        out = exec_resp.json().get("output", "")
-                        assert "ci-terminal-probe-ok" in out, f"Unexpected terminal output: {out}"
+                        data = exec_resp.json()
+                        out = data.get("stdout") or data.get("output", "")
+                        assert "ci-terminal-probe-ok" in out, f"Unexpected terminal output: {data}"
                         results["terminal_exec"] = ("PASS", "远程终端执行无副作用命令 (echo) 并验证返回结果")
                     else:
                         results["terminal_exec"] = ("SKIP", f"终端执行返回: {exec_resp.status}")
