@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,32 +60,29 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 		t.Fatalf("UpsertAdminUser: %v", err)
 	}
 
-	node1 := db.NodeRecord{
-		UUID:        "node-seed-uuid-1",
-		Name:        "Test Node Seed 1",
-		SecretHash:  "secrethash1",
-		Status:      "online",
-		ClientIP:    "127.0.0.1",
-		CreatedNano: now.UnixNano(),
-		UpdatedNano: now.UnixNano(),
+	reg1, err := store.CreateRegistrationToken(ctx, 1*time.Hour, now)
+	if err != nil {
+		t.Fatalf("CreateRegistrationToken: %v", err)
 	}
-	if err := store.UpsertNode(ctx, node1); err != nil {
-		t.Fatalf("UpsertNode: %v", err)
+	regNode1, err := store.RegisterNode(ctx, reg1.Token, db.NodeInput{
+		UUID: "550e8400-e29b-41d4-a716-446655440011",
+		Name: "Test Seed Node 1",
+	}, 24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("RegisterNode: %v", err)
 	}
 
 	target1 := db.ResultTargetInput{
-		ID:        "tgt-seed-1",
-		Name:      "Target Seed 1",
-		Host:      "1.1.1.1",
-		Payload:   `{"kind":"icmp","interval_seconds":30}`,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:   "tgt-seed-1",
+		Name: "Target Seed 1",
+		Kind: "icmp",
+		Host: "1.1.1.1",
 	}
 	if err := store.CreateNetworkTarget(ctx, target1, now); err != nil {
 		t.Fatalf("CreateNetworkTarget: %v", err)
 	}
 
-	rule1 := db.AlertRuleRecord{
+	rule1 := db.AlertRule{
 		ID:              "rule-seed-1",
 		Name:            "Rule Seed 1",
 		Metric:          "cpu",
@@ -96,9 +92,12 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 		Severity:        "warning",
 		NodeFilter:      "*",
 		Enabled:         true,
+		ExpressionType:  "simple",
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
-	if err := store.UpsertAlertRule(ctx, rule1); err != nil {
-		t.Fatalf("UpsertAlertRule: %v", err)
+	if err := store.CreateAlertRule(ctx, rule1); err != nil {
+		t.Fatalf("CreateAlertRule: %v", err)
 	}
 
 	if err := store.SetSetting(ctx, "site_name", "Isolated CI ProbeWatch"); err != nil {
@@ -122,7 +121,6 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 	// 4. Verify failure scenario: unwritable backup directory
 	unwritableDir := filepath.Join(tempDir, "unwritable_backup_dir")
 	if err := os.MkdirAll(unwritableDir, 0500); err == nil {
-		// Try to create backup into unwritable dir
 		_, unwriteErr := store.CreateBackup(ctx, filepath.Join(unwritableDir, "sub"), "fail")
 		if unwriteErr == nil {
 			t.Log("Note: running as root or FS ignored 0500 on unwritableDir")
@@ -146,17 +144,16 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 	}
 
 	// 7. Mutate state after backup
-	node2 := db.NodeRecord{
-		UUID:        "node-seed-uuid-post-backup",
-		Name:        "Test Node Created After Backup",
-		SecretHash:  "secrethash2",
-		Status:      "offline",
-		ClientIP:    "127.0.0.2",
-		CreatedNano: time.Now().UTC().UnixNano(),
-		UpdatedNano: time.Now().UTC().UnixNano(),
+	regPost, err := store.CreateRegistrationToken(ctx, 1*time.Hour, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateRegistrationToken post-backup: %v", err)
 	}
-	if err := store.UpsertNode(ctx, node2); err != nil {
-		t.Fatalf("UpsertNode post-backup: %v", err)
+	_, err = store.RegisterNode(ctx, regPost.Token, db.NodeInput{
+		UUID: "550e8400-e29b-41d4-a716-446655440099",
+		Name: "Node Created After Backup",
+	}, 24*time.Hour, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("RegisterNode post-backup: %v", err)
 	}
 
 	// 8. Restore from backup
@@ -172,13 +169,13 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 		t.Fatalf("restored admin mismatch: got %v, err: %v", gotAdmin, err)
 	}
 
-	gotNode1, err := restoredStore.GetNode(ctx, "node-seed-uuid-1")
-	if err != nil || gotNode1.Name != "Test Node Seed 1" {
+	gotNode1, err := restoredStore.GetNodeByUUID(ctx, regNode1.Node.UUID)
+	if err != nil || gotNode1.Name != "Test Seed Node 1" {
 		t.Fatalf("restored node1 mismatch: got %v, err: %v", gotNode1, err)
 	}
 
 	// Verify post-backup node is absent
-	_, err = restoredStore.GetNode(ctx, "node-seed-uuid-post-backup")
+	_, err = restoredStore.GetNodeByUUID(ctx, "550e8400-e29b-41d4-a716-446655440099")
 	if err == nil {
 		t.Fatal("post-backup node should NOT exist in restored database")
 	}
@@ -195,20 +192,19 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 	}
 
 	// 10. Verify restored database is fully writable
-	node3 := db.NodeRecord{
-		UUID:        "node-seed-uuid-post-restore",
-		Name:        "Test Node Created Post Restore",
-		SecretHash:  "secrethash3",
-		Status:      "online",
-		ClientIP:    "127.0.0.3",
-		CreatedNano: time.Now().UTC().UnixNano(),
-		UpdatedNano: time.Now().UTC().UnixNano(),
+	reg3, err := restoredStore.CreateRegistrationToken(ctx, 1*time.Hour, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("failed to create registration token in restored db: %v", err)
 	}
-	if err := restoredStore.UpsertNode(ctx, node3); err != nil {
-		t.Fatalf("failed to insert new record into restored database: %v", err)
+	regNode3, err := restoredStore.RegisterNode(ctx, reg3.Token, db.NodeInput{
+		UUID: "550e8400-e29b-41d4-a716-446655440033",
+		Name: "Test Node Created Post Restore",
+	}, 24*time.Hour, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("failed to register node in restored db: %v", err)
 	}
-	if _, err := restoredStore.GetNode(ctx, "node-seed-uuid-post-restore"); err != nil {
-		t.Fatalf("failed to read freshly inserted record in restored database: %v", err)
+	if _, err := restoredStore.GetNodeByUUID(ctx, regNode3.Node.UUID); err != nil {
+		t.Fatalf("failed to read freshly registered node in restored database: %v", err)
 	}
 
 	// 11. Verify clean close and reopen of restored database
@@ -219,7 +215,7 @@ func TestIsolatedBackupRestoreLifecycle(t *testing.T) {
 	}
 	defer reopenedStore.Close()
 
-	if _, err := reopenedStore.GetNode(ctx, "node-seed-uuid-post-restore"); err != nil {
+	if _, err := reopenedStore.GetNodeByUUID(ctx, regNode3.Node.UUID); err != nil {
 		t.Fatalf("reopened store failed to read record: %v", err)
 	}
 
