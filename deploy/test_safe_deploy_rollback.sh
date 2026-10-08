@@ -81,7 +81,7 @@ export SYSTEMCTL_CMD="${TEST_BASE}/bin/systemctl"
 export CURL_CMD="${TEST_BASE}/bin/curl"
 
 set +e
-"${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test1.log" 2>&1
+bash "${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test1.log" 2>&1
 T1_CODE=$?
 set -e
 
@@ -142,7 +142,7 @@ EOF
 chmod +x "${TEST_BASE}/bin/curl"
 
 set +e
-"${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test2.log" 2>&1
+bash "${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test2.log" 2>&1
 T2_CODE=$?
 set -e
 
@@ -186,7 +186,7 @@ EOF
 chmod +x "${TEST_BASE}/bin/curl"
 
 set +e
-"${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test3.log" 2>&1
+bash "${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test3.log" 2>&1
 T3_CODE=$?
 set -e
 
@@ -224,7 +224,7 @@ EOF
 chmod +x "${TEST_BASE}/bin/systemctl"
 
 set +e
-"${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test4.log" 2>&1
+bash "${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test4.log" 2>&1
 T4_CODE=$?
 set -e
 
@@ -264,7 +264,7 @@ EOF
 chmod +x "${TEST_BASE}/bin/curl"
 
 set +e
-"${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test5.log" 2>&1
+bash "${DEPLOY_SCRIPT}" "${STAGE_DIR}/probewatch-bin-new" > "${TEST_BASE}/test5.log" 2>&1
 T5_CODE=$?
 set -e
 
