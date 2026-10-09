@@ -303,23 +303,35 @@ func (n *Notifier) dispatchToChannel(ctx context.Context, ch db.NotificationChan
 	case "webhook":
 		var conf struct {
 			WebhookURL string `json:"webhook_url"`
+			URL        string `json:"url"`
 		}
 		if err := json.Unmarshal([]byte(ch.Config), &conf); err != nil {
 			return fmt.Errorf("invalid webhook config: %w", err)
 		}
-		return n.sendWebhook(ctx, conf.WebhookURL, alert, node)
+		targetURL := conf.WebhookURL
+		if targetURL == "" {
+			targetURL = conf.URL
+		}
+		return n.sendWebhook(ctx, targetURL, alert, node)
 	default:
 		return fmt.Errorf("unsupported channel type: %s", ch.Type)
 	}
 }
 
 func (n *Notifier) SendTestNotification(ctx context.Context, channelType, rawConfig string) error {
+	return n.SendTestNotificationWithMessage(ctx, channelType, rawConfig, "")
+}
+
+func (n *Notifier) SendTestNotificationWithMessage(ctx context.Context, channelType, rawConfig, message string) error {
+	if message == "" {
+		message = "测试通知：监控通道连接成功，ProbeWatch 守护就绪！"
+	}
 	testAlert := db.AlertEvent{
 		ID:              "test-" + strconv.FormatInt(time.Now().Unix(), 10),
 		NodeID:          "probewatch-control-plane",
 		Category:        "node",
 		TargetID:        "heartbeat",
-		Reason:          "测试通知：监控通道连接成功，ProbeWatch 守护就绪！",
+		Reason:          message,
 		Severity:        "info",
 		Status:          "open",
 		OccurrenceCount: 1,

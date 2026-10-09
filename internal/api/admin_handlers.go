@@ -366,10 +366,27 @@ func (s *Server) testNotificationChannel(w http.ResponseWriter, r *http.Request,
 		writeJSONError(w, http.StatusServiceUnavailable, "notifier service unavailable")
 		return
 	}
-	if err := s.notifier.SendTestNotification(r.Context(), ch.Type, ch.Config); err != nil {
+	var req struct {
+		Message string `json:"message,omitempty"`
+		RunID   string `json:"run_id,omitempty"`
+	}
+	_ = decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req)
+	msg := req.Message
+	if msg == "" && req.RunID != "" {
+		msg = fmt.Sprintf("ProbeWatch CI notification test %s", req.RunID)
+	}
+
+	if err := s.notifier.SendTestNotificationWithMessage(r.Context(), ch.Type, ch.Config, msg); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("测试消息发送失败: %v", err))
 		return
 	}
+	meta, _ := json.Marshal(map[string]any{
+		"channel_id":   ch.ID,
+		"channel_name": ch.Name,
+		"channel_type": ch.Type,
+		"run_id":       req.RunID,
+	})
+	_ = s.service.Store().RecordAudit(r.Context(), "notification_test", ch.ID, "admin", meta)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "测试通知已成功推送到 " + ch.Name})
 }
 

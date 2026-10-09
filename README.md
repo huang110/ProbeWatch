@@ -160,5 +160,6 @@ docs/                   设计稿、实施计划、本地验证手册
 
 ## 许可证说明 (License)
 
-当前项目许可证状态：**待确认 (License: Pending Confirmation)**。
-本仓库第三方依赖组件（Go 运行时依赖、React 生态库、Phosphor Icons 等）均保留其各自原有开源许可。未满足社区正式版准入条件前保持候选版 (Candidate)。
+当前项目许可证状态：**待确认 (License: Pending Confirmation - PENDING)**。<br>
+当前可用于个人部署和内部使用；公开开源发布前必须由项目所有者确认许可证。<br>
+本仓库第三方依赖组件（Go 运行时依赖、React 生态库、Phosphor Icons 等）均保留其各自原有开源许可。在项目所有者最终确认开源协议前保持候选版 (Candidate) 规范，不发布正式 v1.0.0 标签。
