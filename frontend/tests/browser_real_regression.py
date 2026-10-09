@@ -610,9 +610,10 @@ def run():
             # 15. Dedicated Notification Channel Probe
             if TEST_WEBHOOK_URL:
                 ch_id = f"ch-ci-{RUN_ID}"
+                ch_name = os.environ.get("PROBEWATCH_TEST_NOTIFICATION_CHANNEL") or f"CI-Test-Webhook-{RUN_ID}"
                 ch_payload = {
                     "id": ch_id,
-                    "name": f"CI-Test-Webhook-{RUN_ID}",
+                    "name": ch_name,
                     "type": "webhook",
                     "config": json.dumps({"url": TEST_WEBHOOK_URL}),
                     "enabled": True,
@@ -626,7 +627,7 @@ def run():
                     tracked_entities["channels"].append(ch_id)
                     test_ch_resp = page.request.post(
                         f"{BASE_URL.rstrip('/')}/api/alerts/channels/{ch_id}/test",
-                        data=json.dumps({}),
+                        data=json.dumps({"run_id": RUN_ID, "message": f"ProbeWatch CI notification test {RUN_ID}"}),
                         headers=make_headers(page.request),
                     )
                     assert test_ch_resp.ok, f"Notification test failed: {test_ch_resp.status}"
@@ -634,6 +635,7 @@ def run():
                 else:
                     results["dedicated_notification_probe"] = ("FAIL", f"创建专用测试通知渠道失败: {create_ch_resp.status}")
             else:
+                print("SKIP: 未配置专用通知测试通道")
                 results["dedicated_notification_probe"] = ("SKIP", "未配置专用通知测试通道 (PROBEWATCH_TEST_WEBHOOK_URL)，保持跳过以避免向真实接收人发送测试通知")
 
             # 16. Isolated Database Backup/Restore Declaration
