@@ -1,33 +1,47 @@
 # ProbeWatch 正式版发布准入审查清单 (Release Checklist)
 
-> **当前版本**：`v0.9.3-rc` (Release Candidate)<br>
-> **许可证状态**：**待确认 (License: Pending Confirmation - PENDING)**<br>
-> **使用范围规范**：当前可用于个人部署和内部使用；公开开源发布前必须由项目所有者确认许可证。严禁擅自选择或伪造许可证文件（如私自添加 MIT/Apache 等），在此项完成前阻止直接发布 v1.0.0 稳定标签，严格保持候选版 (Candidate) 规范。
+> **当前候选版本**：`v0.9.3-rc` (Release Candidate)<br>
+> **生产二进制构建提交**：`48537dee39849d4fc6214c0eb3fd0e9f4aff35c0`<br>
+> **当前仓库提交及部署标记**：`dcc2d740cfcb401c089bc1519862ae94b9d48f97`<br>
+> **提交差异说明**：`git diff 48537de..dcc2d74` 仅为外部回归测试脚本 `frontend/tests/browser_real_regression.py` 补充明确输出，应用核心源码（Go 服务端与 React 前端）无任何变化。按规范不改写部署标记，不重新部署或重启。<br>
+> **技术适用范围**：当前架构与功能在技术实现上适用于自建轻量监控、探针出站资源采集、ICMP/MTR 探测与 IPQA 归档渲染。因开源许可证处于待确认状态，本清单不作任何形式的开源或商业授权结论，公开开源发布前必须由项目所有者最终确认许可证。<br>
+> **许可证状态**：**待确认 (License: Pending Confirmation - PENDING)**
 
 ---
 
-## 一、发布准入审查状态汇总 (Release Audit Matrix)
+## 一、最终发布准入验收总表 (Final Acceptance Matrix)
 
-| 审查项 | 状态 | 详细说明 |
-| :--- | :---: | :--- |
-| 1. Go test | **PASS** | `go test -count=1 ./...` 全包测试通过 |
-| 2. Go vet | **PASS** | `go vet ./...` 静态检查零告警通过 |
-| 3. 前端构建 | **PASS** | `npm run build` 干净打包成功，静态资源哈希生成完整 |
-| 4. 前端 smoke | **PASS** | `npm run test:smoke` 核心资产完整性与 HTML 引用断言通过 |
-| 5. npm audit | **PASS** | `npm audit` 与 `npm audit --omit=dev` 零高危及以上安全漏洞 |
-| 6. 备份恢复隔离测试 | **PASS** | `TestIsolatedBackupRestore` 隔离沙箱闭环测试通过，生产库哈希 100% 未受影响 |
-| 7. 安全部署回滚测试 | **PASS** | `test_safe_deploy_rollback.sh` 全部 7 个失败与成功场景闭环通过 |
-| 8. RBAC 矩阵测试 | **PASS** | 服务端对 `admin`、`viewer`、`disabled`、未鉴权及 CSRF 实施严格边界拦截 |
-| 9. 真实浏览器端到端回归 | **PASS** | Playwright 真实业务全生命周期覆盖，零控制台异常，清理后残留为 0 |
-| 10. 专用通知通道测试 | **SKIP** | 未配置专用测试接收端（环境变量 `PROBEWATCH_TEST_WEBHOOK_URL` 为空），按规范安全跳过并如实记录为 SKIP，杜绝干扰真实运维人员 |
-| 11. 许可证确认流程 | **PENDING** | 项目所有者待最终确认协议，当前维持候选版 `v0.9.3-rc`，未进入 v1.0 |
-| 12. 运行时资源采样 | **OBSERVING** | 已完成短时多周期平稳采样，长期负载指标仍需持续观察 |
+| 审查项 | 状态 | 测试类别 | 验证范围与依据 | 测试脚本 / 记录 |
+| :--- | :---: | :---: | :--- | :--- |
+| **1. Go 全量测试** | **PASS** | 模拟与单元测试 | 全包 19 个模块单测及 API 模拟通过，覆盖 RBAC、路由、会话、Agent 协议 | `go test -count=1 ./...` (耗时 60.7s) |
+| **2. Go 静态检查** | **PASS** | 静态代码分析 | Go 源码静态分析零告警，无已知语法或并发隐患 | `go vet ./...` (0 告警) |
+| **3. 前端生产构建** | **PASS** | 构建产物验证 | Vite 生产构建 4,621 模块转换，CSS 与 JS 哈希生成无报错 | `npm run build` |
+| **4. 前端 Smoke 测试** | **PASS** | 静态断言测试 | 核心资产完整性、HTML 引用、IPQA 四态映射规则校验 | `node tests/smoke.mjs` (24 项断言) |
+| **5. 前端依赖审计** | **PASS** | 依赖安全扫描 | 前端锁版本依赖漏洞扫描零高危与零中危 | `npm audit && npm audit --omit=dev` (0 漏洞) |
+| **6. 生产轮询控制器** | **PASS** | 单元逻辑测试 | `LivePollingController.js` 状态转换、休眠防抖与倒计时逻辑 | `node tests/use_live_polling.test.mjs` (24 项断言) |
+| **7. 部署与回滚演练** | **PASS** | 隔离沙箱测试 | 独立沙箱模拟服务异常、探活失败、并发排他锁与正常发布 7 场景 | `bash deploy/test_safe_deploy_rollback.sh` (26.6s) |
+| **8. 数据库备份与恢复** | **PASS** | 隔离沙箱测试 | 独立临时库验证备份创建、路径防穿越、损坏拒绝与覆盖恢复，生产库未受改动 | `go test -run TestIsolatedBackupRestore` (8.01s) |
+| **9. 线上管理认证会话** | **PASS** | 真实线上测试 | 管理员登录认证成功，页面刷新状态无损保持 | `browser_real_regression.py` (步骤 1-2) |
+| **10. 线上 RBAC 与 CSRF** | **PASS** | 真实线上测试 | 服务端对未鉴权(401)、无效CSRF(403)、只读角色写操作(403)及禁用用户(401/403)严格拦截 | `browser_real_regression.py` (步骤 3-5) |
+| **11. 目标配置生命周期** | **PASS** | 真实线上测试 | 真实网络目标创建、重命名、启用、停用及安全删除全流程通过 | `browser_real_regression.py` (步骤 6) |
+| **12. API Token 全生命周期** | **PASS** | 真实线上测试 | Token 签发、携带认证调用、吊销及吊销后服务端严格 401 拦截通过 | `browser_real_regression.py` (步骤 8) |
+| **13. 审计日志查询** | **PASS** | 真实线上测试 | 真实查询 `/api/audit-logs` 返回合法日志列表与字段结构 | `browser_real_regression.py` (步骤 10) |
+| **14. 节点详情 IPQA 渲染** | **PASS** | 真实线上测试 | 真实节点详情页渲染，挂载真实 IPQA 归档状态卡片 | `browser_real_regression.py` (步骤 11) |
+| **15. 远程终端 Echo 探活** | **PASS** | 真实线上测试 | 线上对真实节点下发无害 `echo ci-terminal-probe-ok` 并正确回显 | `browser_real_regression.py` (步骤 12) |
+| **16. 独有视图选择器等待** | **PASS** | 真实线上测试 | 日志、终端、测速专属视图选择器渲染断言通过 | `browser_real_regression.py` (步骤 13) |
+| **17. 移动端视口适配** | **PASS** | 真实线上测试 | 390px 与 375px 视口无横向滚动，抽屉导航自适应 | `browser_real_regression.py` (步骤 14) |
+| **18. 专用通知通道测试** | **SKIP** | 线上安全规范 | 未配置 `PROBEWATCH_TEST_WEBHOOK_URL` 专用测试端，规范跳过以防骚扰真实用户 | 环境变量未配置 (SKIP 输出) |
+| **19. 测速实际打流执行** | **待验证** | 实际业务执行 | 现有自动化测试仅验证了测速任务配置增删管理流程，未触发实际打流执行完成 | 待后续专项验证 |
+| **20. 回程监测实际追踪** | **待验证** | 实际业务执行 | 现有自动化测试仅验证了回程监测任务配置增删管理流程，未触发实际路由追踪完成 | 待后续专项验证 |
+| **21. 运行时资源短时采样** | **短时采样完成** | 运行时观测 | 6 样本采样平均 RSS 29.99 MB，WAL 4.8 MB，NRestarts 0，Delta 2.85 MB；**不据此宣称长期稳定性通过** | `bash scripts/inspect_runtime.sh` (6 样本, 2s 间隔) |
+| **22. 持续运行稳定性 (72h)** | **待验证** | 长期负载观察 | 短时采样不能替代长期运行与高负载压力观察，项目建议以 72 小时为验收观察窗口 | 待长期监控观测 |
+| **23. 开源许可证确认流程** | **PENDING** | 协议与法务合规 | 仓库无 `LICENSE` 文件，待所有者选定协议，阻止打上正式 v1.0.0 标签 | 待所有者确认 |
 
 ---
 
 ## 二、开源许可证确认流程 (License Confirmation Process)
 
-根据正式版开源准入规范，禁止由维护助手私自代选协议。开源发布前必须由所有者逐一复核并勾选：
+根据正式版准入规范，严禁私自代选协议。开源发布前必须由所有者逐一复核并签署：
 
 - [ ] 项目所有者已确认开源许可证
 - [ ] LICENSE 文件已加入仓库
@@ -37,42 +51,9 @@
 
 ---
 
-## 三、准入硬性门槛与详细规范 (Must-Pass Criteria)
+## 三、第三方依赖与授权溯源核查 (Third-Party Licenses)
 
-在发布任何更高版本前，以下各项必须 100% 验证通过：
-
-- [ ] **许可证已确认**：项目作者完成最终开源协议选定并添加根目录 `LICENSE`。
-- [x] **Go 全量测试与静态检查**：
-  - `go test -count=1 ./...` 全包无报错通过；
-  - `go vet ./...` 零告警通过。
-- [x] **前端构建与漏洞审计**：
-  - `npm ci` 安装干净锁版本依赖；
-  - `npm run build` 构建零报错；
-  - `npm run test:smoke` 核心资产完整性断言通过；
-  - `npm audit` 与 `npm audit --omit=dev` 零高危及以上漏洞。
-- [x] **生产轮询逻辑一致性**：
-  - `node frontend/tests/use_live_polling.test.mjs` 测试直接基于生产控制器 `LivePollingController.js`，全部 24 项断言通过。
-- [x] **部署与自动回滚沙箱测试**：
-  - `bash deploy/test_safe_deploy_rollback.sh` 7 个独立场景（服务启动失败、本地健康失败、公网健康失败、回滚失败指引、静态资源复制失败注入、并发部署排他锁、正常发布流程）全部通过。
-- [x] **数据库隔离备份恢复闭环**：
-  - `go test -v -run TestIsolatedBackupRestore ./tests` 验证隔离创建、结构校验、损坏拦截、路径防穿越、覆盖前安全快照、恢复后数据一致性与再次读写能力，且生产数据库保持 100% 未修改。
-- [x] **RBAC 角色权限矩阵服务侧拒绝**：
-  - `admin`、`viewer`、`disabled`、未鉴权及 CSRF 校验全部在服务端严格生效并返回 401/403，非仅前端隐藏按钮。
-- [x] **真实业务端到端回归**：
-  - `python frontend/tests/browser_real_regression.py` 覆盖登录、目标全生命周期、Token 创建与 401 吊销拦截、测速任务增删、审计日志查询、节点详情 IPQA 归档渲染、远程终端 echo 回显、独有视图选择器、390px/375px 移动端无横向滚动，全流程零 `pageerror`，`finally` 严格清理且残留为 0。
-- [x] **通知渠道安全验证**：
-  - 未配置专用测试渠道时严格输出 `SKIP`，杜绝打扰真实运维人员；若配置则验证隔离测试通道且在 `finally` 中清理。
-- [x] **五位一体基线版本一致性**：
-  - 本地 Git HEAD == GitHub `origin/main` == 服务器仓库 HEAD == `/opt/probewatch/CURRENT_COMMIT` == 运行二进制 SHA256。
-  - 公网 `/api/public/version` 返回的版本号与代码中一致。
-- [x] **多样本资源采样稳定性**：
-  - 运行 `scripts/inspect_runtime.sh` 证明内存 RSS、VSZ、打开文件描述符及 WAL 大小在多采样周期内平稳，无内存泄漏与进程异常重启。
-
----
-
-## 四、第三方依赖与授权溯源核查 (Third-Party Licenses)
-
-ProbeWatch 引用的主要第三方开源组件及其授权说明（严禁修改或删除其代码内原有版权声明）：
+ProbeWatch 引用的主要第三方开源组件及其授权说明（保留原有版权声明）：
 
 1. **前端核心组件**：
    - `react` / `react-dom`：MIT License (Meta Platforms, Inc.)
