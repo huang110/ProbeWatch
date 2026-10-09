@@ -79,20 +79,22 @@ func TestDedicatedNotificationProbe(t *testing.T) {
 		Enabled: true,
 	}
 
-	if err := store.CreateNotificationChannel(ctx, ch); err != nil {
-		t.Fatalf("CreateNotificationChannel failed: %v", err)
+	if err := store.UpsertNotificationChannel(ctx, ch); err != nil {
+		t.Fatalf("UpsertNotificationChannel failed: %v", err)
 	}
 
 	ruleID := fmt.Sprintf("rule-probe-%s", runID)
 	rule := db.AlertRule{
 		ID:              ruleID,
 		Name:            fmt.Sprintf("CI-Probe-Rule-%s", runID),
-		Category:        "node",
-		Condition:       "cpu_high",
+		Metric:          "cpu",
+		Operator:        ">=",
 		Threshold:       99.9,
 		DurationSeconds: 300,
 		Severity:        "warning",
+		NodeFilter:      "*",
 		Enabled:         false, // Disabled to prevent any unsolicited alert generation
+		ExpressionType:  "simple",
 	}
 	if err := store.CreateAlertRule(ctx, rule); err != nil {
 		t.Fatalf("CreateAlertRule failed: %v", err)
@@ -100,12 +102,14 @@ func TestDedicatedNotificationProbe(t *testing.T) {
 
 	silenceID := fmt.Sprintf("sil-probe-%s", runID)
 	silence := db.AlertSilence{
-		ID:        silenceID,
-		Category:  "node",
-		StartsAt:  time.Now().UTC(),
-		EndsAt:    time.Now().UTC().Add(10 * time.Minute),
-		Comment:   fmt.Sprintf("probe silence %s", runID),
-		CreatedBy: "ci-probe",
+		ID:         silenceID,
+		Name:       fmt.Sprintf("probe silence %s", runID),
+		Category:   "*",
+		NodeFilter: "*",
+		StartsAt:   time.Now().UTC(),
+		EndsAt:     time.Now().UTC().Add(10 * time.Minute),
+		Reason:     fmt.Sprintf("probe silence %s", runID),
+		CreatedBy:  "ci-probe",
 	}
 	if err := store.CreateAlertSilence(ctx, silence); err != nil {
 		t.Fatalf("CreateAlertSilence failed: %v", err)
