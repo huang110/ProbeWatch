@@ -158,8 +158,19 @@ docs/                   设计稿、实施计划、本地验证手册
 - **只读观察员 (viewer)**：只读模式，仅可浏览大屏、节点详情、检测图表与告警历史。
 - **访客模式 (Guest)**：公开脱敏看板，无需凭据直接访问脱敏资源与综合健康状态。
 
+### 版本兼容性与独立版本策略 (Version Compatibility & Independent Versioning Policy)
+
+ProbeWatch 主控与 Agent 采用**解耦的独立版本策略**：
+- **主控服务端 (Server)**：版本跟踪全平台控制面、前端大屏及 API 架构（当前候选版：`v0.9.3-rc`）。
+- **节点探针 (Agent)**：版本跟踪探针常驻守护进程、系统指标采集器与探针通信协议（当前发布版：`v0.8.13`）。
+- **兼容性窗口**：
+  - 主控端最低兼容探针版本为 `v0.5.0`（`MinAgentVersion`）；
+  - 主控公共版本接口 `/api/public/version` 与探针检查接口 `/api/agent/v1/update/check` 声明当前推荐探针版本为 `v0.8.13`（`LatestAgentVersion`）；
+  - 探针上报若低于 `v0.8.13`，管理界面将提示“可更新至 v0.8.13”；
+  - 核心配置架构解耦（Commit `d509180`）实现了 Server 与 Agent 校验逻辑的彻底隔离，Agent 在 `production` 模式下仅校验节点通信与凭据，绝不要求主控管理员密码或 Session 密钥，保持协议与运行向后完全兼容。
+
 ## 技术适用范围与许可证说明 (Technical Scope & License)
 
 - **技术适用范围**：当前架构与功能在技术实现上适用于自建单体监控、探针出站资源采集、ICMP/MTR 探测与 IPQA 归档渲染。因开源许可证处于待确认状态，不作任何形式的开源或商业授权结论，公开开源发布前必须由项目所有者确认许可证。<br>
-- **许可证状态**：**待确认 (License: Pending Confirmation - PENDING)**。<br>
+- **许可证状态**：**待确认 (License: Pending Confirmation - PENDING)**，详见 [LICENSE-PENDING.md](LICENSE-PENDING.md)。<br>
 本仓库第三方依赖组件（Go 运行时依赖、React 生态库、Phosphor Icons 等）均保留其各自原有开源许可。在项目所有者最终确认开源协议前保持候选版 (Candidate) 规范，不发布正式 v1.0.0 标签。

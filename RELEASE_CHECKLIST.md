@@ -35,12 +35,27 @@
 | **19. 测速实际打流执行** | **待验证** | 实际业务执行 | 现有自动化测试仅验证了测速任务配置增删管理流程，未触发实际打流执行完成 | 待后续专项验证 |
 | **20. 回程监测实际追踪** | **待验证** | 实际业务执行 | 现有自动化测试仅验证了回程监测任务配置增删管理流程，未触发实际路由追踪完成 | 待后续专项验证 |
 | **21. 运行时资源短时采样** | **短时采样完成** | 运行时观测 | 6 样本采样平均 RSS 29.99 MB，WAL 4.8 MB，NRestarts 0，Delta 2.85 MB；**不据此宣称长期稳定性通过** | `bash scripts/inspect_runtime.sh` (6 样本, 2s 间隔) |
-| **22. 持续运行稳定性 (72h)** | **待验证** | 长期负载观察 | 短时采样不能替代长期运行与高负载压力观察，项目建议以 72 小时为验收观察窗口 | 待长期监控观测 |
-| **23. 开源许可证确认流程** | **PENDING** | 协议与法务合规 | 仓库无 `LICENSE` 文件，待所有者选定协议，阻止打上正式 v1.0.0 标签 | 待所有者确认 |
+| **22. 持续运行稳定性 (72h)** | **IN_PROGRESS** | 长期负载观察 | systemd timer + sampler 脚本已启动（每 5 分钟采样探活、PID、重启计数、健康检查及多节点上报时间）；观察期持续累积，未满 72 小时严禁标记为 PASS | `/opt/probewatch/scripts/stability_sampler.sh` |
+| **23. 开源许可证确认流程** | **PENDING** | 协议与法务合规 | 根目录已建立 `LICENSE-PENDING.md` 阻塞说明，严禁私自代选协议，阻塞发布正式 v1.0.0 标签 | 待所有者签署确认 |
 
 ---
 
-## 二、开源许可证确认流程 (License Confirmation Process)
+## 二、版本兼容性与独立版本策略 (Version Compatibility & Independent Versioning Policy)
+
+ProbeWatch 体系采用**解耦的独立版本策略**：
+
+1. **版本定义**：
+   - **主控服务端 (Server)**：版本跟踪全平台控制面、前端大屏及 API 架构（当前候选版：`v0.9.3-rc`）。
+   - **节点探针 (Agent)**：版本跟踪探针常驻守护进程、系统指标采集器与探针通信协议（当前发布版：`v0.8.13`）。
+2. **兼容性范围**：
+   - **最低兼容版本**：主控端 `MinAgentVersion = "0.5.0"`，兼容历史部署的老旧节点协议；
+   - **推荐最新版本**：主控 `/api/public/version` 与 `/api/agent/v1/update/check` 声明 `LatestAgentVersion = "0.8.13"`；
+   - **UI 提示规则**：管理端界面对比节点上报版本与最新版本，若低于最新版显示“可更新至 v0.8.13”；
+   - **配置解耦向后兼容**：Commit `d509180` 将 Agent 配置加载 (`LoadAgentConfig`) 与 Server (`LoadServerConfig`) 彻底解耦，生产环境下 Agent 仅校验通信端点与节点凭据，绝不要求主控管理员密码或 Session 密钥，保持协议与运行向后完全兼容。
+
+---
+
+## 三、开源许可证确认流程 (License Confirmation Process)
 
 根据正式版准入规范，严禁私自代选协议。开源发布前必须由所有者逐一复核并签署：
 
@@ -52,7 +67,7 @@
 
 ---
 
-## 三、第三方依赖与授权溯源核查 (Third-Party Dependencies)
+## 四、第三方依赖与授权溯源核查 (Third-Party Dependencies)
 
 依据 `go.mod`、`go.sum`、`frontend/package.json`、`frontend/package-lock.json` 真实清单核实（许可证待项目所有者或法务逐项复核）：
 
