@@ -38,6 +38,7 @@ import {
 } from '../lib/billing.js'
 import { formatBytes, numeric, safeText, isVersionOutdated } from '../lib/format.js'
 import { fetchCsrfToken } from '../lib/api.js'
+import { escapeShell } from '../lib/shellEscape.js'
 
 export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, latestAgentVersion = '', onSelectNode }) {
   const [showEnroll, setShowEnroll] = useState(false)
@@ -307,14 +308,17 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
     const { token, endpoint, uuid } = installEnrollment
     const remote = remoteManagement ? ' --enable-remote-control=true' : ''
     const base = `https://${window.location.host}/install.sh`
-    if (installTab === 'windows') return `curl.exe -fsSL ${base} -o "$env:TEMP\probewatch-install.sh"; bash "$env:TEMP\probewatch-install.sh" --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
-    if (installTab === 'macos') return `curl -fsSL ${base} | bash -s -- --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
-    if (installTab === 'docker') return `docker run -d --name probewatch-agent --restart always --net host -e PROBEWATCH_AGENT_ENDPOINT="${endpoint}" -e PROBEWATCH_AGENT_NODE_UUID="${uuid}" -e PROBEWATCH_AGENT_REGISTRATION_TOKEN="${token}"${remote ? ' -e PROBEWATCH_AGENT_REMOTE_CONTROL=true' : ''} probewatch/agent:latest`
-    return `curl -fsSL ${base} | bash -s -- --endpoint ${endpoint} --token ${token} --uuid ${uuid}${remote}`
+    const safeEndpoint = escapeShell(endpoint)
+    const safeToken = escapeShell(token)
+    const safeUuid = escapeShell(uuid)
+    if (installTab === 'windows') return `curl.exe -fsSL ${base} -o "$env:TEMP\\probewatch-install.sh"; bash "$env:TEMP\\probewatch-install.sh" --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    if (installTab === 'macos') return `curl -fsSL ${base} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    if (installTab === 'docker') return ''
+    return `curl -fsSL ${base} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
   }, [installEnrollment, installTab, remoteManagement])
 
   const copyInstallCommand = async () => {
-    if (!installCommand) return
+    if (!installCommand || installTab === 'docker') return
     await navigator.clipboard.writeText(installCommand)
     setCopyToast('已复制部署指令')
     setTimeout(() => setCopyToast(''), 2400)
@@ -1243,15 +1247,48 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
             ) : (
               <div className="node-install-body">
                 <div className="node-install-platforms">
-                  {[['linux','Linux'],['windows','Windows'],['macos','macOS'],['docker','Docker']].map(([id,label]) => <button key={id} type="button" className={installTab === id ? 'active' : ''} onClick={() => setInstallTab(id)}>{label}</button>)}
+                  {[['linux','Linux'],['windows','Windows'],['macos','macOS'],['docker','Docker (未发布)']].map(([id,label]) => (
+                    <button key={id} type="button" className={installTab === id ? 'active' : ''} onClick={() => setInstallTab(id)}>{label}</button>
+                  ))}
                 </div>
-                <div className="node-install-section-title"><strong>安装配置</strong><span>重新生成即刻生效</span></div>
-                <label className="node-install-check"><input type="checkbox" checked={remoteManagement} onChange={(e) => setRemoteManagement(e.target.checked)} /> 启用远程管理 <small>默认关闭</small></label>
-                <label className="node-install-check"><input type="checkbox" /> 禁用自动更新</label>
-                <label className="node-install-check"><input type="checkbox" /> 忽略不安全证书</label>
-                <div className="node-install-command-label">指令</div>
-                <pre className="node-install-command mono">{installLoading ? '# 正在生成一次性部署指令…' : installCommand}</pre>
-                <button type="button" className="button button-primary w-full" disabled={!installCommand} onClick={copyInstallCommand}><Copy size={15} /> 保存并复制部署指令</button>
+                {installTab === 'docker' ? (
+                  <div
+                    style={{
+                      padding: '20px 16px',
+                      borderRadius: '8px',
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      color: '#f87171',
+                      fontSize: '13px',
+                      textAlign: 'center',
+                      margin: '16px 0',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '6px' }}>
+                      Docker 镜像尚未发布，请使用 Linux/OpenWrt 安装
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      ProbeWatch 尚未发布可拉取的官方 Docker 镜像，暂不支持容器化部署 Agent。请使用 Linux 脚本安装。
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="node-install-section-title"><strong>安装配置</strong><span>重新生成即刻生效</span></div>
+                    <label className="node-install-check"><input type="checkbox" checked={remoteManagement} onChange={(e) => setRemoteManagement(e.target.checked)} /> 启用远程管理 <small>默认关闭</small></label>
+                    <label className="node-install-check"><input type="checkbox" /> 禁用自动更新</label>
+                    <label className="node-install-check"><input type="checkbox" /> 忽略不安全证书</label>
+                    <div className="node-install-command-label">指令</div>
+                    <pre className="node-install-command mono">{installLoading ? '# 正在生成一次性部署指令…' : installCommand}</pre>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="button button-primary w-full"
+                  disabled={!installCommand || installTab === 'docker'}
+                  onClick={copyInstallCommand}
+                >
+                  <Copy size={15} /> {installTab === 'docker' ? 'Docker 镜像尚未发布' : '保存并复制部署指令'}
+                </button>
               </div>
             )}
           </div>

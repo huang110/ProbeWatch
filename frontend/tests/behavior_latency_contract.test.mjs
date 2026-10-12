@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { isTargetGlobal, nodeMatchesTarget, getTargetScopeSummary } from '../src/lib/targetScope.js'
 import { escapeShell } from '../src/lib/shellEscape.js'
@@ -363,7 +363,102 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
     addServerCode.includes("activeTab === 'docker'"),
     'Scenario 17: Docker tab is explicitly checked and disabled'
   )
-  console.log('[PASS] Scenario 17: Docker unreleased state handling verified.')
+  assert.ok(
+    !addServerCode.includes('dockerScript'),
+    'Scenario 17: dockerScript must not exist'
+  )
+  console.log('[PASS] Scenario 17: Docker unreleased state in AddServerModal verified.')
 }
 
-console.log('\n=== ALL 17 LATENCY, SCOPE & ENROLLMENT BEHAVIORAL CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 18: Docker unreleased state in ServerManageView
+// -----------------------------------------------------------------------------
+{
+  const serverManageCode = readFileSync(
+    resolve(process.cwd(), 'frontend/src/components/ServerManageView.jsx'),
+    'utf8'
+  )
+  assert.ok(
+    serverManageCode.includes('Docker 镜像尚未发布，请使用 Linux/OpenWrt 安装'),
+    'Scenario 18: ServerManageView must show unreleased warning for Docker'
+  )
+  assert.ok(
+    !serverManageCode.includes('probewatch/agent:latest'),
+    'Scenario 18: ServerManageView must NOT contain probewatch/agent:latest'
+  )
+  assert.ok(
+    serverManageCode.includes("if (installTab === 'docker') return ''"),
+    'Scenario 18: installCommand must return empty string for docker tab'
+  )
+  assert.ok(
+    serverManageCode.includes("disabled={!installCommand || installTab === 'docker'}"),
+    'Scenario 18: Copy button must be disabled for docker tab'
+  )
+  assert.ok(
+    serverManageCode.includes("if (!installCommand || installTab === 'docker') return"),
+    'Scenario 18: copyInstallCommand handler must block execution for docker tab'
+  )
+  console.log('[PASS] Scenario 18: Docker unreleased state in ServerManageView verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 19: Other installation components (NodeEnroll)
+// -----------------------------------------------------------------------------
+{
+  const nodeEnrollCode = readFileSync(
+    resolve(process.cwd(), 'frontend/src/components/NodeEnroll.jsx'),
+    'utf8'
+  )
+  assert.ok(
+    !nodeEnrollCode.includes('probewatch/agent:latest'),
+    'Scenario 19: NodeEnroll must NOT contain probewatch/agent:latest'
+  )
+  assert.ok(
+    !nodeEnrollCode.includes('docker run'),
+    'Scenario 19: NodeEnroll must not generate unverified docker run commands'
+  )
+  console.log('[PASS] Scenario 19: Other installation components verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 20: Whole codebase audit for probewatch/agent:latest & consistent warning
+// -----------------------------------------------------------------------------
+{
+  const getAllFiles = (dir) => {
+    const entries = readdirSync(dir)
+    let files = []
+    for (const entry of entries) {
+      const full = resolve(dir, entry)
+      const stat = statSync(full)
+      if (stat.isDirectory()) {
+        files = files.concat(getAllFiles(full))
+      } else if (full.endsWith('.js') || full.endsWith('.jsx')) {
+        files.push(full)
+      }
+    }
+    return files
+  }
+
+  const srcFiles = getAllFiles(resolve(process.cwd(), 'frontend/src'))
+  assert.ok(srcFiles.length > 10, 'Scenario 20: frontend/src must contain source files')
+
+  for (const file of srcFiles) {
+    const content = readFileSync(file, 'utf8')
+    assert.ok(
+      !content.includes('probewatch/agent:latest'),
+      `Scenario 20: Production source file ${file} MUST NOT contain probewatch/agent:latest`
+    )
+  }
+
+  // Verify consistent warning exists across all Docker installation entries
+  const expectedNotice = 'Docker 镜像尚未发布，请使用 Linux/OpenWrt 安装'
+  const addServerCode = readFileSync(resolve(process.cwd(), 'frontend/src/components/AddServerModal.jsx'), 'utf8')
+  const serverManageCode = readFileSync(resolve(process.cwd(), 'frontend/src/components/ServerManageView.jsx'), 'utf8')
+
+  assert.ok(addServerCode.includes(expectedNotice), 'Scenario 20: AddServerModal must match consistent notice')
+  assert.ok(serverManageCode.includes(expectedNotice), 'Scenario 20: ServerManageView must match consistent notice')
+
+  console.log('[PASS] Scenario 20: Full codebase audit passed, no probewatch/agent:latest in frontend/src and consistent notice confirmed.')
+}
+
+console.log('\n=== ALL 20 LATENCY, SCOPE & ENROLLMENT BEHAVIORAL CONTRACT TESTS PASSED ===')
