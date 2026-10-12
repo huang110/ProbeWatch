@@ -15,7 +15,9 @@ import {
   ArrowsClockwise,
   Broadcast,
   CheckCircle,
+  CircleNotch,
   Clock,
+  DotsSixVertical,
   DotsThree,
   Eye,
   Globe,
@@ -27,17 +29,150 @@ import {
   Trash,
   WarningOctagon,
   WifiHigh,
+  X,
 } from '@phosphor-icons/react'
 import { NetworkLatencyLines } from './NetworkMonitorView.jsx'
 import { MTRHopLatencyLine } from './MTRRouteView.jsx'
 import { NewLatencyTargetModal } from './NewLatencyTargetModal.jsx'
 import { NewRouteMonitorModal } from './NewRouteMonitorModal.jsx'
 import { fetchCsrfToken } from '../lib/api.js'
-import { identifyTargetCarrier, safeArray, safeText } from '../lib/format.js'
+import { detectRegionAndFlag, identifyTargetCarrier, relativeHeartbeat, safeArray, safeText } from '../lib/format.js'
 import { useLivePolling } from '../lib/useLivePolling.js'
+import { isTargetGlobal, nodeMatchesTarget, getTargetScopeSummary } from '../lib/targetScope.js'
+
+function ServerListModal({ isOpen, onClose, target, nodes = [] }) {
+  if (!isOpen || !target) return null
+  const isGlobal = isTargetGlobal(target)
+  const targetNodes = isGlobal ? nodes : nodes.filter((n) => nodeMatchesTarget(n, target))
+  const scopeSummary = getTargetScopeSummary(target, nodes)
+
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        backdropFilter: 'blur(3px)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+      }}
+    >
+      <div
+        className="modal-content"
+        style={{
+          maxWidth: '480px',
+          width: '100%',
+          borderRadius: '12px',
+          background: 'var(--surface-card, #ffffff)',
+          border: '1px solid var(--border-subtle, #e2e8f0)',
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)',
+          overflow: 'hidden',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border-subtle, #e2e8f0)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>任务关联服务器列表</h3>
+            <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+              目标：{target.name}（{scopeSummary.text}）
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-action-btn"
+            onClick={onClose}
+            style={{ borderRadius: '6px', padding: '6px' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '12px 18px' }}>
+          {targetNodes.length === 0 ? (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+              暂无匹配的服务器节点
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {targetNodes.map((n) => {
+                const meta = detectRegionAndFlag(n.name, n.hostname || n.resource?.hostname)
+                const isOnline = n.status === 'online'
+                return (
+                  <div
+                    key={n.uuid || n.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid var(--border-subtle, rgba(255, 255, 255, 0.08))',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '16px', lineHeight: 1 }}>{n.flag || meta.flag}</span>
+                      <span
+                        style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: isOnline ? '#10b981' : '#94a3b8',
+                          display: 'inline-block',
+                          flexShrink: 0,
+                        }}
+                        title={isOnline ? '节点在线' : '节点离线'}
+                      />
+                      <span style={{ fontSize: '13px', fontWeight: 600 }}>{n.name}</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="mono text-muted" style={{ fontSize: '11px' }}>
+                        {n.ip || n.address || meta.region}
+                      </div>
+                      <div style={{ fontSize: '10px', color: isOnline ? '#10b981' : '#94a3b8' }}>
+                        {isOnline ? '在线' : '离线'}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: '12px 18px',
+            borderTop: '1px solid var(--border-subtle, #e2e8f0)',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            background: 'rgba(0, 0, 0, 0.02)',
+          }}
+        >
+          <button type="button" className="button button-secondary btn-sm" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // 官方 6 大预置骨干探针目标 (RFC 5737 文档保留地址，完全契合安全契约)
-export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'latency', onNavigate }) {
+export function MonitoringView({ nodes = [], readOnly = false, initialTab = 'latency', onNavigate }) {
   const [activeTab, setActiveTab] = useState(initialTab) // 'latency' | 'route' | 'gfw'
   const [latencyViewMode, setLatencyViewMode] = useState('tasks') // 'tasks' | 'servers'
   const [routeSubTab, setRouteSubTab] = useState('tasks') // 'tasks' | 'records' | 'rules'
@@ -48,9 +183,51 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
   const [liveMtrResults, setLiveMtrResults] = useState([])
   const liveRequestRef = useRef(null)
   const [latencySearch, setLatencySearch] = useState('')
+  const [serverSearch, setServerSearch] = useState('')
   const [showAddLatencyModal, setShowAddLatencyModal] = useState(false)
+  const [editingLatencyTarget, setEditingLatencyTarget] = useState(null)
   const [selectedServerForLatency, setSelectedServerForLatency] = useState(nodes[0]?.uuid || nodes[0]?.id || '')
+  const [mutatingTargetId, setMutatingTargetId] = useState(null)
+  const [operationError, setOperationError] = useState(null)
+  const [operationNotice, setOperationNotice] = useState(null)
+  const [batchLoading, setBatchLoading] = useState(false)
+  const [inspectingServerListTarget, setInspectingServerListTarget] = useState(null)
+  const [openServerActionNodeId, setOpenServerActionNodeId] = useState(null)
   const egressHistoryRef = useRef(new Map())
+
+  // 点击外部关闭服务器快捷操作菜单
+  useEffect(() => {
+    const handleClickOutside = () => setOpenServerActionNodeId(null)
+    if (openServerActionNodeId) {
+      window.addEventListener('click', handleClickOutside)
+      return () => window.removeEventListener('click', handleClickOutside)
+    }
+  }, [openServerActionNodeId])
+
+  // 删除延迟目标 (严格校验响应并拦截错误)
+  const handleDeleteLatencyTarget = async (target) => {
+    if (mutatingTargetId) return
+    if (!window.confirm(`确定删除监测目标 “${target.name}” 吗？此操作不可撤回。`)) return
+    setMutatingTargetId(target.id)
+    setOperationError(null)
+    try {
+      const csrfToken = await fetchCsrfToken()
+      const res = await fetch(`/api/targets/${encodeURIComponent(target.id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `删除失败 (HTTP ${res.status})`)
+      }
+      setTargets((prev) => prev.filter((t) => t.id !== target.id))
+    } catch (err) {
+      setOperationError(`删除目标 “${target.name}” 失败: ${err.message}`)
+    } finally {
+      setMutatingTargetId(null)
+    }
+  }
 
   // 回程线路监测相关状态
   const [routeTasks, setRouteTasks] = useState([])
@@ -67,42 +244,47 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     }
   }, [initialTab])
 
-  // 从 API 加载检测目标
+  // 从 API 加载检测目标 (严格保留完整字段如 node_ids, node_tags, region_rules 等)
   const targetsRequestRef = useRef(null)
   const fetchTargets = async () => {
-      targetsRequestRef.current?.abort()
-      const controller = new AbortController()
-      targetsRequestRef.current = controller
-      try {
-        const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
-        if (res.ok) {
-          const list = await res.json()
-          if (Array.isArray(list) && !controller.signal.aborted) {
-            const mtrList = list.filter((t) => t.kind === 'mtr')
-            const netList = list.filter((t) => t.kind !== 'mtr')
-            setRouteTasks(mtrList)
-            setTargets(
-              netList.map((t) => ({
-                id: t.id,
-                name: t.name,
-                kind: t.kind,
-                host: t.host,
-                enabled: t.enabled !== false,
-                isp: /电信/.test(t.name) ? 'telecom' : /联通/.test(t.name) ? 'unicom' : /移动/.test(t.name) ? 'mobile' : 'other',
-              }))
-            )
-          }
+    targetsRequestRef.current?.abort()
+    const controller = new AbortController()
+    targetsRequestRef.current = controller
+    try {
+      const res = await fetch('/api/targets', { credentials: 'same-origin', signal: controller.signal })
+      if (res.ok) {
+        const list = await res.json()
+        if (Array.isArray(list) && !controller.signal.aborted) {
+          const mtrList = list.filter((t) => t.kind === 'mtr')
+          const netList = list.filter((t) => t.kind !== 'mtr')
+          setRouteTasks(mtrList)
+          setTargets(
+            netList.map((t) => ({
+              ...t,
+              id: t.id,
+              name: t.name,
+              kind: t.kind,
+              host: t.host,
+              enabled: t.enabled !== false,
+              node_ids: Array.isArray(t.node_ids) ? t.node_ids : [],
+              node_tags: Array.isArray(t.node_tags) ? t.node_tags : [],
+              region_rules: Array.isArray(t.region_rules) ? t.region_rules : [],
+              interval_seconds: t.interval_seconds || 60,
+              isp: /电信/.test(t.name) ? 'telecom' : /联通/.test(t.name) ? 'unicom' : /移动/.test(t.name) ? 'mobile' : 'other',
+            }))
+          )
         }
-      } catch (error) {
-        if (error?.name !== 'AbortError') return false
-      } finally {
-        if (!controller.signal.aborted && targetsRequestRef.current === controller) targetsRequestRef.current = null
       }
+    } catch (error) {
+      if (error?.name !== 'AbortError') return false
+    } finally {
+      if (!controller.signal.aborted && targetsRequestRef.current === controller) targetsRequestRef.current = null
+    }
   }
   useLivePolling(fetchTargets, { interval: 15000 })
   useEffect(() => () => targetsRequestRef.current?.abort(), [])
 
-  // 读取当前探测源的真实延迟汇总和 MTR 最新结果，避免页面展示演示数据。
+  // 读取当前探测源的真实延迟汇总和 MTR 最新结果
   useLivePolling(async () => {
     if (!selectedServerForLatency) return
     liveRequestRef.current?.abort()
@@ -128,20 +310,177 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     }
   }, [nodes, selectedServerForLatency])
 
-  // 切换延迟目标开启状态
-  const handleToggleTarget = async (id) => {
-    setTargets((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t))
-    )
+  // 切换延迟目标开启状态 (严格校验与锁定，不静默吞错)
+  const handleToggleTarget = async (target) => {
+    if (mutatingTargetId) return
+    const newEnabled = !target.enabled
+    setMutatingTargetId(target.id)
+    setOperationError(null)
     try {
       const csrfToken = await fetchCsrfToken()
-      await fetch(`/api/targets/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/targets/${encodeURIComponent(target.id)}`, {
         method: 'PATCH',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        body: JSON.stringify({ enabled: !targets.find((t) => t.id === id)?.enabled }),
+        body: JSON.stringify({ enabled: newEnabled }),
       })
-    } catch {}
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `操作失败 (HTTP ${res.status})`)
+      }
+      const updated = await res.json().catch(() => null)
+      setTargets((prev) =>
+        prev.map((t) =>
+          t.id === target.id
+            ? { ...t, enabled: newEnabled, ...(updated && typeof updated === 'object' ? updated : {}) }
+            : t
+        )
+      )
+    } catch (err) {
+      setOperationError(`切换目标 “${target.name}” 状态失败: ${err.message}`)
+    } finally {
+      setMutatingTargetId(null)
+    }
+  }
+
+  // 服务器视图：全局启用/停用该服务器关联任务 (逐个获取 CSRF 串行执行，防 403 冲突)
+  const handleBatchToggleServerTasks = async (node, enable) => {
+    if (batchLoading) return
+    const toUpdate = targets.filter(
+      (t) => nodeMatchesTarget(node, t) && t.enabled !== enable
+    )
+    setOpenServerActionNodeId(null)
+    if (toUpdate.length === 0) {
+      alert(`该服务器下关联的任务已经全部处于${enable ? '启用' : '停用'}状态。`)
+      return
+    }
+    const confirmText =
+      `确定将服务器 “${node.name}” 关联的 ${toUpdate.length} 个任务全局${enable ? '启用' : '停用'}吗？\n\n` +
+      `⚠️ 重要提醒：这些监测任务是全局或被多台服务器共享的任务，${enable ? '启用' : '停用'}将对所有关联服务器生效！`
+    if (!window.confirm(confirmText)) {
+      return
+    }
+
+    setBatchLoading(true)
+    setOperationError(null)
+    setOperationNotice(null)
+    let successCount = 0
+    const failedItems = []
+
+    try {
+      for (const t of toUpdate) {
+        try {
+          const csrfToken = await fetchCsrfToken()
+          const res = await fetch(`/api/targets/${encodeURIComponent(t.id)}`, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ enabled: enable }),
+          })
+          if (res.ok) {
+            successCount++
+          } else {
+            const errData = await res.json().catch(() => ({}))
+            failedItems.push(`“${t.name}” (${errData.error || res.status})`)
+          }
+        } catch (fetchErr) {
+          failedItems.push(`“${t.name}” (${fetchErr.message})`)
+        }
+      }
+
+      await fetchTargets()
+
+      if (failedItems.length > 0) {
+        setOperationError(
+          `批量${enable ? '启用' : '停用'}完成：成功 ${successCount} 个，失败 ${failedItems.length} 个 [${failedItems.join('；')}]`
+        )
+      } else {
+        setOperationNotice(
+          `已全局${enable ? '启用' : '停用'}服务器 “${node.name}” 关联的全部 ${successCount} 个监测任务。`
+        )
+      }
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  // 服务器视图：从定向任务中移除服务器 (真正调用 API 更新 node_ids，严禁删除服务器实体)
+  const handleRemoveServerFromScopedTasks = async (node) => {
+    if (batchLoading) return
+    const serverUuid = String(node.uuid || node.id || '').trim().toLowerCase()
+    setOpenServerActionNodeId(null)
+    const scopedTasks = targets.filter(
+      (t) =>
+        Array.isArray(t.node_ids) &&
+        t.node_ids.some((id) => String(id || '').trim().toLowerCase() === serverUuid)
+    )
+    if (scopedTasks.length === 0) {
+      alert(`服务器 “${node.name}” 未被任何定向任务单独指定（仅作为全部服务器之一参与全局监测，或通过标签策略匹配）。`)
+      return
+    }
+    const confirmText =
+      `确定从 ${scopedTasks.length} 个定向监测任务中移除服务器 “${node.name}” 吗？\n\n` +
+      `注意：此操作只调整任务分发范围，绝不会删除服务器本身。`
+    if (!window.confirm(confirmText)) {
+      return
+    }
+
+    setBatchLoading(true)
+    setOperationError(null)
+    setOperationNotice(null)
+    let successCount = 0
+    const skippedTasks = []
+    const failedTasks = []
+
+    try {
+      for (const task of scopedTasks) {
+        const nextNodeIds = task.node_ids.filter(
+          (id) => String(id || '').trim().toLowerCase() !== serverUuid
+        )
+        // 关键防护：若该定向任务移除此节点后 node_ids 变为空且没有 node_tags，
+        // 后端逻辑 !hasIDs && !hasTags 会把该任务误判为全局任务（向所有服务器分发）！
+        // 必须拦截并跳过，提示用户直接编辑或删除任务。
+        if (nextNodeIds.length === 0 && (!task.node_tags || task.node_tags.length === 0)) {
+          skippedTasks.push(
+            `“${task.name}” (仅剩此唯一指定服务器，移除会导致任务扩大至全部服务器，请直接编辑或删除该任务)`
+          )
+          continue
+        }
+
+        try {
+          const csrfToken = await fetchCsrfToken()
+          const res = await fetch(`/api/targets/${encodeURIComponent(task.id)}`, {
+            method: 'PATCH',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ node_ids: nextNodeIds }),
+          })
+          if (res.ok) {
+            successCount++
+          } else {
+            const errData = await res.json().catch(() => ({}))
+            failedTasks.push(`“${task.name}” (${errData.error || res.status})`)
+          }
+        } catch (callErr) {
+          failedTasks.push(`“${task.name}” (${callErr.message})`)
+        }
+      }
+
+      await fetchTargets()
+
+      const parts = []
+      if (successCount > 0) parts.push(`成功移除 ${successCount} 个定向任务`)
+      if (skippedTasks.length > 0) parts.push(`已跳过 ${skippedTasks.length} 个任务：${skippedTasks.join('；')}`)
+      if (failedTasks.length > 0) parts.push(`失败 ${failedTasks.length} 个任务：${failedTasks.join('；')}`)
+
+      if (failedTasks.length > 0 || skippedTasks.length > 0) {
+        setOperationError(parts.join(' | '))
+      } else {
+        setOperationNotice(parts.join(' | '))
+      }
+    } finally {
+      setBatchLoading(false)
+    }
   }
 
   // 快捷载入常用回程预设
@@ -154,7 +493,7 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     setRouteTasks(presets)
   }
 
-  // 延迟监测过滤列表
+  // 延迟监测过滤列表 (任务视图)
   const filteredLatencyTargets = useMemo(() => {
     if (!latencySearch) return targets
     const q = latencySearch.toLowerCase().trim()
@@ -166,11 +505,41 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
     )
   }, [targets, latencySearch])
 
+  // 服务器过滤列表 (服务器视图)
+  const filteredServers = useMemo(() => {
+    if (!serverSearch) return nodes
+    const q = serverSearch.toLowerCase().trim()
+    return nodes.filter((n) => {
+      const meta = detectRegionAndFlag(n.name, n.hostname || n.resource?.hostname)
+      return (
+        (n.name || '').toLowerCase().includes(q) ||
+        (n.ip || n.address || '').toLowerCase().includes(q) ||
+        meta.region.toLowerCase().includes(q)
+      )
+    })
+  }, [nodes, serverSearch])
+
   // 延迟任务指标统计
   const enabledTargetCount = useMemo(
     () => targets.filter((t) => t.enabled).length,
     [targets]
   )
+
+  // 实际关联有任务的独立服务器数量 (通过 nodeMatchesTarget 检查)
+  const associatedNodesCount = useMemo(() => {
+    if (nodes.length === 0 || targets.length === 0) return 0
+    return nodes.filter((node) => targets.some((target) => nodeMatchesTarget(node, target))).length
+  }, [nodes, targets])
+
+  // 全局下发任务数量 (无 tags 且无 ids 且已启用)
+  const globalEnabledTargetsCount = useMemo(() => {
+    return targets.filter((t) => t.enabled && isTargetGlobal(t)).length
+  }, [targets])
+
+  // 已停用任务数量
+  const disabledTargetsCount = useMemo(() => {
+    return targets.filter((t) => !t.enabled).length
+  }, [targets])
 
   // 回程线路监测过滤列表
   const filteredRouteTasks = useMemo(() => {
@@ -286,8 +655,70 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
             </div>
           </div>
 
-          {/* 顶部 3 个指标卡片 (匹配 Image 4) */}
-          <div className="monitor-stats-grid-3">
+          {/* 操作成功提示横幅 */}
+          {operationNotice && (
+            <div
+              style={{
+                padding: '10px 16px',
+                marginBottom: '16px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.1)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                color: '#34d399',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle size={18} weight="bold" />
+                <span>{operationNotice}</span>
+              </div>
+              <button
+                type="button"
+                className="icon-action-btn"
+                onClick={() => setOperationNotice(null)}
+                style={{ color: '#34d399', padding: '4px' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* 异常提示横幅 */}
+          {operationError && (
+            <div
+              style={{
+                padding: '10px 16px',
+                marginBottom: '16px',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: '#f87171',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <WarningOctagon size={18} weight="bold" />
+                <span>{operationError}</span>
+              </div>
+              <button
+                type="button"
+                className="icon-action-btn"
+                onClick={() => setOperationError(null)}
+                style={{ color: '#f87171', padding: '4px' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* 顶部 4 个指标卡片 (严格对齐真实统计指标) */}
+          <div className="monitor-stats-grid-4">
             {/* 监测任务 */}
             <div className="monitor-stat-card">
               <div className="monitor-stat-head">
@@ -307,18 +738,33 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                   <Globe size={16} />
                 </span>
               </div>
-              <div className="monitor-stat-val mono">{nodes.length}</div>
+              <div className="monitor-stat-val mono">{associatedNodesCount}</div>
             </div>
 
-            {/* 默认开启任务 */}
+            {/* 全局下发任务 */}
             <div className="monitor-stat-card">
               <div className="monitor-stat-head">
-                <span className="monitor-stat-title">默认开启任务</span>
+                <span className="monitor-stat-title">全局下发任务</span>
                 <span className="monitor-stat-icon text-amber" style={{ background: 'rgba(245,158,11,0.08)' }}>
                   <CheckCircle size={16} />
                 </span>
               </div>
-              <div className="monitor-stat-val mono">{enabledTargetCount}</div>
+              <div className="monitor-stat-val mono">
+                {globalEnabledTargetsCount}
+              </div>
+            </div>
+
+            {/* 已停用任务 */}
+            <div className="monitor-stat-card">
+              <div className="monitor-stat-head">
+                <span className="monitor-stat-title">已停用任务</span>
+                <span className="monitor-stat-icon text-rose" style={{ background: 'rgba(239,68,68,0.08)' }}>
+                  <WarningOctagon size={16} />
+                </span>
+              </div>
+              <div className="monitor-stat-val mono">
+                {disabledTargetsCount}
+              </div>
             </div>
           </div>
 
@@ -615,19 +1061,19 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
             })()}
           </div>
 
-          {/* 视图切换与搜索栏 (匹配 Image 4) */}
-          <div className="monitor-toolbar">
-            <div className="monitor-view-toggle">
+          {/* 视图切换与搜索栏 (匹配 Image 1 & Image 2) */}
+          <div className="monitor-toolbar" style={{ marginBottom: '14px' }}>
+            <div className="lite-view-tabs" style={{ marginBottom: 0, borderBottom: 'none', paddingBottom: 0 }}>
               <button
                 type="button"
-                className={`monitor-toggle-btn ${latencyViewMode === 'tasks' ? 'active' : ''}`}
+                className={`lite-view-tab-btn ${latencyViewMode === 'tasks' ? 'active' : ''}`}
                 onClick={() => setLatencyViewMode('tasks')}
               >
                 任务视图
               </button>
               <button
                 type="button"
-                className={`monitor-toggle-btn ${latencyViewMode === 'servers' ? 'active' : ''}`}
+                className={`lite-view-tab-btn ${latencyViewMode === 'servers' ? 'active' : ''}`}
                 onClick={() => setLatencyViewMode('servers')}
               >
                 服务器视图
@@ -640,170 +1086,424 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
                 <input
                   type="text"
                   className="monitor-search-input"
-                  placeholder="搜索目标、分组、备注..."
-                  value={latencySearch}
-                  onChange={(e) => setLatencySearch(e.target.value)}
+                  placeholder={latencyViewMode === 'tasks' ? '搜索目标、分组、备注...' : '搜索服务器、IP、地域...'}
+                  value={latencyViewMode === 'tasks' ? latencySearch : serverSearch}
+                  onChange={(e) => {
+                    if (latencyViewMode === 'tasks') setLatencySearch(e.target.value)
+                    else setServerSearch(e.target.value)
+                  }}
                 />
               </div>
 
-              <button
-                type="button"
-                className="button button-primary btn-sm flex items-center gap-1.5"
-                onClick={() => setShowAddLatencyModal(true)}
-              >
-                <Plus size={14} weight="bold" />
-                <span>新建任务</span>
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="button button-primary btn-sm flex items-center gap-1.5"
+                  onClick={() => {
+                    setEditingLatencyTarget(null)
+                    setShowAddLatencyModal(true)
+                  }}
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>新建任务</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* 任务视图表格 (匹配 Image 4: 重庆电信、四川电信、重庆联通、四川联通、重庆移动、四川移动) */}
+          {/* 任务视图表格 (严格匹配 Image 1) */}
           {latencyViewMode === 'tasks' ? (
-            <div className="monitor-table-card">
+            <div className="lite-table-card">
               <div className="table-scroll">
-                <table className="monitor-table">
+                <table className="lite-table">
                   <thead>
                     <tr>
-                      <th style={{ minWidth: '180px' }}>目标名称</th>
-                      <th style={{ width: '100px' }}>协议</th>
+                      <th style={{ minWidth: '180px' }}>任务名称</th>
                       <th style={{ minWidth: '160px' }}>目标地址</th>
-                      <th style={{ width: '130px' }}>关联服务器</th>
-                      <th style={{ width: '110px' }}>默认启用</th>
-                      <th style={{ width: '110px', textAlign: 'right' }}>操作</th>
+                      <th style={{ minWidth: '220px' }}>关联服务器</th>
+                      <th style={{ width: '90px' }}>协议</th>
+                      <th style={{ width: '90px' }}>周期</th>
+                      <th style={{ width: '80px' }}>状态</th>
+                      {!readOnly && <th style={{ width: '100px', textAlign: 'right' }}>操作</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLatencyTargets.map((target) => {
-                      const dotClass =
-                        target.isp === 'telecom'
-                          ? 'carrier-telecom'
-                          : target.isp === 'unicom'
-                          ? 'carrier-unicom'
-                          : target.isp === 'mobile'
-                          ? 'carrier-mobile'
-                          : 'carrier-other'
+                    {filteredLatencyTargets.length === 0 ? (
+                      <tr>
+                        <td colSpan={readOnly ? 6 : 7} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                          暂无匹配的监测任务
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLatencyTargets.map((target) => {
+                        const isGlobal = isTargetGlobal(target)
+                        const hasIDs = Array.isArray(target.node_ids) && target.node_ids.length > 0
+                        const hasTags = Array.isArray(target.node_tags) && target.node_tags.length > 0
+                        const matchedNodes = isGlobal
+                          ? nodes
+                          : nodes.filter((n) => nodeMatchesTarget(n, target))
 
-                      return (
-                        <tr key={target.id}>
-                          <td>
-                            <div className="carrier-badge-wrap">
-                              <span className={`carrier-dot ${dotClass}`} />
-                              <span>{target.name}</span>
-                            </div>
-                          </td>
+                        const dotColor = target.enabled ? '#10b981' : '#94a3b8'
 
-                          <td>
-                            <span className="ip-protocol-tag tag-ipv4 font-bold mono">
-                              {target.kind.toUpperCase()}
-                            </span>
-                          </td>
+                        return (
+                          <tr key={target.id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span
+                                  style={{
+                                    width: '8px',
+                                    height: '8px',
+                                    borderRadius: '50%',
+                                    backgroundColor: dotColor,
+                                    display: 'inline-block',
+                                    flexShrink: 0,
+                                  }}
+                                  title={target.enabled ? '已启用' : '已停用'}
+                                />
+                                <span style={{ fontWeight: 600, fontSize: '13px' }}>{target.name}</span>
+                              </div>
+                            </td>
 
-                          <td className="mono text-muted">{target.host}</td>
+                            <td className="mono text-muted" style={{ fontSize: '12px' }}>
+                              {target.host}
+                            </td>
 
-                          <td>
-                            <span className="badge badge-subtle mono">{nodes.length} 台</span>
-                          </td>
+                            <td>
+                              <div className="lite-server-cell-wrap">
+                                {isGlobal ? (
+                                  <>
+                                    <div
+                                      className="lite-server-names-text"
+                                      title={nodes.map((n) => n.name).join('、')}
+                                    >
+                                      {nodes.length > 0 ? nodes.map((n) => n.name).join('、') : '全部服务器'}
+                                    </div>
+                                    <span className="lite-pill-default-all">全部服务器 (包含未来新增)</span>
+                                  </>
+                                ) : hasTags && !hasIDs ? (
+                                  <>
+                                    <div
+                                      className="lite-server-names-text"
+                                      title={matchedNodes.map((n) => n.name).join('、')}
+                                    >
+                                      {matchedNodes.length > 0
+                                        ? matchedNodes.map((n) => n.name).join('、')
+                                        : '暂无匹配标签的节点'}
+                                    </div>
+                                    <span
+                                      className="lite-pill-default-all"
+                                      style={{ color: '#0284c7', background: 'rgba(2, 132, 199, 0.1)' }}
+                                    >
+                                      标签限定: {target.node_tags.join(', ')}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                    <span
+                                      className="lite-server-names-text"
+                                      title={matchedNodes.map((n) => n.name).join('、')}
+                                      style={{ maxWidth: '180px' }}
+                                    >
+                                      {matchedNodes.slice(0, 2).map((n) => n.name).join('、') || `${target.node_ids.length} 台服务器`}
+                                    </span>
+                                    {matchedNodes.length > 2 && (
+                                      <button
+                                        type="button"
+                                        className="lite-pill-more-servers"
+                                        onClick={() => setInspectingServerListTarget(target)}
+                                        title="点击查看所有关联服务器"
+                                      >
+                                        +{matchedNodes.length - 2}
+                                      </button>
+                                    )}
+                                    {hasTags && (
+                                      <span
+                                        className="lite-pill-default-all"
+                                        style={{ fontSize: '9px', padding: '0 4px', color: '#0284c7' }}
+                                      >
+                                        +标签
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
 
-                          <td>
-                            <button
-                              type="button"
-                              className={`switch-toggle ${target.enabled ? 'active' : ''}`}
-                              onClick={() => handleToggleTarget(target.id)}
-                              aria-pressed={target.enabled}
-                              title={target.enabled ? '点击停用' : '点击启用'}
-                            >
-                              <span className="switch-thumb" />
-                            </button>
-                          </td>
+                            <td>
+                              <span className="ip-protocol-tag font-bold mono" style={{ fontSize: '11px' }}>
+                                {target.kind.toUpperCase()}
+                              </span>
+                            </td>
 
-                          <td>
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                className="icon-action-btn"
-                                title="查看该目标延迟走势"
-                                onClick={() => setLatencyViewMode('servers')}
-                              >
-                                <Eye size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-action-btn"
-                                title="编辑目标参数"
-                                onClick={() => setShowAddLatencyModal(true)}
-                              >
-                                <PencilSimple size={15} />
-                              </button>
-                              <button
-                                type="button"
-                                className="icon-action-btn text-rose"
-                                title="删除目标"
-                                onClick={() =>
-                                  setTargets((prev) => prev.filter((t) => t.id !== target.id))
-                                }
-                              >
-                                <Trash size={15} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
+                            <td className="mono" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                              {target.interval_seconds || 60}
+                            </td>
+
+                            <td>
+                              {readOnly ? (
+                                <span
+                                  className={`status-pill ${target.enabled ? 'online' : 'offline'}`}
+                                  style={{ fontSize: '11px', padding: '2px 8px' }}
+                                >
+                                  {target.enabled ? '已启用' : '已停用'}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={`switch-toggle ${target.enabled ? 'active' : ''}`}
+                                  disabled={mutatingTargetId === target.id}
+                                  onClick={() => handleToggleTarget(target)}
+                                  aria-pressed={target.enabled}
+                                  title={target.enabled ? '点击停用' : '点击启用'}
+                                >
+                                  <span className="switch-thumb" />
+                                </button>
+                              )}
+                            </td>
+
+                            {!readOnly && (
+                              <td>
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    className="icon-action-btn"
+                                    title="编辑任务"
+                                    disabled={mutatingTargetId === target.id}
+                                    onClick={() => {
+                                      setEditingLatencyTarget(target)
+                                      setShowAddLatencyModal(true)
+                                    }}
+                                  >
+                                    <PencilSimple size={15} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="icon-action-btn text-rose"
+                                    title="删除任务"
+                                    disabled={mutatingTargetId === target.id}
+                                    onClick={() => handleDeleteLatencyTarget(target)}
+                                  >
+                                    <Trash size={15} />
+                                  </button>
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        )
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
           ) : (
-            /* 服务器视图：展示单台服务器对全部目标的探测细线条与详细数据 */
-            <div className="panel p-5 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold">选择探测源服务器:</span>
-                  <select
-                    className="monitor-filter-select"
-                    value={selectedServerForLatency}
-                    onChange={(e) => setSelectedServerForLatency(e.target.value)}
-                  >
-                    {nodes.map((node) => (
-                      <option key={node.uuid || node.id} value={node.uuid || node.id}>
-                        {node.flag || '🌐'} {node.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            /* 服务器视图表格 (严格匹配 Image 2) */
+            <div className="space-y-4">
+              <div className="lite-table-card">
+                <div className="table-scroll">
+                  <table className="lite-table">
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: '200px' }}>服务器</th>
+                        <th style={{ minWidth: '280px' }}>监测任务</th>
+                        <th style={{ width: '150px' }}>探针在线状态</th>
+                        {!readOnly && <th style={{ width: '90px', textAlign: 'right' }}>操作</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredServers.length === 0 ? (
+                        <tr>
+                          <td colSpan={readOnly ? 3 : 4} style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                            暂无匹配的服务器
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredServers.map((node) => {
+                          const serverUuid = node.uuid || node.id
+                          const meta = detectRegionAndFlag(node.name, node.hostname || node.resource?.hostname)
+                          const isOnline = node.status === 'online'
+                          const associatedTasks = targets.filter((t) => nodeMatchesTarget(node, t))
 
-                <div className="text-xs text-muted">
-                  展示源服务器对各骨干目标实时 Ping/TCP 延迟与丢包率走势
+                          return (
+                            <tr key={serverUuid}>
+                              <td>
+                                <div className="lite-server-row-item">
+                                  <span className="lite-flag-icon">{node.flag || meta.flag}</span>
+                                  <span
+                                    style={{
+                                      width: '8px',
+                                      height: '8px',
+                                      borderRadius: '50%',
+                                      backgroundColor: isOnline ? '#10b981' : '#94a3b8',
+                                      display: 'inline-block',
+                                      flexShrink: 0,
+                                    }}
+                                    title={isOnline ? '节点在线' : '节点离线'}
+                                  />
+                                  <div>
+                                    <div style={{ fontWeight: 600, fontSize: '13px' }}>{node.name}</div>
+                                    <div className="mono text-muted" style={{ fontSize: '11px' }}>
+                                      {node.ip || node.address || meta.region}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td>
+                                <div className="lite-server-tasks-preview">
+                                  {associatedTasks.length === 0 ? (
+                                    <span className="text-muted">暂无关联任务</span>
+                                  ) : (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                      <span title={associatedTasks.map((t) => t.name).join('、')}>
+                                        {associatedTasks.slice(0, 3).map((t) => t.name).join('、')}
+                                        {associatedTasks.length > 3 ? '...' : ''}
+                                      </span>
+                                      <span className="badge badge-subtle mono" style={{ fontSize: '10px' }}>
+                                        共 {associatedTasks.length} 项
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <span
+                                    className="mono"
+                                    style={{
+                                      fontSize: '12px',
+                                      fontWeight: 600,
+                                      color: isOnline ? '#10b981' : '#94a3b8',
+                                    }}
+                                  >
+                                    {isOnline ? '探针在线' : '探针离线'}
+                                  </span>
+                                  <span className="text-muted" style={{ fontSize: '11px' }}>
+                                    心跳: {node.last_reported_at ? relativeHeartbeat(node.last_reported_at) : '暂无'}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {!readOnly && (
+                                <td style={{ textAlign: 'right' }}>
+                                  <div className="lite-action-menu-wrap">
+                                    <button
+                                      type="button"
+                                      className="icon-action-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setOpenServerActionNodeId(openServerActionNodeId === serverUuid ? null : serverUuid)
+                                      }}
+                                      title="操作菜单"
+                                    >
+                                      <DotsThree size={20} weight="bold" />
+                                    </button>
+                                    {openServerActionNodeId === serverUuid && (
+                                      <div className="lite-action-popover" onClick={(e) => e.stopPropagation()}>
+                                        <button
+                                          type="button"
+                                          className="lite-action-popover-item"
+                                          onClick={() => {
+                                            setSelectedServerForLatency(serverUuid)
+                                            setOpenServerActionNodeId(null)
+                                          }}
+                                        >
+                                          <Eye size={14} />
+                                          <span>查看该服务器延迟走势</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="lite-action-popover-item"
+                                          disabled={batchLoading}
+                                          onClick={() => handleBatchToggleServerTasks(node, true)}
+                                        >
+                                          <CheckCircle size={14} className="text-mint" />
+                                          <span>全局启用这些关联任务</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="lite-action-popover-item"
+                                          disabled={batchLoading}
+                                          onClick={() => handleBatchToggleServerTasks(node, false)}
+                                        >
+                                          <WarningOctagon size={14} className="text-amber" />
+                                          <span>全局停用这些关联任务</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="lite-action-popover-item text-rose"
+                                          disabled={batchLoading}
+                                          onClick={() => handleRemoveServerFromScopedTasks(node)}
+                                        >
+                                          <Trash size={14} />
+                                          <span>从定向任务中移除服务器</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              {/* 细线条 Catmull-Rom 贝塞尔曲线走势图 */}
-              <div className="bg-subtle p-3 rounded-lg border border-subtle">
-                <NetworkLatencyLines
-                  targets={targets}
-                  resultsByTargetId={liveCheckByTargetId}
-                  history={[]}
-                  selectedNodeName={nodes.find((n) => (n.uuid || n.id) === selectedServerForLatency)?.name || ''}
-                />
-              </div>
+              {/* 服务器实时延迟走势与质量细看 */}
+              <div className="panel p-5 space-y-4" style={{ marginTop: '16px' }}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">探测源服务器延迟走势:</span>
+                    <select
+                      className="monitor-filter-select"
+                      value={selectedServerForLatency}
+                      onChange={(e) => setSelectedServerForLatency(e.target.value)}
+                    >
+                      {nodes.map((node) => (
+                        <option key={node.uuid || node.id} value={node.uuid || node.id}>
+                          {node.flag || '🌐'} {node.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* 延迟详情网格 */}
-              <div className="dash-row-grid-6">
-                {targets.map((t) => {
-                  const check = liveCheckByTargetId.get(t.id)
-                  const hasLatency = Number.isFinite(Number(check?.latency_avg_ms))
-                  const latency = hasLatency ? Number(check.latency_avg_ms) : null
-                  const loss = Number.isFinite(Number(check?.loss_rate)) ? Number(check.loss_rate) * 100 : null
-                  return (
-                    <div key={t.id} className="bg-surface p-3 rounded-lg border border-subtle">
-                      <div className="text-xs text-muted mb-1">{t.name}</div>
-                      <div className="text-lg font-bold mono text-blue">{latency === null ? '等待采样' : `${latency.toFixed(1)} ms`}</div>
-                      <div className="text-xs text-mint mt-1">
-                        丢包 {loss === null ? '—' : `${loss.toFixed(1)}%`} · 抖动 {check?.jitter_ms == null ? '—' : `±${Number(check.jitter_ms).toFixed(1)}ms`}
+                  <div className="text-xs text-muted">
+                    展示源服务器对各骨干目标实时 Ping/TCP 延迟与丢包率走势
+                  </div>
+                </div>
+
+                {/* 细线条 Catmull-Rom 贝塞尔曲线走势图 */}
+                <div className="bg-subtle p-3 rounded-lg border border-subtle">
+                  <NetworkLatencyLines
+                    targets={targets}
+                    resultsByTargetId={liveCheckByTargetId}
+                    history={[]}
+                    selectedNodeName={nodes.find((n) => (n.uuid || n.id) === selectedServerForLatency)?.name || ''}
+                  />
+                </div>
+
+                {/* 延迟详情网格 */}
+                <div className="dash-row-grid-6">
+                  {targets.map((t) => {
+                    const check = liveCheckByTargetId.get(t.id)
+                    const hasLatency = Number.isFinite(Number(check?.latency_avg_ms))
+                    const latency = hasLatency ? Number(check.latency_avg_ms) : null
+                    const loss = Number.isFinite(Number(check?.loss_rate)) ? Number(check.loss_rate) * 100 : null
+                    return (
+                      <div key={t.id} className="bg-surface p-3 rounded-lg border border-subtle">
+                        <div className="text-xs text-muted mb-1">{t.name}</div>
+                        <div className="text-lg font-bold mono text-blue">{latency === null ? '等待采样' : `${latency.toFixed(1)} ms`}</div>
+                        <div className="text-xs text-mint mt-1">
+                          丢包 {loss === null ? '—' : `${loss.toFixed(1)}%`} · 抖动 {check?.jitter_ms == null ? '—' : `±${Number(check.jitter_ms).toFixed(1)}ms`}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -1210,29 +1910,67 @@ export function MonitoringView({ nodes = [], readOnly = true, initialTab = 'late
         </div>
       )}
 
-      {/* 新建延迟监测弹窗 */}
+      {/* 延迟监测添加/编辑弹窗 */}
       <NewLatencyTargetModal
         isOpen={showAddLatencyModal}
-        onClose={() => setShowAddLatencyModal(false)}
-        onCreated={(newT) => {
-          setTargets((prev) => [
-            ...prev,
-            {
-              id: newT.id,
-              name: newT.name,
-              kind: newT.kind || 'icmp',
-              host: newT.host,
-              enabled: newT.enabled !== false,
-              isp: /电信/.test(newT.name)
-                ? 'telecom'
-                : /联通/.test(newT.name)
-                ? 'unicom'
-                : /移动/.test(newT.name)
-                ? 'mobile'
-                : 'other',
-            },
-          ])
+        initialData={editingLatencyTarget}
+        nodes={nodes}
+        onClose={() => {
+          setShowAddLatencyModal(false)
+          setEditingLatencyTarget(null)
         }}
+        onCreated={(savedT) => {
+          setTargets((prev) => {
+            const exists = prev.some((t) => t.id === savedT.id)
+            if (exists) {
+              return prev.map((t) =>
+                t.id === savedT.id
+                  ? {
+                      ...t,
+                      ...savedT,
+                      node_ids: Array.isArray(savedT.node_ids) ? savedT.node_ids : (t.node_ids || []),
+                      interval_seconds: savedT.interval_seconds || t.interval_seconds || 60,
+                      isp: /电信/.test(savedT.name)
+                        ? 'telecom'
+                        : /联通/.test(savedT.name)
+                        ? 'unicom'
+                        : /移动/.test(savedT.name)
+                        ? 'mobile'
+                        : t.isp || 'other',
+                    }
+                  : t
+              )
+            }
+            return [
+              ...prev,
+              {
+                ...savedT,
+                id: savedT.id,
+                name: savedT.name,
+                kind: savedT.kind || 'icmp',
+                host: savedT.host,
+                enabled: savedT.enabled !== false,
+                node_ids: Array.isArray(savedT.node_ids) ? savedT.node_ids : [],
+                interval_seconds: savedT.interval_seconds || 60,
+                isp: /电信/.test(savedT.name)
+                  ? 'telecom'
+                  : /联通/.test(savedT.name)
+                  ? 'unicom'
+                  : /移动/.test(savedT.name)
+                  ? 'mobile'
+                  : 'other',
+              },
+            ]
+          })
+        }}
+      />
+
+      {/* 任务关联服务器列表查看弹窗 */}
+      <ServerListModal
+        isOpen={Boolean(inspectingServerListTarget)}
+        target={inspectingServerListTarget}
+        nodes={nodes}
+        onClose={() => setInspectingServerListTarget(null)}
       />
 
       {/* 新建回程监测弹窗 */}

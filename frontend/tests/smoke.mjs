@@ -3,8 +3,11 @@ import { resolve } from "node:path"
 import "./carrier_matching.test.mjs"
 import "./ip_quality_ui.test.mjs"
 import "./use_live_polling.test.mjs"
+import "./behavior_latency_contract.test.mjs"
 
-const root = resolve(process.cwd())
+const root = existsSync(resolve(process.cwd(), "package.json"))
+  ? resolve(process.cwd())
+  : resolve(process.cwd(), "frontend")
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
 const dist = resolve(root, "dist")
 const indexPath = resolve(dist, "index.html")

@@ -1487,7 +1487,7 @@ export function App() {
         ) : activeNav === 'monitoring' || activeNav === 'latency' || activeNav === 'route' || activeNav === 'network' || activeNav === 'mtr' ? (
           <MonitoringView
             nodes={data}
-            readOnly={true}
+            readOnly={false}
             initialTab={activeNav === 'route' || activeNav === 'mtr' ? 'route' : 'latency'}
             onNavigate={navigate}
           />

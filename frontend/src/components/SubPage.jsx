@@ -126,7 +126,7 @@ export function SubPage({
       ) : page === 'billing' ? (
         <BillingCenter nodes={data} />
       ) : page === 'monitoring' ? (
-        <MonitoringView nodes={data} readOnly={true} />
+        <MonitoringView nodes={data} readOnly={false} />
       ) : page === 'certificates' || page === 'ssl' ? (
         <CertificatesAndDNSView initialTab="certificates" />
       ) : page === 'dns' || page === 'dns-matrix' ? (
