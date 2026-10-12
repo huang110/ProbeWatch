@@ -82,6 +82,10 @@ func (m *MTRMonitor) Run(parent context.Context, task protocol.CheckTask) protoc
 		result.Error = formatMTRFailure("blocked", err)
 		return result
 	}
+	// Normalize any IPv4-mapped IPv6 addresses so that Is4/Is6 checks and sorting are canonical.
+	for i := range addresses {
+		addresses[i] = addresses[i].Unmap()
+	}
 	// Resolver order is not stable across platforms; use a canonical destination.
 	sort.Slice(addresses, func(i, j int) bool { return addresses[i].String() < addresses[j].String() })
 	result.DestinationIP = addresses[0].String()

@@ -22,6 +22,7 @@ func defaultMTRTransport() MTRTransport { return linuxTCPMTRTransport{} }
 type linuxTCPMTRTransport struct{}
 
 func (linuxTCPMTRTransport) Probe(ctx context.Context, destination netip.Addr, ttl int, timeout time.Duration) (protocol.MTRHop, error) {
+	destination = destination.Unmap()
 	if !destination.Is4() || ttl < 1 || ttl > 30 {
 		return protocol.MTRHop{}, fmt.Errorf("unsupported destination or ttl")
 	}
