@@ -220,7 +220,7 @@ func StartAgent(cfg config.Config) error {
 
 // CheckAgentUpdate checks if a newer agent binary is available from the configured control plane.
 func CheckAgentUpdate() error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadAgentConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -250,7 +250,7 @@ func CheckAgentUpdate() error {
 
 // SelfUpdateAgent downloads, verifies, and installs the latest agent binary in place.
 func SelfUpdateAgent() error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadAgentConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

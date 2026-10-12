@@ -37,6 +37,17 @@ func TestRunEntrypointBoundary(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "production agent config error without endpoint",
+			configure: func(t *testing.T) {
+				t.Setenv("PROBEWATCH_ENV", "production")
+			},
+			check: func(t *testing.T, err error) {
+				if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_AGENT_ENDPOINT") {
+					t.Fatalf("run() error = %v, want PROBEWATCH_AGENT_ENDPOINT error", err)
+				}
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -52,9 +63,10 @@ func clearConfigEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"PROBEWATCH_ENV", "PROBEWATCH_LISTEN", "PROBEWATCH_ALLOW_NON_LOOPBACK_LISTEN", "PROBEWATCH_DEPLOYMENT_MODE", "PROBEWATCH_DATABASE", "PROBEWATCH_PUBLIC_BASE_URL",
-		"GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_REDIRECT_URL", "GITHUB_ALLOWED_USERS",
-		"GITHUB_ALLOWED_ORG", "SESSION_SECRET", "AGENT_TOKEN_TTL", "AGENT_CLOCK_SKEW",
-		"MAX_REQUEST_BODY", "AGENT_IGNORE_UNSAFE_CERT",
+		"PROBEWATCH_ADMIN_PASSWORD", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_REDIRECT_URL", "GITHUB_ALLOWED_USERS",
+		"GITHUB_ALLOWED_ORG", "SESSION_SECRET", "PROBEWATCH_TOKEN_PEPPER", "AGENT_TOKEN_TTL", "AGENT_CLOCK_SKEW",
+		"MAX_REQUEST_BODY", "AGENT_IGNORE_UNSAFE_CERT", "PROBEWATCH_AGENT_ENDPOINT", "PROBEWATCH_AGENT_NODE_UUID",
+		"PROBEWATCH_AGENT_NODE_TOKEN", "PROBEWATCH_AGENT_REGISTRATION_TOKEN", "PROBEWATCH_AGENT_NAME", "PROBEWATCH_AGENT_DATA",
 	} {
 		t.Setenv(name, "")
 	}

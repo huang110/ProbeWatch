@@ -52,8 +52,13 @@ const (
 	maxAgentNodeTokenTTL     = 2 * 365 * 24 * time.Hour
 )
 
-// Load reads and validates the process environment once at startup.
+// Load reads and validates the control-plane environment once at startup (legacy compatibility alias for LoadServerConfig).
 func Load() (Config, error) {
+	return LoadServerConfig()
+}
+
+// LoadServerConfig reads and validates the control-plane environment once at startup.
+func LoadServerConfig() (Config, error) {
 	lookup := os.LookupEnv
 	environment := valueOrDefault(lookup, "PROBEWATCH_ENV", "development")
 	publicBaseURL := value(lookup, "PROBEWATCH_PUBLIC_BASE_URL")
@@ -198,6 +203,102 @@ func Load() (Config, error) {
 		}
 		if cfg.AgentIgnoreUnsafeCert {
 			return Config{}, fmt.Errorf("AGENT_IGNORE_UNSAFE_CERT must be false in production")
+		}
+	}
+
+	return cfg, nil
+}
+
+// LoadAgentConfig reads and validates the monitoring agent environment once at startup.
+func LoadAgentConfig() (Config, error) {
+	lookup := os.LookupEnv
+	environment := valueOrDefault(lookup, "PROBEWATCH_ENV", "development")
+
+	cfg := Config{
+		Environment:            environment,
+		PublicBaseURL:          value(lookup, "PROBEWATCH_PUBLIC_BASE_URL"),
+		AgentEndpoint:          value(lookup, "PROBEWATCH_AGENT_ENDPOINT"),
+		AgentNodeUUID:          value(lookup, "PROBEWATCH_AGENT_NODE_UUID"),
+		AgentNodeToken:         value(lookup, "PROBEWATCH_AGENT_NODE_TOKEN"),
+		AgentRegistrationToken: value(lookup, "PROBEWATCH_AGENT_REGISTRATION_TOKEN"),
+		AgentName:              valueOrDefault(lookup, "PROBEWATCH_AGENT_NAME", "ProbeWatch Agent"),
+		AgentDataDir:           valueOrDefault(lookup, "PROBEWATCH_AGENT_DATA", "./data/agent"),
+		AgentTokenTTL:          15 * time.Minute,
+		AgentNodeTokenTTL:      defaultAgentNodeTokenTTL,
+		AgentClockSkew:         5 * time.Minute,
+		MaxRequestBody:         1 << 20,
+	}
+
+	var err error
+	cfg.AgentTokenTTL, err = durationValue(lookup, "AGENT_TOKEN_TTL", cfg.AgentTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AgentNodeTokenTTL, err = durationValue(lookup, "AGENT_NODE_TOKEN_TTL", cfg.AgentNodeTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AgentClockSkew, err = durationValue(lookup, "AGENT_CLOCK_SKEW", cfg.AgentClockSkew)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MaxRequestBody, err = byteSizeValue(lookup, "MAX_REQUEST_BODY", cfg.MaxRequestBody)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AgentIgnoreUnsafeCert, err = boolValue(lookup, "AGENT_IGNORE_UNSAFE_CERT", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", true)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", true)
+	if err != nil {
+		return Config{}, err
+	}
+
+	if cfg.Environment != "development" && cfg.Environment != "production" {
+		return Config{}, fmt.Errorf("PROBEWATCH_ENV must be development or production, got %q", cfg.Environment)
+	}
+	if cfg.AgentTokenTTL > 24*time.Hour {
+		return Config{}, fmt.Errorf("AGENT_TOKEN_TTL must be no more than 24h")
+	}
+	if cfg.AgentNodeTokenTTL > maxAgentNodeTokenTTL {
+		return Config{}, fmt.Errorf("AGENT_NODE_TOKEN_TTL must be no more than 2 years")
+	}
+	if cfg.AgentClockSkew > 15*time.Minute {
+		return Config{}, fmt.Errorf("AGENT_CLOCK_SKEW must be no more than 15m")
+	}
+	if cfg.MaxRequestBody > 16<<20 {
+		return Config{}, fmt.Errorf("MAX_REQUEST_BODY must be no more than 16MiB")
+	}
+
+	if cfg.Environment == "production" {
+		if strings.TrimSpace(cfg.AgentEndpoint) == "" {
+			return Config{}, fmt.Errorf("PROBEWATCH_AGENT_ENDPOINT is required in production")
+		}
+		if err := validateAgentEndpoint(cfg.AgentEndpoint, true); err != nil {
+			return Config{}, err
+		}
+		if strings.TrimSpace(cfg.AgentNodeUUID) == "" {
+			return Config{}, fmt.Errorf("PROBEWATCH_AGENT_NODE_UUID is required in production")
+		}
+		if strings.TrimSpace(cfg.AgentNodeToken) == "" && strings.TrimSpace(cfg.AgentRegistrationToken) == "" {
+			return Config{}, fmt.Errorf("PROBEWATCH_AGENT_NODE_TOKEN is required in production")
+		}
+		if strings.TrimSpace(cfg.AgentDataDir) == "" {
+			return Config{}, fmt.Errorf("PROBEWATCH_AGENT_DATA is required in production")
+		}
+		if cfg.AgentIgnoreUnsafeCert {
+			return Config{}, fmt.Errorf("AGENT_IGNORE_UNSAFE_CERT must be false in production")
+		}
+	} else {
+		if cfg.AgentEndpoint != "" {
+			if err := validateAgentEndpoint(cfg.AgentEndpoint, false); err != nil {
+				return Config{}, err
+			}
 		}
 	}
 

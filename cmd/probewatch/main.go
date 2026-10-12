@@ -25,7 +25,7 @@ func run() error {
 			return nil
 		}
 	}
-	cfg, err := config.Load()
+	cfg, err := config.LoadServerConfig()
 	if err != nil {
 		return err
 	}

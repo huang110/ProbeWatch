@@ -38,6 +38,20 @@ func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protoc
 		linesLimit = 100
 	}
 
+	if req.Unit != "" {
+		trimmedUnit := strings.TrimSpace(req.Unit)
+		if !validUnitRegex.MatchString(trimmedUnit) {
+			return nil, errors.New("invalid unit name")
+		}
+	}
+
+	if req.Priority != "" {
+		trimmedPri := strings.TrimSpace(req.Priority)
+		if !validPriorityRegex.MatchString(trimmedPri) {
+			return nil, errors.New("invalid priority parameter")
+		}
+	}
+
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
@@ -46,19 +60,11 @@ func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protoc
 		args := []string{"--no-pager", "-o", "short-iso", "-n", strconv.Itoa(linesLimit)}
 
 		if req.Unit != "" {
-			trimmedUnit := strings.TrimSpace(req.Unit)
-			if !validUnitRegex.MatchString(trimmedUnit) {
-				return nil, errors.New("invalid unit name")
-			}
-			args = append(args, "-u", trimmedUnit)
+			args = append(args, "-u", strings.TrimSpace(req.Unit))
 		}
 
 		if req.Priority != "" {
-			trimmedPri := strings.TrimSpace(req.Priority)
-			if !validPriorityRegex.MatchString(trimmedPri) {
-				return nil, errors.New("invalid priority parameter")
-			}
-			args = append(args, "-p", trimmedPri)
+			args = append(args, "-p", strings.TrimSpace(req.Priority))
 		}
 
 		if req.Since != "" {

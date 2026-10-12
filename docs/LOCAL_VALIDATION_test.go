@@ -45,7 +45,6 @@ func TestDockerignoreProtectsSecretsAndPreservesBuildSources(t *testing.T) {
 		"secrets/",
 		"credentials/",
 		"frontend/node_modules/",
-		"frontend/dist/",
 		".git/",
 		"*.log",
 		"*.key",

@@ -33,7 +33,7 @@ func run() error {
 		}
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadAgentConfig()
 	if err != nil {
 		return err
 	}

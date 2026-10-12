@@ -494,6 +494,7 @@ func clearConfigEnvironment(t *testing.T) {
 		"PROBEWATCH_DEPLOYMENT_MODE",
 		"PROBEWATCH_DATABASE",
 		"PROBEWATCH_PUBLIC_BASE_URL",
+		"PROBEWATCH_ADMIN_PASSWORD",
 		"GITHUB_CLIENT_ID",
 		"GITHUB_CLIENT_SECRET",
 		"GITHUB_REDIRECT_URL",
@@ -501,6 +502,14 @@ func clearConfigEnvironment(t *testing.T) {
 		"GITHUB_ALLOWED_ORG",
 		"SESSION_SECRET",
 		"PROBEWATCH_TOKEN_PEPPER",
+		"PROBEWATCH_AGENT_ENDPOINT",
+		"PROBEWATCH_AGENT_NODE_UUID",
+		"PROBEWATCH_AGENT_NODE_TOKEN",
+		"PROBEWATCH_AGENT_REGISTRATION_TOKEN",
+		"PROBEWATCH_AGENT_NAME",
+		"PROBEWATCH_AGENT_DATA",
+		"PROBEWATCH_AGENT_ENABLE_TERMINAL",
+		"PROBEWATCH_ENABLE_REMOTE_TERMINAL",
 		"AGENT_TOKEN_TTL",
 		"AGENT_NODE_TOKEN_TTL",
 		"AGENT_CLOCK_SKEW",
@@ -522,4 +531,139 @@ func setValidProductionEnvironment(t *testing.T) {
 	t.Setenv("SESSION_SECRET", "12345678901234567890123456789012")
 	t.Setenv("PROBEWATCH_TOKEN_PEPPER", "12345678901234567890123456789012")
 	t.Setenv("AGENT_NODE_TOKEN_TTL", "8760h")
+}
+
+func setValidProductionAgentEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("PROBEWATCH_ENV", "production")
+	t.Setenv("PROBEWATCH_AGENT_ENDPOINT", "https://monitor.example.test/api/agent/v1")
+	t.Setenv("PROBEWATCH_AGENT_NODE_UUID", "11111111-2222-3333-4444-555555555555")
+	t.Setenv("PROBEWATCH_AGENT_NODE_TOKEN", "mock-agent-node-token-value-12345")
+	t.Setenv("PROBEWATCH_AGENT_DATA", "./tmp/agent-test-data")
+	t.Setenv("AGENT_NODE_TOKEN_TTL", "8760h")
+}
+
+func TestLoadAgentConfigProductionSuccessWithoutServerSecrets(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+
+	cfg, err := LoadAgentConfig()
+	if err != nil {
+		t.Fatalf("LoadAgentConfig failed: %v", err)
+	}
+
+	if cfg.Environment != "production" {
+		t.Fatalf("Environment = %q, want production", cfg.Environment)
+	}
+	if cfg.AgentEndpoint != "https://monitor.example.test/api/agent/v1" {
+		t.Fatalf("AgentEndpoint = %q", cfg.AgentEndpoint)
+	}
+	if cfg.AgentNodeUUID != "11111111-2222-3333-4444-555555555555" {
+		t.Fatalf("AgentNodeUUID = %q", cfg.AgentNodeUUID)
+	}
+	if cfg.AgentNodeToken != "mock-agent-node-token-value-12345" {
+		t.Fatalf("AgentNodeToken = %q", cfg.AgentNodeToken)
+	}
+	if cfg.AgentDataDir != "./tmp/agent-test-data" {
+		t.Fatalf("AgentDataDir = %q", cfg.AgentDataDir)
+	}
+}
+
+func TestLoadAgentConfigRejectsMissingEndpoint(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+	t.Setenv("PROBEWATCH_AGENT_ENDPOINT", "")
+
+	_, err := LoadAgentConfig()
+	if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_AGENT_ENDPOINT") {
+		t.Fatalf("LoadAgentConfig error = %v, want PROBEWATCH_AGENT_ENDPOINT error", err)
+	}
+}
+
+func TestLoadAgentConfigRejectsMissingUUID(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+	t.Setenv("PROBEWATCH_AGENT_NODE_UUID", "")
+
+	_, err := LoadAgentConfig()
+	if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_AGENT_NODE_UUID") {
+		t.Fatalf("LoadAgentConfig error = %v, want PROBEWATCH_AGENT_NODE_UUID error", err)
+	}
+}
+
+func TestLoadAgentConfigRejectsMissingNodeToken(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+	t.Setenv("PROBEWATCH_AGENT_NODE_TOKEN", "")
+	t.Setenv("PROBEWATCH_AGENT_REGISTRATION_TOKEN", "")
+
+	_, err := LoadAgentConfig()
+	if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_AGENT_NODE_TOKEN") {
+		t.Fatalf("LoadAgentConfig error = %v, want PROBEWATCH_AGENT_NODE_TOKEN error", err)
+	}
+}
+
+func TestLoadServerConfigRejectsMissingAdminPassword(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionEnvironment(t)
+	t.Setenv("PROBEWATCH_ADMIN_PASSWORD", "")
+	t.Setenv("GITHUB_CLIENT_ID", "")
+	t.Setenv("GITHUB_CLIENT_SECRET", "")
+
+	_, err := LoadServerConfig()
+	if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_ADMIN_PASSWORD") {
+		t.Fatalf("LoadServerConfig error = %v, want PROBEWATCH_ADMIN_PASSWORD error", err)
+	}
+}
+
+func TestLoadServerConfigRejectsMissingSessionSecret(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionEnvironment(t)
+	t.Setenv("SESSION_SECRET", "")
+
+	_, err := LoadServerConfig()
+	if err == nil || !strings.Contains(err.Error(), "SESSION_SECRET") {
+		t.Fatalf("LoadServerConfig error = %v, want SESSION_SECRET error", err)
+	}
+}
+
+func TestLoadServerConfigRejectsMissingTokenPepper(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionEnvironment(t)
+	t.Setenv("PROBEWATCH_TOKEN_PEPPER", "")
+
+	_, err := LoadServerConfig()
+	if err == nil || !strings.Contains(err.Error(), "PROBEWATCH_TOKEN_PEPPER") {
+		t.Fatalf("LoadServerConfig error = %v, want PROBEWATCH_TOKEN_PEPPER error", err)
+	}
+}
+
+func TestAgentConfigDoesNotTriggerServerValidation(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+	// Server secrets and server address are deliberately missing/invalid for server
+	t.Setenv("PROBEWATCH_ADMIN_PASSWORD", "")
+	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("PROBEWATCH_TOKEN_PEPPER", "")
+	t.Setenv("GITHUB_CLIENT_ID", "")
+	t.Setenv("GITHUB_CLIENT_SECRET", "")
+	t.Setenv("PROBEWATCH_LISTEN", "invalid-port-for-server")
+
+	cfg, err := LoadAgentConfig()
+	if err != nil {
+		t.Fatalf("LoadAgentConfig triggered server validation: %v", err)
+	}
+	if cfg.Environment != "production" {
+		t.Fatalf("Environment = %q, want production", cfg.Environment)
+	}
+}
+
+func TestServerConfigNotBypassedByAgentPath(t *testing.T) {
+	clearConfigEnvironment(t)
+	setValidProductionAgentEnvironment(t)
+	// Only agent environment is configured, server secrets and base URL are not present
+	_, err := LoadServerConfig()
+	if err == nil {
+		t.Fatal("LoadServerConfig was bypassed by agent-only environment")
+	}
 }
