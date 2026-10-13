@@ -211,3 +211,72 @@ func TestAdminIPQA_AuthenticatedEndpoints(t *testing.T) {
 		t.Fatalf("expected dry_run = true, notification_sent = false, got %+v", testResp)
 	}
 }
+
+func TestPopulatePublicIPQualityDTO_DualStackAndIPv6Fallback(t *testing.T) {
+	proxyTrue := true
+	vpnFalse := false
+	scoreV4 := 13.18
+	scoreV6 := 20.2
+
+	legacy := &protocol.IPQualityInfo{
+		IPType:       "unknown",
+		Country:      "SG",
+		Region:       "Central Singapore",
+		City:         "Singapore",
+		ASN:          "AS16509",
+		Organization: "Amazon.com, Inc.",
+		Risk:         "unknown",
+	}
+	qa := &protocol.IPQAInfo{
+		Enabled:   true,
+		Installed: true,
+		State:     "enabled",
+		IPv4: &protocol.IPQAFamilyInfo{
+			RiskScore:    &scoreV4,
+			RiskLevel:    "low",
+			IPType:       "广播IP",
+			Proxy:        &proxyTrue,
+			VPN:          &vpnFalse,
+			SourceScores: map[string]float64{"AbuseIPDB": 0, "IPQS": 75},
+		},
+		IPv6: &protocol.IPQAFamilyInfo{
+			RiskScore:    &scoreV6,
+			RiskLevel:    "low",
+			IPType:       "广播IP",
+			Proxy:        &proxyTrue,
+			SourceScores: map[string]float64{"AbuseIPDB": 0, "IPQS": 95},
+		},
+	}
+
+	dto := populatePublicIPQualityDTO(legacy, qa)
+	if dto == nil {
+		t.Fatal("expected non-nil dto")
+	}
+	if dto.Risk != "low" || dto.IPType != "广播IP" || dto.Source != "IPQA" {
+		t.Fatalf("expected IPQA priority fields (low, 广播IP, IPQA), got risk=%q ipType=%q source=%q", dto.Risk, dto.IPType, dto.Source)
+	}
+	if dto.IPv4 == nil || dto.IPv6 == nil {
+		t.Fatalf("expected both IPv4 and IPv6 family objects in DTO, got ipv4=%v ipv6=%v", dto.IPv4, dto.IPv6)
+	}
+	if dto.IPv4.SourceScores["IPQS"] != 75 || dto.IPv6.SourceScores["IPQS"] != 95 {
+		t.Fatalf("expected distinct IPv4 (75) and IPv6 (95) IPQS scores, got v4=%v v6=%v", dto.IPv4.SourceScores, dto.IPv6.SourceScores)
+	}
+	if dto.Proxy == nil || *dto.Proxy != true {
+		t.Fatalf("expected proxy=true from IPQA, got %v", dto.Proxy)
+	}
+
+	// IPv6-only fallback
+	qaV6Only := &protocol.IPQAInfo{
+		Enabled:   true,
+		Installed: true,
+		State:     "enabled",
+		IPv6:      qa.IPv6,
+	}
+	dtoV6 := populatePublicIPQualityDTO(nil, qaV6Only)
+	if dtoV6 == nil || !dtoV6.HasIPv6 || dtoV6.HasIPv4 {
+		t.Fatalf("expected IPv6-only DTO flags, got %+v", dtoV6)
+	}
+	if dtoV6.Scores["IPQS"] != 95 || dtoV6.Risk != "low" {
+		t.Fatalf("expected IPv6 fallback scores and risk, got scores=%v risk=%q", dtoV6.Scores, dtoV6.Risk)
+	}
+}

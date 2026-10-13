@@ -473,6 +473,8 @@ type publicIPQualityDTO struct {
 	RiskLevel           string                   `json:"risk_level,omitempty"`
 	HasIPv4             bool                     `json:"has_ipv4,omitempty"`
 	HasIPv6             bool                     `json:"has_ipv6,omitempty"`
+	IPv4                *protocol.IPQAFamilyInfo `json:"ipv4,omitempty"`
+	IPv6                *protocol.IPQAFamilyInfo `json:"ipv6,omitempty"`
 	Media               []protocol.IPQAMediaItem `json:"media,omitempty"`
 }
 
@@ -832,18 +834,35 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		}
 		dto.HasIPv4 = qa.IPv4 != nil
 		dto.HasIPv6 = qa.IPv6 != nil
-		if qa.IPv4 != nil {
-			if qa.IPv4.RiskScore != nil {
-				dto.RiskScore = qa.IPv4.RiskScore
+		dto.IPv4 = qa.IPv4
+		dto.IPv6 = qa.IPv6
+		primary := qa.IPv4
+		secondary := qa.IPv6
+		if primary == nil {
+			primary = qa.IPv6
+			secondary = nil
+		}
+		if primary != nil {
+			if primary.RiskScore != nil {
+				dto.RiskScore = primary.RiskScore
+			} else if secondary != nil && secondary.RiskScore != nil {
+				dto.RiskScore = secondary.RiskScore
 			}
-			if qa.IPv4.RiskLevel != "" {
-				dto.RiskLevel = qa.IPv4.RiskLevel
+			if primary.RiskLevel != "" {
+				dto.RiskLevel = primary.RiskLevel
 				if dto.Risk == "" || dto.Risk == "unknown" {
-					dto.Risk = qa.IPv4.RiskLevel
+					dto.Risk = primary.RiskLevel
+				}
+			} else if secondary != nil && secondary.RiskLevel != "" {
+				dto.RiskLevel = secondary.RiskLevel
+				if dto.Risk == "" || dto.Risk == "unknown" {
+					dto.Risk = secondary.RiskLevel
 				}
 			}
-			if len(qa.IPv4.SourceScores) > 0 && len(dto.Scores) == 0 {
-				dto.Scores = qa.IPv4.SourceScores
+			if len(primary.SourceScores) > 0 && len(dto.Scores) == 0 {
+				dto.Scores = primary.SourceScores
+			} else if secondary != nil && len(secondary.SourceScores) > 0 && len(dto.Scores) == 0 {
+				dto.Scores = secondary.SourceScores
 			}
 		}
 		if qa.LastCheckedAt > 0 {
@@ -861,49 +880,73 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		}
 		if qa.Enabled && qa.Installed {
 			dto.Source = "IPQA"
-			if qa.IPv4 != nil && qa.IPv4.RiskLevel != "" {
-				dto.Risk = qa.IPv4.RiskLevel
+			if primary != nil && primary.RiskLevel != "" && primary.RiskLevel != "unknown" {
+				dto.Risk = primary.RiskLevel
 			}
-			if qa.IPv4 != nil && len(qa.IPv4.SourceScores) > 0 {
-				dto.Scores = qa.IPv4.SourceScores
+			if primary != nil && primary.IPType != "" && primary.IPType != "unknown" {
+				dto.IPType = primary.IPType
+			}
+			if primary != nil && len(primary.SourceScores) > 0 {
+				dto.Scores = primary.SourceScores
+			} else if secondary != nil && len(secondary.SourceScores) > 0 {
+				dto.Scores = secondary.SourceScores
+			}
+			if dto.Flags == nil {
+				dto.Flags = make(map[string]*bool)
+			}
+			if primary != nil && primary.Proxy != nil {
+				dto.Proxy = primary.Proxy
+				dto.Flags["proxy"] = primary.Proxy
+			}
+			if primary != nil && primary.VPN != nil {
+				dto.VPN = primary.VPN
+				dto.Flags["vpn"] = primary.VPN
+			}
+			if primary != nil && primary.Tor != nil {
+				dto.Tor = primary.Tor
+				dto.Flags["tor"] = primary.Tor
+			}
+			if primary != nil && primary.Abuse != nil {
+				dto.Abuse = primary.Abuse
+				dto.Flags["abuse"] = primary.Abuse
 			}
 		}
-		if (dto.IPType == "" || dto.IPType == "unknown") && qa.IPv4 != nil && qa.IPv4.IPType != "" {
-			dto.IPType = qa.IPv4.IPType
+		if (dto.IPType == "" || dto.IPType == "unknown") && primary != nil && primary.IPType != "" {
+			dto.IPType = primary.IPType
 		}
-		if dto.Country == "" && qa.IPv4 != nil && qa.IPv4.Country != "" {
-			dto.Country = qa.IPv4.Country
+		if dto.Country == "" && primary != nil && primary.Country != "" {
+			dto.Country = primary.Country
 		}
-		if dto.Region == "" && qa.IPv4 != nil && qa.IPv4.Region != "" {
-			dto.Region = qa.IPv4.Region
+		if dto.Region == "" && primary != nil && primary.Region != "" {
+			dto.Region = primary.Region
 		}
-		if dto.City == "" && qa.IPv4 != nil && qa.IPv4.Region != "" {
-			dto.City = qa.IPv4.Region
+		if dto.City == "" && primary != nil && primary.Region != "" {
+			dto.City = primary.Region
 		}
-		if dto.ASN == "" && qa.IPv4 != nil && qa.IPv4.ASN != "" {
-			dto.ASN = qa.IPv4.ASN
+		if dto.ASN == "" && primary != nil && primary.ASN != "" {
+			dto.ASN = primary.ASN
 		}
-		if dto.Organization == "" && qa.IPv4 != nil && qa.IPv4.Organization != "" {
-			dto.Organization = qa.IPv4.Organization
+		if dto.Organization == "" && primary != nil && primary.Organization != "" {
+			dto.Organization = primary.Organization
 		}
 		if dto.Flags == nil {
 			dto.Flags = make(map[string]*bool)
 		}
-		if dto.Proxy == nil && qa.IPv4 != nil && qa.IPv4.Proxy != nil {
-			dto.Proxy = qa.IPv4.Proxy
-			dto.Flags["proxy"] = qa.IPv4.Proxy
+		if dto.Proxy == nil && primary != nil && primary.Proxy != nil {
+			dto.Proxy = primary.Proxy
+			dto.Flags["proxy"] = primary.Proxy
 		}
-		if dto.VPN == nil && qa.IPv4 != nil && qa.IPv4.VPN != nil {
-			dto.VPN = qa.IPv4.VPN
-			dto.Flags["vpn"] = qa.IPv4.VPN
+		if dto.VPN == nil && primary != nil && primary.VPN != nil {
+			dto.VPN = primary.VPN
+			dto.Flags["vpn"] = primary.VPN
 		}
-		if dto.Tor == nil && qa.IPv4 != nil && qa.IPv4.Tor != nil {
-			dto.Tor = qa.IPv4.Tor
-			dto.Flags["tor"] = qa.IPv4.Tor
+		if dto.Tor == nil && primary != nil && primary.Tor != nil {
+			dto.Tor = primary.Tor
+			dto.Flags["tor"] = primary.Tor
 		}
-		if dto.Abuse == nil && qa.IPv4 != nil && qa.IPv4.Abuse != nil {
-			dto.Abuse = qa.IPv4.Abuse
-			dto.Flags["abuse"] = qa.IPv4.Abuse
+		if dto.Abuse == nil && primary != nil && primary.Abuse != nil {
+			dto.Abuse = primary.Abuse
+			dto.Flags["abuse"] = primary.Abuse
 		}
 	}
 	if dto.IPType == "" {

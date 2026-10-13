@@ -67,7 +67,13 @@ import {
 import { DistroIcon } from './Common.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 import { PosterModal } from './PosterModal.jsx'
-import { fetchPublicNodeDetail, normalizeIPQuality } from '../lib/api.js'
+import {
+  buildIPQualityViewModel,
+  fetchPublicNodeDetail,
+  formatIPQualitySourceName,
+  formatIPQualityType,
+  normalizeIPQuality,
+} from '../lib/api.js'
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -110,34 +116,6 @@ function generateSplinePath(points, width = 450, height = 110, padding = 12) {
   const baselineY = height - padding
   const area = `${line} L ${coords[coords.length - 1].x.toFixed(1)} ${baselineY} L ${coords[0].x.toFixed(1)} ${baselineY} Z`
   return { line, area }
-}
-
-function formatIPQualityType(type) {
-  if (!type) return '未知 / 未识别'
-  const t = String(type).trim().toLowerCase()
-  if (t === 'hosting' || t === 'datacenter') return '机房'
-  if (t === 'isp') return 'ISP'
-  if (t === 'residential') return '家宽'
-  if (t === 'unknown') return '未知 / 未识别'
-  return type
-}
-
-const IP_QUALITY_SOURCE_MAP = {
-  risk_score: '综合风险',
-  fraud_score: '欺诈风险',
-  abuse_score: '滥用风险',
-  threat_score: '威胁分',
-  scamalytics: 'Scamalytics',
-  ip2location: 'IP2Location',
-  abuseipdb: 'AbuseIPDB',
-  ipqs: 'IPQS',
-  dbip: 'DB-IP',
-}
-
-function formatIPQualitySourceName(key) {
-  if (!key) return '—'
-  if (IP_QUALITY_SOURCE_MAP[key]) return IP_QUALITY_SOURCE_MAP[key]
-  return String(key).replace(/_/g, ' ')
 }
 
 function formatIPQualityDateTime(timestamp) {
@@ -593,16 +571,26 @@ export function NodeDetailPage({
     }
     const controller = new AbortController()
     setLoadingIpQuality(true)
-    fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/resource`, { credentials: 'same-origin', signal: controller.signal })
-      .then((res) => {
-        if (res.status === 401) throw new Error('unauthorized')
-        if (!res.ok) throw new Error(`ip-quality:${res.status}`)
-        return res.json()
-      })
-      .then((payload) => {
+    const encodedUuid = encodeURIComponent(nodeUuid)
+    Promise.all([
+      fetch(`/api/nodes/${encodedUuid}/resource`, { credentials: 'same-origin', signal: controller.signal })
+        .then((res) => {
+          if (res.status === 401) throw new Error('unauthorized')
+          if (!res.ok) throw new Error(`ip-quality:${res.status}`)
+          return res.json()
+        }),
+      fetch(`/api/nodes/${encodedUuid}/ipqa`, { credentials: 'same-origin', signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null),
+    ])
+      .then(([payload, ipqaEndpointPayload]) => {
         if (controller.signal.aborted) return
         const qRaw = payload?.resource?.ip_quality || payload?.ip_quality || null
-        const qaRaw = payload?.resource?.ipqa || payload?.ipqa || null
+        const qaFromResource = payload?.resource?.ipqa || payload?.ipqa || null
+        const qaFromEndpoint = ipqaEndpointPayload?.ipqa || ipqaEndpointPayload || null
+        const qaRaw = (qaFromEndpoint && typeof qaFromEndpoint === 'object' && (qaFromEndpoint.ipv4 || qaFromEndpoint.ipv6 || qaFromEndpoint.enabled !== undefined))
+          ? { ...(qaFromResource || {}), ...qaFromEndpoint }
+          : qaFromResource
         if (qRaw || qaRaw) {
           setIpQuality(normalizeIPQuality({ ip_quality: qRaw, ipqa: qaRaw }))
         } else {
@@ -1806,34 +1794,31 @@ export function NodeDetailPage({
               <span>正在同步 IP 质量检测样本…</span>
             </div>
           ) : ipQuality ? (() => {
-            const qBase = ipQuality.ipQuality || ipQuality
+            const vm = buildIPQualityViewModel(ipQuality) || ipQuality
+            const qBase = vm.ipQuality || vm
             const qIpqa = {
-              enabled: Boolean(ipQuality.ipqa_enabled ?? ipQuality.ipqa?.enabled),
-              installed: Boolean(ipQuality.ipqa_installed ?? ipQuality.ipqa?.installed),
-              state: ipQuality.ipqa_state || ipQuality.ipqa?.state || '',
-              highestSeverity: ipQuality.highest_severity || ipQuality.ipqa?.highestSeverity || '',
-              alertCount: Number(ipQuality.alert_count ?? ipQuality.ipqa?.alertCount ?? 0),
-              criticalCount: Number(ipQuality.critical_count ?? ipQuality.ipqa?.criticalCount ?? 0),
-              warningCount: Number(ipQuality.warning_count ?? ipQuality.ipqa?.warningCount ?? 0),
-              lastChangeAt: ipQuality.last_checked_at || ipQuality.checked_at || ipQuality.ipqa?.lastChangeAt || null,
-              latestArchiveDate: ipQuality.latest_archive_date || ipQuality.ipqa?.latestArchiveDate || '',
-              sources: Array.isArray(ipQuality.sources) ? ipQuality.sources : (Array.isArray(ipQuality.ipqa?.sources) ? ipQuality.ipqa?.sources : []),
-              riskScore: typeof ipQuality.risk_score === 'number' ? ipQuality.risk_score : (typeof ipQuality.ipqa?.riskScore === 'number' ? ipQuality.ipqa?.riskScore : null),
-              riskLevel: ipQuality.risk_level || ipQuality.ipqa?.riskLevel || '',
-              hasRecentChanges: Boolean(ipQuality.has_recent_changes ?? ipQuality.ipqa?.hasRecentChanges),
-              recentChangeSummary: ipQuality.recent_change_summary || ipQuality.ipqa?.recentChangeSummary || '',
+              enabled: Boolean(vm.ipqa_enabled ?? vm.ipqa?.enabled),
+              installed: Boolean(vm.ipqa_installed ?? vm.ipqa?.installed),
+              state: vm.ipqa_state || vm.ipqa?.state || '',
+              highestSeverity: vm.highest_severity || vm.ipqa?.highestSeverity || '',
+              alertCount: Number(vm.alert_count ?? vm.ipqa?.alertCount ?? 0),
+              criticalCount: Number(vm.critical_count ?? vm.ipqa?.criticalCount ?? 0),
+              warningCount: Number(vm.warning_count ?? vm.ipqa?.warningCount ?? 0),
+              lastChangeAt: vm.last_checked_at || vm.checked_at || vm.ipqa?.lastChangeAt || null,
+              latestArchiveDate: vm.latest_archive_date || vm.ipqa?.latestArchiveDate || '',
+              sources: Array.isArray(vm.sources) ? vm.sources : (Array.isArray(vm.ipqa?.sources) ? vm.ipqa?.sources : []),
+              riskScore: typeof vm.risk_score === 'number' ? vm.risk_score : (typeof vm.ipqa?.riskScore === 'number' ? vm.ipqa?.riskScore : null),
+              riskLevel: vm.risk_level || vm.ipqa?.riskLevel || '',
+              hasRecentChanges: Boolean(vm.has_recent_changes ?? vm.ipqa?.hasRecentChanges),
+              recentChangeSummary: vm.recent_change_summary || vm.ipqa?.recentChangeSummary || '',
             }
             const qIpType = qBase.ipType || qBase.ip_type || ''
             const qLocation = [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
             const qAsnOrg = [qBase.asn ? (String(qBase.asn).toUpperCase().startsWith('AS') ? qBase.asn : `AS${qBase.asn}`) : '', qBase.organization].filter(Boolean).join(' ') || '—'
             const qCheckedAt = qBase.checkedAt || qBase.checked_at || qIpqa.lastChangeAt || null
-            const qFlags = qBase.flags || {
-              proxy: qBase.proxy ?? null,
-              vpn: qBase.vpn ?? null,
-              tor: qBase.tor ?? null,
-              abuse: qBase.abuse ?? null,
-            }
-            const scoresObj = qBase.scores || qBase.sources || {}
+            const scoreItems = Array.isArray(qBase.scoreItems) ? qBase.scoreItems : []
+            const flagItems = Array.isArray(qBase.flagItems) ? qBase.flagItems : []
+            const databaseFlagsCount = Array.isArray(qBase.databaseFlags) ? qBase.databaseFlags.length : 0
 
             return (
               <>
@@ -1906,31 +1891,22 @@ export function NodeDetailPage({
                       </span>
                     </div>
                     <div className="ip-quality-panel-body">
-                      {scoresObj && Object.keys(scoresObj).length > 0 ? (
+                      {scoreItems.length > 0 ? (
                         <div className="ip-quality-score-list">
-                          {Object.entries(scoresObj).map(([sourceKey, scoreVal]) => {
-                            const isNullish = scoreVal === null || scoreVal === undefined || scoreVal === ''
-                            const scoreNum = Number(scoreVal)
-                            const isNum = !isNullish && Number.isFinite(scoreNum)
-                            const displayVal = isNullish ? '未知' : (isNum ? String(Math.round(scoreNum * 100) / 100) : '—')
-                            const pct = isNum ? Math.min(100, Math.max(0, scoreNum)) : 0
-                            const tone = !isNum ? 'unknown' : scoreNum < 25 ? 'low' : scoreNum < 75 ? 'medium' : 'high'
-                            const label = formatIPQualitySourceName(sourceKey)
-                            return (
-                              <div key={sourceKey} className="ip-quality-score-row">
-                                <span className="ip-quality-score-label" title={label}>{label}</span>
-                                <div className="ip-quality-score-track">
-                                  <div
-                                    className={`ip-quality-score-bar score-${tone}`}
-                                    style={{ width: `${pct}%` }}
-                                  />
-                                </div>
-                                <span className={`ip-quality-score-value score-text-${tone} mono`}>
-                                  {displayVal}
-                                </span>
+                          {scoreItems.map((item) => (
+                            <div key={item.key} className="ip-quality-score-row">
+                              <span className="ip-quality-score-label" title={item.label}>{item.label}</span>
+                              <div className="ip-quality-score-track">
+                                <div
+                                  className={`ip-quality-score-bar score-${item.tone}`}
+                                  style={{ width: `${item.pct}%` }}
+                                />
                               </div>
-                            )
-                          })}
+                              <span className={`ip-quality-score-value score-text-${item.tone} mono`}>
+                                {item.displayValue}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       ) : (
                         <div className="ip-quality-empty-inline">
@@ -1949,45 +1925,29 @@ export function NodeDetailPage({
                       </span>
                     </div>
                     <div className="ip-quality-panel-body">
-                      {(() => {
-                        const flagsList = [
-                          ['代理', qFlags.proxy],
-                          ['VPN', qFlags.vpn],
-                          ['Tor', qFlags.tor],
-                          ['滥用', qFlags.abuse],
-                          ['机房', typeof qFlags.hosting === 'boolean' ? qFlags.hosting : (!qIpType || qIpType === 'unknown' ? null : (qIpType === 'hosting' || qIpType === 'datacenter'))],
-                        ]
-                        const hasAnyFlag = flagsList.some(([, val]) => val !== null && val !== undefined)
-                        if (!hasAnyFlag) {
-                          return (
-                            <div className="ip-quality-empty-inline">
-                              <span>暂无检测结果</span>
-                            </div>
-                          )
-                        }
-                        return (
-                          <>
-                            <div className="ip-quality-flag-grid">
-                              {flagsList.map(([label, val]) => {
-                                const status = val === true ? 'yes' : val === false ? 'no' : 'unknown'
-                                return (
-                                  <div key={label} className="ip-quality-flag-item">
-                                    <span className="flag-label">{label}</span>
-                                    <span className={`flag-status flag-${status}`}>
-                                      {val === true ? '是' : val === false ? '否' : '未知'}
-                                    </span>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                            <div className="ip-quality-panel-footer">
-                              <small className="ip-quality-check-time">
-                                检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · 来源未提供统计
-                              </small>
-                            </div>
-                          </>
-                        )
-                      })()}
+                      {flagItems.length === 0 ? (
+                        <div className="ip-quality-empty-inline">
+                          <span>暂无检测结果</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="ip-quality-flag-grid">
+                            {flagItems.map((flagItem) => (
+                              <div key={flagItem.key} className="ip-quality-flag-item">
+                                <span className="flag-label" title={flagItem.label}>{flagItem.label}</span>
+                                <span className={`flag-status flag-${flagItem.status}`} title={flagItem.text}>
+                                  {flagItem.text}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="ip-quality-panel-footer">
+                            <small className="ip-quality-check-time">
+                              检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · {databaseFlagsCount > 0 ? `已校验 ${databaseFlagsCount} 个风控库` : '来源未提供统计'}
+                            </small>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </section>
 

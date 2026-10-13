@@ -3,6 +3,13 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { isTargetGlobal, nodeMatchesTarget, getTargetScopeSummary } from '../src/lib/targetScope.js'
 import { escapeShell } from '../src/lib/shellEscape.js'
+import {
+  buildIPQualityViewModel,
+  normalizeIPQuality,
+  parseIPQualityScoreValue,
+  formatIPQualitySourceName,
+  formatIPQualityType,
+} from '../src/lib/api.js'
 
 console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n')
 
@@ -461,4 +468,295 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   console.log('[PASS] Scenario 20: Full codebase audit passed, no probewatch/agent:latest in frontend/src and consistent notice confirmed.')
 }
 
-console.log('\n=== ALL 20 LATENCY, SCOPE & ENROLLMENT BEHAVIORAL CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 21: IPQA with risk scores & database flags (IPQA takes priority over legacy ipwho.is)
+// -----------------------------------------------------------------------------
+{
+  const payload = {
+    ip_quality: {
+      ip_type: 'unknown',
+      country: 'SG',
+      region: 'Central Singapore',
+      city: 'Singapore',
+      asn: 'AS16509',
+      organization: 'Amazon.com, Inc.',
+      risk: 'unknown',
+      checked_at: 1791846642,
+    },
+    ipqa: {
+      enabled: true,
+      installed: true,
+      state: 'enabled',
+      has_ipv4: true,
+      has_ipv6: false,
+      latest_archive_date: '2026-10-12',
+      ipv4: {
+        risk_score: 13.18,
+        risk_level: 'low',
+        ip_type: '广播IP',
+        country: 'SG',
+        region: '新加坡',
+        asn: 'AS16509',
+        organization: 'Amazon.com, Inc.',
+        proxy: true,
+        vpn: true,
+        tor: false,
+        abuse: false,
+        source_scores: {
+          AbuseIPDB: 0,
+          DBIP: 0,
+          IP2LOCATION: 3,
+          IPQS: 75,
+          SCAMALYTICS: 0,
+          ipapi: 1.09,
+        },
+      },
+    },
+  }
+
+  const vm = normalizeIPQuality(payload)
+  assert.strictEqual(vm.hasScores, true, 'Scenario 21: IPQA scores must be detected')
+  assert.strictEqual(vm.risk, 'low', 'Scenario 21: IPQA risk_level must override legacy unknown')
+  assert.strictEqual(vm.ipType, '广播IP', 'Scenario 21: IPQA ip_type must override legacy unknown')
+  assert.strictEqual(vm.scoreItems.length, 6, 'Scenario 21: Must extract all 6 IPQA source_scores')
+  assert.strictEqual(vm.hasFlags, true, 'Scenario 21: Must extract threat flags and database conclusions')
+
+  const proxyFlag = vm.flagItems.find((f) => f.key === 'proxy')
+  assert.ok(proxyFlag && proxyFlag.value === true && proxyFlag.text === '是', 'Scenario 21: Proxy flag must be true/是')
+
+  const ipqsDbFlag = vm.flagItems.find((f) => f.key === 'db:ipqs')
+  assert.ok(ipqsDbFlag && ipqsDbFlag.status === 'yes' && ipqsDbFlag.text.includes('命中'), 'Scenario 21: IPQS=75 must show 命中 conclusion')
+
+  const abuseDbFlag = vm.flagItems.find((f) => f.key === 'db:abuseipdb')
+  assert.ok(abuseDbFlag && abuseDbFlag.status === 'no' && abuseDbFlag.text.includes('通过'), 'Scenario 21: AbuseIPDB=0 must show 通过 conclusion')
+
+  console.log('[PASS] Scenario 21: IPQA with risk scores & database flags verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 22: IPQA with media only and NO scores/flags (must not fake scores from ipqa_enabled=true)
+// -----------------------------------------------------------------------------
+{
+  const mediaOnlyPayload = {
+    ipqa: {
+      enabled: true,
+      installed: true,
+      state: 'enabled',
+      latest_archive_date: '2026-10-12',
+      media: [
+        { detector_id: 'netflix', detector: 'Netflix', status: 'available', region: 'SG' },
+        { detector_id: 'openai', detector: 'ChatGPT', status: 'available', region: 'SG' },
+      ],
+    },
+  }
+
+  const vm = buildIPQualityViewModel(mediaOnlyPayload)
+  assert.strictEqual(vm.ipqa_enabled, true, 'Scenario 22: IPQA must be enabled')
+  assert.strictEqual(vm.media.length, 2, 'Scenario 22: Media items must be preserved')
+  assert.strictEqual(vm.hasScores, false, 'Scenario 22: Media-only IPQA must NOT pretend to have risk scores')
+  assert.strictEqual(vm.scoreItems.length, 0, 'Scenario 22: scoreItems must be empty when no scores exist')
+  assert.strictEqual(vm.hasFlags, false, 'Scenario 22: Media-only IPQA must NOT fabricate database flags')
+  assert.strictEqual(vm.flagItems.length, 0, 'Scenario 22: flagItems must be empty when no conclusions exist')
+
+  console.log('[PASS] Scenario 22: IPQA with media only (empty scores & flags) verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 23: IPv4 has scores, IPv6 has no scores
+// -----------------------------------------------------------------------------
+{
+  const v4OnlyPayload = {
+    ipqa: {
+      enabled: true,
+      installed: true,
+      has_ipv4: true,
+      has_ipv6: false,
+      ipv4: {
+        risk_score: 0.14,
+        risk_level: 'low',
+        ip_type: '原生IP',
+        proxy: false,
+        vpn: false,
+        tor: false,
+        abuse: false,
+        source_scores: {
+          AbuseIPDB: 0,
+          SCAMALYTICS: 0,
+          ipapi: '0.69',
+        },
+      },
+      ipv6: null,
+    },
+  }
+
+  const vm = buildIPQualityViewModel(v4OnlyPayload)
+  assert.strictEqual(vm.hasIPv4Scores, true, 'Scenario 23: hasIPv4Scores must be true')
+  assert.strictEqual(vm.hasIPv6Scores, false, 'Scenario 23: hasIPv6Scores must be false')
+  assert.strictEqual(vm.isDualStackScores, false, 'Scenario 23: isDualStackScores must be false')
+  assert.strictEqual(vm.scoreItems.length, 3, 'Scenario 23: Must have 3 IPv4 score items')
+  assert.strictEqual(vm.scoreItems[0].label, 'AbuseIPDB', 'Scenario 23: Single-stack label uses clean source name')
+  assert.strictEqual(vm.scoreItems[2].displayValue, '0.69', 'Scenario 23: Numeric string "0.69" parsed accurately')
+
+  console.log('[PASS] Scenario 23: IPv4 present and IPv6 absent verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 24: Dual-stack IPv4 and IPv6 both have scores (must NOT overwrite each other)
+// -----------------------------------------------------------------------------
+{
+  const dualStackPayload = {
+    ipqa: {
+      enabled: true,
+      installed: true,
+      has_ipv4: true,
+      has_ipv6: true,
+      ipv4: {
+        risk_score: 13.18,
+        risk_level: 'low',
+        ip_type: '广播IP',
+        proxy: true,
+        vpn: true,
+        tor: false,
+        abuse: false,
+        source_scores: {
+          AbuseIPDB: 0,
+          IPQS: 75,
+          ipapi: 1.09,
+        },
+      },
+      ipv6: {
+        risk_score: 20.2,
+        risk_level: 'low',
+        ip_type: '广播IP',
+        proxy: true,
+        vpn: false,
+        tor: false,
+        abuse: false,
+        source_scores: {
+          AbuseIPDB: 0,
+          IPQS: 95,
+          ipapi: 0,
+        },
+      },
+    },
+  }
+
+  const vm = buildIPQualityViewModel(dualStackPayload)
+  assert.strictEqual(vm.isDualStackScores, true, 'Scenario 24: Dual-stack scores must be detected')
+  assert.strictEqual(vm.scoreGroups.length, 2, 'Scenario 24: Must preserve separate IPv4 and IPv6 score groups')
+  assert.strictEqual(vm.scoreItems.length, 6, 'Scenario 24: Both IPv4 (3) and IPv6 (3) scores must be preserved without overwriting')
+
+  const v4Ipqs = vm.scoreItems.find((i) => i.key === 'IPv4:IPQS')
+  const v6Ipqs = vm.scoreItems.find((i) => i.key === 'IPv6:IPQS')
+  assert.ok(v4Ipqs && v4Ipqs.value === 75 && v4Ipqs.label === 'IPQS (IPv4)', 'Scenario 24: IPv4 IPQS=75 preserved and labeled')
+  assert.ok(v6Ipqs && v6Ipqs.value === 95 && v6Ipqs.label === 'IPQS (IPv6)', 'Scenario 24: IPv6 IPQS=95 preserved and labeled')
+
+  const vpnFlag = vm.flagItems.find((f) => f.key === 'vpn')
+  assert.ok(vpnFlag && vpnFlag.text === '是 (IPv4)', 'Scenario 24: Mixed dual-stack boolean flag identifies family')
+
+  const dbIpqs = vm.databaseFlags.find((d) => d.key === 'db:ipqs')
+  assert.ok(dbIpqs && dbIpqs.text.includes('v4:75/v6:95'), 'Scenario 24: Dual-stack database conclusion preserves both v4 and v6 scores')
+
+  console.log('[PASS] Scenario 24: Dual-stack IPv4 + IPv6 scores preserved without overwrite.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 25: Score value 0 and numeric string "0" (must be valid low-risk, never treated as empty)
+// -----------------------------------------------------------------------------
+{
+  const pNumZero = parseIPQualityScoreValue(0)
+  assert.strictEqual(pNumZero.status, 'valid', 'Scenario 25: Numeric 0 must have status=valid')
+  assert.strictEqual(pNumZero.value, 0, 'Scenario 25: Numeric 0 value must be 0')
+  assert.strictEqual(pNumZero.displayValue, '0', 'Scenario 25: Numeric 0 displayValue must be "0"')
+  assert.strictEqual(pNumZero.tone, 'low', 'Scenario 25: Numeric 0 tone must be low')
+  assert.strictEqual(pNumZero.hasConclusion, true, 'Scenario 25: Numeric 0 must have conclusion')
+
+  const pStrZero = parseIPQualityScoreValue('0')
+  assert.strictEqual(pStrZero.status, 'valid', 'Scenario 25: String "0" must have status=valid')
+  assert.strictEqual(pStrZero.value, 0, 'Scenario 25: String "0" value must be 0')
+  assert.strictEqual(pStrZero.displayValue, '0', 'Scenario 25: String "0" displayValue must be "0"')
+
+  const vmZero = buildIPQualityViewModel({
+    ipv4: {
+      source_scores: {
+        AbuseIPDB: 0,
+        DBIP: '0',
+      },
+    },
+  })
+  assert.strictEqual(vmZero.hasScores, true, 'Scenario 25: All-zero scores must still render as valid score list')
+  assert.strictEqual(vmZero.scoreItems.length, 2, 'Scenario 25: Both 0 and "0" must be present in scoreItems')
+  assert.strictEqual(vmZero.databaseFlags.length, 2, 'Scenario 25: Zero scores must produce 通过 (0) database conclusions')
+
+  console.log('[PASS] Scenario 25: Zero score values (0 and "0") verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 26: Score value "unknown" and missing null/undefined/""
+// -----------------------------------------------------------------------------
+{
+  const pUnknown = parseIPQualityScoreValue('unknown')
+  assert.strictEqual(pUnknown.status, 'unknown', 'Scenario 26: "unknown" must have status=unknown')
+  assert.strictEqual(pUnknown.value, null, 'Scenario 26: "unknown" value must be null (NOT 0)')
+  assert.strictEqual(pUnknown.displayValue, '未知', 'Scenario 26: "unknown" displayValue must be 未知')
+  assert.strictEqual(pUnknown.hasConclusion, false, 'Scenario 26: "unknown" must NOT count as a database conclusion')
+
+  for (const missingVal of [null, undefined, '']) {
+    const pMissing = parseIPQualityScoreValue(missingVal)
+    assert.strictEqual(pMissing.status, 'missing', 'Scenario 26: null/undefined/"" must have status=missing')
+    assert.strictEqual(pMissing.hasConclusion, false, 'Scenario 26: missing value must NOT count as conclusion')
+  }
+
+  const vmUnknown = buildIPQualityViewModel({
+    ipv4: {
+      source_scores: {
+        SCAMALYTICS: 'unknown',
+        IPQS: null,
+        DBIP: '',
+      },
+    },
+  })
+  assert.strictEqual(vmUnknown.scoreItems.length, 1, 'Scenario 26: Explicit "unknown" renders as 未知 row while null/"" are omitted')
+  assert.strictEqual(vmUnknown.scoreItems[0].displayValue, '未知', 'Scenario 26: "unknown" displays 未知')
+  assert.strictEqual(vmUnknown.scoreItems[0].value, null, 'Scenario 26: "unknown" is never coerced to 0')
+  assert.strictEqual(vmUnknown.databaseFlags.length, 0, 'Scenario 26: "unknown" and missing scores must NOT fabricate low-risk database flags')
+
+  console.log('[PASS] Scenario 26: "unknown" and missing score values verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 27: Legacy IPQualityInfo fallback (when IPQA has no ipv4/ipv6)
+// -----------------------------------------------------------------------------
+{
+  const legacyPayload = {
+    ip_type: 'hosting',
+    country: 'US',
+    region: 'California',
+    city: 'Los Angeles',
+    asn: 'AS13335',
+    organization: 'Cloudflare, Inc.',
+    proxy: false,
+    vpn: false,
+    tor: false,
+    abuse: false,
+    risk: 'low',
+    checked_at: 1700000000,
+    scores: {
+      scamalytics: 12,
+      abuseipdb: 0,
+    },
+  }
+
+  const vmLegacy = buildIPQualityViewModel(legacyPayload)
+  assert.strictEqual(vmLegacy.hasScores, true, 'Scenario 27: Legacy scores must be supported as fallback')
+  assert.strictEqual(vmLegacy.scoreItems.length, 2, 'Scenario 27: Legacy scores must produce 2 scoreItems')
+  assert.strictEqual(vmLegacy.scoreItems[0].label, 'Scamalytics', 'Scenario 27: Legacy source key formatted')
+  assert.strictEqual(vmLegacy.scoreItems[0].displayValue, '12', 'Scenario 27: Legacy score value preserved')
+  assert.strictEqual(vmLegacy.hasFlags, true, 'Scenario 27: Legacy flags must be supported')
+  const hostingFlag = vmLegacy.flagItems.find((f) => f.key === 'hosting')
+  assert.ok(hostingFlag && hostingFlag.value === true && hostingFlag.text === '是', 'Scenario 27: hosting ip_type infers 机房=是')
+
+  console.log('[PASS] Scenario 27: Legacy IPQualityInfo fallback verified.')
+}
+
+console.log('\n=== ALL 27 LATENCY, SCOPE, ENROLLMENT & IPQA BEHAVIORAL CONTRACT TESTS PASSED ===')
