@@ -3,6 +3,10 @@ import sys
 import time
 from playwright.sync_api import sync_playwright
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+
 BASE_URL = "https://tz.115yu.us.ci"
 NODE_UUID = "bdf9fac6-66ff-4585-9e1e-1cc20c4ac3c8"
 ARTIFACT_DIR = r"C:\Users\黄\.gemini\antigravity\brain\8376b092-4bfc-49a6-b17c-29bb89f3558a"
@@ -80,10 +84,10 @@ def run():
             # Check 3 columns
             score_list = card.locator(".ip-quality-score-list")
             factors_grid = card.locator(".ip-quality-factors-grid")
-            media_grid = card.locator(".ip-quality-media-grid")
+            media_grid = card.locator(".ip-quality-media-list")
             assert score_list.count() > 0, "Must render .ip-quality-score-list"
             assert factors_grid.count() > 0, "Must render .ip-quality-factors-grid"
-            assert media_grid.count() > 0, "Must render .ip-quality-media-grid"
+            assert media_grid.count() > 0, "Must render .ip-quality-media-list"
 
             # Check score list items
             score_items = score_list.locator(".ip-quality-score-row").all_inner_texts()
@@ -137,79 +141,94 @@ def run():
         context = browser.new_context(viewport={"width": 1280, "height": 900}, color_scheme="dark")
         page = context.new_page()
 
-        # Mock public IP quality endpoint with Songzhong data
-        def handle_ipqa(route):
-            mock_data = {
-                "ip_quality": {
-                    "has_ipv4": True,
-                    "has_ipv6": True,
-                    "last_checked_at": "2026-10-13 21:05:00",
-                    "ipv4": {
-                        "risk_score": 0,
-                        "risk_level": "low",
-                        "ip_type": "原生IP",
-                        "country": "TW",
-                        "region": "台湾",
-                        "asn": "AS3462",
-                        "organization": "Data Communication Business Group",
-                        "proxy": False,
-                        "vpn": False,
-                        "tor": False,
-                        "abuse": False,
-                        "source_scores": {
-                            "IP2Location": 0,
-                            "Scamalytics": 0,
-                            "ipapi": 0,
-                            "AbuseIPDB": 0,
-                            "IPQS": 0,
-                            "DB-IP": 0
-                        },
-                        "media": [
-                            {"name": "Google 定位", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "Netflix", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "Disney+", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "YouTube", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "Prime Video", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "TikTok", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "Reddit", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
-                            {"name": "ChatGPT", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"}
-                        ]
+        mock_data = {
+            "ip_quality": {
+                "has_ipv4": True,
+                "has_ipv6": True,
+                "last_checked_at": "2026-10-13 21:05:00",
+                "ipv4": {
+                    "risk_score": 0,
+                    "risk_level": "low",
+                    "ip_type": "原生IP",
+                    "country": "TW",
+                    "region": "台湾",
+                    "asn": "AS3462",
+                    "organization": "Data Communication Business Group",
+                    "proxy": False,
+                    "vpn": False,
+                    "tor": False,
+                    "abuse": False,
+                    "source_scores": {
+                        "IP2Location": 0,
+                        "Scamalytics": 0,
+                        "ipapi": 0,
+                        "AbuseIPDB": 0,
+                        "IPQS": 0,
+                        "DB-IP": 0
                     },
-                    "ipv6": {
-                        "risk_score": 0.5,
-                        "risk_level": "low",
-                        "ip_type": "原生IP",
-                        "country": "HK",
-                        "region": "香港",
-                        "asn": "AS202355",
-                        "organization": "Ciallo Networks LTD",
-                        "proxy": False,
-                        "vpn": False,
-                        "tor": False,
-                        "abuse": False,
-                        "source_scores": {
-                            "IP2Location": 3,
-                            "Scamalytics": 0,
-                            "ipapi": 0,
-                            "AbuseIPDB": 0,
-                            "IPQS": 0,
-                            "DB-IP": 0
-                        },
-                        "media": [
-                            {"name": "Google 定位", "status": "songzhong", "status_raw": "送中 · CN", "region": "CN", "type": "送中"},
-                            {"name": "Netflix", "status": "available", "status_raw": "仅自制", "region": "HK", "type": "原生"},
-                            {"name": "Disney+", "status": "available", "status_raw": "解锁", "region": "HK", "type": "原生"},
-                            {"name": "YouTube", "status": "songzhong", "status_raw": "送中 · CN", "region": "CN", "type": "送中"},
-                            {"name": "Prime Video", "status": "blocked", "status_raw": "不可用"},
-                            {"name": "TikTok", "status": "blocked", "status_raw": "不可用"},
-                            {"name": "Reddit", "status": "available", "status_raw": "解锁", "region": "HK", "type": "原生"},
-                            {"name": "ChatGPT", "status": "available", "status_raw": "仅APP", "region": "HK", "type": "原生"}
-                        ]
-                    }
+                    "media": [
+                        {"name": "Google 定位", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "Netflix", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "Disney+", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "YouTube", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "Prime Video", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "TikTok", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "Reddit", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"},
+                        {"name": "ChatGPT", "status": "available", "status_raw": "解锁", "region": "TW", "type": "原生"}
+                    ]
+                },
+                "ipv6": {
+                    "risk_score": 0.5,
+                    "risk_level": "low",
+                    "ip_type": "原生IP",
+                    "country": "HK",
+                    "region": "香港",
+                    "asn": "AS202355",
+                    "organization": "Ciallo Networks LTD",
+                    "proxy": False,
+                    "vpn": False,
+                    "tor": False,
+                    "abuse": False,
+                    "source_scores": {
+                        "IP2Location": 3,
+                        "Scamalytics": 0,
+                        "ipapi": 0,
+                        "AbuseIPDB": 0,
+                        "IPQS": 0,
+                        "DB-IP": 0
+                    },
+                    "media": [
+                        {"name": "Google 定位", "status": "songzhong", "status_raw": "送中 · CN", "region": "CN", "type": "送中"},
+                        {"name": "Netflix", "status": "available", "status_raw": "仅自制", "region": "HK", "type": "原生"},
+                        {"name": "Disney+", "status": "available", "status_raw": "解锁", "region": "HK", "type": "原生"},
+                        {"name": "YouTube", "status": "songzhong", "status_raw": "送中 · CN", "region": "CN", "type": "送中"},
+                        {"name": "Prime Video", "status": "blocked", "status_raw": "不可用"},
+                        {"name": "TikTok", "status": "blocked", "status_raw": "不可用"},
+                        {"name": "Reddit", "status": "available", "status_raw": "解锁", "region": "HK", "type": "原生"},
+                        {"name": "ChatGPT", "status": "available", "status_raw": "仅APP", "region": "HK", "type": "原生"}
+                    ]
                 }
             }
+        }
+
+        def handle_ipqa(route):
             route.fulfill(json=mock_data)
 
+        def handle_detail(route):
+            mock_detail = {
+                "uuid": NODE_UUID,
+                "name": "Ciallonet-Host",
+                "status": "online",
+                "resource": {
+                    "cpu_model": "AMD EPYC 7B13",
+                    "cpu_cores": 1,
+                    "os": "Linux"
+                },
+                "ip_quality": mock_data["ip_quality"],
+            }
+            route.fulfill(json=mock_detail)
+
+        page.route(f"**/api/public/nodes/{NODE_UUID}/detail*", handle_detail)
         page.route(f"**/api/public/nodes/{NODE_UUID}/ip-quality*", handle_ipqa)
         page.goto(f"{BASE_URL}/#/node-detail?uuid={NODE_UUID}")
         page.wait_for_selector(".komari-ip-quality-card", timeout=30000)

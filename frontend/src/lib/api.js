@@ -211,6 +211,7 @@ function sanitizeFamilyObject(fam) {
     hosting: parseBoolConclusion(fam.hosting ?? fam.is_server ?? fam.server),
     robot: parseBoolConclusion(fam.robot ?? fam.is_robot),
     source_scores: cleanScores,
+    media: Array.isArray(fam.media) ? fam.media : [],
   }
 }
 
@@ -646,6 +647,12 @@ export function buildIPQualityViewModel(raw, activeFamily = null) {
   if (raw._isIPQualityViewModel === true) {
     if (!activeFamily || raw.activeFamily === activeFamily) {
       return raw
+    }
+    const targetFamily = activeFamily === 'ipv6' && raw.hasIPv6 ? 'ipv6' : (activeFamily === 'ipv4' && raw.hasIPv4 ? 'ipv4' : raw.activeFamily)
+    return {
+      ...raw,
+      activeFamily: targetFamily,
+      active: targetFamily === 'ipv6' ? raw.v6 : raw.v4,
     }
   }
 
@@ -1136,6 +1143,7 @@ export function buildIPQualityViewModel(raw, activeFamily = null) {
   const activeVM = effectiveActive === 'ipv6' ? v6VM : v4VM
 
   const ipQualityObj = {
+    _isIPQualityViewModel: true,
     ipType,
     country,
     region,
