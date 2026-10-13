@@ -21,6 +21,7 @@ import (
 
 const (
 	defaultIPQADir          = ".ipqa"
+	defaultSystemIPQADir    = "/var/lib/probewatch/ipqa"
 	defaultIPQACacheTTL     = 6 * time.Hour
 	defaultIPQAMaxLogBytes  = 1024 * 1024       // 1MB
 	maxIPQALogLines         = 500
@@ -59,35 +60,55 @@ type DefaultIPQACollector struct {
 }
 
 // resolveIPQABaseDir determines the effective IPQA directory path safely.
+// Priority:
+//  1. Explicit PROBEWATCH_IPQA_DIR environment variable
+//  2. $PROBEWATCH_AGENT_DATA/ipqa (if installed and readable)
+//  3. /var/lib/probewatch/ipqa (if installed and readable)
+//  4. Non-root user home directory ~/.ipqa (if installed and readable)
+//  5. Default fallback: $PROBEWATCH_AGENT_DATA/ipqa or /var/lib/probewatch/ipqa (never /root/.ipqa)
 func resolveIPQABaseDir() string {
 	if dir := strings.TrimSpace(os.Getenv("PROBEWATCH_IPQA_DIR")); dir != "" {
 		return dir
 	}
+	agentData := strings.TrimSpace(os.Getenv("PROBEWATCH_AGENT_DATA"))
+	if agentData != "" {
+		candidate := filepath.Join(agentData, "ipqa")
+		if isIPQADataDirInstalled(candidate) {
+			return candidate
+		}
+	}
+	if isIPQADataDirInstalled(defaultSystemIPQADir) {
+		return defaultSystemIPQADir
+	}
 	home, err := os.UserHomeDir()
-	if err == nil && home != "" {
+	if err == nil && strings.TrimSpace(home) != "" && filepath.Clean(home) != "/root" {
 		candidate := filepath.Join(home, defaultIPQADir)
 		if isIPQADataDirInstalled(candidate) {
 			return candidate
 		}
 	}
-	// Fallback to /root/.ipqa if accessible and home was different
-	if home != "/root" && isIPQADataDirInstalled(filepath.Join("/root", defaultIPQADir)) {
-		return filepath.Join("/root", defaultIPQADir)
+	if agentData != "" {
+		return filepath.Join(agentData, "ipqa")
 	}
-	if home != "" {
-		return filepath.Join(home, defaultIPQADir)
-	}
-	return filepath.Join("/root", defaultIPQADir)
+	return defaultSystemIPQADir
 }
 
-// isIPQADataDirInstalled checks safely if the IPQA data directory exists and is a directory.
+// isIPQADataDirInstalled checks safely if the IPQA data directory exists, is a directory, and is readable by the current process.
 func isIPQADataDirInstalled(baseDir string) bool {
 	if strings.TrimSpace(baseDir) == "" {
 		return false
 	}
 	dataPath := filepath.Join(baseDir, "data")
 	fi, err := os.Stat(dataPath)
-	return err == nil && fi.IsDir()
+	if err != nil || !fi.IsDir() {
+		return false
+	}
+	f, err := os.Open(dataPath)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 // NewIPQACollector constructs a new IPQACollector with environment variables.
@@ -557,15 +578,46 @@ func normalizeArchive(raw *rawIPQAArchive) (*protocol.IPQAFamilyInfo, []string) 
 		if v, ok := raw.Info["Country"].(string); ok {
 			info.Country = strings.TrimSpace(v)
 		} else if vMap, ok := raw.Info["Country"].(map[string]any); ok {
-			if name, ok := vMap["Name"].(string); ok {
+			if code, ok := vMap["Code"].(string); ok && cleanRegion(code) != "--" {
+				info.Country = strings.TrimSpace(code)
+			} else if name, ok := vMap["Name"].(string); ok {
 				info.Country = strings.TrimSpace(name)
 			}
 		}
 		if v, ok := raw.Info["Region"].(string); ok {
 			info.Region = cleanRegion(v)
+		} else if rMap, ok := raw.Info["Region"].(map[string]any); ok {
+			if info.Country == "" {
+				if code, ok := rMap["Code"].(string); ok && cleanRegion(code) != "--" {
+					info.Country = strings.TrimSpace(code)
+				}
+			}
+			if name, ok := rMap["Name"].(string); ok && cleanRegion(name) != "--" {
+				info.Region = cleanRegion(name)
+			}
+		}
+		if info.Country == "" {
+			if regMap, ok := raw.Info["RegisteredRegion"].(map[string]any); ok {
+				if code, ok := regMap["Code"].(string); ok && cleanRegion(code) != "--" {
+					info.Country = strings.TrimSpace(code)
+				}
+			}
+		}
+		if cMap, ok := raw.Info["City"].(map[string]any); ok {
+			if cName, ok := cMap["Name"].(string); ok && cleanRegion(cName) != "--" {
+				if info.Region == "" || info.Region == "--" {
+					info.Region = cleanRegion(cName)
+				}
+			}
 		}
 		if v, ok := raw.Info["ASN"].(string); ok {
-			info.ASN = strings.TrimSpace(v)
+			trimmedASN := strings.TrimSpace(v)
+			if trimmedASN != "" && !strings.HasPrefix(strings.ToUpper(trimmedASN), "AS") {
+				if _, err := strconv.Atoi(trimmedASN); err == nil {
+					trimmedASN = "AS" + trimmedASN
+				}
+			}
+			info.ASN = trimmedASN
 		} else if vNum, ok := raw.Info["ASN"].(float64); ok {
 			info.ASN = fmt.Sprintf("AS%d", int(vNum))
 		}
@@ -670,11 +722,11 @@ func normalizeArchive(raw *rawIPQAArchive) (*protocol.IPQAFamilyInfo, []string) 
 
 			rawLower := strings.ToLower(item.StatusRaw)
 			switch {
-			case strings.Contains(rawLower, "不可用") || strings.Contains(rawLower, "失败") || strings.Contains(rawLower, "blocked") || strings.Contains(rawLower, "ban"):
+			case strings.Contains(rawLower, "不可用") || strings.Contains(rawLower, "失败") || strings.Contains(rawLower, "屏蔽") || strings.Contains(rawLower, "blocked") || strings.Contains(rawLower, "ban"):
 				item.Status = "blocked"
 			case strings.Contains(rawLower, "未") || strings.Contains(rawLower, "unavailable") || strings.Contains(rawLower, "no") || strings.Contains(rawLower, "false"):
 				item.Status = "unavailable"
-			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制"):
+			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制") || strings.Contains(rawLower, "仅"):
 				item.Status = "available"
 			default:
 				item.Status = "unknown"

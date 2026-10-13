@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -471,3 +472,131 @@ func TestIPQACollector_ParsesMediaArchive(t *testing.T) {
 	}
 }
 
+func TestResolveIPQABaseDir_PriorityAndNoRootDependency(t *testing.T) {
+	tmpRoot := t.TempDir()
+	explicitDir := filepath.Join(tmpRoot, "explicit-ipqa")
+	agentDataDir := filepath.Join(tmpRoot, "agent-data")
+
+	// 1. Explicit PROBEWATCH_IPQA_DIR always wins
+	t.Setenv("PROBEWATCH_IPQA_DIR", explicitDir)
+	t.Setenv("PROBEWATCH_AGENT_DATA", agentDataDir)
+	if got := resolveIPQABaseDir(); got != explicitDir {
+		t.Fatalf("expected explicit PROBEWATCH_IPQA_DIR %q, got %q", explicitDir, got)
+	}
+
+	// 2. When PROBEWATCH_IPQA_DIR is unset and PROBEWATCH_AGENT_DATA is set, fallback uses $PROBEWATCH_AGENT_DATA/ipqa
+	t.Setenv("PROBEWATCH_IPQA_DIR", "")
+	expectedAgentIPQA := filepath.Join(agentDataDir, "ipqa")
+	if got := resolveIPQABaseDir(); got != expectedAgentIPQA {
+		t.Fatalf("expected agent data ipqa dir %q, got %q", expectedAgentIPQA, got)
+	}
+
+	// 3. When both are unset, default never points to /root/.ipqa
+	t.Setenv("PROBEWATCH_AGENT_DATA", "")
+	gotDefault := resolveIPQABaseDir()
+	if filepath.ToSlash(gotDefault) == "/root/.ipqa" {
+		t.Fatalf("resolveIPQABaseDir must not depend on /root/.ipqa, got %q", gotDefault)
+	}
+}
+
+func TestIPQACollector_V2026ArchiveAndSanitization(t *testing.T) {
+	tmpDir := t.TempDir()
+	v4Dir := filepath.Join(tmpDir, "data", "v4")
+	v6Dir := filepath.Join(tmpDir, "data", "v6")
+	if err := os.MkdirAll(v4Dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(v6Dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	v4Archive := map[string]any{
+		"Head": map[string]any{
+			"IP":      "203.0.113.199",
+			"Time":    "2026-10-13 04:00:03 CST",
+			"Version": "v2026-09-16",
+		},
+		"Info": map[string]any{
+			"ASN":              "3462",
+			"Organization":     "Data Communication Business Group",
+			"City":             map[string]any{"Name": "Yunlin"},
+			"Region":           map[string]any{"Code": "TW", "Name": "台湾"},
+			"RegisteredRegion": map[string]any{"Code": "TW", "Name": "台湾"},
+			"Type":             "原生IP",
+		},
+		"Score": map[string]any{
+			"IP2LOCATION": "0",
+			"SCAMALYTICS": "0",
+			"ipapi":       "0.69%",
+			"AbuseIPDB":   "null",
+			"IPQS":        "0",
+		},
+		"Factor": map[string]any{
+			"Proxy":  map[string]any{"IP2LOCATION": false},
+			"Abuser": map[string]any{"IP2LOCATION": false},
+		},
+		"Media": map[string]any{
+			"Netflix": map[string]any{"Status": "仅自制", "Region": "TW", "Type": "原生"},
+		},
+	}
+	v6Archive := map[string]any{
+		"Head": map[string]any{
+			"IP":      "2001:db8::9999",
+			"Time":    "2026-10-13 04:01:13 CST",
+			"Version": "v2026-09-16",
+		},
+		"Info": map[string]any{
+			"ASN":          "202355",
+			"Organization": "Ciallo Networks LTD",
+			"Region":       map[string]any{"Code": "HK", "Name": "香港"},
+			"Type":         "原生IP",
+		},
+		"Score": map[string]any{
+			"IPQS": "0",
+		},
+		"Media": map[string]any{
+			"AmazonPrimeVideo": map[string]any{"Status": "屏蔽", "Region": "", "Type": ""},
+			"ChatGPT":          map[string]any{"Status": "仅APP", "Region": "HK", "Type": "原生"},
+		},
+	}
+
+	b4, _ := json.Marshal(v4Archive)
+	b6, _ := json.Marshal(v6Archive)
+	if err := os.WriteFile(filepath.Join(v4Dir, "2026-10-13_040001.json"), b4, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v6Dir, "2026-10-13_040001.json"), b6, 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &DefaultIPQACollector{
+		enabled:     true,
+		baseDir:     tmpDir,
+		maxLogBytes: 1024 * 1024,
+	}
+
+	info, err := c.collect()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !info.Enabled || !info.Installed || info.State != "enabled" {
+		t.Fatalf("expected enabled=true, installed=true, state=enabled, got %+v", info)
+	}
+	if info.IPv4 == nil || info.IPv4.Country != "TW" || info.IPv4.Region != "台湾" || info.IPv4.ASN != "AS3462" {
+		t.Fatalf("unexpected IPv4 normalization: %+v", info.IPv4)
+	}
+	if info.IPv6 == nil || info.IPv6.Country != "HK" || info.IPv6.Region != "香港" || info.IPv6.ASN != "AS202355" {
+		t.Fatalf("unexpected IPv6 normalization: %+v", info.IPv6)
+	}
+
+	serialized, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal IPQAInfo: %v", err)
+	}
+	rawJSON := string(serialized)
+	for _, secret := range []string{"203.0.113.199", "2001:db8::9999", tmpDir, "/root/.ipqa"} {
+		if strings.Contains(rawJSON, secret) {
+			t.Fatalf("serialized IPQAInfo leaked sensitive string %q: %s", secret, rawJSON)
+		}
+	}
+}
