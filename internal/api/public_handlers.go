@@ -1313,11 +1313,16 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		dto.Source = "ipwho.is"
 		dto.HasIPv4 = true
 		if dto.IPv4 == nil {
+			region := q.Region
+			if q.City != "" && q.Region != "" && !strings.Contains(q.Region, q.City) {
+				region = q.City + " · " + q.Region
+			} else if q.City != "" && q.Region == "" {
+				region = q.City
+			}
 			dto.IPv4 = &protocol.IPQAFamilyInfo{
 				IPType:       q.IPType,
 				Country:      q.Country,
-				Region:       q.Region,
-				City:         q.City,
+				Region:       region,
 				ASN:          q.ASN,
 				Organization: q.Organization,
 				RiskLevel:    q.Risk,
