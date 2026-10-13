@@ -55,6 +55,15 @@ export function formatIPQualityType(type) {
   return String(type).trim()
 }
 
+export function formatIPQualityDateTime(timestamp) {
+  if (!timestamp) return '—'
+  const ms = Number(timestamp) > 1e11 ? Number(timestamp) : Number(timestamp) * 1000
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return '—'
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 export function parseIPQualityScoreValue(rawVal) {
   if (rawVal === null || rawVal === undefined || rawVal === '') {
     return {

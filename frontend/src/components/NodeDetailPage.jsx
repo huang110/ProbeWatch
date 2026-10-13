@@ -77,6 +77,7 @@ import {
   STANDARD_IP_RISK_DATABASES,
   parseMediaItemDetails,
   parseSongzhong,
+  formatIPQualityDateTime,
 } from '../lib/api.js'
 
 export { parseMediaItemDetails, POPULAR_MEDIA }
@@ -124,14 +125,6 @@ function generateSplinePath(points, width = 450, height = 110, padding = 12) {
   return { line, area }
 }
 
-function formatIPQualityDateTime(timestamp) {
-  if (!timestamp) return '未知'
-  const ms = Number(timestamp) > 1e11 ? Number(timestamp) : Number(timestamp) * 1000
-  const d = new Date(ms)
-  if (isNaN(d.getTime())) return '未知'
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
 
 function formatIPQualityShortTime(timestamp) {
   if (!timestamp) return '—'
