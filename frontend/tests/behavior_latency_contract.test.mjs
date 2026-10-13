@@ -1,7 +1,20 @@
 import assert from 'node:assert'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { isTargetGlobal, nodeMatchesTarget, getTargetScopeSummary } from '../src/lib/targetScope.js'
+import {
+  isTargetGlobal,
+  nodeMatchesTarget,
+  getTargetScopeSummary,
+  formatTargetScopeDisplay,
+  maskNodeIdentifier,
+  resolveNodeDisplayName,
+  extractAvailableNodeTags,
+  TARGET_QUICK_TEMPLATES,
+  applyTargetQuickTemplate,
+  buildTargetFormFromRecord,
+  buildTargetSubmitPayload,
+  executeWithCsrfRetry,
+} from '../src/lib/targetScope.js'
 import { escapeShell } from '../src/lib/shellEscape.js'
 import {
   buildIPQualityViewModel,
@@ -759,4 +772,322 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   console.log('[PASS] Scenario 27: Legacy IPQualityInfo fallback verified.')
 }
 
-console.log('\n=== ALL 27 LATENCY, SCOPE, ENROLLMENT & IPQA BEHAVIORAL CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 28 (TargetManage #1 & #2): Drawer closed by default, opens on "新建目标"
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes('const [drawerOpen, setDrawerOpen] = useState(false)'),
+    'Scenario 28: Drawer must be closed by default (drawerOpen = false)'
+  )
+  assert.ok(
+    targetManageSrc.includes("openCreateDrawer('http')") && targetManageSrc.includes('setDrawerOpen(true)'),
+    'Scenario 28: Clicking "新建目标" must open the drawer via openCreateDrawer()'
+  )
+  assert.ok(
+    targetManageSrc.includes('{drawerOpen && (') && targetManageSrc.includes('target-drawer-panel'),
+    'Scenario 28: Creation/Edit form must only render inside .target-drawer-panel when drawerOpen is true'
+  )
+  console.log('[PASS] Scenario 28: Drawer closed by default & opens on "新建目标" verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 29 (TargetManage #3): Create HTTP target submits accurate payload
+// -----------------------------------------------------------------------------
+{
+  const form = applyTargetQuickTemplate('http', {})
+  form.id = 'http-cf-check'
+  const payload = buildTargetSubmitPayload(form)
+  assert.strictEqual(payload.kind, 'http', 'Scenario 29: HTTP health template sets kind=http')
+  assert.strictEqual(payload.host, 'example.com', 'Scenario 29: Host populated')
+  assert.strictEqual(payload.port, 80, 'Scenario 29: Port is numeric 80')
+  assert.strictEqual(payload.path, '/health', 'Scenario 29: Path populated')
+  assert.strictEqual(payload.expected_status, 200, 'Scenario 29: expected_status is numeric 200')
+  assert.deepStrictEqual(payload.node_ids, [], 'Scenario 29: Global scope submits empty node_ids')
+  assert.deepStrictEqual(payload.node_tags, [], 'Scenario 29: Global scope submits empty node_tags')
+  console.log('[PASS] Scenario 29: Create HTTP target payload verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 30 (TargetManage #4): Create TCP target submits accurate payload
+// -----------------------------------------------------------------------------
+{
+  const form = applyTargetQuickTemplate('tcp', {})
+  form.id = 'tcp-dns-check'
+  const payload = buildTargetSubmitPayload(form)
+  assert.strictEqual(payload.kind, 'tcp', 'Scenario 30: TCP template sets kind=tcp')
+  assert.strictEqual(payload.host, '1.1.1.1', 'Scenario 30: TCP host populated')
+  assert.strictEqual(payload.port, 443, 'Scenario 30: TCP port is numeric 443')
+  assert.strictEqual(payload.interval_seconds, 60, 'Scenario 30: TCP interval_seconds is numeric 60')
+  assert.strictEqual(payload.timeout_ms, 3000, 'Scenario 30: TCP timeout_ms is numeric 3000')
+  assert.strictEqual(payload.expected_status, undefined, 'Scenario 30: TCP target omits expected_status')
+  console.log('[PASS] Scenario 30: Create TCP target payload verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 31 (TargetManage #5): Create DNS target includes dns_type
+// -----------------------------------------------------------------------------
+{
+  const form = applyTargetQuickTemplate('dns', {})
+  form.dnsType = 'AAAA'
+  const payload = buildTargetSubmitPayload(form)
+  assert.strictEqual(payload.kind, 'dns', 'Scenario 31: DNS target kind=dns')
+  assert.strictEqual(payload.dns_type, 'AAAA', 'Scenario 31: DNS target includes dns_type')
+  console.log('[PASS] Scenario 31: Create DNS target includes dns_type verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 32 (TargetManage #6): Create MTR target includes max_hops
+// -----------------------------------------------------------------------------
+{
+  const form = buildTargetFormFromRecord({
+    id: 'mtr-google',
+    kind: 'mtr',
+    name: 'MTR Route Check',
+    host: '8.8.8.8',
+    max_hops: 24,
+    interval_seconds: 120,
+    timeout_ms: 5000,
+  })
+  const payload = buildTargetSubmitPayload(form)
+  assert.strictEqual(payload.kind, 'mtr', 'Scenario 32: MTR target kind=mtr')
+  assert.strictEqual(payload.max_hops, 24, 'Scenario 32: MTR target includes numeric max_hops')
+  console.log('[PASS] Scenario 32: Create MTR target includes max_hops verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 33 (TargetManage #7): Selecting "全部节点" submits node_ids=[] & node_tags=[]
+// -----------------------------------------------------------------------------
+{
+  const form = buildTargetFormFromRecord({
+    id: 'http-global',
+    kind: 'http',
+    name: 'Global HTTP',
+    host: 'example.com',
+    node_ids: ['node-1', 'node-2'],
+    node_tags: ['hk'],
+  })
+  form.scopeMode = 'all'
+  const payload = buildTargetSubmitPayload(form)
+  assert.deepStrictEqual(payload.node_ids, [], 'Scenario 33: scopeMode=all forces node_ids=[]')
+  assert.deepStrictEqual(payload.node_tags, [], 'Scenario 33: scopeMode=all forces node_tags=[]')
+  console.log('[PASS] Scenario 33: Selecting "全部节点" resets node_ids=[] and node_tags=[] verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 34 (TargetManage #8): Selecting specific nodes submits node_ids
+// -----------------------------------------------------------------------------
+{
+  const form = applyTargetQuickTemplate('tcp', {})
+  form.name = 'Scoped Nodes TCP'
+  form.host = '1.0.0.1'
+  form.port = '443'
+  form.scopeMode = 'nodes'
+  form.nodeIds = ['node-sg-1', 'node-hk-2', 'node-sg-1']
+  form.nodeTags = []
+  const payload = buildTargetSubmitPayload(form)
+  assert.deepStrictEqual(payload.node_ids, ['node-sg-1', 'node-hk-2'], 'Scenario 34: Deduplicated node_ids submitted')
+  assert.deepStrictEqual(payload.node_tags, [], 'Scenario 34: Empty node_tags when only nodes selected')
+  console.log('[PASS] Scenario 34: Selecting specific nodes submits node_ids verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 35 (TargetManage #9): Selecting tags submits node_tags
+// -----------------------------------------------------------------------------
+{
+  const form = applyTargetQuickTemplate('http', {})
+  form.kind = 'https'
+  form.name = 'Scoped Tags HTTPS'
+  form.host = 'example.org'
+  form.scopeMode = 'tags'
+  form.nodeIds = []
+  form.nodeTags = ['cn2', 'bgp', 'cn2']
+  const payload = buildTargetSubmitPayload(form)
+  assert.deepStrictEqual(payload.node_ids, [], 'Scenario 35: Empty node_ids when only tags selected')
+  assert.deepStrictEqual(payload.node_tags, ['cn2', 'bgp'], 'Scenario 35: Deduplicated node_tags submitted')
+  console.log('[PASS] Scenario 35: Selecting tags submits node_tags verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 36 (TargetManage #10): Selecting both node_ids and node_tags displays and submits accurately
+// -----------------------------------------------------------------------------
+{
+  const nodes = [
+    { id: '5177b9b4-e693-4fff-aaff-adb26ab858da', name: 'AWS-Singapore', tags: ['sg', 'aws'] },
+    { id: 'e2812132-89ab-4cde-9012-3456789abcde', name: 'Ciallonet-Host', tags: ['us', 'cn2'] },
+  ]
+  const form = applyTargetQuickTemplate('tcp', {})
+  form.name = 'Mixed Scope TCP'
+  form.host = '8.8.4.4'
+  form.port = '53'
+  form.scopeMode = 'custom'
+  form.nodeIds = ['5177b9b4-e693-4fff-aaff-adb26ab858da']
+  form.nodeTags = ['cn2']
+  const payload = buildTargetSubmitPayload(form)
+  assert.deepStrictEqual(payload.node_ids, ['5177b9b4-e693-4fff-aaff-adb26ab858da'], 'Scenario 36: Mixed scope preserves node_ids')
+  assert.deepStrictEqual(payload.node_tags, ['cn2'], 'Scenario 36: Mixed scope preserves node_tags')
+
+  const display = formatTargetScopeDisplay(payload, nodes)
+  assert.strictEqual(display.label, '指定 1 台 + 标签', 'Scenario 36: Mixed scope label is "指定 1 台 + 标签"')
+  assert.deepStrictEqual(display.nodeNames, ['AWS-Singapore'], 'Scenario 36: Resolved node name without full UUID')
+  assert.deepStrictEqual(display.tags, ['cn2'], 'Scenario 36: Resolved tags list')
+  console.log('[PASS] Scenario 36: Both node_ids and node_tags display & submit verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 37 (TargetManage #11): Editing existing target echoes node_ids, node_tags, and region_rules
+// -----------------------------------------------------------------------------
+{
+  const existingRecord = {
+    id: 'legacy-media-nf',
+    name: 'Netflix US Check',
+    kind: 'media_http',
+    host: 'www.netflix.com',
+    port: 443,
+    path: '/title/80018499',
+    interval_seconds: 300,
+    timeout_ms: 8000,
+    expected_status: 200,
+    enabled: false,
+    node_ids: ['node-a', 'node-b'],
+    node_tags: ['unlock', 'hk'],
+    region_rules: [
+      { region: 'US', contains: 'United States' },
+    ],
+  }
+  const echoedForm = buildTargetFormFromRecord(existingRecord)
+  assert.deepStrictEqual(echoedForm.nodeIds, ['node-a', 'node-b'], 'Scenario 37: Echoes node_ids')
+  assert.deepStrictEqual(echoedForm.nodeTags, ['unlock', 'hk'], 'Scenario 37: Echoes node_tags')
+  assert.strictEqual(echoedForm.regionRulesList.length, 1, 'Scenario 37: Echoes region_rules into form rows')
+  assert.strictEqual(echoedForm.regionRulesList[0].region, 'US', 'Scenario 37: Echoes region_rules region')
+
+  const roundTripPayload = buildTargetSubmitPayload(echoedForm, existingRecord)
+  assert.deepStrictEqual(roundTripPayload.node_ids, ['node-a', 'node-b'], 'Scenario 37: Round-trip preserves node_ids')
+  assert.deepStrictEqual(roundTripPayload.node_tags, ['unlock', 'hk'], 'Scenario 37: Round-trip preserves node_tags')
+  assert.deepStrictEqual(
+    roundTripPayload.region_rules,
+    [{ region: 'US', contains: 'United States' }],
+    'Scenario 37: Round-trip preserves region_rules without manual JSON editing'
+  )
+  console.log('[PASS] Scenario 37: Editing existing target echoes node_ids, node_tags, and region_rules.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 38 (TargetManage #12 & #13): Scope display rules & NO full UUID exposure
+// -----------------------------------------------------------------------------
+{
+  const sampleNodes = [
+    { id: '5177b9b4-e693-4fff-aaff-adb26ab858da', name: 'AWS-Singapore' },
+    { id: 'a1b2c3d4-1111-2222-3333-444455556666', name: 'Tokyo-BGP' },
+  ]
+  const unknownUuid = '99998888-7777-6666-5555-444433332222'
+
+  const dAll = formatTargetScopeDisplay({ node_ids: [], node_tags: [] }, sampleNodes)
+  assert.strictEqual(dAll.label, '全部节点', 'Scenario 38: Empty scope displays "全部节点"')
+
+  const dNodes = formatTargetScopeDisplay(
+    { node_ids: ['5177b9b4-e693-4fff-aaff-adb26ab858da', unknownUuid], node_tags: [] },
+    sampleNodes
+  )
+  assert.strictEqual(dNodes.label, '指定 2 台节点', 'Scenario 38: Node-only scope displays "指定 N 台节点"')
+  assert.strictEqual(dNodes.nodeNames[0], 'AWS-Singapore', 'Scenario 38: Known node resolves to node name')
+  assert.strictEqual(dNodes.nodeNames[1], '节点 #999988', 'Scenario 38: Unknown UUID is masked to 6 hex chars')
+  assert.ok(!dNodes.detail.includes(unknownUuid), 'Scenario 38: Tooltip/detail must NEVER contain full UUID')
+
+  const dTags = formatTargetScopeDisplay({ node_ids: [], node_tags: ['hk', 'cn2'] }, sampleNodes)
+  assert.strictEqual(dTags.label, '标签：hk、cn2', 'Scenario 38: Tag-only scope displays "标签：tag1、tag2"')
+
+  const dMixed = formatTargetScopeDisplay(
+    {
+      node_ids: ['a1b2c3d4-1111-2222-3333-444455556666'],
+      node_tags: ['bgp'],
+      region_rules: [{ region: 'JP', contains: 'Japan' }],
+    },
+    sampleNodes
+  )
+  assert.strictEqual(dMixed.label, '指定 1 台 + 标签', 'Scenario 38: Mixed scope displays "指定 1 台 + 标签"')
+  assert.strictEqual(dMixed.hasRegionRules, true, 'Scenario 38: region_rules badge flag is true')
+  assert.strictEqual(dMixed.regionBadge, '区域规则', 'Scenario 38: region_rules badge text is "区域规则"')
+  assert.strictEqual(maskNodeIdentifier(unknownUuid), '节点 #999988', 'Scenario 38: maskNodeIdentifier masks UUID')
+  assert.strictEqual(resolveNodeDisplayName(unknownUuid, sampleNodes), '节点 #999988', 'Scenario 38: resolveNodeDisplayName masks unknown UUID')
+  console.log('[PASS] Scenario 38: Scope display rules & zero full UUID exposure verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 39 (TargetManage #14): media_http cannot be newly created or re-enabled
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes("const CREATE_TARGET_KINDS = ['http', 'https', 'tcp', 'dns', 'mtr']"),
+    'Scenario 39: CREATE_TARGET_KINDS excludes media_http'
+  )
+  assert.ok(
+    targetManageSrc.includes('不再支持新建 media_http 检测目标') &&
+      targetManageSrc.includes('不再支持重新启用独立 media-* 周期探测') &&
+      targetManageSrc.includes('已由 IPQA 接管') &&
+      targetManageSrc.includes('历史流媒体目标'),
+    'Scenario 39: media_http creation and re-enabling are blocked and labeled as IPQA-managed'
+  )
+  console.log('[PASS] Scenario 39: media_http creation & re-enable prevention verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 40 (TargetManage #15): Empty state quick templates only prefill drawer form without writing to DB
+// -----------------------------------------------------------------------------
+{
+  const tplList = Object.values(TARGET_QUICK_TEMPLATES)
+  assert.strictEqual(tplList.length, 3, 'Scenario 40: 3 quick templates defined')
+  const tplTitles = tplList.map((t) => t.title)
+  assert.deepStrictEqual(
+    tplTitles,
+    ['HTTP 健康检查', 'TCP 端口检查', 'DNS 解析检查'],
+    'Scenario 40: Quick templates match required names'
+  )
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes('openQuickTemplateDrawer') &&
+      targetManageSrc.includes('applyTargetQuickTemplate(templateKey, emptyTargetForm())'),
+    'Scenario 40: Clicking a quick template opens the drawer and prefills state without calling fetch POST'
+  )
+  console.log('[PASS] Scenario 40: Empty state quick templates prefill-only behavior verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 41 (TargetManage #16): readOnly mode hides create, edit, delete, and toggle buttons, plus CSRF retry & delete confirmation
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes('if (readOnly)') &&
+      targetManageSrc.includes('confirmDeleteTarget') &&
+      targetManageSrc.includes('确认删除检测目标'),
+    'Scenario 41: readOnly mode gates action buttons and delete requires secondary confirmation modal'
+  )
+
+  // Verify executeWithCsrfRetry refreshes CSRF token once on 403
+  let callCount = 0
+  let tokenFetchCount = 0
+  const fakeRes = await executeWithCsrfRetry(
+    async (token) => {
+      callCount += 1
+      if (callCount === 1) {
+        assert.strictEqual(token, 'stale-token')
+        return { status: 403, ok: false }
+      }
+      assert.strictEqual(token, 'fresh-token')
+      return { status: 200, ok: true }
+    },
+    async () => {
+      tokenFetchCount += 1
+      return tokenFetchCount === 1 ? 'stale-token' : 'fresh-token'
+    }
+  )
+  assert.strictEqual(callCount, 2, 'Scenario 41: executeWithCsrfRetry retries once after 403')
+  assert.strictEqual(tokenFetchCount, 2, 'Scenario 41: executeWithCsrfRetry refreshes token once after initial fetch')
+  assert.strictEqual(fakeRes.status, 200, 'Scenario 41: Retried request succeeds with fresh token')
+  console.log('[PASS] Scenario 41: readOnly gating, delete confirmation, and CSRF 403 single-retry verified.')
+}
+
+console.log('\n=== ALL 41 LATENCY, SCOPE, ENROLLMENT, IPQA & TARGET-MANAGE CONTRACT TESTS PASSED ===')
