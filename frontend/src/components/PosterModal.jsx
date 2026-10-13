@@ -18,6 +18,7 @@ import {
 } from '@phosphor-icons/react'
 import { formatBytes, formatLatency, formatRate, identifyTargetCarrier, numeric, safeArray, safeObject, safeText } from '../lib/format.js'
 import { calculateRemainingValue, getNodeBilling, getNodeCustomMeta } from '../lib/billing.js'
+import { parseSongzhong } from '../lib/api.js'
 
 function maskIpString(ip) {
   if (!ip) return '—'
@@ -294,10 +295,15 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
       ]
       mediaList.forEach((m, idx) => {
         const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m.id))
+        const sz = m.id === 'youtube' ? parseSongzhong(rep) : { isSongzhong: false }
         let icon = '—'
         let text = '暂无数据'
         let tone = '#64748b'
-        if (rep && rep.status) {
+        if (sz.isSongzhong) {
+          icon = '⚡'
+          text = '送中'
+          tone = '#f97316'
+        } else if (rep && rep.status) {
           if (rep.status === 'available') {
             icon = '✔'
             text = '可用'
@@ -422,9 +428,13 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
       ]
       const badges = mediaList.map((m) => {
         const rep = mediaReports.find((r) => r.name.toLowerCase().includes(m.id))
+        const sz = m.id === 'youtube' ? parseSongzhong(rep) : { isSongzhong: false }
         let st = '暂无数据'
         let icon = '⚪'
-        if (rep && rep.status) {
+        if (sz.isSongzhong) {
+          st = '送中(CN)'
+          icon = '⚠️'
+        } else if (rep && rep.status) {
           if (rep.status === 'available') {
             st = '可用'
             icon = '✅'
@@ -439,7 +449,7 @@ export function PosterModal({ node, mediaData = [], pingHistory = {}, onClose })
             icon = '❌'
           }
         }
-        return `${icon} ${m.label}: ${st}${rep?.region ? `(${rep.region})` : ''}`
+        return `${icon} ${m.label}: ${st}${(!sz.isSongzhong && rep?.region) ? `(${rep.region})` : ''}`
       }).join(' · ')
       lines.push(`**流媒体 & AI 解锁：**`, `> ${badges}`, '')
     }

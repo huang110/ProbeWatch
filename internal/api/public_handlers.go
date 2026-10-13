@@ -1311,6 +1311,23 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 			dto.Stale = (now - q.CheckedAt) > int64(12*time.Hour/time.Second)
 		}
 		dto.Source = "ipwho.is"
+		dto.HasIPv4 = true
+		if dto.IPv4 == nil {
+			dto.IPv4 = &protocol.IPQAFamilyInfo{
+				IPType:       q.IPType,
+				Country:      q.Country,
+				Region:       q.Region,
+				City:         q.City,
+				ASN:          q.ASN,
+				Organization: q.Organization,
+				RiskLevel:    q.Risk,
+				Proxy:        q.Proxy,
+				VPN:          q.VPN,
+				Tor:          q.Tor,
+				Abuse:        q.Abuse,
+				SourceScores: q.Sources,
+			}
+		}
 	}
 	if qa != nil {
 		dto.IPQAEnabled = qa.Enabled
@@ -1328,9 +1345,11 @@ func populatePublicIPQualityDTO(q *protocol.IPQualityInfo, qa *protocol.IPQAInfo
 		if len(qa.Media) > 0 {
 			dto.Media = qa.Media
 		}
-		dto.HasIPv4 = qa.IPv4 != nil
+		dto.HasIPv4 = qa.IPv4 != nil || (q != nil)
 		dto.HasIPv6 = qa.IPv6 != nil
-		dto.IPv4 = qa.IPv4
+		if qa.IPv4 != nil {
+			dto.IPv4 = qa.IPv4
+		}
 		dto.IPv6 = qa.IPv6
 		primary := qa.IPv4
 		secondary := qa.IPv6

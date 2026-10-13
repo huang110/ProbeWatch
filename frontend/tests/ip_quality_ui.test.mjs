@@ -483,4 +483,125 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
   console.log("[PASS] Media matrix removal, navigation redirection, and IPQA unification contracts verified")
 }
 
+// Test 7: IPv4/IPv6 Protocol Switching, Songzhong Scoping & 3-Column MJJ Layout Contract
+{
+  console.log("=== Testing IPv4/IPv6 Protocol Switching & Songzhong Verification ===")
+  const srcDir = existsSync(resolve(process.cwd(), "src"))
+    ? resolve(process.cwd(), "src")
+    : resolve(process.cwd(), "frontend/src")
+  const nodeDetailSrc = readFileSync(resolve(srcDir, 'components/NodeDetailPage.jsx'), 'utf8')
+  const apiSrc = readFileSync(resolve(srcDir, 'lib/api.js'), 'utf8')
+  const css = readFileSync(resolve(srcDir, 'styles.css'), 'utf8')
+
+  // 1. Verify CSS defines the new tabs, songzhong badges, factors grid, and dnsbl row
+  const requiredClasses = [
+    ".ip-family-tabs",
+    ".ip-family-tab",
+    ".tab-songzhong-badge",
+    ".risk-songzhong-badge",
+    ".ip-quality-factors-grid",
+    ".ip-quality-factor-cell",
+    ".ip-quality-dnsbl-row",
+    ".status-songzhong",
+    ".status-bullet",
+  ]
+  for (const cls of requiredClasses) {
+    assert.ok(css.includes(cls), `styles.css must define ${cls}`)
+  }
+
+  // 2. NodeDetailPage.jsx must support protocol tabs, songzhong badges, and 8 standard media platforms
+  assert.ok(nodeDetailSrc.includes("ip-family-tabs"), "NodeDetailPage must render ip-family-tabs")
+  assert.ok(nodeDetailSrc.includes("tab-songzhong-badge"), "NodeDetailPage must render tab-songzhong-badge")
+  assert.ok(nodeDetailSrc.includes("risk-songzhong-badge"), "NodeDetailPage must render risk-songzhong-badge")
+  assert.ok(nodeDetailSrc.includes("ip-quality-factors-grid"), "NodeDetailPage must render ip-quality-factors-grid")
+  assert.ok(nodeDetailSrc.includes("ip-quality-dnsbl-row"), "NodeDetailPage must render ip-quality-dnsbl-row")
+  assert.ok(nodeDetailSrc.includes("暂无 IP 质量数据"), "NodeDetailPage must display 暂无 IP 质量数据 when both v4 and v6 are empty")
+
+  // 3. Test Songzhong Scoping: only Google and YouTube allowed, strictly forbidden on other platforms
+  const { isSongzhongCandidate, parseSongzhong, parseMediaItemDetails } = await import("../src/lib/api.js")
+
+  assert.equal(isSongzhongCandidate("YouTube"), true, "YouTube must be songzhong candidate")
+  assert.equal(isSongzhongCandidate("Google 定位"), true, "Google 定位 must be songzhong candidate")
+  assert.equal(isSongzhongCandidate("google_redirect"), true, "Google redirect must be songzhong candidate")
+  assert.equal(isSongzhongCandidate("Netflix"), false, "Netflix must NOT be songzhong candidate")
+  assert.equal(isSongzhongCandidate("DisneyPlus"), false, "Disney+ must NOT be songzhong candidate")
+  assert.equal(isSongzhongCandidate("TikTok"), false, "TikTok must NOT be songzhong candidate")
+  assert.equal(isSongzhongCandidate("ChatGPT"), false, "ChatGPT must NOT be songzhong candidate")
+  assert.equal(isSongzhongCandidate("Reddit"), false, "Reddit must NOT be songzhong candidate")
+  assert.equal(isSongzhongCandidate("AmazonPrimeVideo"), false, "Prime Video must NOT be songzhong candidate")
+
+  // YouTube with CN region/status -> songzhong
+  const ytSZ = parseSongzhong({ name: 'YouTube', status: '送中', region: 'CN' })
+  assert.equal(ytSZ.isSongzhong, true, "YouTube with CN status must be songzhong")
+  assert.equal(ytSZ.label, '送中 · CN')
+
+  // Netflix with CN status/region -> strictly NOT songzhong
+  const nfCN = parseSongzhong({ name: 'Netflix', status: '送中', region: 'CN' })
+  assert.equal(nfCN.isSongzhong, false, "Netflix must NEVER be marked as songzhong")
+
+  // YouTube parseMediaItemDetails
+  const ytDetails = parseMediaItemDetails({ name: 'YouTube', status: '送中', region: 'CN' })
+  assert.equal(ytDetails.tone, 'songzhong')
+  assert.equal(ytDetails.displayStatus, '送中 · CN')
+  assert.equal(ytDetails.isSongzhong, true)
+
+  // Netflix parseMediaItemDetails
+  const nfDetails = parseMediaItemDetails({ name: 'Netflix', status: '仅自制', region: 'TW' })
+  assert.equal(nfDetails.tone, 'warning')
+  assert.equal(nfDetails.displayStatus, 'NF.Only')
+  assert.equal(nfDetails.isSongzhong, false)
+
+  // 4. Test Dual-Stack Model Separation
+  const { buildIPQualityViewModel } = await import("../src/lib/api.js")
+  const dualStackFixture = {
+    has_ipv4: true,
+    has_ipv6: true,
+    ipv4: {
+      risk_score: 0,
+      risk_level: 'low',
+      ip_type: '原生IP',
+      country: 'TW',
+      registered_region: 'TW',
+      asn: 'AS3462',
+      organization: 'Data Communication Business Group',
+      source_scores: { IP2LOCATION: 0, SCAMALYTICS: 0, ipapi: 0.69, AbuseIPDB: 0, DBIP: 0 },
+      media: [{ name: 'YouTube', status: 'available', region: 'TW' }],
+    },
+    ipv6: {
+      risk_score: 95,
+      risk_level: 'high',
+      ip_type: '机房',
+      country: 'HK',
+      asn: 'AS202355',
+      organization: 'Ciallo Networks LTD',
+      source_scores: { IP2LOCATION: 3, SCAMALYTICS: 88 },
+      media: [{ name: 'YouTube', status: 'available', region: 'CN' }], // Songzhong!
+    },
+  }
+
+  const v4Model = buildIPQualityViewModel(dualStackFixture, 'ipv4')
+  assert.equal(v4Model.activeFamily, 'ipv4')
+  assert.equal(v4Model.v4.risk, 'low')
+  assert.equal(v4Model.v4.location, 'TW (注册地一致)')
+  assert.equal(v4Model.v4.hasSongzhong, false)
+  // Verify standard score items has 6 entries and score 0 has tone 'low'
+  const ip2loc = v4Model.v4.standardScoreItems.find(s => s.sourceKey === 'ip2location')
+  assert.ok(ip2loc, "IP2Location must be in standard scores")
+  assert.equal(ip2loc.value, 0)
+  assert.equal(ip2loc.displayValue, '0')
+  assert.equal(ip2loc.tone, 'low')
+
+  const v6Model = buildIPQualityViewModel(dualStackFixture, 'ipv6')
+  assert.equal(v6Model.activeFamily, 'ipv6')
+  assert.equal(v6Model.v6.risk, 'high')
+  assert.equal(v6Model.v6.hasSongzhong, true)
+  assert.equal(v6Model.v6.songzhongLabel, '送中 · CN')
+
+  // IPv4 risk score does not overwrite IPv6 and vice versa
+  assert.notEqual(v4Model.v4.riskScore, v6Model.v6.riskScore)
+  assert.notEqual(v4Model.v4.location, v6Model.v6.location)
+
+  console.log("[PASS] Protocol switching, data separation, and songzhong contracts verified")
+}
+
 console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")

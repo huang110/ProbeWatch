@@ -205,12 +205,439 @@ function sanitizeFamilyObject(fam) {
   }
 }
 
-export function buildIPQualityViewModel(raw) {
+export const STANDARD_IP_RISK_DATABASES = [
+  { key: 'ip2location', label: 'IP2Location', aliases: ['ip2location', 'ip2_location'] },
+  { key: 'scamalytics', label: 'Scamalytics', aliases: ['scamalytics'] },
+  { key: 'ipapi', label: 'ipapi', aliases: ['ipapi', 'ipapi_is'] },
+  { key: 'abuseipdb', label: 'AbuseIPDB', aliases: ['abuseipdb', 'abuse_ipdb'] },
+  { key: 'ipqs', label: 'IPQS', aliases: ['ipqs', 'ipqualityscore'] },
+  { key: 'dbip', label: 'DB-IP', aliases: ['dbip', 'db_ip', 'db-ip'] },
+]
+
+export const POPULAR_MEDIA = [
+  { id: 'google', name: 'Google 定位', iconBg: '#4285F4', symbol: 'G', alias: ['google', 'googlelocation', 'google_location', 'google-location'] },
+  { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF', alias: ['netflix'] },
+  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney', 'disneyplus'] },
+  { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT', alias: ['youtube'] },
+  { id: 'amazonpv', name: 'Prime Video', iconBg: '#00A8E1', symbol: 'PV', alias: ['amazon', 'primevideo', 'amazonprimevideo', 'amazonpv'] },
+  { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK', alias: ['tiktok'] },
+  { id: 'reddit', name: 'Reddit', iconBg: '#FF4500', symbol: 'RD', alias: ['reddit'] },
+  { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
+  { id: 'claude', name: 'Claude', iconBg: '#D97706', symbol: 'CL', alias: ['claude', 'anthropic'] },
+  { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP', alias: ['spotify'] },
+  { id: 'bilibili', name: 'Bilibili', iconBg: '#00A1D6', symbol: 'Bili', alias: ['bilibili'] },
+]
+
+export function isSongzhongCandidate(name) {
+  if (!name) return false
+  const n = String(name).toLowerCase()
+  return (
+    n.includes('google') ||
+    n.includes('youtube') ||
+    n.includes('yt') ||
+    n.includes('谷歌') ||
+    n.includes('油管')
+  )
+}
+
+export function parseSongzhong(mediaItem) {
+  if (!mediaItem || typeof mediaItem !== 'object') {
+    return { isSongzhong: false, label: '' }
+  }
+  const name = String(mediaItem.name || mediaItem.detector || mediaItem.detector_id || mediaItem.target_id || '').toLowerCase()
+  if (!isSongzhongCandidate(name)) {
+    return { isSongzhong: false, label: '' }
+  }
+
+  const rawStatus = String(mediaItem.statusRaw || mediaItem.status_raw || mediaItem.status || '').trim()
+  const rawLower = rawStatus.toLowerCase()
+  const rawRegion = String(mediaItem.region || mediaItem.regionText || '').trim().toUpperCase()
+
+  const isSzText =
+    rawLower.includes('送中') ||
+    rawLower.includes('direct_cn') ||
+    rawLower.includes('mainland') ||
+    rawLower.includes('redirect_cn') ||
+    rawLower === 'cn'
+
+  const isCnRegionSongzhong = (rawRegion === 'CN' || rawRegion === '中国') && (
+    rawLower.includes('解锁') ||
+    rawLower.includes('available') ||
+    rawLower.includes('cn') ||
+    rawLower.includes('送中') ||
+    rawLower === '' ||
+    rawLower === '原生'
+  )
+
+  if (isSzText || isCnRegionSongzhong) {
+    let label = '送中'
+    if (rawStatus.includes('CN') || rawRegion === 'CN') {
+      label = '送中 · CN'
+    } else if (rawStatus.includes('送中')) {
+      label = rawStatus
+    }
+    return { isSongzhong: true, label }
+  }
+
+  return { isSongzhong: false, label: '' }
+}
+
+export function parseMediaItemDetails(m, nowSec = Math.floor(Date.now() / 1000)) {
+  if (!m || typeof m !== 'object') {
+    return {
+      tone: 'unknown',
+      statusText: '未知',
+      displayStatus: '未知',
+      regionText: '',
+      latencyText: null,
+      typeText: '—',
+      checkTime: '—',
+      isStale: false,
+      isSongzhong: false,
+      iconType: 'unknown',
+    }
+  }
+
+  const rawName = m.name || m.detector || m.detector_id || m.target_id || ''
+  const rawStatus = String(m.status || m.result?.status || m.status_raw || m.statusRaw || '').toLowerCase()
+  const rawType = String(m.type || m.result?.type || m.reason || '').toLowerCase()
+  const checkedAt = m.checked_at || m.result?.checked_at || m.checkedAt || 0
+  const isStale = checkedAt > 0 && nowSec > 0 && (nowSec - checkedAt > 7 * 86400)
+
+  // 1. Check for Songzhong first (restricted strictly to Google & YouTube candidates)
+  const songzhong = parseSongzhong(m)
+  if (songzhong.isSongzhong) {
+    const checkTime = checkedAt > 0 ? formatIPQualityDateTime(checkedAt) : '—'
+    return {
+      tone: 'songzhong',
+      statusText: '送中',
+      displayStatus: songzhong.label || '送中 · CN',
+      regionText: 'CN',
+      latencyText: null,
+      typeText: '送中',
+      checkTime,
+      isStale,
+      isSongzhong: true,
+      iconType: 'songzhong',
+    }
+  }
+
+  let tone = 'unknown'
+  let statusText = '未知'
+  let iconType = 'unknown'
+
+  if (isStale) {
+    tone = 'stale'
+    statusText = '数据较旧'
+    iconType = 'stale'
+  } else if (rawStatus.includes('仅自制') || rawStatus.includes('nf.only') || rawStatus.includes('nfonly')) {
+    tone = 'warning'
+    statusText = 'NF.Only'
+    iconType = 'circle'
+  } else if (rawStatus.includes('仅app') || rawStatus.includes('apponly') || rawStatus.includes('app_only')) {
+    tone = 'warning'
+    statusText = 'APPOnly'
+    iconType = 'circle'
+  } else if (
+    rawStatus.includes('解锁') || rawStatus.includes('原生') || rawStatus.includes('自制') ||
+    rawStatus === 'available' || rawStatus === 'yes' || rawStatus === 'true' ||
+    rawType.includes('原生') || rawType.includes('自制')
+  ) {
+    tone = 'available'
+    statusText = '已解锁'
+    iconType = 'check'
+  } else if (
+    rawStatus.includes('未') || rawStatus === 'unavailable' || rawStatus === 'no' || rawStatus === 'false'
+  ) {
+    tone = 'unavailable'
+    statusText = '未解锁'
+    iconType = 'minus'
+  } else if (
+    rawStatus.includes('不可用') || rawStatus.includes('屏蔽') || rawStatus.includes('blocked') ||
+    rawStatus.includes('ban') || rawStatus.includes('失败') || rawStatus === 'error'
+  ) {
+    tone = 'blocked'
+    statusText = '不可用'
+    iconType = 'minus'
+  } else if (rawStatus === 'timeout') {
+    tone = 'timeout'
+    statusText = '超时'
+    iconType = 'minus'
+  } else {
+    tone = 'unknown'
+    statusText = '未知'
+    iconType = 'unknown'
+  }
+
+  const rawRegion = m.region || m.result?.region
+  const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : ''
+  const typeText = m.type || m.result?.type || ''
+  
+  let displayStatus = statusText
+  if (statusText === 'NF.Only') {
+    displayStatus = 'NF.Only'
+  } else if (statusText === 'APPOnly') {
+    displayStatus = 'APPOnly'
+  } else if (tone === 'available') {
+    if (isSongzhongCandidate(rawName) && rawName.toLowerCase().includes('google')) {
+      displayStatus = regionText ? regionText : '可用'
+    } else if (regionText) {
+      displayStatus = typeText ? `解锁 · ${regionText} ${typeText}` : `解锁 · ${regionText}`
+    } else {
+      displayStatus = typeText ? `解锁 · ${typeText}` : '已解锁'
+    }
+  }
+
+  const lat = m.latency_ms ?? m.result?.latency_ms ?? null
+  const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
+    ? `${Math.round(Number(lat))}ms`
+    : null
+
+  const checkTime = checkedAt > 0 ? formatIPQualityDateTime(checkedAt) : '—'
+
+  return {
+    tone,
+    statusText,
+    displayStatus,
+    regionText,
+    latencyText,
+    typeText: typeText || (latencyText ? latencyText : '—'),
+    checkTime,
+    isStale,
+    isSongzhong: false,
+    iconType,
+  }
+}
+
+export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseCheckedAt) {
+  const isV4 = famLabel === 'IPv4'
+  const src = famRaw || (isV4 ? fallbackData : null)
+  const hasData = Boolean(
+    famRaw && (
+      famRaw.ip_type || famRaw.ipType ||
+      famRaw.country || famRaw.region || famRaw.city ||
+      famRaw.asn || famRaw.organization || famRaw.org ||
+      famRaw.risk_level || famRaw.riskLevel || famRaw.risk ||
+      famRaw.risk_score !== undefined || famRaw.riskScore !== undefined ||
+      (famRaw.source_scores && Object.keys(famRaw.source_scores).length > 0) ||
+      (famRaw.sourceScores && Object.keys(famRaw.sourceScores).length > 0) ||
+      (famRaw.scores && Object.keys(famRaw.scores).length > 0) ||
+      (Array.isArray(famRaw.media) && famRaw.media.length > 0) ||
+      famRaw.proxy !== undefined || famRaw.vpn !== undefined
+    )
+  ) || Boolean(isV4 && fallbackData && (fallbackData.ip_type || fallbackData.country || fallbackData.asn || fallbackData.scores || fallbackData.risk))
+
+  if (!hasData && !src) {
+    return {
+      family: famLabel,
+      hasData: false,
+      ipType: '',
+      country: '',
+      region: '',
+      city: '',
+      location: '—',
+      asn: '',
+      organization: '',
+      asnOrg: '—',
+      risk: 'unknown',
+      riskScore: null,
+      scores: {},
+      scoreItems: [],
+      standardScoreItems: STANDARD_IP_RISK_DATABASES.map((db) => ({
+        key: `${famLabel}:${db.key}`,
+        sourceKey: db.key,
+        label: db.label,
+        value: null,
+        displayValue: '—',
+        pct: 0,
+        tone: 'unknown',
+        status: 'missing',
+      })),
+      flags: { proxy: null, vpn: null, tor: null, abuse: null, hosting: null, robot: null },
+      flagItems: [],
+      media: [],
+      hasSongzhong: false,
+      songzhongLabel: '',
+      checkedAt: null,
+      dnsbl: null,
+    }
+  }
+
+  const s = src || {}
+  const rawScores = s.source_scores || s.sourceScores || s.scores || (isV4 ? (fallbackData?.source_scores || fallbackData?.sourceScores || fallbackData?.scores) : null) || {}
+  const scoreMap = {}
+  if (rawScores && typeof rawScores === 'object' && !Array.isArray(rawScores)) {
+    for (const [k, v] of Object.entries(rawScores)) {
+      const p = parseIPQualityScoreValue(v)
+      if (p.status === 'valid') scoreMap[k] = p.value
+      else if (p.status === 'unknown') scoreMap[k] = 'unknown'
+    }
+  }
+
+  const ipType = s.ip_type || s.ipType || (isV4 ? (fallbackData?.ip_type || fallbackData?.ipType || '') : '')
+  const country = s.country || (isV4 ? fallbackData?.country : '') || ''
+  const region = s.region || (isV4 ? fallbackData?.region : '') || ''
+  const city = s.city || (isV4 ? fallbackData?.city : '') || ''
+  const asn = s.asn || (isV4 ? fallbackData?.asn : '') || ''
+  const organization = s.organization || s.org || (isV4 ? (fallbackData?.organization || fallbackData?.org) : '') || ''
+
+  const registeredRegion = s.registered_region || s.registeredRegion || (isV4 ? fallbackData?.registered_region : '') || ''
+  let location = '—'
+  if (country) {
+    if (registeredRegion && registeredRegion.toUpperCase() === country.toUpperCase()) {
+      location = `${country} (注册地一致)`
+    } else {
+      const parts = [city, region, country].filter(Boolean)
+      location = parts.length > 0 ? parts.join(' · ') : country
+    }
+  }
+
+  const cleanAsn = asn ? (String(asn).toUpperCase().startsWith('AS') ? asn : `AS${asn}`) : ''
+  const asnOrg = [cleanAsn, organization].filter(Boolean).join(' ') || '—'
+
+  let risk = (s.risk_level || s.riskLevel || s.risk || (isV4 ? (fallbackData?.risk_level || fallbackData?.risk) : '') || '').toLowerCase()
+  if (!risk || risk === 'clean') risk = 'low'
+  if (risk !== 'low' && risk !== 'medium' && risk !== 'high') risk = 'unknown'
+
+  let riskScore = null
+  const pScore = parseIPQualityScoreValue(s.risk_score ?? s.riskScore ?? (isV4 ? (fallbackData?.risk_score ?? fallbackData?.riskScore) : null))
+  if (pScore.status === 'valid') riskScore = pScore.value
+
+  const flags = {
+    proxy: parseBoolConclusion(s.proxy ?? s.is_proxy ?? (isV4 ? fallbackData?.proxy : null)),
+    vpn: parseBoolConclusion(s.vpn ?? s.is_vpn ?? (isV4 ? fallbackData?.vpn : null)),
+    tor: parseBoolConclusion(s.tor ?? s.is_tor ?? (isV4 ? fallbackData?.tor : null)),
+    abuse: parseBoolConclusion(s.abuse ?? s.is_abuser ?? (isV4 ? fallbackData?.abuse : null)),
+    hosting: parseBoolConclusion(s.hosting ?? s.is_server ?? (isV4 ? fallbackData?.hosting : null)),
+    robot: parseBoolConclusion(s.robot ?? s.is_robot ?? (isV4 ? fallbackData?.robot : null)),
+  }
+
+  const lowerIpType = (ipType || '').toLowerCase()
+  if (flags.hosting === null) {
+    if (lowerIpType === 'hosting' || lowerIpType === 'datacenter' || ipType === '机房') {
+      flags.hosting = true
+    } else if (lowerIpType === 'isp' || lowerIpType === 'residential' || ipType === '家宽') {
+      flags.hosting = false
+    }
+  }
+
+  // Build standard 6 scores
+  const standardScoreItems = STANDARD_IP_RISK_DATABASES.map((db) => {
+    let matchedVal = undefined
+    for (const [k, v] of Object.entries(scoreMap)) {
+      const canon = k.toLowerCase().replace(/[-_]/g, '')
+      if (db.aliases.some((a) => a.toLowerCase().replace(/[-_]/g, '') === canon)) {
+        matchedVal = v
+        break
+      }
+    }
+
+    if (matchedVal === undefined) {
+      return {
+        key: `${famLabel}:${db.key}`,
+        sourceKey: db.key,
+        label: db.label,
+        value: null,
+        displayValue: '—',
+        pct: 0,
+        tone: 'unknown',
+        status: 'missing',
+      }
+    }
+
+    const p = parseIPQualityScoreValue(matchedVal)
+    if (p.status === 'valid') {
+      return {
+        key: `${famLabel}:${db.key}`,
+        sourceKey: db.key,
+        label: db.label,
+        value: p.value,
+        displayValue: p.displayValue,
+        pct: p.pct,
+        tone: p.tone,
+        status: 'valid',
+      }
+    }
+
+    if (p.status === 'unknown') {
+      return {
+        key: `${famLabel}:${db.key}`,
+        sourceKey: db.key,
+        label: db.label,
+        value: null,
+        displayValue: '未知',
+        pct: 0,
+        tone: 'unknown',
+        status: 'unknown',
+      }
+    }
+
+    return {
+      key: `${famLabel}:${db.key}`,
+      sourceKey: db.key,
+      label: db.label,
+      value: null,
+      displayValue: '—',
+      pct: 0,
+      tone: 'unknown',
+      status: 'missing',
+    }
+  })
+
+  const scoreItems = extractScoreEntriesFromMap(rawScores, famLabel)
+
+  const media = Array.isArray(s.media) && s.media.length > 0
+    ? s.media
+    : (isV4 && Array.isArray(fallbackData?.media) ? fallbackData.media : [])
+
+  let hasSongzhong = false
+  let songzhongLabel = ''
+  for (const m of media) {
+    const sz = parseSongzhong(m)
+    if (sz.isSongzhong) {
+      hasSongzhong = true
+      songzhongLabel = sz.label || '送中 · CN'
+      break
+    }
+  }
+
+  const dnsbl = s.dnsbl || s.mail?.dnsblacklist || (isV4 ? (fallbackData?.dnsbl || fallbackData?.mail?.dnsblacklist) : null) || null
+
+  const checkedAt = s.checked_at || s.checkedAt || baseCheckedAt || null
+
+  return {
+    family: famLabel,
+    hasData,
+    ipType,
+    country,
+    region,
+    city,
+    location,
+    asn: cleanAsn,
+    organization,
+    asnOrg,
+    risk,
+    riskScore,
+    scores: scoreMap,
+    scoreItems,
+    standardScoreItems,
+    flags,
+    media,
+    hasSongzhong,
+    songzhongLabel,
+    dnsbl,
+    checkedAt,
+  }
+}
+
+export function buildIPQualityViewModel(raw, activeFamily = null) {
   if (!raw || typeof raw !== 'object') {
     return null
   }
   if (raw._isIPQualityViewModel === true) {
-    return raw
+    if (!activeFamily || raw.activeFamily === activeFamily) {
+      return raw
+    }
   }
 
   const legacyRaw = (raw.ip_quality && typeof raw.ip_quality === 'object')
@@ -685,6 +1112,20 @@ export function buildIPQualityViewModel(raw) {
             ? v6Raw.media
             : []
 
+  const v4VM = buildFamilyViewModel(v4Raw, 'IPv4', data, checkedAt)
+  const v6VM = buildFamilyViewModel(v6Raw, 'IPv6', null, checkedAt)
+
+  const effectiveHasIPv4 = Boolean(v4VM?.hasData || hasIPv4)
+  const effectiveHasIPv6 = Boolean(v6VM?.hasData || hasIPv6)
+
+  const effectiveActive = (activeFamily === 'ipv6' && effectiveHasIPv6)
+    ? 'ipv6'
+    : (activeFamily === 'ipv4' && effectiveHasIPv4)
+      ? 'ipv4'
+      : (effectiveHasIPv4 ? 'ipv4' : (effectiveHasIPv6 ? 'ipv6' : 'ipv4'))
+
+  const activeVM = effectiveActive === 'ipv6' ? v6VM : v4VM
+
   const ipQualityObj = {
     ipType,
     country,
@@ -709,6 +1150,12 @@ export function buildIPQualityViewModel(raw) {
     source,
     ipv4: ipv4Clean,
     ipv6: ipv6Clean,
+    v4: v4VM,
+    v6: v6VM,
+    active: activeVM,
+    activeFamily: effectiveActive,
+    hasIPv4: effectiveHasIPv4,
+    hasIPv6: effectiveHasIPv6,
   }
 
   const ipqaObj = {
@@ -726,10 +1173,14 @@ export function buildIPQualityViewModel(raw) {
     sources,
     riskScore,
     riskLevel,
-    hasIPv4,
-    hasIPv6,
+    hasIPv4: effectiveHasIPv4,
+    hasIPv6: effectiveHasIPv6,
     ipv4: ipv4Clean,
     ipv6: ipv6Clean,
+    v4: v4VM,
+    v6: v6VM,
+    active: activeVM,
+    activeFamily: effectiveActive,
   }
 
   return {
@@ -737,8 +1188,12 @@ export function buildIPQualityViewModel(raw) {
     ipQuality: ipQualityObj,
     ipqa: ipqaObj,
     ...ipQualityObj,
-    ip_type: ipType,
-    checked_at: checkedAt,
+    v4: v4VM,
+    v6: v6VM,
+    active: activeVM,
+    activeFamily: effectiveActive,
+    ip_type: activeFamily ? activeVM.ipType : ipType,
+    checked_at: activeFamily ? (activeVM.checkedAt || checkedAt) : checkedAt,
     ipqa_enabled: enabled,
     ipqa_installed: installed,
     ipqa_state: state,
@@ -752,20 +1207,20 @@ export function buildIPQualityViewModel(raw) {
     latest_archive_date: latestArchiveDate,
     latestArchiveDate,
     sources,
-    risk_score: riskScore,
-    riskScore,
-    risk_level: riskLevel,
-    riskLevel,
-    has_ipv4: hasIPv4,
-    hasIPv4,
-    has_ipv6: hasIPv6,
-    hasIPv6,
-    proxy: flags.proxy,
-    vpn: flags.vpn,
-    tor: flags.tor,
-    abuse: flags.abuse,
-    hosting: flags.hosting,
-    media,
+    risk_score: activeFamily ? activeVM.riskScore : riskScore,
+    riskScore: activeFamily ? activeVM.riskScore : riskScore,
+    risk_level: activeFamily ? activeVM.risk : riskLevel,
+    riskLevel: activeFamily ? activeVM.risk : riskLevel,
+    has_ipv4: effectiveHasIPv4,
+    hasIPv4: effectiveHasIPv4,
+    has_ipv6: effectiveHasIPv6,
+    hasIPv6: effectiveHasIPv6,
+    proxy: activeFamily ? activeVM.flags.proxy : flags.proxy,
+    vpn: activeFamily ? activeVM.flags.vpn : flags.vpn,
+    tor: activeFamily ? activeVM.flags.tor : flags.tor,
+    abuse: activeFamily ? activeVM.flags.abuse : flags.abuse,
+    hosting: activeFamily ? activeVM.flags.hosting : flags.hosting,
+    media: (activeFamily && Array.isArray(activeVM.media)) ? activeVM.media : media,
   }
 }
 

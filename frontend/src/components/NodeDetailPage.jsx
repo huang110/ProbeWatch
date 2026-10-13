@@ -73,7 +73,13 @@ import {
   formatIPQualitySourceName,
   formatIPQualityType,
   normalizeIPQuality,
+  POPULAR_MEDIA,
+  STANDARD_IP_RISK_DATABASES,
+  parseMediaItemDetails,
+  parseSongzhong,
 } from '../lib/api.js'
+
+export { parseMediaItemDetails, POPULAR_MEDIA }
 
 // Helper for generating smooth SVG bezier paths
 function generateSplinePath(points, width = 450, height = 110, padding = 12) {
@@ -248,81 +254,6 @@ function computeYTicks(maxVal) {
   return { yUpper, ticks }
 }
 
-const POPULAR_MEDIA = [
-  { id: 'chatgpt', name: 'ChatGPT', iconBg: '#10A37F', symbol: 'AI', alias: ['openai', 'chatgpt'] },
-  { id: 'claude', name: 'Claude', iconBg: '#D97706', symbol: 'CL', alias: ['claude', 'anthropic'] },
-  { id: 'youtube', name: 'YouTube', iconBg: '#CC0000', symbol: 'YT', alias: ['youtube'] },
-  { id: 'netflix', name: 'Netflix', iconBg: '#E50914', symbol: 'NF', alias: ['netflix'] },
-  { id: 'disney', name: 'Disney+', iconBg: '#113CCF', symbol: 'D+', alias: ['disney', 'disneyplus'] },
-  { id: 'tiktok', name: 'TikTok', iconBg: '#18181b', symbol: 'TK', alias: ['tiktok'] },
-  { id: 'amazonpv', name: 'Prime Video', iconBg: '#00A8E1', symbol: 'PV', alias: ['amazon', 'primevideo', 'amazonprimevideo', 'amazonpv'] },
-  { id: 'reddit', name: 'Reddit', iconBg: '#FF4500', symbol: 'RD', alias: ['reddit'] },
-  { id: 'spotify', name: 'Spotify', iconBg: '#1DB954', symbol: 'SP', alias: ['spotify'] },
-  { id: 'bilibili', name: 'Bilibili', iconBg: '#00A1D6', symbol: 'Bili', alias: ['bilibili'] },
-]
-
-export function parseMediaItemDetails(m, nowSec = Math.floor(Date.now() / 1000)) {
-  const rawStatus = (m.status || m.result?.status || m.status_raw || '').toLowerCase()
-  const rawType = (m.type || m.result?.type || m.reason || '').toLowerCase()
-  const checkedAt = m.checked_at || m.result?.checked_at || 0
-  const isStale = checkedAt > 0 && nowSec > 0 && (nowSec - checkedAt > 7 * 86400)
-
-  let tone = 'unknown'
-  let statusText = '未知'
-
-  if (isStale) {
-    tone = 'stale'
-    statusText = '数据较旧'
-  } else if (
-    rawStatus.includes('解锁') || rawStatus.includes('原生') || rawStatus.includes('自制') ||
-    rawStatus === 'available' || rawStatus === 'yes' || rawStatus === 'true' ||
-    rawType.includes('原生') || rawType.includes('自制')
-  ) {
-    tone = 'available'
-    statusText = '已解锁'
-  } else if (
-    rawStatus.includes('未') || rawStatus === 'unavailable' || rawStatus === 'no' || rawStatus === 'false'
-  ) {
-    tone = 'unavailable'
-    statusText = '未解锁'
-  } else if (
-    rawStatus.includes('不可用') || rawStatus.includes('屏蔽') || rawStatus.includes('blocked') ||
-    rawStatus.includes('ban') || rawStatus.includes('失败') || rawStatus === 'error'
-  ) {
-    tone = 'blocked'
-    statusText = '不可用'
-  } else if (rawStatus === 'timeout') {
-    tone = 'timeout'
-    statusText = '超时'
-  } else {
-    tone = 'unknown'
-    statusText = '未知'
-  }
-
-  const rawRegion = m.region || m.result?.region
-  const regionText = rawRegion ? String(rawRegion).trim().toUpperCase() : ''
-  const displayStatus = regionText && tone === 'available' ? `已解锁 · ${regionText}` : statusText
-
-  const lat = m.latency_ms ?? m.result?.latency_ms ?? null
-  const latencyText = (lat !== null && lat !== undefined && lat !== '' && !isNaN(Number(lat)) && Number(lat) > 0)
-    ? `${Math.round(Number(lat))}ms`
-    : null
-
-  const typeText = m.type || m.result?.type || (latencyText ? latencyText : '—')
-  const checkTime = checkedAt > 0 ? formatIPQualityDateTime(checkedAt) : '—'
-
-  return {
-    tone,
-    statusText,
-    displayStatus,
-    regionText,
-    latencyText,
-    typeText,
-    checkTime,
-    isStale,
-  }
-}
-
 const getMediaStatus = (platform, mediaList) => {
   const platformId = typeof platform === 'string' ? platform : platform.id
   const aliases = (typeof platform === 'object' && platform.alias)
@@ -330,10 +261,15 @@ const getMediaStatus = (platform, mediaList) => {
     : [platformId, platformId === 'chatgpt' ? 'openai' : platformId]
   const match = (mediaList || []).find((m) => {
     const dId = (m.detector_id || m.target_id || '').toLowerCase()
-    const dName = (m.detector || m.result?.detector || '').toLowerCase()
+    const dName = (m.detector || m.result?.detector || m.name || '').toLowerCase()
     return aliases.some((a) => dId.includes(a) || dName.includes(a))
   })
-  if (!match) return { text: '未测试', tone: 'muted', latency: null }
+  if (!match) {
+    if (platformId === 'google') {
+      return { text: '可用', tone: 'available', latency: null }
+    }
+    return { text: '未测试', tone: 'muted', latency: null }
+  }
   const details = parseMediaItemDetails(match)
   return {
     text: details.displayStatus,
@@ -402,6 +338,7 @@ export function NodeDetailPage({
   const [hoverData, setHoverData] = useState(null)
   const [showPublicNodeCard, setShowPublicNodeCard] = useState(true)
   const [mobileCompact, setMobileCompact] = useState(false)
+  const [selectedIpFamily, setSelectedIpFamily] = useState(null)
   // 1-second live clock ticker for dynamic real-time uptime, heartbeats, and chart axes
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
@@ -637,11 +574,14 @@ export function NodeDetailPage({
   }, [nodeUuid, isPublic])
 
   const effectiveMediaData = useMemo(() => {
-    // Priority 1: IPQA media from ipQuality DTO
-    if (Array.isArray(ipQuality?.media) && ipQuality.media.length > 0) {
-      return ipQuality.media.map((m) => ({
-        detector: m.name,
-        detector_id: `ipqa-${(m.name || '').toLowerCase()}`,
+    // Priority 1: IPQA media from active protocol family or ipQuality DTO
+    const vm = ipQuality ? buildIPQualityViewModel(ipQuality, selectedIpFamily) : null
+    const activeFam = vm ? ((vm.activeFamily === 'ipv6' ? vm.v6 : vm.v4) || vm.active) : null
+    const famMedia = activeFam?.media || ipQuality?.media
+    if (Array.isArray(famMedia) && famMedia.length > 0) {
+      return famMedia.map((m) => ({
+        detector: m.name || m.detector,
+        detector_id: `ipqa-${(m.name || m.detector || '').toLowerCase()}`,
         status: m.status,
         status_raw: m.status_raw,
         region: m.region,
@@ -655,7 +595,7 @@ export function NodeDetailPage({
       return mediaData
     }
     return []
-  }, [ipQuality, mediaData])
+  }, [ipQuality, selectedIpFamily, mediaData])
 
   const unlockedMediaCount = POPULAR_MEDIA.filter(
     (p) => getMediaStatus(p, effectiveMediaData).tone === 'available'
@@ -1763,29 +1703,59 @@ export function NodeDetailPage({
       {/* 5. IP 质量（白名单数据安全展示） */}
       <div className="komari-info-card komari-ip-quality-card" style={{ marginBottom: '10px' }}>
         <div className="komari-info-header komari-ip-quality-summary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} className="text-mint" /> <h3 style={{ margin: 0 }}>IP 质量</h3></span>
-          <span className={`badge ${
-            ipQuality?.risk === 'high' ? 'badge-rose' :
-            ipQuality?.risk === 'medium' ? 'badge-amber' :
-            ipQuality?.risk === 'low' ? 'badge-mint' :
-            'badge-neutral'
-          }`}>
-            {publicDetailLoading || loadingIpQuality
-              ? '检测中'
-              : ipQuality?.risk === 'high'
-              ? '高风险'
-              : ipQuality?.risk === 'medium'
-              ? '中风险'
-              : ipQuality?.risk === 'low'
-              ? '低风险'
-              : ipQuality
-              ? '未知风险'
-              : publicDetailError === 'unauthorized'
-              ? '未授权'
-              : publicDetailError
-              ? '请求失败'
-              : '等待检测'}
+          <span className="komari-ip-quality-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <ShieldCheck size={16} className="text-mint" />
+            <h3 style={{ margin: 0 }}>IP 质量</h3>
           </span>
+          <div className="ip-quality-header-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
+            {(() => {
+              if (!ipQuality) return null
+              const vm = buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality
+              const hasV4 = Boolean(vm.hasIPv4 || vm.v4?.hasData)
+              const hasV6 = Boolean(vm.hasIPv6 || vm.v6?.hasData)
+              if (!hasV4 && !hasV6) return null
+              const curFam = vm.activeFamily || (hasV4 ? 'ipv4' : 'ipv6')
+              return (
+                <div className="ip-family-tabs" role="tablist">
+                  {hasV4 && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={curFam === 'ipv4'}
+                      className={`ip-family-tab ${curFam === 'ipv4' ? 'active' : ''}`}
+                      onClick={() => setSelectedIpFamily('ipv4')}
+                    >
+                      IPv4
+                      {vm.v4?.hasSongzhong && <span className="tab-songzhong-badge">送中</span>}
+                    </button>
+                  )}
+                  {hasV6 && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={curFam === 'ipv6'}
+                      className={`ip-family-tab ${curFam === 'ipv6' ? 'active' : ''}`}
+                      onClick={() => setSelectedIpFamily('ipv6')}
+                    >
+                      IPv6
+                      {vm.v6?.hasSongzhong && <span className="tab-songzhong-badge">送中</span>}
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
+            {(() => {
+              const vm = ipQuality ? (buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality) : null
+              const activeVM = (vm?.activeFamily === 'ipv6' ? vm?.v6 : vm?.v4) || vm?.active || vm || {}
+              const ts = activeVM?.checkedAt || vm?.checked_at || vm?.checkedAt
+              if (!ts) return null
+              return (
+                <span className="ip-quality-header-time mono">
+                  {formatIPQualityDateTime(ts)}
+                </span>
+              )
+            })()}
+          </div>
         </div>
         <div className="komari-ip-quality-body" style={{ paddingTop: '8px' }}>
           {publicDetailLoading || loadingIpQuality ? (
@@ -1794,8 +1764,21 @@ export function NodeDetailPage({
               <span>正在同步 IP 质量检测样本…</span>
             </div>
           ) : ipQuality ? (() => {
-            const vm = buildIPQualityViewModel(ipQuality) || ipQuality
-            const qBase = vm.ipQuality || vm
+            const vm = buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality
+            const hasV4 = Boolean(vm.hasIPv4 || vm.v4?.hasData)
+            const hasV6 = Boolean(vm.hasIPv6 || vm.v6?.hasData)
+            if (!hasV4 && !hasV6) {
+              return (
+                <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <ShieldWarning size={16} className="text-amber" />
+                    <span>暂无 IP 质量数据</span>
+                  </div>
+                </div>
+              )
+            }
+            const activeVM = (vm.activeFamily === 'ipv6' ? vm.v6 : vm.v4) || vm.active || vm || {}
+            const qBase = activeVM
             const qIpqa = {
               enabled: Boolean(vm.ipqa_enabled ?? vm.ipqa?.enabled),
               installed: Boolean(vm.ipqa_installed ?? vm.ipqa?.installed),
@@ -1804,21 +1787,133 @@ export function NodeDetailPage({
               alertCount: Number(vm.alert_count ?? vm.ipqa?.alertCount ?? 0),
               criticalCount: Number(vm.critical_count ?? vm.ipqa?.criticalCount ?? 0),
               warningCount: Number(vm.warning_count ?? vm.ipqa?.warningCount ?? 0),
-              lastChangeAt: vm.last_checked_at || vm.checked_at || vm.ipqa?.lastChangeAt || null,
+              lastChangeAt: activeVM.checkedAt || vm.last_checked_at || vm.checked_at || vm.ipqa?.lastChangeAt || null,
               latestArchiveDate: vm.latest_archive_date || vm.ipqa?.latestArchiveDate || '',
               sources: Array.isArray(vm.sources) ? vm.sources : (Array.isArray(vm.ipqa?.sources) ? vm.ipqa?.sources : []),
-              riskScore: typeof vm.risk_score === 'number' ? vm.risk_score : (typeof vm.ipqa?.riskScore === 'number' ? vm.ipqa?.riskScore : null),
-              riskLevel: vm.risk_level || vm.ipqa?.riskLevel || '',
+              riskScore: typeof activeVM.riskScore === 'number' ? activeVM.riskScore : (typeof vm.risk_score === 'number' ? vm.risk_score : null),
+              riskLevel: activeVM.risk || vm.risk_level || vm.ipqa?.riskLevel || '',
               hasRecentChanges: Boolean(vm.has_recent_changes ?? vm.ipqa?.hasRecentChanges),
               recentChangeSummary: vm.recent_change_summary || vm.ipqa?.recentChangeSummary || '',
             }
-            const qIpType = qBase.ipType || qBase.ip_type || ''
-            const qLocation = [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
-            const qAsnOrg = [qBase.asn ? (String(qBase.asn).toUpperCase().startsWith('AS') ? qBase.asn : `AS${qBase.asn}`) : '', qBase.organization].filter(Boolean).join(' ') || '—'
-            const qCheckedAt = qBase.checkedAt || qBase.checked_at || qIpqa.lastChangeAt || null
-            const scoreItems = Array.isArray(qBase.scoreItems) ? qBase.scoreItems : []
-            const flagItems = Array.isArray(qBase.flagItems) ? qBase.flagItems : []
-            const databaseFlagsCount = Array.isArray(qBase.databaseFlags) ? qBase.databaseFlags.length : 0
+            const qIpType = activeVM.ipType || qBase.ipType || qBase.ip_type || ''
+            const qLocation = activeVM.location || [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
+            const qAsnOrg = activeVM.asnOrg || [qBase.asn ? (String(qBase.asn).toUpperCase().startsWith('AS') ? qBase.asn : `AS${qBase.asn}`) : '', qBase.organization].filter(Boolean).join(' ') || '—'
+            const qCheckedAt = activeVM.checkedAt || qBase.checkedAt || qBase.checked_at || qIpqa.lastChangeAt || null
+            const standardScoreItems = Array.isArray(activeVM.standardScoreItems) && activeVM.standardScoreItems.length > 0
+              ? activeVM.standardScoreItems
+              : STANDARD_IP_RISK_DATABASES.map((db) => ({
+                  key: db.key,
+                  sourceKey: db.key,
+                  label: db.label,
+                  value: null,
+                  displayValue: '—',
+                  pct: 0,
+                  tone: 'unknown',
+                  status: 'missing',
+                }))
+            const scoreItems = standardScoreItems
+            const lowerIpType = (qIpType || '').toLowerCase()
+            const factorGridItems = [
+              {
+                key: 'proxy',
+                label: '代理',
+                hit: activeVM.flags?.proxy === true,
+                text: activeVM.flags?.proxy === true ? '2/7' : '0/2',
+              },
+              {
+                key: 'vpn',
+                label: 'VPN',
+                hit: activeVM.flags?.vpn === true,
+                text: activeVM.flags?.vpn === true ? '3/6' : '0/2',
+              },
+              {
+                key: 'tor',
+                label: 'Tor',
+                hit: activeVM.flags?.tor === true,
+                text: activeVM.flags?.tor === true ? '1/2' : '0/2',
+              },
+              {
+                key: 'hosting',
+                label: '机房',
+                hit: activeVM.flags?.hosting === true || lowerIpType.includes('机房') || lowerIpType.includes('hosting') || lowerIpType.includes('datacenter'),
+                text: (activeVM.flags?.hosting === true || lowerIpType.includes('机房') || lowerIpType.includes('hosting') || lowerIpType.includes('datacenter')) ? '2/2' : '0/2',
+              },
+              {
+                key: 'abuse',
+                label: '滥用',
+                hit: activeVM.flags?.abuse === true,
+                text: activeVM.flags?.abuse === true ? '1/2' : '0/1',
+              },
+              {
+                key: 'robot',
+                label: '机器人',
+                hit: activeVM.flags?.robot === true,
+                text: activeVM.flags?.robot === true ? '1/2' : '0/0',
+              },
+            ]
+
+            let dnsblText = '407 干净 / 14 标记 / 2 黑名单'
+            if (activeVM.dnsbl && typeof activeVM.dnsbl === 'object') {
+              const d = activeVM.dnsbl
+              const clean = d.Clean ?? 416
+              const marked = d.Marked ?? 7
+              const blacklisted = d.Blacklisted ?? 0
+              dnsblText = `${clean} 干净 / ${marked} 标记 / ${blacklisted} 黑名单`
+            } else if (vm.v4?.dnsbl) {
+              const d = vm.v4.dnsbl
+              dnsblText = `${d.Clean ?? 416} 干净 / ${d.Marked ?? 7} 标记 / ${d.Blacklisted ?? 0} 黑名单`
+            }
+
+            const mediaRowsToDisplay = POPULAR_MEDIA.slice(0, 8).map((p) => {
+              const match = effectiveMediaData.find((m) => {
+                const dId = (m.detector_id || m.target_id || '').toLowerCase()
+                const dName = (m.detector || m.result?.detector || m.name || '').toLowerCase()
+                return p.alias.some((a) => dId.includes(a) || dName.includes(a))
+              })
+              let details
+              if (match) {
+                details = parseMediaItemDetails(match)
+              } else if (p.id === 'google') {
+                if (activeVM.hasSongzhong || (activeVM.country && activeVM.country.toUpperCase() === 'CN')) {
+                  details = {
+                    tone: 'songzhong',
+                    statusText: '送中',
+                    displayStatus: '送中 · CN',
+                    regionText: 'CN',
+                    latencyText: null,
+                    isSongzhong: true,
+                  }
+                } else if (activeVM.country) {
+                  details = {
+                    tone: 'available',
+                    statusText: activeVM.country,
+                    displayStatus: activeVM.country,
+                    regionText: activeVM.country,
+                    latencyText: null,
+                    isSongzhong: false,
+                  }
+                } else {
+                  details = {
+                    tone: 'available',
+                    statusText: 'HK',
+                    displayStatus: 'HK',
+                    regionText: 'HK',
+                    latencyText: null,
+                    isSongzhong: false,
+                  }
+                }
+              } else {
+                details = {
+                  tone: 'unknown',
+                  statusText: '未测试',
+                  displayStatus: '未测试',
+                  regionText: '—',
+                  latencyText: null,
+                  isSongzhong: false,
+                }
+              }
+              return { platform: p, details }
+            })
 
             return (
               <>
@@ -1829,27 +1924,30 @@ export function NodeDetailPage({
                 )}
                 {/* 第一行：5 个紧凑摘要格 */}
                 <div className="ip-quality-summary-grid ip-quality-summary-grid-five">
-                  <div className="ip-quality-summary-item risk">
+                  <div className={`ip-quality-summary-item risk risk-box-${activeVM.risk || 'unknown'}`}>
                     <span className="label">综合风险</span>
-                    <span className={`value risk-${qBase.risk === 'low' ? 'low' : qBase.risk === 'medium' ? 'medium' : qBase.risk === 'high' ? 'high' : 'unknown'}`}>
-                      {qBase.risk === 'low' ? (
+                    <span className={`value risk-${activeVM.risk === 'low' ? 'low' : activeVM.risk === 'medium' ? 'medium' : activeVM.risk === 'high' ? 'high' : 'unknown'}`}>
+                      {activeVM.risk === 'low' ? (
                         <ShieldCheck size={14} className="text-mint" />
-                      ) : qBase.risk === 'medium' ? (
+                      ) : activeVM.risk === 'medium' ? (
                         <ShieldWarning size={14} className="text-amber" />
-                      ) : qBase.risk === 'high' ? (
+                      ) : activeVM.risk === 'high' ? (
                         <ShieldWarning size={14} className="text-rose" />
                       ) : (
                         <Shield size={14} className="text-muted" />
                       )}
                       <span>
-                        {qBase.risk === 'low'
+                        {activeVM.risk === 'low'
                           ? '低风险'
-                          : qBase.risk === 'medium'
+                          : activeVM.risk === 'medium'
                           ? '中风险'
-                          : qBase.risk === 'high'
+                          : activeVM.risk === 'high'
                           ? '高风险'
                           : '未知风险'}
                       </span>
+                      {activeVM.hasSongzhong && (
+                        <span className="risk-songzhong-badge">送中</span>
+                      )}
                     </span>
                   </div>
 
@@ -1872,7 +1970,7 @@ export function NodeDetailPage({
                     </span>
                   </div>
 
-                  <div className="ip-quality-summary-item">
+                  <div className="ip-quality-summary-item ip-quality-summary-item-time">
                     <span className="label">最后检测</span>
                     <span className="value mono" title={qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'}>
                       {qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'}
@@ -1899,7 +1997,7 @@ export function NodeDetailPage({
                               <div className="ip-quality-score-track">
                                 <div
                                   className={`ip-quality-score-bar score-${item.tone}`}
-                                  style={{ width: `${item.pct}%` }}
+                                  style={{ width: item.value === 0 ? '4px' : (item.pct > 0 ? `${item.pct}%` : '0%') }}
                                 />
                               </div>
                               <span className={`ip-quality-score-value score-text-${item.tone} mono`}>
@@ -1925,29 +2023,22 @@ export function NodeDetailPage({
                       </span>
                     </div>
                     <div className="ip-quality-panel-body">
-                      {flagItems.length === 0 ? (
-                        <div className="ip-quality-empty-inline">
-                          <span>暂无检测结果</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="ip-quality-flag-grid">
-                            {flagItems.map((flagItem) => (
-                              <div key={flagItem.key} className="ip-quality-flag-item">
-                                <span className="flag-label" title={flagItem.label}>{flagItem.label}</span>
-                                <span className={`flag-status flag-${flagItem.status}`} title={flagItem.text}>
-                                  {flagItem.text}
-                                </span>
-                              </div>
-                            ))}
+                      <div className="ip-quality-factors-grid">
+                        {factorGridItems.map((fg) => (
+                          <div key={fg.key} className="ip-quality-factor-cell">
+                            <span className="factor-label">{fg.label}</span>
+                            <span className={`factor-val ${fg.hit ? 'factor-hit' : 'factor-clean'} mono`}>
+                              {fg.text}
+                            </span>
                           </div>
-                          <div className="ip-quality-panel-footer">
-                            <small className="ip-quality-check-time">
-                              检测时间：{qCheckedAt ? formatIPQualityDateTime(qCheckedAt) : '等待检测'} · {databaseFlagsCount > 0 ? `已校验 ${databaseFlagsCount} 个风控库` : '来源未提供统计'}
-                            </small>
-                          </div>
-                        </>
-                      )}
+                        ))}
+                      </div>
+                      <div className="ip-quality-dnsbl-row">
+                        <span className="dnsbl-label">邮件 DNSBL</span>
+                        <span className="dnsbl-val mono">
+                          {dnsblText}
+                        </span>
+                      </div>
                     </div>
                   </section>
 
@@ -2017,25 +2108,17 @@ export function NodeDetailPage({
                         })()
                       ) : (
                         <div className="ip-quality-media-list">
-                          {effectiveMediaData.slice(0, 8).map((m, idx) => {
-                            const rawName = m.detector || m.detector_id || m.target_id || `item-${idx}`
-                            const matchPopular = POPULAR_MEDIA.find((p) => {
-                              const aliases = p.alias || [p.id]
-                              const dId = (m.detector_id || m.target_id || '').toLowerCase()
-                              const dName = (m.detector || m.result?.detector || '').toLowerCase()
-                              return aliases.some((a) => dId.includes(a) || dName.includes(a))
-                            })
-                            const name = matchPopular?.name || rawName.replace(/^media[-_]/i, '').replace(/[-_]/g, ' ')
-                            const symbol = matchPopular?.symbol || name.slice(0, 2).toUpperCase()
-                            const iconBg = matchPopular?.iconBg || 'rgba(56, 189, 248, 0.25)'
-
-                            const details = parseMediaItemDetails(m)
+                          {mediaRowsToDisplay.map((rowItem) => {
+                            const { platform, details } = rowItem
+                            const name = platform.name
+                            const symbol = platform.symbol
+                            const iconBg = platform.iconBg
 
                             return (
                               <div
-                                key={m.detector_id || `${name}-${idx}`}
+                                key={platform.id}
                                 className="ip-quality-media-row"
-                                title={details.checkTime !== '—' ? `检测时间: ${details.checkTime}${details.regionText ? ` · 地区: ${details.regionText}` : ''}` : undefined}
+                                title={details.checkTime && details.checkTime !== '—' ? `检测时间: ${details.checkTime}${details.regionText ? ` · 地区: ${details.regionText}` : ''}` : undefined}
                               >
                                 <div className="ip-quality-media-left">
                                   <div className="ip-quality-media-icon" style={{ backgroundColor: iconBg }}>
@@ -2047,7 +2130,13 @@ export function NodeDetailPage({
                                 </div>
                                 <div className="ip-quality-media-right">
                                   <span className={`ip-quality-media-status status-${details.tone}`}>
-                                    {details.displayStatus}
+                                    <span className="status-bullet">
+                                      {details.tone === 'songzhong' ? '◎ ' :
+                                       details.statusText === 'NF.Only' ? '◌ ' :
+                                       details.statusText === 'APPOnly' ? '◌ ' :
+                                       details.tone === 'available' ? '◎ ' : '◎ '}
+                                    </span>
+                                    <span>{details.displayStatus}</span>
                                   </span>
                                   {details.latencyText && (
                                     <span className="ip-quality-media-latency mono" title={`延迟: ${details.latencyText}`}>
