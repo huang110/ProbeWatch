@@ -4,7 +4,7 @@ import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, form
 import { fetchCsrfToken, fetchGuestStatus, fetchPublicClientInfo, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
-import { GuestView, VisitorInfoCard } from './components/GuestView.jsx'
+import { GuestView } from './components/GuestView.jsx'
 import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { useLivePolling } from './lib/useLivePolling.js'
@@ -509,11 +509,6 @@ export function App() {
         if (active) setApiVersion('')
         if (active) setLatestAgentVersion('')
       })
-    fetchPublicClientInfo()
-      .then((info) => {
-        if (active && info) setPublicClientInfo(info)
-      })
-      .catch(() => {})
     return () => { active = false }
   }, [])
 
@@ -1362,7 +1357,6 @@ export function App() {
       onLogout={performLogout}
     />
     <main className="main-content">
-      <VisitorInfoCard clientInfo={publicClientInfo} />
       <Topbar
         activeNav={activeNav}
         clockText={clockText}

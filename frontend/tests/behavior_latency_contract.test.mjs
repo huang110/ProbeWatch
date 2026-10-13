@@ -1301,7 +1301,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 }
 
 // -----------------------------------------------------------------------------
-// Scenario 49: Unified VisitorInfoCard across GuestView & App, mobile default collapsed, zero localStorage
+// Scenario 49: VisitorInfoCard restricted to GuestView, absent from App admin shell, zero localStorage
 // -----------------------------------------------------------------------------
 {
   const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
@@ -1309,9 +1309,17 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 
   assert.ok(
     guestSrc.includes('export function VisitorInfoCard') &&
-      guestSrc.includes('<VisitorInfoCard clientInfo={visitorInfo} />') &&
-      appSrc.includes('<VisitorInfoCard clientInfo={publicClientInfo} />'),
-    'Scenario 49: Both GuestView and App render the unified VisitorInfoCard component'
+      guestSrc.includes('<VisitorInfoCard clientInfo={visitorInfo} />'),
+    'Scenario 49: GuestView renders VisitorInfoCard'
+  )
+  assert.ok(
+    !appSrc.includes('<VisitorInfoCard') &&
+      !appSrc.includes("import { GuestView, VisitorInfoCard }"),
+    'Scenario 49: Admin console in App.jsx does not render or import VisitorInfoCard'
+  )
+  assert.ok(
+    !appSrc.includes('fetchPublicClientInfo().then'),
+    'Scenario 49: App.jsx does not unconditionally fetch /api/public/client-info on mount'
   )
   assert.ok(
     guestSrc.includes('window.innerWidth <= 768') &&
@@ -1322,7 +1330,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
     !guestSrc.includes('localStorage') && !appSrc.includes('localStorage'),
     'Scenario 49: Neither GuestView nor App uses localStorage for visitor card state'
   )
-  console.log('[PASS] Scenario 49: Unified VisitorInfoCard & mobile default collapsed state verified.')
+  console.log('[PASS] Scenario 49: VisitorInfoCard restricted to GuestView, absent from App admin shell, verified.')
 }
 
 // -----------------------------------------------------------------------------
