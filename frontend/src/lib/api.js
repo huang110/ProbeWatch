@@ -266,6 +266,7 @@ export function parseSongzhong(mediaItem) {
   const isSzText =
     rawLower.includes('送中') ||
     rawLower.includes('direct_cn') ||
+    rawLower.includes('mainland_redirect') ||
     rawLower.includes('mainland') ||
     rawLower.includes('redirect_cn') ||
     rawLower === 'cn'
@@ -276,7 +277,9 @@ export function parseSongzhong(mediaItem) {
     rawLower.includes('cn') ||
     rawLower.includes('送中') ||
     rawLower === '' ||
-    rawLower === '原生'
+    rawLower === '原生' ||
+    rawLower.includes('direct') ||
+    rawLower.includes('redirect')
   )
 
   if (isSzText || isCnRegionSongzhong) {
@@ -419,25 +422,86 @@ export function parseMediaItemDetails(m, nowSec = Math.floor(Date.now() / 1000))
   }
 }
 
-export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseCheckedAt) {
-  const isV4 = famLabel === 'IPv4'
-  const src = famRaw || (isV4 ? fallbackData : null)
-  const hasData = Boolean(
-    famRaw && (
-      famRaw.ip_type || famRaw.ipType ||
-      famRaw.country || famRaw.region || famRaw.city ||
-      famRaw.asn || famRaw.organization || famRaw.org ||
-      famRaw.risk_level || famRaw.riskLevel || famRaw.risk ||
-      famRaw.risk_score !== undefined || famRaw.riskScore !== undefined ||
-      (famRaw.source_scores && Object.keys(famRaw.source_scores).length > 0) ||
-      (famRaw.sourceScores && Object.keys(famRaw.sourceScores).length > 0) ||
-      (famRaw.scores && Object.keys(famRaw.scores).length > 0) ||
-      (Array.isArray(famRaw.media) && famRaw.media.length > 0) ||
-      famRaw.proxy !== undefined || famRaw.vpn !== undefined
-    )
-  ) || Boolean(isV4 && fallbackData && (fallbackData.ip_type || fallbackData.country || fallbackData.asn || fallbackData.scores || fallbackData.risk))
+export function hasRealFamilyData(fam) {
+  if (!fam || typeof fam !== 'object' || Array.isArray(fam)) return false
+  if (fam.hasData === false || fam.has_data === false) return false
+  return Boolean(
+    fam.ip_type || fam.ipType ||
+    fam.ip || fam.address || fam.ip_address || fam.ipAddress ||
+    fam.country || fam.country_code || fam.countryCode || fam.region || fam.city ||
+    fam.asn || fam.organization || fam.org || fam.isp ||
+    fam.risk_level || fam.riskLevel || fam.risk ||
+    fam.risk_score !== undefined || fam.riskScore !== undefined ||
+    (fam.source_scores && typeof fam.source_scores === 'object' && Object.keys(fam.source_scores).length > 0) ||
+    (fam.sourceScores && typeof fam.sourceScores === 'object' && Object.keys(fam.sourceScores).length > 0) ||
+    (fam.scores && typeof fam.scores === 'object' && Object.keys(fam.scores).length > 0) ||
+    (Array.isArray(fam.media) && fam.media.length > 0) ||
+    fam.proxy !== undefined || fam.is_proxy !== undefined ||
+    fam.vpn !== undefined || fam.is_vpn !== undefined ||
+    fam.tor !== undefined || fam.is_tor !== undefined ||
+    fam.abuse !== undefined || fam.is_abuser !== undefined ||
+    fam.hosting !== undefined || fam.is_server !== undefined ||
+    fam.robot !== undefined || fam.is_robot !== undefined ||
+    fam.dnsbl || fam.mail?.dnsblacklist
+  )
+}
 
-  if (!hasData && !src) {
+export function formatFactorDisplay(factorVal, hitBool) {
+  if (factorVal !== null && factorVal !== undefined && typeof factorVal === 'object') {
+    const count = factorVal.count ?? factorVal.Count ?? factorVal.matched ?? factorVal.hitCount
+    const total = factorVal.total ?? factorVal.Total ?? factorVal.sources ?? factorVal.totalCount
+    if (typeof count === 'number' && typeof total === 'number' && total > 0) {
+      return `${count}/${total}`
+    }
+    if (typeof factorVal.text === 'string' && factorVal.text.trim()) {
+      return factorVal.text.trim()
+    }
+    if (typeof factorVal.hit === 'boolean') {
+      return factorVal.hit ? '命中' : '未命中'
+    }
+  }
+
+  const bool = (typeof hitBool === 'boolean')
+    ? hitBool
+    : (typeof factorVal === 'boolean' ? factorVal : null)
+
+  if (bool === true) return '命中'
+  if (bool === false) return '未命中'
+  return '—'
+}
+
+export function formatDNSBLDisplay(dnsbl) {
+  if (!dnsbl) return '暂无数据'
+  if (typeof dnsbl === 'string') {
+    const trimmed = dnsbl.trim()
+    return trimmed ? trimmed : '暂无数据'
+  }
+  if (typeof dnsbl === 'object') {
+    const clean = dnsbl.clean ?? dnsbl.Clean
+    const marked = dnsbl.marked ?? dnsbl.Marked
+    const blacklisted = dnsbl.blacklisted ?? dnsbl.Blacklisted ?? dnsbl.black ?? dnsbl.Black
+    const hasAnyNum = typeof clean === 'number' || typeof marked === 'number' || typeof blacklisted === 'number'
+    if (hasAnyNum) {
+      const c = typeof clean === 'number' ? clean : 0
+      const m = typeof marked === 'number' ? marked : 0
+      const b = typeof blacklisted === 'number' ? blacklisted : 0
+      return `${c} 干净 / ${m} 标记 / ${b} 黑名单`
+    }
+    if (typeof dnsbl.text === 'string' && dnsbl.text.trim()) {
+      return dnsbl.text.trim()
+    }
+  }
+  return '暂无数据'
+}
+
+export function buildFamilyViewModel(famRaw, famLabel, maybeCheckedAt, maybeCheckedAt2) {
+  const baseCheckedAt = (typeof maybeCheckedAt === 'string' || typeof maybeCheckedAt === 'number')
+    ? maybeCheckedAt
+    : ((typeof maybeCheckedAt2 === 'string' || typeof maybeCheckedAt2 === 'number') ? maybeCheckedAt2 : null)
+
+  const hasData = hasRealFamilyData(famRaw)
+
+  if (!hasData || !famRaw) {
     return {
       family: famLabel,
       hasData: false,
@@ -465,6 +529,7 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
       })),
       flags: { proxy: null, vpn: null, tor: null, abuse: null, hosting: null, robot: null },
       flagItems: [],
+      factorDetails: {},
       media: [],
       hasSongzhong: false,
       songzhongLabel: '',
@@ -473,8 +538,8 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
     }
   }
 
-  const s = src || {}
-  const rawScores = s.source_scores || s.sourceScores || s.scores || (isV4 ? (fallbackData?.source_scores || fallbackData?.sourceScores || fallbackData?.scores) : null) || {}
+  const s = famRaw
+  const rawScores = s.source_scores || s.sourceScores || s.scores || {}
   const scoreMap = {}
   if (rawScores && typeof rawScores === 'object' && !Array.isArray(rawScores)) {
     for (const [k, v] of Object.entries(rawScores)) {
@@ -484,14 +549,14 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
     }
   }
 
-  const ipType = s.ip_type || s.ipType || (isV4 ? (fallbackData?.ip_type || fallbackData?.ipType || '') : '')
-  const country = s.country || (isV4 ? fallbackData?.country : '') || ''
-  const region = s.region || (isV4 ? fallbackData?.region : '') || ''
-  const city = s.city || (isV4 ? fallbackData?.city : '') || ''
-  const asn = s.asn || (isV4 ? fallbackData?.asn : '') || ''
-  const organization = s.organization || s.org || (isV4 ? (fallbackData?.organization || fallbackData?.org) : '') || ''
+  const ipType = s.ip_type || s.ipType || ''
+  const country = s.country || ''
+  const region = s.region || ''
+  const city = s.city || ''
+  const asn = s.asn || ''
+  const organization = s.organization || s.org || ''
 
-  const registeredRegion = s.registered_region || s.registeredRegion || (isV4 ? fallbackData?.registered_region : '') || ''
+  const registeredRegion = s.registered_region || s.registeredRegion || ''
   let location = '—'
   if (country) {
     if (registeredRegion && registeredRegion.toUpperCase() === country.toUpperCase()) {
@@ -505,21 +570,21 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
   const cleanAsn = asn ? (String(asn).toUpperCase().startsWith('AS') ? asn : `AS${asn}`) : ''
   const asnOrg = [cleanAsn, organization].filter(Boolean).join(' ') || '—'
 
-  let risk = (s.risk_level || s.riskLevel || s.risk || (isV4 ? (fallbackData?.risk_level || fallbackData?.risk) : '') || '').toLowerCase()
+  let risk = (s.risk_level || s.riskLevel || s.risk || '').toLowerCase()
   if (!risk || risk === 'clean') risk = 'low'
   if (risk !== 'low' && risk !== 'medium' && risk !== 'high') risk = 'unknown'
 
   let riskScore = null
-  const pScore = parseIPQualityScoreValue(s.risk_score ?? s.riskScore ?? (isV4 ? (fallbackData?.risk_score ?? fallbackData?.riskScore) : null))
+  const pScore = parseIPQualityScoreValue(s.risk_score ?? s.riskScore)
   if (pScore.status === 'valid') riskScore = pScore.value
 
   const flags = {
-    proxy: parseBoolConclusion(s.proxy ?? s.is_proxy ?? (isV4 ? fallbackData?.proxy : null)),
-    vpn: parseBoolConclusion(s.vpn ?? s.is_vpn ?? (isV4 ? fallbackData?.vpn : null)),
-    tor: parseBoolConclusion(s.tor ?? s.is_tor ?? (isV4 ? fallbackData?.tor : null)),
-    abuse: parseBoolConclusion(s.abuse ?? s.is_abuser ?? (isV4 ? fallbackData?.abuse : null)),
-    hosting: parseBoolConclusion(s.hosting ?? s.is_server ?? (isV4 ? fallbackData?.hosting : null)),
-    robot: parseBoolConclusion(s.robot ?? s.is_robot ?? (isV4 ? fallbackData?.robot : null)),
+    proxy: parseBoolConclusion(s.proxy ?? s.is_proxy),
+    vpn: parseBoolConclusion(s.vpn ?? s.is_vpn),
+    tor: parseBoolConclusion(s.tor ?? s.is_tor),
+    abuse: parseBoolConclusion(s.abuse ?? s.is_abuser),
+    hosting: parseBoolConclusion(s.hosting ?? s.is_server),
+    robot: parseBoolConclusion(s.robot ?? s.is_robot),
   }
 
   const lowerIpType = (ipType || '').toLowerCase()
@@ -529,6 +594,15 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
     } else if (lowerIpType === 'isp' || lowerIpType === 'residential' || ipType === '家宽') {
       flags.hosting = false
     }
+  }
+
+  const factorDetails = {
+    proxy: (typeof s.proxy === 'object' && s.proxy !== null) ? s.proxy : (s.factors?.proxy ?? null),
+    vpn: (typeof s.vpn === 'object' && s.vpn !== null) ? s.vpn : (s.factors?.vpn ?? null),
+    tor: (typeof s.tor === 'object' && s.tor !== null) ? s.tor : (s.factors?.tor ?? null),
+    hosting: (typeof s.hosting === 'object' && s.hosting !== null) ? s.hosting : (s.factors?.hosting ?? null),
+    abuse: (typeof s.abuse === 'object' && s.abuse !== null) ? s.abuse : (s.factors?.abuse ?? null),
+    robot: (typeof s.robot === 'object' && s.robot !== null) ? s.robot : (s.factors?.robot ?? null),
   }
 
   // Build standard 6 scores
@@ -596,9 +670,7 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
 
   const scoreItems = extractScoreEntriesFromMap(rawScores, famLabel)
 
-  const media = Array.isArray(s.media) && s.media.length > 0
-    ? s.media
-    : (isV4 && Array.isArray(fallbackData?.media) ? fallbackData.media : [])
+  const media = Array.isArray(s.media) ? s.media : []
 
   let hasSongzhong = false
   let songzhongLabel = ''
@@ -611,7 +683,7 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
     }
   }
 
-  const dnsbl = s.dnsbl || s.mail?.dnsblacklist || (isV4 ? (fallbackData?.dnsbl || fallbackData?.mail?.dnsblacklist) : null) || null
+  const dnsbl = s.dnsbl || s.mail?.dnsblacklist || null
 
   const checkedAt = s.checked_at || s.checkedAt || baseCheckedAt || null
 
@@ -632,6 +704,7 @@ export function buildFamilyViewModel(famRaw, famLabel, fallbackData, baseChecked
     scoreItems,
     standardScoreItems,
     flags,
+    factorDetails,
     media,
     hasSongzhong,
     songzhongLabel,
@@ -1111,8 +1184,16 @@ export function buildIPQualityViewModel(raw, activeFamily = null) {
     }
   }
 
-  const hasIPv4 = v4Raw !== null ? true : Boolean(data.hasIPv4 ?? data.has_ipv4 ?? ipqaRaw?.hasIPv4 ?? ipqaRaw?.has_ipv4 ?? (v6Raw ? false : true))
-  const hasIPv6 = v6Raw !== null ? true : Boolean(data.hasIPv6 ?? data.has_ipv6 ?? ipqaRaw?.hasIPv6 ?? ipqaRaw?.has_ipv6 ?? false)
+  const explicitHasV4 = data?.has_ipv4 === true || data?.hasIPv4 === true || ipqaRaw?.has_ipv4 === true || ipqaRaw?.hasIPv4 === true || raw?.has_ipv4 === true || raw?.hasIPv4 === true
+  const explicitNoV4 = data?.has_ipv4 === false || data?.hasIPv4 === false || ipqaRaw?.has_ipv4 === false || ipqaRaw?.hasIPv4 === false || raw?.has_ipv4 === false || raw?.hasIPv4 === false
+  const explicitHasV6 = data?.has_ipv6 === true || data?.hasIPv6 === true || ipqaRaw?.has_ipv6 === true || ipqaRaw?.hasIPv6 === true || raw?.has_ipv6 === true || raw?.hasIPv6 === true
+  const explicitNoV6 = data?.has_ipv6 === false || data?.hasIPv6 === false || ipqaRaw?.has_ipv6 === false || ipqaRaw?.hasIPv6 === false || raw?.has_ipv6 === false || raw?.hasIPv6 === false
+
+  const v4HasData = hasRealFamilyData(v4Raw)
+  const v6HasData = hasRealFamilyData(v6Raw)
+
+  const hasIPv4 = !explicitNoV4 && (explicitHasV4 || v4HasData)
+  const hasIPv6 = !explicitNoV6 && (explicitHasV6 || v6HasData)
   const stale = Boolean(data.stale ?? raw.stale)
   const source = (enabled && installed) ? 'IPQA' : (data.source || raw.source || 'ipwho.is')
 
@@ -1128,11 +1209,11 @@ export function buildIPQualityViewModel(raw, activeFamily = null) {
             ? v6Raw.media
             : []
 
-  const v4VM = buildFamilyViewModel(v4Raw, 'IPv4', data, checkedAt)
-  const v6VM = buildFamilyViewModel(v6Raw, 'IPv6', null, checkedAt)
+  const v4VM = buildFamilyViewModel(v4Raw, 'IPv4', checkedAt)
+  const v6VM = buildFamilyViewModel(v6Raw, 'IPv6', checkedAt)
 
-  const effectiveHasIPv4 = Boolean(v4VM?.hasData || hasIPv4)
-  const effectiveHasIPv6 = Boolean(v6VM?.hasData || hasIPv6)
+  const effectiveHasIPv4 = Boolean(hasIPv4)
+  const effectiveHasIPv6 = Boolean(hasIPv6)
 
   const effectiveActive = (activeFamily === 'ipv6' && effectiveHasIPv6)
     ? 'ipv6'

@@ -78,6 +78,8 @@ import {
   parseMediaItemDetails,
   parseSongzhong,
   formatIPQualityDateTime,
+  formatFactorDisplay,
+  formatDNSBLDisplay,
 } from '../lib/api.js'
 
 export { parseMediaItemDetails, POPULAR_MEDIA }
@@ -567,23 +569,28 @@ export function NodeDetailPage({
   }, [nodeUuid, isPublic])
 
   const effectiveMediaData = useMemo(() => {
-    // Priority 1: IPQA media from active protocol family or ipQuality DTO
+    // Priority 1: IPQA media strictly from active protocol family
     const vm = ipQuality ? buildIPQualityViewModel(ipQuality, selectedIpFamily) : null
-    const activeFam = vm ? ((vm.activeFamily === 'ipv6' ? vm.v6 : vm.v4) || vm.active) : null
-    const famMedia = activeFam?.media || ipQuality?.media
-    if (Array.isArray(famMedia) && famMedia.length > 0) {
-      return famMedia.map((m) => ({
-        detector: m.name || m.detector,
-        detector_id: `ipqa-${(m.name || m.detector || '').toLowerCase()}`,
-        status: m.status,
-        status_raw: m.status_raw,
-        region: m.region,
-        type: m.type,
-        latency_ms: null,
-        checked_at: m.checked_at,
-      }))
+    const hasV4 = Boolean(vm?.hasIPv4)
+    const hasV6 = Boolean(vm?.hasIPv6)
+    if (hasV4 || hasV6) {
+      const activeFam = (vm.activeFamily === 'ipv6' ? vm.v6 : vm.v4) || vm.active
+      const famMedia = activeFam?.media
+      if (Array.isArray(famMedia) && famMedia.length > 0) {
+        return famMedia.map((m) => ({
+          detector: m.name || m.detector,
+          detector_id: `ipqa-${(m.name || m.detector || '').toLowerCase()}`,
+          status: m.status,
+          status_raw: m.status_raw,
+          region: m.region,
+          type: m.type,
+          latency_ms: null,
+          checked_at: m.checked_at,
+        }))
+      }
+      return []
     }
-    // Priority 2: direct mediaData from API
+    // Priority 2: direct mediaData from API only when no dual-stack/family model exists
     if (Array.isArray(mediaData) && mediaData.length > 0) {
       return mediaData
     }
@@ -1704,8 +1711,8 @@ export function NodeDetailPage({
             {(() => {
               if (!ipQuality) return null
               const vm = buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality
-              const hasV4 = Boolean(vm.hasIPv4 || vm.v4?.hasData)
-              const hasV6 = Boolean(vm.hasIPv6 || vm.v6?.hasData)
+              const hasV4 = Boolean(vm.hasIPv4)
+              const hasV6 = Boolean(vm.hasIPv6)
               if (!hasV4 && !hasV6) return null
               const curFam = vm.activeFamily || (hasV4 ? 'ipv4' : 'ipv6')
               return (
@@ -1740,7 +1747,7 @@ export function NodeDetailPage({
             {(() => {
               const vm = ipQuality ? (buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality) : null
               const activeVM = (vm?.activeFamily === 'ipv6' ? vm?.v6 : vm?.v4) || vm?.active || vm || {}
-              const ts = activeVM?.checkedAt || vm?.checked_at || vm?.checkedAt
+              const ts = activeVM?.checkedAt
               if (!ts) return null
               return (
                 <span className="ip-quality-header-time mono">
@@ -1758,8 +1765,8 @@ export function NodeDetailPage({
             </div>
           ) : ipQuality ? (() => {
             const vm = buildIPQualityViewModel(ipQuality, selectedIpFamily) || ipQuality
-            const hasV4 = Boolean(vm.hasIPv4 || vm.v4?.hasData)
-            const hasV6 = Boolean(vm.hasIPv6 || vm.v6?.hasData)
+            const hasV4 = Boolean(vm.hasIPv4)
+            const hasV6 = Boolean(vm.hasIPv6)
             if (!hasV4 && !hasV6) {
               return (
                 <div className="komari-ip-quality-empty" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px 12px', color: 'var(--text-muted, #94a3b8)', fontSize: '12px' }}>
@@ -1780,7 +1787,7 @@ export function NodeDetailPage({
               alertCount: Number(vm.alert_count ?? vm.ipqa?.alertCount ?? 0),
               criticalCount: Number(vm.critical_count ?? vm.ipqa?.criticalCount ?? 0),
               warningCount: Number(vm.warning_count ?? vm.ipqa?.warningCount ?? 0),
-              lastChangeAt: activeVM.checkedAt || vm.last_checked_at || vm.checked_at || vm.ipqa?.lastChangeAt || null,
+              lastChangeAt: activeVM.checkedAt || null,
               latestArchiveDate: vm.latest_archive_date || vm.ipqa?.latestArchiveDate || '',
               sources: Array.isArray(vm.sources) ? vm.sources : (Array.isArray(vm.ipqa?.sources) ? vm.ipqa?.sources : []),
               riskScore: typeof activeVM.riskScore === 'number' ? activeVM.riskScore : (typeof vm.risk_score === 'number' ? vm.risk_score : null),
@@ -1788,10 +1795,10 @@ export function NodeDetailPage({
               hasRecentChanges: Boolean(vm.has_recent_changes ?? vm.ipqa?.hasRecentChanges),
               recentChangeSummary: vm.recent_change_summary || vm.ipqa?.recentChangeSummary || '',
             }
-            const qIpType = activeVM.ipType || qBase.ipType || qBase.ip_type || ''
-            const qLocation = activeVM.location || [qBase.city, qBase.region, qBase.country].filter(Boolean).join(' · ') || '—'
-            const qAsnOrg = activeVM.asnOrg || [qBase.asn ? (String(qBase.asn).toUpperCase().startsWith('AS') ? qBase.asn : `AS${qBase.asn}`) : '', qBase.organization].filter(Boolean).join(' ') || '—'
-            const qCheckedAt = activeVM.checkedAt || qBase.checkedAt || qBase.checked_at || qIpqa.lastChangeAt || null
+            const qIpType = activeVM.ipType || ''
+            const qLocation = activeVM.location || '—'
+            const qAsnOrg = activeVM.asnOrg || '—'
+            const qCheckedAt = activeVM.checkedAt || null
             const standardScoreItems = Array.isArray(activeVM.standardScoreItems) && activeVM.standardScoreItems.length > 0
               ? activeVM.standardScoreItems
               : STANDARD_IP_RISK_DATABASES.map((db) => ({
@@ -1811,51 +1818,41 @@ export function NodeDetailPage({
                 key: 'proxy',
                 label: '代理',
                 hit: activeVM.flags?.proxy === true,
-                text: activeVM.flags?.proxy === true ? '2/7' : '0/2',
+                text: formatFactorDisplay(activeVM.factorDetails?.proxy, activeVM.flags?.proxy),
               },
               {
                 key: 'vpn',
                 label: 'VPN',
                 hit: activeVM.flags?.vpn === true,
-                text: activeVM.flags?.vpn === true ? '3/6' : '0/2',
+                text: formatFactorDisplay(activeVM.factorDetails?.vpn, activeVM.flags?.vpn),
               },
               {
                 key: 'tor',
                 label: 'Tor',
                 hit: activeVM.flags?.tor === true,
-                text: activeVM.flags?.tor === true ? '1/2' : '0/2',
+                text: formatFactorDisplay(activeVM.factorDetails?.tor, activeVM.flags?.tor),
               },
               {
                 key: 'hosting',
                 label: '机房',
-                hit: activeVM.flags?.hosting === true || lowerIpType.includes('机房') || lowerIpType.includes('hosting') || lowerIpType.includes('datacenter'),
-                text: (activeVM.flags?.hosting === true || lowerIpType.includes('机房') || lowerIpType.includes('hosting') || lowerIpType.includes('datacenter')) ? '2/2' : '0/2',
+                hit: activeVM.flags?.hosting === true,
+                text: formatFactorDisplay(activeVM.factorDetails?.hosting, activeVM.flags?.hosting),
               },
               {
                 key: 'abuse',
                 label: '滥用',
                 hit: activeVM.flags?.abuse === true,
-                text: activeVM.flags?.abuse === true ? '1/2' : '0/1',
+                text: formatFactorDisplay(activeVM.factorDetails?.abuse, activeVM.flags?.abuse),
               },
               {
                 key: 'robot',
                 label: '机器人',
                 hit: activeVM.flags?.robot === true,
-                text: activeVM.flags?.robot === true ? '1/2' : '0/0',
+                text: formatFactorDisplay(activeVM.factorDetails?.robot, activeVM.flags?.robot),
               },
             ]
 
-            let dnsblText = '407 干净 / 14 标记 / 2 黑名单'
-            if (activeVM.dnsbl && typeof activeVM.dnsbl === 'object') {
-              const d = activeVM.dnsbl
-              const clean = d.Clean ?? 416
-              const marked = d.Marked ?? 7
-              const blacklisted = d.Blacklisted ?? 0
-              dnsblText = `${clean} 干净 / ${marked} 标记 / ${blacklisted} 黑名单`
-            } else if (vm.v4?.dnsbl) {
-              const d = vm.v4.dnsbl
-              dnsblText = `${d.Clean ?? 416} 干净 / ${d.Marked ?? 7} 标记 / ${d.Blacklisted ?? 0} 黑名单`
-            }
+            const dnsblText = formatDNSBLDisplay(activeVM.dnsbl)
 
             const mediaRowsToDisplay = POPULAR_MEDIA.slice(0, 8).map((p) => {
               const match = effectiveMediaData.find((m) => {
@@ -1866,35 +1863,6 @@ export function NodeDetailPage({
               let details
               if (match) {
                 details = parseMediaItemDetails(match)
-              } else if (p.id === 'google') {
-                if (activeVM.hasSongzhong || (activeVM.country && activeVM.country.toUpperCase() === 'CN')) {
-                  details = {
-                    tone: 'songzhong',
-                    statusText: '送中',
-                    displayStatus: '送中 · CN',
-                    regionText: 'CN',
-                    latencyText: null,
-                    isSongzhong: true,
-                  }
-                } else if (activeVM.country) {
-                  details = {
-                    tone: 'available',
-                    statusText: activeVM.country,
-                    displayStatus: activeVM.country,
-                    regionText: activeVM.country,
-                    latencyText: null,
-                    isSongzhong: false,
-                  }
-                } else {
-                  details = {
-                    tone: 'available',
-                    statusText: 'HK',
-                    displayStatus: 'HK',
-                    regionText: 'HK',
-                    latencyText: null,
-                    isSongzhong: false,
-                  }
-                }
               } else {
                 details = {
                   tone: 'unknown',

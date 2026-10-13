@@ -602,6 +602,119 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
   assert.notEqual(v4Model.v4.location, v6Model.v6.location)
 
   console.log("[PASS] Protocol switching, data separation, and songzhong contracts verified")
+
+  // -----------------------------------------------------------------------------
+  // 5. Strict IPv4/IPv6 Existence & Boundary Tests
+  // -----------------------------------------------------------------------------
+  console.log("=== Testing Strict IPv4/IPv6 Existence & Zero Hardcode Contracts ===")
+  const { hasRealFamilyData, formatFactorDisplay, formatDNSBLDisplay } = await import("../src/lib/api.js")
+
+  // Test 1: {} -> neither tab displayed
+  const emptyVM = buildIPQualityViewModel({})
+  assert.equal(emptyVM.hasIPv4, false, "{} must have hasIPv4 = false")
+  assert.equal(emptyVM.hasIPv6, false, "{} must have hasIPv6 = false")
+
+  // Test 2: { ip_quality: {} } -> neither tab displayed
+  const emptyWrappedVM = buildIPQualityViewModel({ ip_quality: {} })
+  assert.equal(emptyWrappedVM.hasIPv4, false, "{ ip_quality: {} } must have hasIPv4 = false")
+  assert.equal(emptyWrappedVM.hasIPv6, false, "{ ip_quality: {} } must have hasIPv6 = false")
+
+  // Test 3: Only IPv4 object -> only IPv4 tab
+  const onlyV4VM = buildIPQualityViewModel({
+    ip_quality: {
+      ipv4: { country: 'TW', asn: 'AS3462', risk_score: 10 }
+    }
+  })
+  assert.equal(onlyV4VM.hasIPv4, true, "Only IPv4 object must have hasIPv4 = true")
+  assert.equal(onlyV4VM.hasIPv6, false, "Only IPv4 object must have hasIPv6 = false")
+
+  // Test 4: Only IPv6 object -> only IPv6 tab
+  const onlyV6VM = buildIPQualityViewModel({
+    ip_quality: {
+      ipv6: { country: 'HK', asn: 'AS202355', risk_score: 90 }
+    }
+  })
+  assert.equal(onlyV6VM.hasIPv4, false, "Only IPv6 object must have hasIPv4 = false")
+  assert.equal(onlyV6VM.hasIPv6, true, "Only IPv6 object must have hasIPv6 = true")
+
+  // Test 5: Legacy risk_score without protocol attribution -> NO tabs fabricated
+  const legacyNoFamilyVM = buildIPQualityViewModel({
+    ip_quality: { risk_score: 45, country: 'US' }
+  })
+  assert.equal(legacyNoFamilyVM.hasIPv4, false, "Legacy risk_score without attribution must not fabricate hasIPv4")
+  assert.equal(legacyNoFamilyVM.hasIPv6, false, "Legacy risk_score without attribution must not fabricate hasIPv6")
+
+  // Test 6: Explicit has_ipv4: false, has_ipv6: false -> empty state
+  const explicitBothFalseVM = buildIPQualityViewModel({
+    ip_quality: {
+      has_ipv4: false,
+      has_ipv6: false,
+      ipv4: { risk_score: 10 },
+      ipv6: { risk_score: 20 },
+    }
+  })
+  assert.equal(explicitBothFalseVM.hasIPv4, false, "Explicit has_ipv4: false must override")
+  assert.equal(explicitBothFalseVM.hasIPv6, false, "Explicit has_ipv6: false must override")
+
+  // -----------------------------------------------------------------------------
+  // 6. Zero Hardcoded Conclusions Verification
+  // -----------------------------------------------------------------------------
+  const forbiddenHardcodes = [
+    '407 干净 / 14 标记 / 2 黑名单',
+    'text: activeVM.flags?.proxy === true ? \'2/7\' : \'0/2\'',
+    'text: activeVM.flags?.vpn === true ? \'3/6\' : \'0/2\'',
+    'text: activeVM.flags?.tor === true ? \'1/2\' : \'0/2\'',
+    'text: activeVM.flags?.abuse === true ? \'1/2\' : \'0/1\'',
+    'text: activeVM.flags?.robot === true ? \'1/2\' : \'0/0\'',
+    'displayStatus: \'HK\'',
+    'statusText: \'HK\'',
+  ]
+  for (const fh of forbiddenHardcodes) {
+    assert.ok(
+      !nodeDetailSrc.includes(fh),
+      `NodeDetailPage.jsx must NOT contain hardcoded pattern: "${fh}"`
+    )
+  }
+
+  // Factor formatting tests
+  assert.equal(formatFactorDisplay(null, true), '命中', 'Boolean true must display 命中')
+  assert.equal(formatFactorDisplay(null, false), '未命中', 'Boolean false must display 未命中')
+  assert.equal(formatFactorDisplay(null, null), '—', 'Null flag must display —')
+  assert.equal(formatFactorDisplay(undefined, undefined), '—', 'Undefined flag must display —')
+  assert.equal(formatFactorDisplay({ count: 2, total: 7 }, true), '2/7', 'Real count/total must display 2/7')
+  assert.equal(formatFactorDisplay({ count: 0, total: 2 }, false), '0/2', 'Real count/total must display 0/2')
+
+  // DNSBL formatting tests
+  assert.equal(formatDNSBLDisplay(null), '暂无数据', 'Null DNSBL must display 暂无数据')
+  assert.equal(formatDNSBLDisplay(undefined), '暂无数据', 'Undefined DNSBL must display 暂无数据')
+  assert.equal(formatDNSBLDisplay({}), '暂无数据', 'Empty DNSBL object must display 暂无数据')
+  assert.equal(formatDNSBLDisplay({ Clean: 416, Marked: 7, Blacklisted: 0 }), '416 干净 / 7 标记 / 0 黑名单', 'Real numeric DNSBL must format properly')
+  assert.equal(formatDNSBLDisplay({ clean: 100, marked: 0, blacklisted: 2 }), '100 干净 / 0 标记 / 2 黑名单', 'Lowercase numeric DNSBL must format properly')
+
+  // DNSBL cross-protocol isolation check in NodeDetailPage
+  assert.ok(
+    !nodeDetailSrc.includes('vm.v4?.dnsbl'),
+    'NodeDetailPage must not fall back to vm.v4?.dnsbl'
+  )
+
+  // -----------------------------------------------------------------------------
+  // 7. Songzhong Keywords & Media Isolation Tests
+  // -----------------------------------------------------------------------------
+  // Google / YouTube matching real songzhong keywords
+  const directCnMatch = parseSongzhong({ name: 'YouTube', status: 'direct_cn' })
+  assert.equal(directCnMatch.isSongzhong, true, 'direct_cn keyword must trigger songzhong')
+
+  const mainlandRedirectMatch = parseSongzhong({ name: 'Google 定位', status: 'mainland_redirect' })
+  assert.equal(mainlandRedirectMatch.isSongzhong, true, 'mainland_redirect keyword must trigger songzhong')
+
+  // Other platforms forbidden from songzhong
+  const chatgptFake = parseSongzhong({ name: 'ChatGPT', status: 'direct_cn', region: 'CN' })
+  assert.equal(chatgptFake.isSongzhong, false, 'ChatGPT must NEVER be songzhong')
+
+  const tiktokFake = parseSongzhong({ name: 'TikTok', status: 'mainland_redirect', region: 'CN' })
+  assert.equal(tiktokFake.isSongzhong, false, 'TikTok must NEVER be songzhong')
+
+  console.log("[PASS] Strict IPv4/IPv6 existence, zero hardcodes, and songzhong contracts verified")
 }
 
 console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")
