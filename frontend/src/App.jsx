@@ -1210,31 +1210,31 @@ export function App() {
       return (
         <main className="guest-shell guest-mjj-shell">
           {guestPreview && (
-            <div className="guest-preview-banner">
-              <div className="preview-banner-left">
-                <Eye size={17} weight="bold" className="text-mint" />
-                <span>您当前处于<strong>「游客大屏模式」</strong>（访客将直接看到此只读页面）</span>
+            <div className="guest-preview-strip">
+              <div className="guest-preview-strip-left">
+                <Eye size={14} weight="bold" className="text-mint" />
+                <span>管理员预览模式（访客只读大屏）</span>
               </div>
-              <div className="preview-banner-right">
+              <div className="guest-preview-strip-right">
                 <button
                   type="button"
-                  className="button button-primary btn-sm"
+                  className="button button-primary btn-xs"
                   onClick={() => {
                     setGuestPreview(false)
                     setActiveNav('node-detail')
                   }}
                   title="返回管理后台"
                 >
-                  <SquaresFour size={15} weight="bold" />
+                  <SquaresFour size={13} weight="bold" />
                   <span>返回管理后台</span>
                 </button>
                 <button
                   type="button"
-                  className="button button-quiet btn-sm text-rose"
+                  className="button button-quiet btn-xs text-rose"
                   onClick={performLogout}
                   title="退出当前登录"
                 >
-                  <SignOut size={15} />
+                  <SignOut size={13} />
                   <span>退出登录</span>
                 </button>
               </div>

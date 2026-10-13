@@ -83,7 +83,7 @@ export function VisitorInfoCard({ clientInfo }) {
 
         <div className="visitor-card-rows">
           <div className="visitor-card-row">
-            <span className="visitor-row-label">公网 IP</span>
+            <span className="visitor-row-label">访客 IP</span>
             <span className="visitor-row-val mono">{maskVisitorIp(vm.ip) || '未知 IP'}</span>
           </div>
           <div className="visitor-card-row">
@@ -91,12 +91,11 @@ export function VisitorInfoCard({ clientInfo }) {
             <span className={`visitor-row-val ${vm.hasLocation ? '' : 'is-muted'}`}>{vm.locationText}</span>
           </div>
           <div className="visitor-card-row">
-            <span className="visitor-row-label">运营商</span>
-            <span className={`visitor-row-val ${vm.hasIsp ? '' : 'is-muted'}`}>{vm.ispText}</span>
-          </div>
-          <div className="visitor-card-row">
-            <span className="visitor-row-label">ASN</span>
-            <span className={`visitor-row-val ${vm.hasAsn ? 'mono visitor-asn-tag' : 'is-muted'}`}>{vm.asnText}</span>
+            <span className="visitor-row-label">运营商/ASN</span>
+            <span className={`visitor-row-val ${vm.hasIsp || vm.hasAsn ? '' : 'is-muted'}`}>
+              {vm.hasIsp ? vm.ispText : '运营商未知'}
+              {vm.hasAsn ? ` (${vm.asnText})` : ''}
+            </span>
           </div>
           <div className="visitor-card-row">
             <span className="visitor-row-label">系统</span>
@@ -203,6 +202,7 @@ function buildGuestNode(name, allCustomMeta, meta, telemetry = {}) {
 export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLoginSuccess, isPreview = false, onExitPreview, onLogout, theme = 'system', onThemeChange, onSelectNode }) {
   const [viewMode, setViewMode] = useState('grid') // 'grid' | 'table' | 'compact'
   const [showLogin, setShowLogin] = useState(false)
+  const [showMediaModal, setShowMediaModal] = useState(false)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
@@ -262,11 +262,14 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   // Close modal on ESC
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') setShowLogin(false)
+      if (e.key === 'Escape') {
+        setShowLogin(false)
+        setShowMediaModal(false)
+      }
     }
-    if (showLogin) window.addEventListener('keydown', handleKeyDown)
+    if (showLogin || showMediaModal) window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showLogin])
+  }, [showLogin, showMediaModal])
 
   const handlePasswordLogin = async (e) => {
     e.preventDefault()
@@ -476,7 +479,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   const healthLabel = total === null || total === 0
     ? '等待节点数据'
     : hasIssues
-      ? (online !== null && online < total ? '部分节点异常' : '检测质量下降')
+      ? (online !== null && online < total ? '部分异常' : '检测质量下降')
       : '全部正常'
   const telemetryItems = safeArray(nodes.telemetry)
   const totalRxBytes = telemetryItems.reduce((acc, t) => acc + (numeric(t.network_rx_bytes) || 0), 0)
@@ -504,35 +507,35 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   return (
     <main className="guest-shell guest-mjj-shell">
       <VisitorInfoCard clientInfo={visitorInfo} />
-      {/* 游客预览横幅（仅在管理员预览时呈现） */}
+      {/* 管理员预览提示条（仅在管理员预览时呈现，窄条无重复按钮） */}
       {isPreview && (
-        <div className="guest-preview-banner">
-          <div className="preview-banner-left">
-            <Eye size={17} weight="bold" className="text-mint" />
-            <span>您当前处于<strong>「游客大屏模式」</strong>（访客将直接看到此只读页面）</span>
+        <div className="guest-preview-strip">
+          <div className="guest-preview-strip-left">
+            <Eye size={14} weight="bold" className="text-mint" />
+            <span>管理员预览模式（访客只读大屏）</span>
           </div>
-          <div className="preview-banner-right">
-            <button type="button" className="button button-primary btn-sm" onClick={onExitPreview} title="返回管理后台">
-              <SquaresFour size={15} weight="bold" />
+          <div className="guest-preview-strip-right">
+            <button type="button" className="button button-primary btn-xs" onClick={onExitPreview} title="返回管理后台">
+              <SquaresFour size={13} weight="bold" />
               <span>返回管理后台</span>
             </button>
-            <button type="button" className="button button-quiet btn-sm text-rose" onClick={onLogout} title="退出当前登录">
-              <SignOut size={15} />
+            <button type="button" className="button button-quiet btn-xs text-rose" onClick={onLogout} title="退出当前登录">
+              <SignOut size={13} />
               <span>退出登录</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* 顶部导航 */}
+      {/* 顶部紧凑导航 */}
       <header className="guest-header">
         <div className="brand-lockup">
           <div className="brand-mark">
-            <Pulse size={22} weight="bold" />
+            <Pulse size={18} weight="bold" />
           </div>
           <div className="brand-text">
             <strong>ProbeWatch</strong>
-            <span>公开探针状态大屏</span>
+            <span>公开探针大屏</span>
           </div>
         </div>
 
@@ -540,133 +543,138 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           <ThemeToggle theme={theme} onThemeChange={onThemeChange} compact={true} />
           <a
             href="/#/status"
-            className="button button-quiet"
+            className="button button-quiet btn-sm"
             title="查看 90 天服务可用率 SLA 与故障通告"
           >
-            <Broadcast size={16} />
-            <span>90天 SLA 状态页</span>
+            <Broadcast size={14} />
+            <span>90天 SLA</span>
           </a>
           <span className="guest-live-indicator" title="页面会自动同步最新探针数据">
             <span className="status-dot status-online" />
             实时同步
           </span>
-          {isPreview ? (
-            <>
-              <button className="button button-primary" onClick={onExitPreview} title="返回管理员控制台">
-                <SquaresFour size={16} weight="bold" />
-                <span>返回管理后台</span>
-              </button>
-              <button className="button button-quiet text-rose" onClick={onLogout} title="退出管理员登录">
-                <SignOut size={16} />
-                <span>退出登录</span>
-              </button>
-            </>
-          ) : (
-            <button type="button" className="button button-primary" aria-haspopup="dialog" aria-expanded={showLogin} aria-controls="guest-admin-login" onClick={() => { setLoginError(''); setShowLogin(true) }}>
-              <SignIn size={16} weight="bold" />
+          {!isPreview && (
+            <button
+              type="button"
+              className="button button-primary btn-sm"
+              aria-haspopup="dialog"
+              aria-expanded={showLogin}
+              aria-controls="guest-admin-login"
+              onClick={() => { setLoginError(''); setShowLogin(true) }}
+            >
+              <SignIn size={14} weight="bold" />
               <span>管理员登录</span>
             </button>
           )}
         </div>
       </header>
 
-      {/* 极客大屏：Hero 全局运行状态与雷达波 */}
-      <section className="guest-hero-container">
-        <div className={`guest-hero-banner ${isAllHealthy ? 'hero-operational' : hasIssues ? 'hero-degraded' : 'hero-loading'}`}>
-          <div className="hero-status-radar">
-            <span className="radar-glow" />
+      {/* 紧凑单行状态概览指标条 */}
+      <section className="guest-stats-bar" aria-label="全局概览与关键指标">
+        <div className={`guest-stat-box ${isAllHealthy ? 'status-ok' : hasIssues ? 'status-warn' : 'status-pending'}`}>
+          <div className="stat-head">
             {isAllHealthy ? (
-              <CheckCircle size={38} weight="fill" className="hero-status-icon icon-ok" />
+              <CheckCircle size={14} weight="fill" className="text-mint" />
             ) : hasIssues ? (
-              <WarningCircle size={38} weight="fill" className="hero-status-icon icon-warn" />
+              <WarningCircle size={14} weight="fill" className="text-amber" />
             ) : (
-              <Pulse size={38} weight="bold" className="hero-status-icon icon-neutral" />
+              <Pulse size={14} weight="bold" className="text-blue" />
             )}
+            <span>{healthLabel}</span>
           </div>
-          <div className="hero-status-content">
-            <h1>
-              {healthLabel}
-            </h1>
-            <p>
-              面向访客的实时只读探针仪表盘 · 全球三网质量侦测与可用性遥测
-            </p>
+          <div className="stat-main mono">
+            {displayPercent(successRate)}
           </div>
-          <div className="hero-uptime-indicator">
-            <span className="uptime-label">在线率</span>
-            <b className="uptime-value mono">{displayPercent(successRate)}</b>
+          <div className="stat-sub">
+            {successSummary}
           </div>
         </div>
 
-        {/* 关键四项指标看板 (在线节点数、平均健康分、总体下行速率、总体上行速率) */}
-        <div className="guest-stats-grid">
-          <div className={`guest-stat-box telemetry-stat-box ${!hasTelemetry ? 'telemetry-pending' : ''}`}>
-            <div className="stat-head"><GlobeHemisphereWest size={15} /><span>在线节点数</span></div>
-            <div className="stat-main mono">
-              {online !== null && total !== null ? `${online} / ${total}` : '—'}
-            </div>
-            <div className="stat-sub">
-              {online !== null && total !== null ? `${online} 在线 · ${Math.max(0, total - online)} 离线` : '等待节点数据'}
-            </div>
+        <div className={`guest-stat-box ${!hasTelemetry ? 'telemetry-pending' : ''}`}>
+          <div className="stat-head">
+            <GlobeHemisphereWest size={14} />
+            <span>在线节点</span>
           </div>
-
-          <div className="guest-stat-box" title="综合服务可用率与线路探测健康分">
-            <div className="stat-head"><ShieldCheck size={15} /><span>平均健康分</span></div>
-            <div className="stat-main mono">
-              {apiHealthScore !== null ? `${Math.round(apiHealthScore)} 分` : '暂无评分'}
-            </div>
-            <div className="stat-sub">
-              {avgLatency !== null ? `综合延迟 ${formatLatency(avgLatency)}` : (successSummary || '等待探测样本')}
-            </div>
+          <div className="stat-main mono">
+            {online !== null && total !== null ? `${online} / ${total}` : '—'}
           </div>
-
-          <div className="guest-stat-box" title="所有已连接探针节点的实时接收速率总和">
-            <div className="stat-head"><ArrowDown size={15} className="text-mint" /><span>总体下行速率</span></div>
-            <div className="stat-main mono">
-              {formatRate(totalDownRate)}
-            </div>
-            <div className="stat-sub">
-              累计接收 {totalRxBytes > 0 ? formatBytes(totalRxBytes) : '—'}
-            </div>
+          <div className="stat-sub">
+            {online !== null && total !== null ? `${online} 在线 · ${offlineCount ?? 0} 离线` : '等待节点数据'}
           </div>
+        </div>
 
-          <div className="guest-stat-box" title="所有已连接探针节点的实时发送速率总和">
-            <div className="stat-head"><ArrowUp size={15} className="text-blue" /><span>总体上行速率</span></div>
-            <div className="stat-main mono">
-              {formatRate(totalUpRate)}
-            </div>
-            <div className="stat-sub">
-              累计发送 {totalTxBytes > 0 ? formatBytes(totalTxBytes) : '—'}
-            </div>
+        <div className="guest-stat-box" title="综合服务可用率与线路探测健康分">
+          <div className="stat-head">
+            <ShieldCheck size={14} />
+            <span>健康评分</span>
+          </div>
+          <div className="stat-main mono">
+            {apiHealthScore !== null ? `${Math.round(apiHealthScore)} 分` : '暂无评分'}
+          </div>
+          <div className="stat-sub">
+            {avgLatency !== null ? `综合延迟 ${formatLatency(avgLatency)}` : '等待探测样本'}
+          </div>
+        </div>
+
+        <div className="guest-stat-box" title="所有已连接探针节点的实时接收速率总和">
+          <div className="stat-head">
+            <ArrowDown size={14} className="text-mint" />
+            <span>实时下行</span>
+          </div>
+          <div className="stat-main mono">
+            {formatRate(totalDownRate)}
+          </div>
+          <div className="stat-sub">
+            累计 {totalRxBytes > 0 ? formatBytes(totalRxBytes) : '—'}
+          </div>
+        </div>
+
+        <div className="guest-stat-box" title="所有已连接探针节点的实时发送速率总和">
+          <div className="stat-head">
+            <ArrowUp size={14} className="text-blue" />
+            <span>实时上行</span>
+          </div>
+          <div className="stat-main mono">
+            {formatRate(totalUpRate)}
+          </div>
+          <div className="stat-sub">
+            累计 {totalTxBytes > 0 ? formatBytes(totalTxBytes) : '—'}
           </div>
         </div>
       </section>
 
-      {/* 流媒体与 AI 解锁紧凑行 */}
-      <section className="guest-media-summary" aria-label="流媒体与 AI 解锁摘要">
-        <div className="guest-media-summary-head">
-          <div className="guest-media-title-group">
-            <h2>流媒体 / AI 解锁</h2>
-            <span className="guest-media-summary-sub">按公开遥测汇总</span>
-          </div>
-          <div className="guest-media-summary-status">
-            <span className="guest-media-empty-note">
-              {guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total} 平台解锁` : '暂无流媒体检测样本'}
-            </span>
-            <strong className="mono">{guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total}` : '0/0'}</strong>
-          </div>
+      {/* 流媒体与 AI 解锁紧凑横条 */}
+      <section className="guest-media-compact-bar" aria-label="流媒体与 AI 解锁摘要">
+        <div className="media-bar-left">
+          <Broadcast size={14} className="text-blue" />
+          <strong>流媒体 / AI 解锁</strong>
+          <span className="media-bar-badge mono">
+            {guestMediaSummary.total ? `${guestMediaSummary.available}/${guestMediaSummary.total}` : '0/0'}
+          </span>
         </div>
-        {guestMediaSummary.platforms.length > 0 ? (
-          <div className="guest-media-summary-grid">
-            {guestMediaSummary.platforms.map((item) => (
-              <span key={item.name} className={item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}>
-                <b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>
-                {item.name}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div className="guest-media-empty-desc">
-            <span>管理员配置检测目标后，这里会显示最近一次真实结果。</span>
+        <div className="media-bar-center">
+          {guestMediaSummary.platforms.length > 0 ? (
+            <div className="media-bar-preview-tags">
+              {guestMediaSummary.platforms.slice(0, 4).map((item) => (
+                <span key={item.name} className={`media-mini-tag ${item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}`}>
+                  <b>{item.status === 'available' || item.status === 'unlocked' ? '✓' : '·'}</b>
+                  <span>{item.name}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="media-bar-empty-note">暂无流媒体检测结果</span>
+          )}
+        </div>
+        {guestMediaSummary.platforms.length > 0 && (
+          <div className="media-bar-right">
+            <button
+              type="button"
+              className="button button-quiet btn-xs media-view-all-btn"
+              onClick={() => setShowMediaModal(true)}
+            >
+              <span>查看全部</span>
+            </button>
           </div>
         )}
       </section>
@@ -712,38 +720,37 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
         </div>
 
         {names.length > 0 && (
-          <div className="guest-filter-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', background: 'var(--surface-subtle, rgba(255,255,255,0.03))', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border-subtle, rgba(255,255,255,0.06))' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 240px', maxWidth: '380px', background: 'var(--surface-card, rgba(0,0,0,0.2))', border: '1px solid var(--border-subtle, rgba(255,255,255,0.1))', borderRadius: '8px', padding: '6px 10px' }}>
-              <MagnifyingGlass size={15} style={{ opacity: 0.6 }} />
+          <div className="guest-filter-toolbar">
+            <div className="guest-search-box">
+              <MagnifyingGlass size={15} className="guest-search-icon" />
               <input
                 type="text"
                 placeholder="搜索节点名称、标签、地区或 IP..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ background: 'transparent', border: 'none', outline: 'none', color: 'inherit', width: '100%', fontSize: '13px' }}
+                className="guest-search-input"
               />
               {searchQuery && (
-                <button type="button" onClick={() => setSearchQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, opacity: 0.6, color: 'inherit' }}>
+                <button type="button" onClick={() => setSearchQuery('')} className="guest-search-clear" aria-label="清除搜索">
                   <X size={14} />
                 </button>
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="guest-filters-group">
               <div className="guest-status-filters" role="group" aria-label="节点状态筛选">
                 {[['all', '全部'], ['online', '在线'], ['attention', '需关注'], ['offline', '离线']].map(([value, label]) => (
                   <button key={value} type="button" className={`button button-quiet btn-sm ${selectedStatus === value ? 'active' : ''}`} onClick={() => setSelectedStatus(value)}>{label}</button>
                 ))}
               </div>
               {availableTags.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto', maxWidth: '340px' }}>
+                <div className="guest-tag-scroll">
                   <button
                     type="button"
                     className={`button button-quiet btn-sm ${selectedTag === 'all' ? 'active' : ''}`}
                     onClick={() => setSelectedTag('all')}
-                    style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: selectedTag === 'all' ? 'var(--primary-color, rgba(14,165,233,0.2))' : undefined }}
                   >
-                    全部
+                    全部标签
                   </button>
                   {availableTags.slice(0, 5).map((tag) => (
                     <button
@@ -751,7 +758,6 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                       type="button"
                       className={`button button-quiet btn-sm ${selectedTag === tag ? 'active' : ''}`}
                       onClick={() => setSelectedTag(selectedTag === tag ? 'all' : tag)}
-                      style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: selectedTag === tag ? 'var(--primary-color, rgba(14,165,233,0.2))' : undefined }}
                     >
                       {tag}
                     </button>
@@ -762,7 +768,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
               <select
                 value={sortKey}
                 onChange={(e) => setSortKey(e.target.value)}
-                style={{ background: 'var(--surface-card, rgba(0,0,0,0.2))', border: '1px solid var(--border-subtle, rgba(255,255,255,0.1))', color: 'inherit', fontSize: '12px', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer' }}
+                className="guest-sort-select"
               >
                 <option value="default">默认排序</option>
                 <option value="cpu">CPU 占用 ⬇</option>
@@ -780,7 +786,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                 <p style={{ fontSize: '13px', marginTop: '6px' }}>请尝试调整搜索关键词或重置标签筛选条件</p>
               </div>
             ) : viewMode === 'grid' ? (
-              <div className={`guest-node-grid ${filteredNames.length === 1 ? 'single-node-grid' : ''}`}>
+              <div className={`guest-node-grid ${filteredNames.length === 1 ? 'single-node-grid' : filteredNames.length === 2 ? 'two-node-grid' : ''}`}>
                 {filteredNames.map((name, index) => {
                   const meta = detectRegionAndFlag(name, '')
                   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
@@ -887,14 +893,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         </div>
                       </div>
 
-                      {/* 2. 状态标签行 (在线天数 & 价格周期) */}
-                      <div className="vps-sub-pills">
-                        <span className="vps-sub-pill">{nodeStatus === 'offline' ? '历史在线 ' : '在线 '}{uptimeText}</span>
-                        <span className="vps-sub-pill">{priceText}</span>
-                        <span className={`vps-sub-pill ${nodeStatus === 'offline' ? 'is-stale' : ''}`}>{statusDetail}</span>
-                      </div>
-
-                      {/* 2.5 IP 质量概览条 */}
+                      {/* 2. 系统/地区/ASN/风险概览条 */}
                       <div className="vps-ipqa-strip" title={`IP 质量: ${ipTypeDisplay} · ${locationDisplay} · ${asnDisplay} · ${riskInfo.label}`}>
                         <span className="vps-ipqa-item">
                           <span className="vps-ipqa-label">类型</span>
@@ -1071,19 +1070,25 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                         </div>
                       )}
 
-                      {/* 卡片底栏: 提示与进入详情按钮 */}
+                      {/* 卡片底栏: 剩余天数, 价格/剩余价值, 最近上报与进入详情按钮 */}
                       <div className="vps-card-footer">
-                        <span className="vps-card-footer-tip">{remainDays !== null ? `剩余 ${remainDays} 天` : '点击查看详细遥测'}</span>
-                        <button
-                          type="button"
-                          className="vps-detail-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry))
-                          }}
-                        >
-                          详情 →
-                        </button>
+                        <div className="vps-footer-left">
+                          <span className="vps-footer-pill">{remainDays !== null ? `剩 ${remainDays} 天` : (uptimeText !== '—' ? `在线 ${uptimeText}` : '在线 —')}</span>
+                          {custom.price && <span className="vps-footer-pill">{priceText}</span>}
+                        </div>
+                        <div className="vps-footer-right">
+                          <span className="vps-card-footer-tip">{lastReportedAt ? formatTimeOfDay(lastReportedAt) : '暂无上报'}</span>
+                          <button
+                            type="button"
+                            className="vps-detail-btn"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCardClick(buildGuestNode(name, allCustomMeta, meta, telemetry))
+                            }}
+                          >
+                            详情 →
+                          </button>
+                        </div>
                       </div>
 
                       {/* 保持安全契约约束兼容 */}
@@ -1368,6 +1373,33 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 流媒体与 AI 解锁完整弹窗 */}
+      {showMediaModal && (
+        <div className="modal-overlay" onClick={() => setShowMediaModal(false)}>
+          <div className="media-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="media-modal-title" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                <Broadcast size={18} className="text-blue" />
+                <span id="media-modal-title">流媒体与 AI 解锁详情</span>
+                <span className="media-bar-badge mono">{guestMediaSummary.available}/{guestMediaSummary.total}</span>
+              </div>
+              <button className="icon-button modal-close" onClick={() => setShowMediaModal(false)} aria-label="关闭">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="media-modal-grid">
+              {guestMediaSummary.platforms.map((item) => (
+                <div key={item.name} className={`media-modal-card ${item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}`}>
+                  <span className="media-modal-status-icon">{item.status === 'available' || item.status === 'unlocked' ? '✓' : '×'}</span>
+                  <span className="media-modal-name">{item.name}</span>
+                  <span className="media-modal-status-text">{item.status === 'available' || item.status === 'unlocked' ? '已解锁' : '未解锁'}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

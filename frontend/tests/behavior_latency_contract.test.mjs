@@ -1208,27 +1208,28 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 }
 
 // -----------------------------------------------------------------------------
-// Scenario 46: GuestView 2-node responsive CSS Grid layout & full-width shell
+// Scenario 46: GuestView compact 3-column MJJ responsive layout & centered shell
 // -----------------------------------------------------------------------------
 {
   const stylesSrc = readFileSync(resolve('frontend/src/styles.css'), 'utf8')
   const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
 
   assert.ok(
-    stylesSrc.includes('grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));'),
-    'Scenario 46: .guest-node-grid uses responsive repeat(auto-fit, minmax(min(100%, 460px), 1fr)) instead of hardcoded 4 columns'
+    stylesSrc.includes('grid-template-columns: repeat(3, minmax(0, 1fr));') &&
+      stylesSrc.includes('width: min(100% - 32px, 1240px);'),
+    'Scenario 46: .guest-node-grid uses 3 columns and .guest-shell is capped at 1240px centered'
   )
   assert.ok(
-    stylesSrc.includes('@media (min-width: 1100px) and (max-width: 1599px)') &&
-      stylesSrc.includes('@media (min-width: 700px) and (max-width: 1099px)') &&
+    stylesSrc.includes('.guest-node-grid.two-node-grid') &&
+      stylesSrc.includes('@media (max-width: 1279px)') &&
       stylesSrc.includes('@media (max-width: 699px)'),
-    'Scenario 46: Responsive breakpoints for 1100-1599px (2 cols), 700-1099px, and <=699px (1 col) are present'
+    'Scenario 46: Responsive breakpoints for two-node centering, 2-cols (<=1279px), and 1-col (<=699px) are present'
   )
   assert.ok(
-    guestSrc.includes("filteredNames.length === 1 ? 'single-node-grid' : ''"),
-    'Scenario 46: Single node applies single-node-grid cap while 2+ nodes fill full row width'
+    guestSrc.includes('single-node-grid') && guestSrc.includes('two-node-grid'),
+    'Scenario 46: GuestView applies single-node-grid and two-node-grid classes appropriately'
   )
-  console.log('[PASS] Scenario 46: GuestView 2-node responsive CSS Grid layout verified.')
+  console.log('[PASS] Scenario 46: GuestView compact 3-column MJJ responsive layout verified.')
 }
 
 // -----------------------------------------------------------------------------
