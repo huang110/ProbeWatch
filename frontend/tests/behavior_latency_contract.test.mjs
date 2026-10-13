@@ -8,6 +8,7 @@ import {
   formatTargetScopeDisplay,
   maskNodeIdentifier,
   resolveNodeDisplayName,
+  maskTargetIdentifier,
   extractAvailableNodeTags,
   TARGET_QUICK_TEMPLATES,
   applyTargetQuickTemplate,
@@ -1090,4 +1091,118 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   console.log('[PASS] Scenario 41: readOnly gating, delete confirmation, and CSRF 403 single-retry verified.')
 }
 
-console.log('\n=== ALL 41 LATENCY, SCOPE, ENROLLMENT, IPQA & TARGET-MANAGE CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 42 (Auto-ID #1-#5): Create payload never includes user-entered id; Edit preserves original record id
+// -----------------------------------------------------------------------------
+{
+  const createForm = applyTargetQuickTemplate('http', {})
+  const createPayload = buildTargetSubmitPayload(createForm)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(createPayload, 'id'), false, 'Scenario 42: Create payload must omit id so backend auto-generates it')
+
+  const createFormWithBlankId = { ...applyTargetQuickTemplate('tcp', {}), id: '' }
+  const createPayloadBlank = buildTargetSubmitPayload(createFormWithBlankId)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(createPayloadBlank, 'id'), false, 'Scenario 42: Create payload with empty id must omit id')
+
+  const existingRecord = {
+    id: 'target_1760000000_a1b2c3d4e5f60718',
+    name: 'Original Name',
+    kind: 'http',
+    host: 'example.com',
+    port: 80,
+    path: '/health',
+    node_ids: ['node-1'],
+    node_tags: ['sg'],
+  }
+  const editForm = buildTargetFormFromRecord(existingRecord)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(editForm, 'id'), false, 'Scenario 42: Edit form state does not expose editable id field')
+  editForm.name = 'Renamed Target'
+  editForm.nodeIds = ['node-1', 'node-2']
+  editForm.nodeTags = ['sg', 'hk']
+  const editPayload = buildTargetSubmitPayload(editForm, existingRecord)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(editPayload, 'id'), false, 'Scenario 42: PATCH payload does not overwrite route :id parameter')
+  assert.strictEqual(editPayload.name, 'Renamed Target', 'Scenario 42: Renamed target updates name')
+  assert.deepStrictEqual(editPayload.node_ids, ['node-1', 'node-2'], 'Scenario 42: Updated node_ids preserved')
+  assert.deepStrictEqual(editPayload.node_tags, ['sg', 'hk'], 'Scenario 42: Updated node_tags preserved')
+  console.log('[PASS] Scenario 42: Create omits id & Edit preserves immutable target ID verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 43 (Auto-ID #9 & #10): Drawer removes ID input, shows auto-ID hint, and masks internal ID in collapsed advanced section
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    !targetManageSrc.includes('<span className="field-label">ID *</span>') &&
+      !targetManageSrc.includes("setField('id')") &&
+      !targetManageSrc.includes('请输入目标 ID'),
+    'Scenario 43: Create/Edit drawer must NOT render an ID input box or require manual ID entry'
+  )
+  assert.ok(
+    targetManageSrc.includes('系统将自动生成唯一标识，无需手动填写。'),
+    'Scenario 43: Drawer Section A displays auto-ID helper hint'
+  )
+  assert.ok(
+    targetManageSrc.includes('maskTargetIdentifier(editingTarget.id)') &&
+      targetManageSrc.includes('复制内部标识') &&
+      targetManageSrc.includes('handleCopyInternalId'),
+    'Scenario 43: Edit drawer provides masked internal ID and copy button inside collapsed advanced section'
+  )
+  assert.strictEqual(
+    maskTargetIdentifier('target_1760000000_a1b2c3d4e5f60718'),
+    'target_1…0718',
+    'Scenario 43: maskTargetIdentifier masks auto-generated target ID'
+  )
+  assert.strictEqual(
+    maskTargetIdentifier('http-sh-01'),
+    'http…01',
+    'Scenario 43: maskTargetIdentifier masks legacy short target ID'
+  )
+  console.log('[PASS] Scenario 43: Drawer removes ID input & masks internal ID in collapsed advanced section verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 44 (Auto-ID #11 & #12): Target list, mobile cards, delete modal, search, and readOnly mode hide internal ID
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes('<th>名称</th>') &&
+      !targetManageSrc.includes('<th>名称 / ID</th>') &&
+      !targetManageSrc.includes('target-id-sub') &&
+      !targetManageSrc.includes('<span className="kv-label">目标 ID</span>') &&
+      !targetManageSrc.includes('data-target-id='),
+    'Scenario 44: Desktop table and mobile cards must NOT display internal target IDs'
+  )
+  assert.ok(
+    targetManageSrc.includes('placeholder="搜索名称 / 主机 / 类型 / 标签…"') &&
+      !targetManageSrc.includes('t.id.toLowerCase().includes(q)'),
+    'Scenario 44: Search box searches name, host, type, and tags without requiring internal ID'
+  )
+  assert.ok(
+    !targetManageSrc.includes('{confirmDeleteTarget.id}'),
+    'Scenario 44: Delete confirmation modal does NOT expose internal target ID'
+  )
+  console.log('[PASS] Scenario 44: Target list, mobile cards, delete modal, search, and readOnly hide internal ID verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 45 (Auto-ID #8): HTTP 409 conflict displays friendly Chinese error without stack trace
+// -----------------------------------------------------------------------------
+{
+  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const latencyModalSrc = readFileSync(resolve('frontend/src/components/NewLatencyTargetModal.jsx'), 'utf8')
+  const routeModalSrc = readFileSync(resolve('frontend/src/components/NewRouteMonitorModal.jsx'), 'utf8')
+  assert.ok(
+    targetManageSrc.includes("if (response.status === 409) throw new Error('conflict')") &&
+      targetManageSrc.includes("conflict: '目标标识生成冲突，请重试'"),
+    'Scenario 45: TargetManage maps HTTP 409 to "目标标识生成冲突，请重试"'
+  )
+  assert.ok(
+    latencyModalSrc.includes('目标标识生成冲突，请重试') &&
+      routeModalSrc.includes('目标标识生成冲突，请重试'),
+    'Scenario 45: Other target creation modals also omit client ID and map 409 to Chinese conflict message'
+  )
+  console.log('[PASS] Scenario 45: HTTP 409 conflict friendly Chinese message verified.')
+}
+
+console.log('\n=== ALL 45 LATENCY, SCOPE, ENROLLMENT, IPQA & TARGET-MANAGE CONTRACT TESTS PASSED ===')

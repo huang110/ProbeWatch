@@ -118,6 +118,17 @@ export function maskNodeIdentifier(rawId) {
 }
 
 /**
+ * Masks internal target ID for collapsed admin diagnostic display, never exposing full internal IDs.
+ */
+export function maskTargetIdentifier(rawId) {
+  const s = String(rawId || '').trim()
+  if (!s) return '—'
+  if (s.length <= 6) return `${s.slice(0, 2)}…`
+  if (s.length <= 12) return `${s.slice(0, 4)}…${s.slice(-2)}`
+  return `${s.slice(0, 8)}…${s.slice(-4)}`
+}
+
+/**
  * Resolves a node UUID/ID to its human-readable node name (never returning a full UUID).
  */
 export function resolveNodeDisplayName(rawId, nodes = []) {
@@ -237,7 +248,6 @@ export const TARGET_QUICK_TEMPLATES = {
     form: {
       kind: 'http',
       name: 'HTTP 健康检查',
-      id: 'http-health-01',
       host: 'example.com',
       port: '80',
       path: '/health',
@@ -260,7 +270,6 @@ export const TARGET_QUICK_TEMPLATES = {
     form: {
       kind: 'tcp',
       name: 'TCP 端口检查',
-      id: 'tcp-port-443',
       host: '1.1.1.1',
       port: '443',
       path: '',
@@ -283,7 +292,6 @@ export const TARGET_QUICK_TEMPLATES = {
     form: {
       kind: 'dns',
       name: 'DNS 解析检查',
-      id: 'dns-resolve-01',
       host: 'one.one.one.one',
       port: '53',
       path: '',
@@ -303,13 +311,15 @@ export const TARGET_QUICK_TEMPLATES = {
 export function applyTargetQuickTemplate(templateKey, baseForm = {}) {
   const tpl = TARGET_QUICK_TEMPLATES[templateKey]
   if (!tpl) return { ...baseForm }
-  return {
+  const next = {
     ...baseForm,
     ...tpl.form,
     nodeIds: [...tpl.form.nodeIds],
     nodeTags: [...tpl.form.nodeTags],
     regionRulesList: [...tpl.form.regionRulesList],
   }
+  delete next.id
+  return next
 }
 
 /**
@@ -353,7 +363,6 @@ export function buildTargetFormFromRecord(target) {
 
   return {
     kind,
-    id: String(target.id || ''),
     name: String(target.name || ''),
     host: String(target.host || ''),
     port: String(target.port ?? defaultPort),
@@ -379,7 +388,7 @@ export function buildTargetFormFromRecord(target) {
 
 /**
  * Builds the API POST/PATCH request payload from drawer form state, strictly preserving
- * node_ids, node_tags, and existing region_rules upon edit.
+ * node_ids, node_tags, and existing region_rules upon edit. Never sends user-input id.
  */
 export function buildTargetSubmitPayload(form, initialTarget = null) {
   const kind = form.kind || 'tcp'
@@ -392,7 +401,6 @@ export function buildTargetSubmitPayload(form, initialTarget = null) {
     : Array.from(new Set((Array.isArray(form.nodeTags) ? form.nodeTags : []).map((t) => String(t || '').trim()).filter(Boolean)))
 
   const body = {
-    id: String(form.id || '').trim(),
     name: String(form.name || '').trim(),
     kind,
     host: String(form.host || '').trim(),

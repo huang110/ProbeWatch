@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle,
   CircleNotch,
+  Copy,
   Crosshair,
   Funnel,
   Globe,
@@ -31,6 +32,7 @@ import {
   executeWithCsrfRetry,
   extractAvailableNodeTags,
   formatTargetScopeDisplay,
+  maskTargetIdentifier,
   nodeMatchesTarget,
 } from '../lib/targetScope.js'
 
@@ -114,7 +116,6 @@ const readErrorDetail = async (response) => {
 
 export const emptyTargetForm = (kind = 'http') => ({
   kind,
-  id: '',
   name: '',
   host: '',
   port: String(KIND_PORT_DEFAULTS[kind] ?? 80),
@@ -143,12 +144,9 @@ const parseLegacyRegionRulesJson = (rawText) => {
 export const validateTargetForm = (form) => {
   const kind = form.kind
   const name = String(form.name || '').trim()
-  const id = String(form.id || '').trim()
   const host = String(form.host || '').trim()
   if (!name) return '请输入目标名称。'
   if (name.length > 128) return '目标名称不能超过 128 个字符。'
-  if (!id) return '请输入目标 ID。'
-  if (id.length > 128) return '目标 ID 不能超过 128 个字符。'
   if (!host) return '请输入主机地址。'
   if (host.length > 253) return '主机地址不能超过 253 个字符。'
   if (/\s/.test(host) || host.includes('://') || /[/?#@\\]/.test(host)) {
@@ -383,7 +381,7 @@ export function TargetTable({
                   />
                 </th>
               )}
-              <th>名称 / ID</th>
+              <th>名称</th>
               <th>类型</th>
               <th>主机 / 端口</th>
               <th>路径 / 记录类型</th>
@@ -415,7 +413,6 @@ export function TargetTable({
               return (
                 <tr
                   key={target.id || `target-${index}`}
-                  data-target-id={target.id || undefined}
                   className={isMediaDisabled ? 'target-row-media-disabled' : undefined}
                 >
                   {!readOnly && onSelectToggle && (
@@ -442,7 +439,6 @@ export function TargetTable({
                           </span>
                         )}
                       </div>
-                      <span className="target-id-sub mono">{target.id || '—'}</span>
                     </div>
                   </td>
                   <td>
@@ -559,7 +555,7 @@ export function TargetTable({
                           <button
                             type="button"
                             className="text-button target-edit-btn"
-                            aria-label={`${isMedia ? '查看' : '编辑'}检测目标 ${target.id || target.name}`}
+                            aria-label={`${isMedia ? '查看' : '编辑'}检测目标 ${target.name || '未命名目标'}`}
                             disabled={mutatingId === target.id}
                             onClick={() => onEdit(target)}
                           >
@@ -569,7 +565,7 @@ export function TargetTable({
                         <button
                           type="button"
                           className="text-button target-delete"
-                          aria-label={`删除检测目标 ${target.id || target.name}`}
+                          aria-label={`删除检测目标 ${target.name || '未命名目标'}`}
                           disabled={mutatingId === target.id}
                           onClick={(event) => {
                             event.preventDefault()
@@ -600,7 +596,6 @@ export function TargetTable({
             <div
               key={target.id || `mobile-target-${index}`}
               className={`target-mobile-card ${!target.enabled ? 'is-disabled' : ''}`}
-              data-target-id={target.id || undefined}
             >
               <div className="target-mobile-card-top">
                 <div className="target-mobile-title-wrap">
@@ -644,10 +639,6 @@ export function TargetTable({
 
               {isExpanded && (
                 <div className="target-mobile-card-extra">
-                  <div className="target-mobile-kv">
-                    <span className="kv-label">目标 ID</span>
-                    <span className="kv-val mono">{target.id}</span>
-                  </div>
                   <div className="target-mobile-kv">
                     <span className="kv-label">端口</span>
                     <span className="kv-val mono">{target.port ?? '—'}</span>
@@ -760,6 +751,7 @@ export function TargetManage({
   const [nodeSearch, setNodeSearch] = useState('')
   const [customTagInput, setCustomTagInput] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [copiedInternalId, setCopiedInternalId] = useState(false)
 
   // 删除二次确认状态
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState(null)
@@ -1015,7 +1007,7 @@ export function TargetManage({
     }
   }, [targets, kinds, telemetryMap])
 
-  // 筛选后的可见目标列表
+  // 筛选后的可见目标列表（搜索名称、主机、类型、标签，不依赖内部 ID）
   const visible = useMemo(() => {
     let list = kinds ? targets.filter((target) => kinds.includes(target.kind)) : targets
     if (!kinds) {
@@ -1039,10 +1031,15 @@ export function TargetManage({
       const q = searchQuery.trim().toLowerCase()
       list = list.filter((t) => {
         const sc = formatTargetScopeDisplay(t, nodes)
+        const kindLabel = String(KIND_LABELS[t.kind] || t.kind || '').toLowerCase()
+        const rawKind = String(t.kind || '').toLowerCase()
+        const tagsStr = Array.isArray(t.nodeTags) ? t.nodeTags.join(' ').toLowerCase() : ''
         return (
           t.name.toLowerCase().includes(q) ||
-          t.id.toLowerCase().includes(q) ||
           t.host.toLowerCase().includes(q) ||
+          rawKind.includes(q) ||
+          kindLabel.includes(q) ||
+          tagsStr.includes(q) ||
           sc.label.toLowerCase().includes(q) ||
           sc.detail.toLowerCase().includes(q)
         )
@@ -1104,6 +1101,7 @@ export function TargetManage({
     setNodeSearch('')
     setCustomTagInput('')
     setAdvancedOpen(false)
+    setCopiedInternalId(false)
     setDrawerOpen(true)
   }, [])
 
@@ -1116,10 +1114,11 @@ export function TargetManage({
     setNodeSearch('')
     setCustomTagInput('')
     setAdvancedOpen(false)
+    setCopiedInternalId(false)
     setDrawerOpen(true)
   }, [])
 
-  // 打开编辑/查看抽屉（复用同一个抽屉，完整保留 node_ids、node_tags、region_rules）
+  // 打开编辑/查看抽屉（复用同一个抽屉，完整保留 node_ids、node_tags、region_rules；高级设置默认折叠）
   const openEditDrawer = useCallback((target) => {
     if (!target) return
     setDrawerMode('edit')
@@ -1129,7 +1128,8 @@ export function TargetManage({
     setFormError('')
     setNodeSearch('')
     setCustomTagInput('')
-    setAdvancedOpen(Array.isArray(built?.regionRulesList) && built.regionRulesList.length > 0)
+    setAdvancedOpen(false)
+    setCopiedInternalId(false)
     setDrawerOpen(true)
   }, [])
 
@@ -1137,7 +1137,20 @@ export function TargetManage({
     if (submitting) return
     setDrawerOpen(false)
     setFormError('')
+    setCopiedInternalId(false)
   }, [submitting])
+
+  const handleCopyInternalId = useCallback(async () => {
+    if (!editingTarget?.id) return
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(String(editingTarget.id))
+      }
+      setCopiedInternalId(true)
+    } catch {
+      setCopiedInternalId(false)
+    }
+  }, [editingTarget])
 
   const disableAllMediaTargets = async () => {
     setMutatingId('batch-disable-media')
@@ -1520,6 +1533,7 @@ export function TargetManage({
       )
       if (response.status === 401) throw new Error('auth')
       if (response.status === 403) throw new Error('forbidden')
+      if (response.status === 409) throw new Error('conflict')
       if (!response.ok) {
         throw new Error(
           (await readErrorDetail(response)) || `${isEditing ? '更新' : '创建'}失败（${response.status}）`
@@ -1541,6 +1555,7 @@ export function TargetManage({
         auth: `需要登录后才能${isEditing ? '编辑' : '创建'}检测目标。`,
         csrf: '无法获取安全令牌，请刷新后重试。',
         forbidden: `${isEditing ? '更新' : '创建'}检测目标被拒绝，请刷新后重试。`,
+        conflict: '目标标识生成冲突，请重试',
       }
       setFormError(messages[caught?.message] || caught?.message || `${isEditing ? '更新' : '创建'}失败，请稍后重试。`)
     } finally {
@@ -1758,7 +1773,7 @@ export function TargetManage({
                 className="target-search-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索名称 / ID / 主机 / 标签…"
+                placeholder="搜索名称 / 主机 / 类型 / 标签…"
                 aria-label="搜索检测目标"
               />
               {searchQuery && (
@@ -1881,7 +1896,10 @@ export function TargetManage({
               <div className="target-drawer-body">
                 {/* 分组 A: 基本信息 */}
                 <section className="target-form-section">
-                  <div className="target-section-title">A. 基本信息</div>
+                  <div className="target-section-head-row">
+                    <span className="target-section-title">A. 基本信息</span>
+                    <span className="target-auto-id-hint">系统将自动生成唯一标识，无需手动填写。</span>
+                  </div>
                   <div className="target-form-grid">
                     <label className="field">
                       <span className="field-label">类型 *</span>
@@ -1912,18 +1930,6 @@ export function TargetManage({
                     </label>
 
                     <label className="field">
-                      <span className="field-label">ID *</span>
-                      <input
-                        className="field-input mono"
-                        value={form.id}
-                        onChange={setField('id')}
-                        maxLength={128}
-                        disabled={drawerMode === 'edit'}
-                        placeholder="例如：http-sh-01"
-                      />
-                    </label>
-
-                    <label className="field">
                       <span className="field-label">主机 *</span>
                       <input
                         className="field-input mono"
@@ -1949,7 +1955,7 @@ export function TargetManage({
                     </label>
 
                     {HTTP_LIKE_KINDS.includes(form.kind) && (
-                      <label className="field">
+                      <label className="field field-span-full">
                         <span className="field-label">路径 *</span>
                         <input
                           className="field-input mono"
@@ -1963,7 +1969,7 @@ export function TargetManage({
                     )}
 
                     {form.kind === 'dns' && (
-                      <label className="field">
+                      <label className="field field-span-full">
                         <span className="field-label">DNS 记录类型 *</span>
                         <select
                           className="field-select mono"
@@ -2013,7 +2019,7 @@ export function TargetManage({
                     </label>
 
                     {form.kind === 'mtr' && (
-                      <label className="field">
+                      <label className="field field-span-full">
                         <span className="field-label">最大跳数</span>
                         <input
                           className="field-input mono"
@@ -2028,7 +2034,7 @@ export function TargetManage({
                     )}
 
                     {HTTP_LIKE_KINDS.includes(form.kind) && (
-                      <label className="field">
+                      <label className="field field-span-full">
                         <span className="field-label">期望状态码</span>
                         <input
                           className="field-input mono"
@@ -2233,7 +2239,7 @@ export function TargetManage({
                   )}
                 </section>
 
-                {/* 高级设置：区域规则（默认折叠，表单化编辑并保留旧目标 region_rules） */}
+                {/* 高级设置：区域规则与只读内部标识（默认折叠） */}
                 <section className="target-form-section target-advanced-section">
                   <button
                     type="button"
@@ -2243,7 +2249,7 @@ export function TargetManage({
                   >
                     <span className="adv-toggle-left">
                       {advancedOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}
-                      <span>高级设置 · 区域规则 (region_rules)</span>
+                      <span>高级设置 · 区域规则与诊断信息</span>
                       {form.regionRulesList?.length > 0 && (
                         <span className="adv-count-pill mono">{form.regionRulesList.length} 条</span>
                       )}
@@ -2253,6 +2259,25 @@ export function TargetManage({
 
                   {advancedOpen && (
                     <div className="target-advanced-body">
+                      {drawerMode === 'edit' && editingTarget?.id && (
+                        <div className="target-internal-id-diag">
+                          <div className="diag-meta">
+                            <span className="diag-label">内部标识（脱敏显示）</span>
+                            <code className="diag-code mono" data-testid="masked-internal-target-id">
+                              {maskTargetIdentifier(editingTarget.id)}
+                            </code>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button-quiet target-copy-id-btn"
+                            onClick={handleCopyInternalId}
+                          >
+                            <Copy size={12} />
+                            {copiedInternalId ? '已复制内部标识' : '复制内部标识'}
+                          </button>
+                        </div>
+                      )}
+
                       <p className="target-advanced-hint">
                         按响应特征匹配归属地区（表单化维护，编辑旧目标时自动保留原有 <code>region_rules</code>，无需手写 JSON）。
                       </p>
@@ -2358,8 +2383,7 @@ export function TargetManage({
               <h3>确认删除检测目标？</h3>
             </div>
             <p className="confirm-modal-desc">
-              即将删除检测目标 <strong>{confirmDeleteTarget.name}</strong>（ID:{' '}
-              <code className="mono">{confirmDeleteTarget.id}</code>）。删除后各探针将停止对该目标的采样调度。
+              即将删除检测目标 <strong>{confirmDeleteTarget.name}</strong>。删除后各探针将停止对该目标的采样调度。
             </p>
             <div className="confirm-modal-actions">
               <button

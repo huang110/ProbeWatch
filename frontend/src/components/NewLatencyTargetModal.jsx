@@ -384,12 +384,9 @@ export function NewLatencyTargetModal({
     setLoading(true)
     try {
       const csrfToken = await fetchCsrfToken()
-      const targetId = isEdit
-        ? initialData.id
-        : `target-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`
+      const targetId = isEdit ? initialData.id : ''
 
       const payload = {
-        id: targetId,
         name: trimmedName,
         kind,
         host: cleanHost,
@@ -446,6 +443,9 @@ export function NewLatencyTargetModal({
         body: JSON.stringify(payload),
       })
 
+      if (res.status === 409) {
+        throw new Error('目标标识生成冲突，请重试')
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `${isEdit ? '修改' : '创建'}监测任务失败（HTTP ${res.status}）`)

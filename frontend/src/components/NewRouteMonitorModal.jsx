@@ -109,10 +109,8 @@ export function NewRouteMonitorModal({ isOpen, onClose, nodes = [], onCreated })
     try {
       const csrfToken = await fetchCsrfToken()
       const finalName = taskName.trim() || `${isp} ${region} 回程 (${expectedRoute})`
-      const safeId = `mtr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 
       const payload = {
-        id: safeId,
         name: finalName,
         kind: 'mtr',
         host,
@@ -132,6 +130,9 @@ export function NewRouteMonitorModal({ isOpen, onClose, nodes = [], onCreated })
         body: JSON.stringify(payload),
       })
 
+      if (res.status === 409) {
+        throw new Error('目标标识生成冲突，请重试')
+      }
       if (!res.ok) {
         let errText = '创建回程监测任务失败'
         try {
