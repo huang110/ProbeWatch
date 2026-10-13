@@ -1060,8 +1060,17 @@ export function TargetManage({
     [targets]
   )
 
-  // 从当前节点真实标签生成可选标签列表
-  const availableTags = useMemo(() => extractAvailableNodeTags(nodes), [nodes])
+  // 从当前节点与目标真实标签生成可选标签列表（若节点尚未配置自定义 tags，提供常用标签 chip 以供直接点击）
+  const availableTags = useMemo(() => {
+    const fromNodes = extractAvailableNodeTags(nodes)
+    const fromTargets = []
+    for (const t of targets) {
+      if (Array.isArray(t.nodeTags)) fromTargets.push(...t.nodeTags)
+      else if (Array.isArray(t.node_tags)) fromTargets.push(...t.node_tags)
+    }
+    const merged = Array.from(new Set([...fromNodes, ...fromTargets].filter(Boolean)))
+    return merged.length > 0 ? merged : ['sg-edge', 'hk-cn2', 'us-west', 'bgp']
+  }, [nodes, targets])
 
   // 抽屉内节点搜索过滤
   const filteredDrawerNodes = useMemo(() => {
@@ -1349,7 +1358,7 @@ export function TargetManage({
       const nextIds = Array.from(set)
       const hasTags = current.nodeTags.length > 0
       const nextMode =
-        nextIds.length > 0 && hasTags
+        current.scopeMode === 'custom' || (nextIds.length > 0 && hasTags)
           ? 'custom'
           : nextIds.length > 0
             ? 'nodes'
@@ -1370,7 +1379,7 @@ export function TargetManage({
     const allIds = filteredDrawerNodes.map((n) => n.uuid || n.id).filter(Boolean)
     setForm((current) => ({
       ...current,
-      scopeMode: current.nodeTags.length > 0 ? 'custom' : 'nodes',
+      scopeMode: current.scopeMode === 'custom' || current.nodeTags.length > 0 ? 'custom' : 'nodes',
       nodeIds: Array.from(new Set([...current.nodeIds, ...allIds])),
     }))
   }
@@ -1392,7 +1401,7 @@ export function TargetManage({
       const nextTags = Array.from(set)
       const hasNodes = current.nodeIds.length > 0
       const nextMode =
-        hasNodes && nextTags.length > 0
+        current.scopeMode === 'custom' || (hasNodes && nextTags.length > 0)
           ? 'custom'
           : nextTags.length > 0
             ? 'tags'
@@ -1421,7 +1430,7 @@ export function TargetManage({
       const nextTags = Array.from(new Set([...current.nodeTags, ...tagsToAdd]))
       return {
         ...current,
-        scopeMode: current.nodeIds.length > 0 ? 'custom' : 'tags',
+        scopeMode: current.scopeMode === 'custom' || current.nodeIds.length > 0 ? 'custom' : 'tags',
         nodeTags: nextTags,
       }
     })
