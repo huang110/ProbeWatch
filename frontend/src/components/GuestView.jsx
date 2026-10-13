@@ -644,7 +644,20 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
       </section>
 
       {/* 流媒体与 AI 解锁紧凑横条 */}
-      <section className="guest-media-compact-bar" aria-label="流媒体与 AI 解锁摘要">
+      <section
+        className="guest-media-compact-bar"
+        aria-label="流媒体与 AI 解锁摘要"
+        role="button"
+        tabIndex={0}
+        onClick={() => setShowMediaModal(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setShowMediaModal(true)
+          }
+        }}
+        title="点击查看完整流媒体与 AI 解锁列表"
+      >
         <div className="media-bar-left">
           <Broadcast size={14} className="text-blue" />
           <strong>流媒体 / AI 解锁</strong>
@@ -666,17 +679,18 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
             <span className="media-bar-empty-note">暂无流媒体检测结果</span>
           )}
         </div>
-        {guestMediaSummary.platforms.length > 0 && (
-          <div className="media-bar-right">
-            <button
-              type="button"
-              className="button button-quiet btn-xs media-view-all-btn"
-              onClick={() => setShowMediaModal(true)}
-            >
-              <span>查看全部</span>
-            </button>
-          </div>
-        )}
+        <div className="media-bar-right">
+          <button
+            type="button"
+            className="button button-quiet btn-xs media-view-all-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowMediaModal(true)
+            }}
+          >
+            <span>{guestMediaSummary.platforms.length > 0 ? '查看全部' : '详情'}</span>
+          </button>
+        </div>
       </section>
 
       {/* 节点列表展示 (DStatus 宫格与紧凑表格双视图) */}
@@ -1391,15 +1405,22 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                 <X size={18} />
               </button>
             </div>
-            <div className="media-modal-grid">
-              {guestMediaSummary.platforms.map((item) => (
-                <div key={item.name} className={`media-modal-card ${item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}`}>
-                  <span className="media-modal-status-icon">{item.status === 'available' || item.status === 'unlocked' ? '✓' : '×'}</span>
-                  <span className="media-modal-name">{item.name}</span>
-                  <span className="media-modal-status-text">{item.status === 'available' || item.status === 'unlocked' ? '已解锁' : '未解锁'}</span>
-                </div>
-              ))}
-            </div>
+            {guestMediaSummary.platforms.length > 0 ? (
+              <div className="media-modal-grid">
+                {guestMediaSummary.platforms.map((item) => (
+                  <div key={item.name} className={`media-modal-card ${item.status === 'available' || item.status === 'unlocked' ? 'is-ok' : 'is-muted'}`}>
+                    <span className="media-modal-status-icon">{item.status === 'available' || item.status === 'unlocked' ? '✓' : '×'}</span>
+                    <span className="media-modal-name">{item.name}</span>
+                    <span className="media-modal-status-text">{item.status === 'available' || item.status === 'unlocked' ? '已解锁' : '未解锁'}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <p style={{ fontSize: '14px', marginBottom: '6px' }}>暂无流媒体与 AI 解锁检测记录</p>
+                <p style={{ fontSize: '12px', opacity: 0.7 }}>节点上报流媒体探测结果后将在此自动展示</p>
+              </div>
+            )}
           </div>
         </div>
       )}
