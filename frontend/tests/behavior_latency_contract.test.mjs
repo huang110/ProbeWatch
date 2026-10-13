@@ -1255,12 +1255,12 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   assert.strictEqual(vmEmpty.hasLocation, false, 'Scenario 47: hasLocation is false when empty')
   assert.strictEqual(vmEmpty.ispText, '运营商未知', 'Scenario 47: Empty ISP displays 运营商未知')
   assert.strictEqual(vmEmpty.hasIsp, false, 'Scenario 47: hasIsp is false when empty')
-  assert.strictEqual(vmEmpty.hasAsn, false, 'Scenario 47: Empty ASN hides ASN row')
-  assert.strictEqual(vmEmpty.asnText, '', 'Scenario 47: Empty ASN text is blank')
+  assert.strictEqual(vmEmpty.hasAsn, false, 'Scenario 47: hasAsn is false when empty')
+  assert.strictEqual(vmEmpty.asnText, '未知', 'Scenario 47: Empty ASN text displays 未知 to prevent blank rows')
   assert.strictEqual(vmEmpty.platformText, 'Windows 10/11', 'Scenario 47: Platform text preserved')
   assert.strictEqual(vmEmpty.browserText, 'Chrome 131', 'Scenario 47: Browser + major version combined')
   assert.strictEqual(vmEmpty.connection, 'IPv4', 'Scenario 47: Connection protocol badge is IPv4')
-  assert.strictEqual(vmEmpty.sourceLabel, '数据来源：请求连接信息', 'Scenario 47: Footer source label is 数据来源：请求连接信息')
+  assert.strictEqual(vmEmpty.sourceLabel, '未配置 GeoIP', 'Scenario 47: Footer source label is 未配置 GeoIP')
   console.log('[PASS] Scenario 47: Visitor card empty location/ISP/ASN fallback verified.')
 }
 
@@ -1281,6 +1281,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
     browser_version: '17',
     connection: '',
     visited_at: '2026-10-13T06:30:45Z',
+    geo_source: 'geoip',
   })
   assert.strictEqual(vmFull.ip, '2001:db8:85a3::8a2e:370:7334', 'Scenario 48: Full IPv6 preserved')
   assert.strictEqual(vmFull.connection, 'IPv6', 'Scenario 48: IPv6 address automatically sets connection=IPv6')
@@ -1292,6 +1293,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   assert.strictEqual(vmFull.asnText, 'AS13335', 'Scenario 48: Numeric ASN normalized with AS prefix')
   assert.strictEqual(vmFull.platformText, 'macOS', 'Scenario 48: Platform text preserved')
   assert.strictEqual(vmFull.browserText, 'Safari 17', 'Scenario 48: Browser + version preserved')
+  assert.strictEqual(vmFull.sourceLabel, '来源：GeoIP', 'Scenario 48: Explicit geo_source=geoip formats label as 来源：GeoIP')
   assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(vmFull.visitedAtText), 'Scenario 48: visited_at formatted as YYYY-MM-DD HH:mm:ss')
   assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(formatVisitorTimestamp('')), 'Scenario 48: Empty timestamp falls back to formatted current time')
   console.log('[PASS] Scenario 48: Visitor card full metadata & IPv6 detection verified.')
@@ -1322,4 +1324,20 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   console.log('[PASS] Scenario 49: Unified VisitorInfoCard & mobile default collapsed state verified.')
 }
 
-console.log('\n=== ALL 49 LATENCY, SCOPE, ENROLLMENT, IPQA, TARGET-MANAGE & GUEST-VIEW CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 50: Visitor card source label mapping across GeoIP, proxy, and unconfigured
+// -----------------------------------------------------------------------------
+{
+  const vmGeoIP = buildVisitorCardViewModel({ ip: '1.2.3.4', geo_source: 'geoip' })
+  assert.strictEqual(vmGeoIP.sourceLabel, '来源：GeoIP', 'Scenario 50: geo_source=geoip maps to 来源：GeoIP')
+
+  const vmProxy = buildVisitorCardViewModel({ ip: '1.2.3.4', geo_source: 'proxy' })
+  assert.strictEqual(vmProxy.sourceLabel, '来源：反向代理', 'Scenario 50: geo_source=proxy maps to 来源：反向代理')
+
+  const vmUnconfigured = buildVisitorCardViewModel({ ip: '1.2.3.4', geo_source: 'unconfigured' })
+  assert.strictEqual(vmUnconfigured.sourceLabel, '未配置 GeoIP', 'Scenario 50: geo_source=unconfigured maps to 未配置 GeoIP')
+
+  console.log('[PASS] Scenario 50: Visitor card source label mapping verified.')
+}
+
+console.log('\n=== ALL 50 LATENCY, SCOPE, ENROLLMENT, IPQA, TARGET-MANAGE & GUEST-VIEW CONTRACT TESTS PASSED ===')

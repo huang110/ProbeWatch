@@ -2,8 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -23,22 +25,27 @@ import (
 )
 
 type Server struct {
-	cfg           config.Config
-	service       *auth.Service
-	aiService     *ai.AIService
-	notifier      *notify.Notifier
-	agentLimiter  *rateLimiter
-	agentIPLimiter *rateLimiter
+	cfg                 config.Config
+	service             *auth.Service
+	aiService           *ai.AIService
+	notifier            *notify.Notifier
+	agentLimiter        *rateLimiter
+	agentIPLimiter      *rateLimiter
 	registrationLimiter *rateLimiter
-	publicLimiter *rateLimiter
-	loginLimiter  *rateLimiter
-	totpLimiter   *rateLimiter
-	ipqaLimiter   *rateLimiter
-	terminalManager *terminal.Manager
-	backupScheduler *backup.Scheduler
-	publicCacheMu sync.RWMutex
-	publicCacheAt time.Time
-	publicCache    publicStatusResponse
+	publicLimiter       *rateLimiter
+	loginLimiter        *rateLimiter
+	totpLimiter         *rateLimiter
+	ipqaLimiter         *rateLimiter
+	terminalManager     *terminal.Manager
+	backupScheduler     *backup.Scheduler
+	publicCacheMu       sync.RWMutex
+	publicCacheAt       time.Time
+	publicCache         publicStatusResponse
+	trustedProxyNets    []*net.IPNet
+	visitorGeoMu        sync.RWMutex
+	visitorGeoCache     map[string]visitorGeoCacheEntry
+	visitorGeoClient    *http.Client
+	visitorGeoFetch     func(ctx context.Context, ip string) (visitorGeoData, error)
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
@@ -58,20 +65,32 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		}
 		backupSched = backup.NewScheduler(service.Store(), bDir)
 	}
+	trustedNets, err := config.ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs)
+	if err != nil || len(trustedNets) == 0 {
+		trustedNets, _ = config.ParseTrustedProxyCIDRs(nil)
+	}
 	return &Server{
-		cfg:           cfg,
-		service:       service,
-		aiService:     aiSvc,
-		notifier:      n,
-		agentLimiter:  newRateLimiter(120, time.Minute, 10000),
-		agentIPLimiter: newRateLimiter(240, time.Minute, 10000),
+		cfg:                 cfg,
+		service:             service,
+		aiService:           aiSvc,
+		notifier:            n,
+		agentLimiter:        newRateLimiter(120, time.Minute, 10000),
+		agentIPLimiter:      newRateLimiter(240, time.Minute, 10000),
 		registrationLimiter: newRateLimiter(10, time.Minute, 10000),
-		publicLimiter: newRateLimiter(60, time.Minute, 10000),
-		loginLimiter:  newRateLimiter(10, time.Minute, 10000),
-		totpLimiter:   newRateLimiter(6, time.Minute, 10000),
-		ipqaLimiter:   newRateLimiter(60, time.Minute, 5000),
-		terminalManager: terminal.NewManager(),
-		backupScheduler: backupSched,
+		publicLimiter:       newRateLimiter(60, time.Minute, 10000),
+		loginLimiter:        newRateLimiter(10, time.Minute, 10000),
+		totpLimiter:         newRateLimiter(6, time.Minute, 10000),
+		ipqaLimiter:         newRateLimiter(60, time.Minute, 5000),
+		terminalManager:     terminal.NewManager(),
+		backupScheduler:     backupSched,
+		trustedProxyNets:    trustedNets,
+		visitorGeoCache:     make(map[string]visitorGeoCacheEntry),
+		visitorGeoClient: &http.Client{
+			Timeout: 2500 * time.Millisecond,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return errors.New("visitor geoip redirects disallowed")
+			},
+		},
 	}
 }
 

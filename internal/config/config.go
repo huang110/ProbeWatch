@@ -43,6 +43,10 @@ type Config struct {
 	WebhookURL             string
 	EnableRemoteTerminal   bool
 	EnableTerminal         bool
+	TrustedProxyCIDRs      []string
+	TrustProxyGeoHeaders   bool
+	EnableVisitorGeoIP     bool
+	VisitorGeoIPURL        string
 }
 
 const DefaultDevelopmentTokenPepper = "development-only-probewatch-token-pepper"
@@ -93,6 +97,8 @@ func LoadServerConfig() (Config, error) {
 		TelegramBotToken:       value(lookup, "PROBEWATCH_TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:         value(lookup, "PROBEWATCH_TELEGRAM_CHAT_ID"),
 		WebhookURL:             value(lookup, "PROBEWATCH_WEBHOOK_URL"),
+		TrustedProxyCIDRs:      parseList(value(lookup, "PROBEWATCH_TRUSTED_PROXY_CIDRS")),
+		VisitorGeoIPURL:        valueOrDefault(lookup, "PROBEWATCH_VISITOR_GEOIP_URL", "https://ipwho.is/{ip}?lang=zh-CN"),
 	}
 
 	var err error
@@ -132,6 +138,17 @@ func LoadServerConfig() (Config, error) {
 	}
 	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", true)
 	if err != nil {
+		return Config{}, err
+	}
+	cfg.TrustProxyGeoHeaders, err = boolValue(lookup, "PROBEWATCH_TRUST_PROXY_GEO_HEADERS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.EnableVisitorGeoIP, err = boolValue(lookup, "PROBEWATCH_ENABLE_VISITOR_GEOIP", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if _, err := ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs); err != nil {
 		return Config{}, err
 	}
 
@@ -512,4 +529,40 @@ func boolValue(lookup func(string) (string, bool), name string, fallback bool) (
 		return false, fmt.Errorf("invalid %s %q: must be true or false", name, raw)
 	}
 	return parsed, nil
+}
+
+// ParseTrustedProxyCIDRs parses explicit reverse-proxy CIDRs (or single IPs) and
+// always includes loopback (127.0.0.1/32 and ::1/128) by default.
+func ParseTrustedProxyCIDRs(rawCIDRs []string) ([]*net.IPNet, error) {
+	nets := make([]*net.IPNet, 0, len(rawCIDRs)+2)
+	for _, def := range []string{"127.0.0.1/32", "::1/128"} {
+		_, parsedNet, err := net.ParseCIDR(def)
+		if err == nil && parsedNet != nil {
+			nets = append(nets, parsedNet)
+		}
+	}
+	for _, raw := range rawCIDRs {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			_, parsedNet, err := net.ParseCIDR(item)
+			if err != nil || parsedNet == nil {
+				return nil, fmt.Errorf("invalid PROBEWATCH_TRUSTED_PROXY_CIDRS entry %q: %w", item, err)
+			}
+			nets = append(nets, parsedNet)
+			continue
+		}
+		ip := net.ParseIP(item)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid PROBEWATCH_TRUSTED_PROXY_CIDRS entry %q: must be CIDR or IP", item)
+		}
+		if v4 := ip.To4(); v4 != nil {
+			nets = append(nets, &net.IPNet{IP: v4, Mask: net.CIDRMask(32, 32)})
+		} else {
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)})
+		}
+	}
+	return nets, nil
 }

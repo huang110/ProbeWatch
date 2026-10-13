@@ -826,12 +826,27 @@ export function buildVisitorCardViewModel(raw) {
   const ispText = isp || '运营商未知'
   const rawAsn = String(info.asn || '').trim()
   const asn = rawAsn ? (/^\d+$/.test(rawAsn) ? `AS${rawAsn}` : rawAsn.toUpperCase().startsWith('AS') ? `AS${rawAsn.slice(2)}` : rawAsn) : ''
+  const asnText = asn || '未知'
   const platform = String(info.platform || '').trim() || '未知系统'
   const browser = String(info.browser || '').trim() || '未知浏览器'
   const browserVersion = String(info.browser_version ?? info.browserVersion ?? '').trim()
   const browserText = browserVersion && !browser.includes(browserVersion) ? `${browser} ${browserVersion}` : browser
   const visitedAt = String(info.visited_at ?? info.visitedAt ?? '').trim()
   const visitedAtText = formatVisitorTimestamp(visitedAt)
+
+  const rawSource = String(info.geo_source ?? info.geoSource ?? info.source ?? '').trim().toLowerCase()
+  let sourceLabel = '未配置 GeoIP'
+  if (rawSource === 'geoip') {
+    sourceLabel = '来源：GeoIP'
+  } else if (rawSource === 'proxy' || rawSource === 'reverse_proxy') {
+    sourceLabel = '来源：反向代理'
+  } else if (rawSource === 'unconfigured' || rawSource === 'none') {
+    sourceLabel = '未配置 GeoIP'
+  } else if (location || isp || asn) {
+    sourceLabel = '来源：GeoIP'
+  } else {
+    sourceLabel = '未配置 GeoIP'
+  }
 
   return {
     title: '访客访问',
@@ -849,7 +864,7 @@ export function buildVisitorCardViewModel(raw) {
     ispText,
     hasIsp: Boolean(isp),
     asn,
-    asnText: asn,
+    asnText,
     hasAsn: Boolean(asn),
     platform,
     platformText: platform,
@@ -860,7 +875,9 @@ export function buildVisitorCardViewModel(raw) {
     visited_at: visitedAt,
     visitedAt,
     visitedAtText,
-    sourceLabel: '数据来源：请求连接信息',
+    geo_source: rawSource,
+    geoSource: rawSource,
+    sourceLabel,
   }
 }
 

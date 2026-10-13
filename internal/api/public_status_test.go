@@ -193,9 +193,12 @@ func TestSanitizeNodeNameMasksIdentifiers(t *testing.T) {
 func TestPublicClientInfoEndpoint(t *testing.T) {
 	service, store := newTask4Auth(t)
 	defer store.Close()
-	handler := NewServer(task4Config(), service).Handler()
 
-	// 1. Direct untrusted request with forged X-Forwarded-For / X-Real-IP / CF-Connecting-IP and geo headers
+	cfgDefault := task4Config()
+	serverDefault := NewServer(cfgDefault, service)
+	handlerDefault := serverDefault.Handler()
+
+	// 1. Direct untrusted public request with forged X-Forwarded-For / X-Real-IP / CF-Connecting-IP and geo headers
 	reqUntrusted := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
 	reqUntrusted.RemoteAddr = "198.51.100.42:54321"
 	reqUntrusted.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0")
@@ -205,7 +208,7 @@ func TestPublicClientInfoEndpoint(t *testing.T) {
 	reqUntrusted.Header.Set("CF-IPCountry", "SG")
 	reqUntrusted.Header.Set("X-Visitor-ISP", "Forged ISP")
 	resUntrusted := httptest.NewRecorder()
-	handler.ServeHTTP(resUntrusted, reqUntrusted)
+	handlerDefault.ServeHTTP(resUntrusted, reqUntrusted)
 
 	if resUntrusted.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resUntrusted.Code)
@@ -229,11 +232,34 @@ func TestPublicClientInfoEndpoint(t *testing.T) {
 	if infoUntrusted.Location != "" || infoUntrusted.ISP != "" || infoUntrusted.ASN != "" {
 		t.Fatalf("untrusted geo headers must be ignored, got location=%q isp=%q asn=%q", infoUntrusted.Location, infoUntrusted.ISP, infoUntrusted.ASN)
 	}
+	if infoUntrusted.GeoSource != "unconfigured" {
+		t.Fatalf("untrusted geo_source = %q, want unconfigured", infoUntrusted.GeoSource)
+	}
 	if _, err := time.Parse(time.RFC3339, infoUntrusted.VisitedAt); err != nil {
 		t.Fatalf("visited_at %q is not RFC3339: %v", infoUntrusted.VisitedAt, err)
 	}
 
-	// 2. Trusted loopback reverse proxy with IPv6 visitor and geo headers
+	// 2. Untrusted RFC1918 private address (e.g. 10.20.30.40) when PROBEWATCH_TRUSTED_PROXY_CIDRS is unset/empty
+	reqRFC1918 := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	reqRFC1918.RemoteAddr = "10.20.30.40:43210"
+	reqRFC1918.Header.Set("X-Real-IP", "203.0.113.55")
+	reqRFC1918.Header.Set("X-Forwarded-For", "203.0.113.55")
+	reqRFC1918.Header.Set("X-Visitor-Country", "SG")
+	resRFC1918 := httptest.NewRecorder()
+	handlerDefault.ServeHTTP(resRFC1918, reqRFC1918)
+	var infoRFC1918 publicClientInfoResponse
+	if err := json.Unmarshal(resRFC1918.Body.Bytes(), &infoRFC1918); err != nil {
+		t.Fatal(err)
+	}
+	if infoRFC1918.IP != "10.20.30.40" {
+		t.Fatalf("arbitrary RFC1918 must NOT be trusted by default, got IP = %q, want 10.20.30.40", infoRFC1918.IP)
+	}
+
+	// 3. Trusted loopback proxy with TrustProxyGeoHeaders enabled and IPv6 visitor
+	cfgProxyHeaders := task4Config()
+	cfgProxyHeaders.TrustProxyGeoHeaders = true
+	handlerProxyHeaders := NewServer(cfgProxyHeaders, service).Handler()
+
 	reqTrustedV6 := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
 	reqTrustedV6.RemoteAddr = "127.0.0.1:43210"
 	reqTrustedV6.Header.Set("X-Real-IP", "2001:db8::1234")
@@ -243,7 +269,7 @@ func TestPublicClientInfoEndpoint(t *testing.T) {
 	reqTrustedV6.Header.Set("X-Visitor-ASN", "13335")
 	reqTrustedV6.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Safari/537.36")
 	resTrustedV6 := httptest.NewRecorder()
-	handler.ServeHTTP(resTrustedV6, reqTrustedV6)
+	handlerProxyHeaders.ServeHTTP(resTrustedV6, reqTrustedV6)
 
 	if resTrustedV6.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resTrustedV6.Code)
@@ -258,7 +284,64 @@ func TestPublicClientInfoEndpoint(t *testing.T) {
 	if infoV6.Platform != "macOS" || infoV6.Browser != "Chrome" || infoV6.BrowserVersion != "130.0.6723.58" {
 		t.Fatalf("UA parsed = %+v, want macOS / Chrome / 130.0.6723.58", infoV6)
 	}
-	if infoV6.Location != "HK · Hong Kong" || infoV6.ISP != "Cloudflare" || infoV6.ASN != "AS13335" {
-		t.Fatalf("trusted geo meta = %+v", infoV6)
+	if infoV6.Location != "HK · Hong Kong" || infoV6.ISP != "Cloudflare" || infoV6.ASN != "AS13335" || infoV6.GeoSource != "proxy" {
+		t.Fatalf("trusted geo meta = %+v, want HK · Hong Kong, Cloudflare, AS13335, proxy", infoV6)
+	}
+
+	// 4. Configured Docker Bridge CIDR (172.18.0.0/16) with EnableVisitorGeoIP enabled
+	cfgDockerGeoIP := task4Config()
+	cfgDockerGeoIP.TrustedProxyCIDRs = []string{"172.18.0.0/16"}
+	cfgDockerGeoIP.EnableVisitorGeoIP = true
+	serverDockerGeoIP := NewServer(cfgDockerGeoIP, service)
+	serverDockerGeoIP.visitorGeoFetch = func(ctx context.Context, ip string) (visitorGeoData, error) {
+		if ip == "125.80.81.51" {
+			return visitorGeoData{
+				Country:  "中国",
+				Region:   "重庆市",
+				City:     "渝中區",
+				Location: "中国 · 重庆市 · 渝中區",
+				ISP:      "CHINANET Chongqing Province Network",
+				ASN:      "AS4134",
+			}, nil
+		}
+		return visitorGeoData{}, errors.New("not found")
+	}
+	handlerDockerGeoIP := serverDockerGeoIP.Handler()
+
+	reqDockerBridge := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	reqDockerBridge.RemoteAddr = "172.18.0.1:54321" // Docker bridge gateway peer
+	reqDockerBridge.Header.Set("X-Real-IP", "125.80.81.51")
+	resDockerBridge := httptest.NewRecorder()
+	handlerDockerGeoIP.ServeHTTP(resDockerBridge, reqDockerBridge)
+
+	if resDockerBridge.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resDockerBridge.Code)
+	}
+	var infoDocker publicClientInfoResponse
+	if err := json.Unmarshal(resDockerBridge.Body.Bytes(), &infoDocker); err != nil {
+		t.Fatal(err)
+	}
+	if infoDocker.IP != "125.80.81.51" {
+		t.Fatalf("docker bridge IP = %q, want 125.80.81.51", infoDocker.IP)
+	}
+	if infoDocker.Location != "中国 · 重庆市 · 渝中區" || infoDocker.ISP != "CHINANET Chongqing Province Network" || infoDocker.ASN != "AS4134" {
+		t.Fatalf("docker bridge geo = %+v, want Chinese location, ISP, and AS4134", infoDocker)
+	}
+	if infoDocker.GeoSource != "geoip" {
+		t.Fatalf("docker bridge geo_source = %q, want geoip", infoDocker.GeoSource)
+	}
+
+	// 5. Lookup failure returns empty fields without fake data
+	reqFailedGeo := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	reqFailedGeo.RemoteAddr = "172.18.0.1:54322"
+	reqFailedGeo.Header.Set("X-Real-IP", "192.0.2.99")
+	resFailedGeo := httptest.NewRecorder()
+	handlerDockerGeoIP.ServeHTTP(resFailedGeo, reqFailedGeo)
+	var infoFailed publicClientInfoResponse
+	if err := json.Unmarshal(resFailedGeo.Body.Bytes(), &infoFailed); err != nil {
+		t.Fatal(err)
+	}
+	if infoFailed.Location != "" || infoFailed.ISP != "" || infoFailed.ASN != "" {
+		t.Fatalf("failed geo lookup must return empty fields, got %+v", infoFailed)
 	}
 }

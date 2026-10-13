@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -41,6 +45,22 @@ type publicClientInfoResponse struct {
 	BrowserVersion string `json:"browser_version"`
 	Connection     string `json:"connection"`
 	VisitedAt      string `json:"visited_at"`
+	GeoSource      string `json:"geo_source"`
+}
+
+type visitorGeoData struct {
+	Country  string
+	Region   string
+	City     string
+	Location string
+	ISP      string
+	ASN      string
+}
+
+type visitorGeoCacheEntry struct {
+	data      visitorGeoData
+	expiresAt time.Time
+	ok        bool
 }
 
 var (
@@ -63,22 +83,23 @@ func (s *Server) publicClientInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	ip := publicClientIP(r)
+	ip := s.publicClientIP(r)
 	browser, browserVersion := publicClientBrowserAndVersion(r.UserAgent())
-	country, region, city, location, isp, asn := publicClientGeoMeta(r)
+	geoData, geoSource := s.resolveVisitorGeo(r.Context(), r, ip)
 	response := publicClientInfoResponse{
 		IP:             ip,
-		Location:       location,
-		ISP:            isp,
-		ASN:            asn,
-		Country:        country,
-		Region:         region,
-		City:           city,
+		Location:       geoData.Location,
+		ISP:            geoData.ISP,
+		ASN:            geoData.ASN,
+		Country:        geoData.Country,
+		Region:         geoData.Region,
+		City:           geoData.City,
 		Platform:       publicClientPlatform(r.UserAgent()),
 		Browser:        browser,
 		BrowserVersion: browserVersion,
 		Connection:     publicClientConnectionFamily(ip),
 		VisitedAt:      time.Now().UTC().Format(time.RFC3339),
+		GeoSource:      geoSource,
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -436,6 +457,15 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) publicLimiterKey(r *http.Request) string {
+	if s != nil {
+		if clientIP := s.publicClientIP(r); clientIP != "" {
+			return clientIP
+		}
+	}
+	return publicLimiterKey(r)
+}
+
 func publicLimiterKey(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && isLoopbackHost(host) {
 		if forwarded := strings.TrimSpace(r.Header.Get("X-Real-IP")); forwarded != "" && net.ParseIP(forwarded) != nil {
@@ -470,19 +500,34 @@ func extractRemotePeerIP(remoteAddr string) net.IP {
 	return net.ParseIP(trimmed)
 }
 
-func isTrustedReverseProxyPeer(remoteAddr string) bool {
+func isTrustedReverseProxyPeer(remoteAddr string, trustedNets ...*net.IPNet) bool {
 	peerIP := extractRemotePeerIP(remoteAddr)
 	if peerIP == nil {
 		return false
 	}
-	return peerIP.IsLoopback() || peerIP.IsPrivate()
+	if peerIP.IsLoopback() {
+		return true
+	}
+	for _, ipNet := range trustedNets {
+		if ipNet != nil && ipNet.Contains(peerIP) {
+			return true
+		}
+	}
+	return false
 }
 
-func publicClientIP(r *http.Request) string {
+func (s *Server) isTrustedPeer(remoteAddr string) bool {
+	if s == nil {
+		return isTrustedReverseProxyPeer(remoteAddr)
+	}
+	return isTrustedReverseProxyPeer(remoteAddr, s.trustedProxyNets...)
+}
+
+func publicClientIP(r *http.Request, trustedNets ...*net.IPNet) string {
 	if r == nil {
 		return ""
 	}
-	if isTrustedReverseProxyPeer(r.RemoteAddr) {
+	if isTrustedReverseProxyPeer(r.RemoteAddr, trustedNets...) {
 		for _, header := range []string{"X-Real-IP", "CF-Connecting-IP"} {
 			if canonical := normalizeCanonicalIPString(r.Header.Get(header)); canonical != "" {
 				return canonical
@@ -503,6 +548,13 @@ func publicClientIP(r *http.Request) string {
 		return peerIP.String()
 	}
 	return ""
+}
+
+func (s *Server) publicClientIP(r *http.Request) string {
+	if s == nil {
+		return publicClientIP(r)
+	}
+	return publicClientIP(r, s.trustedProxyNets...)
 }
 
 func sanitizeClientHeaderText(raw string, maxRunes int) string {
@@ -534,8 +586,8 @@ func firstTrustedHeader(r *http.Request, maxRunes int, names ...string) string {
 	return ""
 }
 
-func publicClientGeoMeta(r *http.Request) (country, region, city, location, isp, asn string) {
-	if r == nil || !isTrustedReverseProxyPeer(r.RemoteAddr) {
+func publicClientGeoMeta(r *http.Request, trustedNets ...*net.IPNet) (country, region, city, location, isp, asn string) {
+	if r == nil || !isTrustedReverseProxyPeer(r.RemoteAddr, trustedNets...) {
 		return "", "", "", "", "", ""
 	}
 	country = firstTrustedHeader(r, 48, "X-Visitor-Country", "X-Geo-Country", "CF-IPCountry", "X-Country-Code")
@@ -583,6 +635,272 @@ func publicClientGeoMeta(r *http.Request) (country, region, city, location, isp,
 		location = strings.Join(parts, " · ")
 	}
 	return country, region, city, location, isp, asn
+}
+
+func (s *Server) resolveVisitorGeo(ctx context.Context, r *http.Request, clientIP string) (visitorGeoData, string) {
+	if s == nil {
+		return visitorGeoData{}, "unconfigured"
+	}
+	// 1. Check reverse proxy Geo headers ONLY if peer is trusted AND TrustProxyGeoHeaders is true
+	if s.cfg.TrustProxyGeoHeaders && s.isTrustedPeer(r.RemoteAddr) {
+		country, region, city, location, isp, asn := publicClientGeoMeta(r, s.trustedProxyNets...)
+		if location != "" || isp != "" || asn != "" || country != "" || region != "" || city != "" {
+			return visitorGeoData{
+				Country:  country,
+				Region:   region,
+				City:     city,
+				Location: location,
+				ISP:      isp,
+				ASN:      asn,
+			}, "proxy"
+		}
+	}
+
+	// 2. Check server-side visitor GeoIP lookup if enabled
+	if s.cfg.EnableVisitorGeoIP {
+		if data, ok := s.lookupVisitorGeoCached(ctx, clientIP); ok {
+			return data, "geoip"
+		}
+		return visitorGeoData{}, "geoip"
+	}
+
+	if s.cfg.TrustProxyGeoHeaders {
+		return visitorGeoData{}, "proxy"
+	}
+	return visitorGeoData{}, "unconfigured"
+}
+
+func isGeoRoutableVisitorIP(ipStr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	return true
+}
+
+func (s *Server) lookupVisitorGeoCached(ctx context.Context, clientIP string) (visitorGeoData, bool) {
+	trimmed := strings.TrimSpace(clientIP)
+	if trimmed == "" {
+		return visitorGeoData{}, false
+	}
+	if s.visitorGeoFetch == nil && !isGeoRoutableVisitorIP(trimmed) {
+		return visitorGeoData{}, false
+	}
+
+	now := time.Now()
+	s.visitorGeoMu.RLock()
+	entry, found := s.visitorGeoCache[trimmed]
+	s.visitorGeoMu.RUnlock()
+	if found && now.Before(entry.expiresAt) {
+		return entry.data, entry.ok
+	}
+
+	var data visitorGeoData
+	var err error
+	if s.visitorGeoFetch != nil {
+		data, err = s.visitorGeoFetch(ctx, trimmed)
+	} else {
+		data, err = s.fetchVisitorGeoHTTP(ctx, trimmed)
+	}
+
+	s.visitorGeoMu.Lock()
+	defer s.visitorGeoMu.Unlock()
+	if len(s.visitorGeoCache) > 2048 {
+		for k, v := range s.visitorGeoCache {
+			if now.After(v.expiresAt) {
+				delete(s.visitorGeoCache, k)
+			}
+		}
+	}
+	if err == nil && (data.Location != "" || data.ISP != "" || data.ASN != "" || data.Country != "") {
+		s.visitorGeoCache[trimmed] = visitorGeoCacheEntry{
+			data:      data,
+			expiresAt: now.Add(30 * time.Minute),
+			ok:        true,
+		}
+		return data, true
+	}
+
+	s.visitorGeoCache[trimmed] = visitorGeoCacheEntry{
+		data:      visitorGeoData{},
+		expiresAt: now.Add(1 * time.Minute),
+		ok:        false,
+	}
+	return visitorGeoData{}, false
+}
+
+func (s *Server) fetchVisitorGeoHTTP(ctx context.Context, clientIP string) (visitorGeoData, error) {
+	template := strings.TrimSpace(s.cfg.VisitorGeoIPURL)
+	if template == "" {
+		template = "https://ipwho.is/{ip}?lang=zh-CN"
+	}
+	targetURL := template
+	if strings.Contains(targetURL, "{ip}") {
+		targetURL = strings.ReplaceAll(targetURL, "{ip}", url.PathEscape(clientIP))
+	} else {
+		targetURL = strings.TrimRight(targetURL, "/") + "/" + url.PathEscape(clientIP)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return visitorGeoData{}, err
+	}
+	req.Header.Set("User-Agent", "ProbeWatch-Server/0.9.3")
+	req.Header.Set("Accept", "application/json")
+
+	client := s.visitorGeoClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return visitorGeoData{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return visitorGeoData{}, fmt.Errorf("geoip provider status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+	if err != nil {
+		return visitorGeoData{}, err
+	}
+	return parseVisitorGeoResponse(body)
+}
+
+func parseVisitorGeoResponse(body []byte) (visitorGeoData, error) {
+	if len(body) == 0 {
+		return visitorGeoData{}, errors.New("empty response")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return visitorGeoData{}, err
+	}
+	if success, ok := raw["success"].(bool); ok && !success {
+		return visitorGeoData{}, errors.New("provider reported failure")
+	}
+	if isErr, ok := raw["error"].(bool); ok && isErr {
+		return visitorGeoData{}, errors.New("provider returned error")
+	}
+
+	country := extractStringField(raw, "country", "country_name", "countryCode", "country_code")
+	if strings.EqualFold(country, "unknown") || strings.EqualFold(country, "XX") {
+		country = ""
+	}
+	region := extractStringField(raw, "region", "regionName", "region_name", "state")
+	if strings.EqualFold(region, "unknown") {
+		region = ""
+	}
+	city := extractStringField(raw, "city")
+	if strings.EqualFold(city, "unknown") {
+		city = ""
+	}
+
+	var asn string
+	if rawASN := extractFieldAny(raw, "connection.asn", "asn", "as.number"); rawASN != nil {
+		asn = formatASNString(rawASN)
+	}
+
+	ispVal := extractStringField(raw, "connection.isp", "isp", "isp.isp")
+	orgVal := extractStringField(raw, "connection.org", "org", "organization", "company", "isp.org")
+	isp := pickGeoISP(ispVal, orgVal)
+
+	location := extractStringField(raw, "location")
+	if location == "" {
+		parts := make([]string, 0, 3)
+		for _, p := range []string{country, region, city} {
+			if p == "" {
+				continue
+			}
+			dup := false
+			for _, existing := range parts {
+				if strings.EqualFold(existing, p) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				parts = append(parts, p)
+			}
+		}
+		location = strings.Join(parts, " · ")
+	}
+
+	return visitorGeoData{
+		Country:  country,
+		Region:   region,
+		City:     city,
+		Location: location,
+		ISP:      isp,
+		ASN:      asn,
+	}, nil
+}
+
+func extractFieldAny(m map[string]any, paths ...string) any {
+	for _, p := range paths {
+		parts := strings.Split(p, ".")
+		var current any = m
+		found := true
+		for _, part := range parts {
+			currMap, ok := current.(map[string]any)
+			if !ok {
+				found = false
+				break
+			}
+			current, ok = currMap[part]
+			if !ok {
+				found = false
+				break
+			}
+		}
+		if found && current != nil {
+			return current
+		}
+	}
+	return nil
+}
+
+func extractStringField(m map[string]any, paths ...string) string {
+	val := extractFieldAny(m, paths...)
+	if val == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(val))
+}
+
+func formatASNString(val any) string {
+	if val == nil {
+		return ""
+	}
+	str := strings.TrimSpace(fmt.Sprint(val))
+	if str == "" || strings.EqualFold(str, "0") {
+		return ""
+	}
+	if asnDigitsRe.MatchString(str) {
+		return "AS" + str
+	}
+	if strings.HasPrefix(strings.ToLower(str), "as") && asnDigitsRe.MatchString(str[2:]) {
+		return "AS" + str[2:]
+	}
+	return str
+}
+
+func pickGeoISP(ispVal, orgVal string) string {
+	ispVal = strings.TrimSpace(ispVal)
+	orgVal = strings.TrimSpace(orgVal)
+	lowerISP := strings.ToLower(ispVal)
+	if ispVal == "" || strings.HasPrefix(lowerISP, "no.") || strings.Contains(lowerISP, "street") || strings.Contains(lowerISP, "road") {
+		if orgVal != "" {
+			return orgVal
+		}
+	}
+	if ispVal != "" {
+		return ispVal
+	}
+	return orgVal
 }
 
 func isLoopbackHost(host string) bool {

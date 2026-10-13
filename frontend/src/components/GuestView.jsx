@@ -94,12 +94,10 @@ export function VisitorInfoCard({ clientInfo }) {
             <span className="visitor-row-label">运营商</span>
             <span className={`visitor-row-val ${vm.hasIsp ? '' : 'is-muted'}`}>{vm.ispText}</span>
           </div>
-          {vm.hasAsn && (
-            <div className="visitor-card-row">
-              <span className="visitor-row-label">ASN</span>
-              <span className="visitor-row-val mono visitor-asn-tag">{vm.asnText}</span>
-            </div>
-          )}
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">ASN</span>
+            <span className={`visitor-row-val ${vm.hasAsn ? 'mono visitor-asn-tag' : 'is-muted'}`}>{vm.asnText}</span>
+          </div>
           <div className="visitor-card-row">
             <span className="visitor-row-label">系统</span>
             <span className="visitor-row-val">{vm.platformText}</span>
