@@ -29,23 +29,57 @@ type publicStatusResponse struct {
 }
 
 type publicClientInfoResponse struct {
-	IP       string `json:"ip"`
-	Location string `json:"location,omitempty"`
-	ISP      string `json:"isp,omitempty"`
-	Platform string `json:"platform,omitempty"`
-	Browser  string `json:"browser,omitempty"`
+	IP             string `json:"ip"`
+	Location       string `json:"location"`
+	ISP            string `json:"isp"`
+	ASN            string `json:"asn"`
+	Country        string `json:"country"`
+	Region         string `json:"region"`
+	City           string `json:"city"`
+	Platform       string `json:"platform"`
+	Browser        string `json:"browser"`
+	BrowserVersion string `json:"browser_version"`
+	Connection     string `json:"connection"`
+	VisitedAt      string `json:"visited_at"`
 }
 
-// publicClientInfo returns only the visitor's connection address as seen by
-// the reverse proxy. It is intentionally separate from node telemetry so the
-// public dashboard can label the current visitor without exposing node IPs.
+var (
+	uaEdgeRe    = regexp.MustCompile(`(?i)(?:edg|edga|edgios)/([0-9]+(?:\.[0-9]+){0,3})`)
+	uaOperaRe   = regexp.MustCompile(`(?i)(?:opr|opera)/([0-9]+(?:\.[0-9]+){0,3})`)
+	uaFirefoxRe = regexp.MustCompile(`(?i)(?:firefox|fxios)/([0-9]+(?:\.[0-9]+){0,3})`)
+	uaChromeRe  = regexp.MustCompile(`(?i)(?:chrome|crios)/([0-9]+(?:\.[0-9]+){0,3})`)
+	uaVersionRe = regexp.MustCompile(`(?i)version/([0-9]+(?:\.[0-9]+){0,3})`)
+	uaCurlRe    = regexp.MustCompile(`(?i)curl/([0-9]+(?:\.[0-9]+){0,3})`)
+	asnDigitsRe = regexp.MustCompile(`^[0-9]+$`)
+)
+
+// publicClientInfo returns only the visitor's connection address and request metadata
+// as seen by the server or trusted reverse proxy. It is intentionally separate from
+// node telemetry so the public dashboard can label the current visitor without
+// exposing node IPs, UUIDs, or tokens.
 func (s *Server) publicClientInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	ip := publicClientIP(r)
-	response := publicClientInfoResponse{IP: ip, Platform: publicClientPlatform(r.UserAgent()), Browser: publicClientBrowser(r.UserAgent())}
+	browser, browserVersion := publicClientBrowserAndVersion(r.UserAgent())
+	country, region, city, location, isp, asn := publicClientGeoMeta(r)
+	response := publicClientInfoResponse{
+		IP:             ip,
+		Location:       location,
+		ISP:            isp,
+		ASN:            asn,
+		Country:        country,
+		Region:         region,
+		City:           city,
+		Platform:       publicClientPlatform(r.UserAgent()),
+		Browser:        browser,
+		BrowserVersion: browserVersion,
+		Connection:     publicClientConnectionFamily(ip),
+		VisitedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -54,12 +88,12 @@ func publicClientPlatform(userAgent string) string {
 	switch {
 	case strings.Contains(ua, "windows"):
 		return "Windows"
-	case strings.Contains(ua, "mac os") || strings.Contains(ua, "macintosh"):
-		return "macOS"
+	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad") || strings.Contains(ua, "ipod"):
+		return "iOS"
 	case strings.Contains(ua, "android"):
 		return "Android"
-	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad"):
-		return "iOS"
+	case strings.Contains(ua, "mac os") || strings.Contains(ua, "macintosh"):
+		return "macOS"
 	case strings.Contains(ua, "linux"):
 		return "Linux"
 	default:
@@ -68,19 +102,46 @@ func publicClientPlatform(userAgent string) string {
 }
 
 func publicClientBrowser(userAgent string) string {
-	ua := strings.ToLower(userAgent)
-	switch {
-	case strings.Contains(ua, "edg/"):
-		return "Edge Browser"
-	case strings.Contains(ua, "firefox/"):
-		return "Firefox Browser"
-	case strings.Contains(ua, "chrome/") || strings.Contains(ua, "crios/"):
-		return "Chrome Browser"
-	case strings.Contains(ua, "safari/"):
-		return "Safari Browser"
-	default:
-		return "浏览器"
+	browser, _ := publicClientBrowserAndVersion(userAgent)
+	return browser
+}
+
+func publicClientBrowserAndVersion(userAgent string) (string, string) {
+	ua := strings.TrimSpace(userAgent)
+	if ua == "" {
+		return "未知浏览器", ""
 	}
+	lower := strings.ToLower(ua)
+	if m := uaEdgeRe.FindStringSubmatch(ua); len(m) == 2 {
+		return "Edge", m[1]
+	}
+	if m := uaOperaRe.FindStringSubmatch(ua); len(m) == 2 {
+		return "Opera", m[1]
+	}
+	if m := uaFirefoxRe.FindStringSubmatch(ua); len(m) == 2 {
+		return "Firefox", m[1]
+	}
+	if m := uaChromeRe.FindStringSubmatch(ua); len(m) == 2 {
+		return "Chrome", m[1]
+	}
+	if strings.Contains(lower, "safari/") {
+		if m := uaVersionRe.FindStringSubmatch(ua); len(m) == 2 {
+			return "Safari", m[1]
+		}
+		return "Safari", ""
+	}
+	if m := uaCurlRe.FindStringSubmatch(ua); len(m) == 2 {
+		return "curl", m[1]
+	}
+	return "未知浏览器", ""
+}
+
+func publicClientConnectionFamily(ipStr string) string {
+	parsed := net.ParseIP(strings.TrimSpace(ipStr))
+	if parsed != nil && parsed.To4() == nil {
+		return "IPv6"
+	}
+	return "IPv4"
 }
 
 type publicStatusNodes struct {
@@ -387,24 +448,141 @@ func publicLimiterKey(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+func normalizeCanonicalIPString(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.String()
+}
+
+func extractRemotePeerIP(remoteAddr string) net.IP {
+	trimmed := strings.TrimSpace(remoteAddr)
+	if trimmed == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		return net.ParseIP(strings.TrimSpace(host))
+	}
+	return net.ParseIP(trimmed)
+}
+
+func isTrustedReverseProxyPeer(remoteAddr string) bool {
+	peerIP := extractRemotePeerIP(remoteAddr)
+	if peerIP == nil {
+		return false
+	}
+	return peerIP.IsLoopback() || peerIP.IsPrivate()
+}
+
 func publicClientIP(r *http.Request) string {
-	for _, header := range []string{"CF-Connecting-IP", "X-Real-IP"} {
-		if value := strings.TrimSpace(r.Header.Get(header)); net.ParseIP(value) != nil {
-			return value
+	if r == nil {
+		return ""
+	}
+	if isTrustedReverseProxyPeer(r.RemoteAddr) {
+		for _, header := range []string{"X-Real-IP", "CF-Connecting-IP"} {
+			if canonical := normalizeCanonicalIPString(r.Header.Get(header)); canonical != "" {
+				return canonical
+			}
+		}
+		if forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ","); len(forwarded) > 0 {
+			for _, part := range forwarded {
+				if canonical := normalizeCanonicalIPString(part); canonical != "" {
+					return canonical
+				}
+			}
 		}
 	}
-	if forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ","); len(forwarded) > 0 {
-		if value := strings.TrimSpace(forwarded[0]); net.ParseIP(value) != nil {
-			return value
+	if peerIP := extractRemotePeerIP(r.RemoteAddr); peerIP != nil {
+		if v4 := peerIP.To4(); v4 != nil {
+			return v4.String()
 		}
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && net.ParseIP(host) != nil {
-		return host
-	}
-	if net.ParseIP(strings.TrimSpace(r.RemoteAddr)) != nil {
-		return strings.TrimSpace(r.RemoteAddr)
+		return peerIP.String()
 	}
 	return ""
+}
+
+func sanitizeClientHeaderText(raw string, maxRunes int) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	var b strings.Builder
+	count := 0
+	for _, r := range trimmed {
+		if r < 32 || r == 127 {
+			continue
+		}
+		b.WriteRune(r)
+		count++
+		if maxRunes > 0 && count >= maxRunes {
+			break
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func firstTrustedHeader(r *http.Request, maxRunes int, names ...string) string {
+	for _, name := range names {
+		if val := sanitizeClientHeaderText(r.Header.Get(name), maxRunes); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func publicClientGeoMeta(r *http.Request) (country, region, city, location, isp, asn string) {
+	if r == nil || !isTrustedReverseProxyPeer(r.RemoteAddr) {
+		return "", "", "", "", "", ""
+	}
+	country = firstTrustedHeader(r, 48, "X-Visitor-Country", "X-Geo-Country", "CF-IPCountry", "X-Country-Code")
+	if strings.EqualFold(country, "XX") || strings.EqualFold(country, "T1") || strings.EqualFold(country, "unknown") {
+		country = ""
+	}
+	region = firstTrustedHeader(r, 64, "X-Visitor-Region", "X-Geo-Region", "CF-Region", "X-Region")
+	if strings.EqualFold(region, "unknown") {
+		region = ""
+	}
+	city = firstTrustedHeader(r, 64, "X-Visitor-City", "X-Geo-City", "CF-IPCity", "X-City")
+	if strings.EqualFold(city, "unknown") {
+		city = ""
+	}
+	isp = firstTrustedHeader(r, 96, "X-Visitor-ISP", "X-Geo-ISP", "CF-ISP", "X-ISP")
+	if strings.EqualFold(isp, "unknown") {
+		isp = ""
+	}
+	asn = firstTrustedHeader(r, 32, "X-Visitor-ASN", "X-Geo-ASN", "CF-IPASN", "X-ASN")
+	if strings.EqualFold(asn, "unknown") {
+		asn = ""
+	} else if asnDigitsRe.MatchString(asn) {
+		asn = "AS" + asn
+	} else if strings.HasPrefix(strings.ToLower(asn), "as") && asnDigitsRe.MatchString(asn[2:]) {
+		asn = "AS" + asn[2:]
+	}
+	location = firstTrustedHeader(r, 128, "X-Visitor-Location", "X-Geo-Location")
+	if location == "" {
+		parts := make([]string, 0, 3)
+		for _, p := range []string{country, region, city} {
+			if p == "" {
+				continue
+			}
+			dup := false
+			for _, existing := range parts {
+				if strings.EqualFold(existing, p) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				parts = append(parts, p)
+			}
+		}
+		location = strings.Join(parts, " · ")
+	}
+	return country, region, city, location, isp, asn
 }
 
 func isLoopbackHost(host string) bool {

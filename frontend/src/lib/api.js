@@ -797,17 +797,85 @@ export async function fetchGuestStatus(signal) {
   }
 }
 
+export function formatVisitorTimestamp(rawTime) {
+  const text = String(rawTime || '').trim()
+  const parsed = text ? new Date(text) : new Date()
+  const d = Number.isNaN(parsed.getTime()) ? new Date() : parsed
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+export function buildVisitorCardViewModel(raw) {
+  const info = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  const ip = String(info.ip || '').trim()
+  const rawConn = String(info.connection || '').trim().toUpperCase()
+  const connection = rawConn === 'IPV6' || (!rawConn && ip.includes(':')) ? 'IPv6' : 'IPv4'
+  const country = String(info.country || '').trim()
+  const region = String(info.region || '').trim()
+  const city = String(info.city || '').trim()
+  const geoParts = []
+  for (const part of [country, region, city]) {
+    if (!part) continue
+    if (!geoParts.some((existing) => existing.toLowerCase() === part.toLowerCase())) {
+      geoParts.push(part)
+    }
+  }
+  const location = String(info.location || '').trim() || geoParts.join(' · ')
+  const locationText = location || '位置未知'
+  const isp = String(info.isp || '').trim()
+  const ispText = isp || '运营商未知'
+  const rawAsn = String(info.asn || '').trim()
+  const asn = rawAsn ? (/^\d+$/.test(rawAsn) ? `AS${rawAsn}` : rawAsn.toUpperCase().startsWith('AS') ? `AS${rawAsn.slice(2)}` : rawAsn) : ''
+  const platform = String(info.platform || '').trim() || '未知系统'
+  const browser = String(info.browser || '').trim() || '未知浏览器'
+  const browserVersion = String(info.browser_version ?? info.browserVersion ?? '').trim()
+  const browserText = browserVersion && !browser.includes(browserVersion) ? `${browser} ${browserVersion}` : browser
+  const visitedAt = String(info.visited_at ?? info.visitedAt ?? '').trim()
+  const visitedAtText = formatVisitorTimestamp(visitedAt)
+
+  return {
+    title: '访客访问',
+    ip,
+    ipText: ip || '未知 IP',
+    hasIp: Boolean(ip),
+    connection,
+    country,
+    region,
+    city,
+    location,
+    locationText,
+    hasLocation: Boolean(location),
+    isp,
+    ispText,
+    hasIsp: Boolean(isp),
+    asn,
+    asnText: asn,
+    hasAsn: Boolean(asn),
+    platform,
+    platformText: platform,
+    browser,
+    browser_version: browserVersion,
+    browserVersion,
+    browserText,
+    visited_at: visitedAt,
+    visitedAt,
+    visitedAtText,
+    sourceLabel: '数据来源：请求连接信息',
+  }
+}
+
 export async function fetchPublicClientInfo(signal) {
   try {
     const response = await fetch('/api/public/client-info', { credentials: 'same-origin', signal })
     if (!response.ok) return null
     const json = await response.json()
-    return json && typeof json === 'object' && !Array.isArray(json) ? json : null
+    return json && typeof json === 'object' && !Array.isArray(json) ? buildVisitorCardViewModel(json) : null
   } catch (error) {
     if (error?.name === 'AbortError') throw error
     return null
   }
 }
+
 
 // 管理页写操作（POST/PATCH/DELETE）先取一次性 CSRF Token，与 ackAlert / TOTP 同一模式。
 export async function fetchCsrfToken() {

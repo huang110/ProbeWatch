@@ -189,3 +189,76 @@ func TestSanitizeNodeNameMasksIdentifiers(t *testing.T) {
 		t.Errorf("sanitizeNodeName did not truncate long name: %d runes", len([]rune(got)))
 	}
 }
+
+func TestPublicClientInfoEndpoint(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	handler := NewServer(task4Config(), service).Handler()
+
+	// 1. Direct untrusted request with forged X-Forwarded-For / X-Real-IP / CF-Connecting-IP and geo headers
+	reqUntrusted := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	reqUntrusted.RemoteAddr = "198.51.100.42:54321"
+	reqUntrusted.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0")
+	reqUntrusted.Header.Set("X-Forwarded-For", "203.0.113.99")
+	reqUntrusted.Header.Set("X-Real-IP", "203.0.113.99")
+	reqUntrusted.Header.Set("CF-Connecting-IP", "203.0.113.99")
+	reqUntrusted.Header.Set("CF-IPCountry", "SG")
+	reqUntrusted.Header.Set("X-Visitor-ISP", "Forged ISP")
+	resUntrusted := httptest.NewRecorder()
+	handler.ServeHTTP(resUntrusted, reqUntrusted)
+
+	if resUntrusted.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resUntrusted.Code)
+	}
+	if cc := resUntrusted.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cc)
+	}
+	var infoUntrusted publicClientInfoResponse
+	if err := json.Unmarshal(resUntrusted.Body.Bytes(), &infoUntrusted); err != nil {
+		t.Fatal(err)
+	}
+	if infoUntrusted.IP != "198.51.100.42" {
+		t.Fatalf("untrusted request IP = %q, want 198.51.100.42 (must ignore forged X-Forwarded-For)", infoUntrusted.IP)
+	}
+	if infoUntrusted.Connection != "IPv4" {
+		t.Fatalf("connection = %q, want IPv4", infoUntrusted.Connection)
+	}
+	if infoUntrusted.Platform != "Windows" || infoUntrusted.Browser != "Firefox" || infoUntrusted.BrowserVersion != "131.0" {
+		t.Fatalf("UA parsed = %+v, want Windows / Firefox / 131.0", infoUntrusted)
+	}
+	if infoUntrusted.Location != "" || infoUntrusted.ISP != "" || infoUntrusted.ASN != "" {
+		t.Fatalf("untrusted geo headers must be ignored, got location=%q isp=%q asn=%q", infoUntrusted.Location, infoUntrusted.ISP, infoUntrusted.ASN)
+	}
+	if _, err := time.Parse(time.RFC3339, infoUntrusted.VisitedAt); err != nil {
+		t.Fatalf("visited_at %q is not RFC3339: %v", infoUntrusted.VisitedAt, err)
+	}
+
+	// 2. Trusted loopback reverse proxy with IPv6 visitor and geo headers
+	reqTrustedV6 := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	reqTrustedV6.RemoteAddr = "127.0.0.1:43210"
+	reqTrustedV6.Header.Set("X-Real-IP", "2001:db8::1234")
+	reqTrustedV6.Header.Set("X-Visitor-Country", "HK")
+	reqTrustedV6.Header.Set("X-Visitor-City", "Hong Kong")
+	reqTrustedV6.Header.Set("X-Visitor-ISP", "Cloudflare")
+	reqTrustedV6.Header.Set("X-Visitor-ASN", "13335")
+	reqTrustedV6.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.58 Safari/537.36")
+	resTrustedV6 := httptest.NewRecorder()
+	handler.ServeHTTP(resTrustedV6, reqTrustedV6)
+
+	if resTrustedV6.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resTrustedV6.Code)
+	}
+	var infoV6 publicClientInfoResponse
+	if err := json.Unmarshal(resTrustedV6.Body.Bytes(), &infoV6); err != nil {
+		t.Fatal(err)
+	}
+	if infoV6.IP != "2001:db8::1234" || infoV6.Connection != "IPv6" {
+		t.Fatalf("trusted IPv6 = %q (%q), want 2001:db8::1234 (IPv6)", infoV6.IP, infoV6.Connection)
+	}
+	if infoV6.Platform != "macOS" || infoV6.Browser != "Chrome" || infoV6.BrowserVersion != "130.0.6723.58" {
+		t.Fatalf("UA parsed = %+v, want macOS / Chrome / 130.0.6723.58", infoV6)
+	}
+	if infoV6.Location != "HK · Hong Kong" || infoV6.ISP != "Cloudflare" || infoV6.ASN != "AS13335" {
+		t.Fatalf("trusted geo meta = %+v", infoV6)
+	}
+}

@@ -23,6 +23,8 @@ import {
   parseIPQualityScoreValue,
   formatIPQualitySourceName,
   formatIPQualityType,
+  buildVisitorCardViewModel,
+  formatVisitorTimestamp,
 } from '../src/lib/api.js'
 
 console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n')
@@ -1205,4 +1207,119 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
   console.log('[PASS] Scenario 45: HTTP 409 conflict friendly Chinese message verified.')
 }
 
-console.log('\n=== ALL 45 LATENCY, SCOPE, ENROLLMENT, IPQA & TARGET-MANAGE CONTRACT TESTS PASSED ===')
+// -----------------------------------------------------------------------------
+// Scenario 46: GuestView 2-node responsive CSS Grid layout & full-width shell
+// -----------------------------------------------------------------------------
+{
+  const stylesSrc = readFileSync(resolve('frontend/src/styles.css'), 'utf8')
+  const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
+
+  assert.ok(
+    stylesSrc.includes('grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));'),
+    'Scenario 46: .guest-node-grid uses responsive repeat(auto-fit, minmax(min(100%, 460px), 1fr)) instead of hardcoded 4 columns'
+  )
+  assert.ok(
+    stylesSrc.includes('@media (min-width: 1100px) and (max-width: 1599px)') &&
+      stylesSrc.includes('@media (min-width: 700px) and (max-width: 1099px)') &&
+      stylesSrc.includes('@media (max-width: 699px)'),
+    'Scenario 46: Responsive breakpoints for 1100-1599px (2 cols), 700-1099px, and <=699px (1 col) are present'
+  )
+  assert.ok(
+    guestSrc.includes("filteredNames.length === 1 ? 'single-node-grid' : ''"),
+    'Scenario 46: Single node applies single-node-grid cap while 2+ nodes fill full row width'
+  )
+  console.log('[PASS] Scenario 46: GuestView 2-node responsive CSS Grid layout verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 47: Visitor card view model when location / isp / asn are empty
+// -----------------------------------------------------------------------------
+{
+  const vmEmpty = buildVisitorCardViewModel({
+    ip: '198.51.100.42',
+    location: '',
+    isp: '',
+    asn: '',
+    country: '',
+    region: '',
+    city: '',
+    platform: 'Windows 10/11',
+    browser: 'Chrome',
+    browser_version: '131',
+    connection: 'IPv4',
+    visited_at: '2026-10-13T06:00:00Z',
+  })
+  assert.strictEqual(vmEmpty.title, '访客访问', 'Scenario 47: Card title is 访客访问')
+  assert.strictEqual(vmEmpty.ip, '198.51.100.42', 'Scenario 47: Full visitor IP preserved')
+  assert.strictEqual(vmEmpty.locationText, '位置未知', 'Scenario 47: Empty location displays 位置未知')
+  assert.strictEqual(vmEmpty.hasLocation, false, 'Scenario 47: hasLocation is false when empty')
+  assert.strictEqual(vmEmpty.ispText, '运营商未知', 'Scenario 47: Empty ISP displays 运营商未知')
+  assert.strictEqual(vmEmpty.hasIsp, false, 'Scenario 47: hasIsp is false when empty')
+  assert.strictEqual(vmEmpty.hasAsn, false, 'Scenario 47: Empty ASN hides ASN row')
+  assert.strictEqual(vmEmpty.asnText, '', 'Scenario 47: Empty ASN text is blank')
+  assert.strictEqual(vmEmpty.platformText, 'Windows 10/11', 'Scenario 47: Platform text preserved')
+  assert.strictEqual(vmEmpty.browserText, 'Chrome 131', 'Scenario 47: Browser + major version combined')
+  assert.strictEqual(vmEmpty.connection, 'IPv4', 'Scenario 47: Connection protocol badge is IPv4')
+  assert.strictEqual(vmEmpty.sourceLabel, '数据来源：请求连接信息', 'Scenario 47: Footer source label is 数据来源：请求连接信息')
+  console.log('[PASS] Scenario 47: Visitor card empty location/ISP/ASN fallback verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 48: Visitor card view model when location / isp / asn are populated + IPv6 detection
+// -----------------------------------------------------------------------------
+{
+  const vmFull = buildVisitorCardViewModel({
+    ip: '2001:db8:85a3::8a2e:370:7334',
+    location: '',
+    isp: 'Cloudflare, Inc.',
+    asn: '13335',
+    country: 'SG',
+    region: 'Central Singapore',
+    city: 'Singapore',
+    platform: 'macOS',
+    browser: 'Safari',
+    browser_version: '17',
+    connection: '',
+    visited_at: '2026-10-13T06:30:45Z',
+  })
+  assert.strictEqual(vmFull.ip, '2001:db8:85a3::8a2e:370:7334', 'Scenario 48: Full IPv6 preserved')
+  assert.strictEqual(vmFull.connection, 'IPv6', 'Scenario 48: IPv6 address automatically sets connection=IPv6')
+  assert.strictEqual(vmFull.hasLocation, true, 'Scenario 48: Location synthesized from country/region/city')
+  assert.strictEqual(vmFull.locationText, 'SG · Central Singapore · Singapore', 'Scenario 48: Location text formatted cleanly')
+  assert.strictEqual(vmFull.hasIsp, true, 'Scenario 48: hasIsp is true')
+  assert.strictEqual(vmFull.ispText, 'Cloudflare, Inc.', 'Scenario 48: ISP text preserved')
+  assert.strictEqual(vmFull.hasAsn, true, 'Scenario 48: hasAsn is true when ASN present')
+  assert.strictEqual(vmFull.asnText, 'AS13335', 'Scenario 48: Numeric ASN normalized with AS prefix')
+  assert.strictEqual(vmFull.platformText, 'macOS', 'Scenario 48: Platform text preserved')
+  assert.strictEqual(vmFull.browserText, 'Safari 17', 'Scenario 48: Browser + version preserved')
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(vmFull.visitedAtText), 'Scenario 48: visited_at formatted as YYYY-MM-DD HH:mm:ss')
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(formatVisitorTimestamp('')), 'Scenario 48: Empty timestamp falls back to formatted current time')
+  console.log('[PASS] Scenario 48: Visitor card full metadata & IPv6 detection verified.')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 49: Unified VisitorInfoCard across GuestView & App, mobile default collapsed, zero localStorage
+// -----------------------------------------------------------------------------
+{
+  const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
+  const appSrc = readFileSync(resolve('frontend/src/App.jsx'), 'utf8')
+
+  assert.ok(
+    guestSrc.includes('export function VisitorInfoCard') &&
+      guestSrc.includes('<VisitorInfoCard clientInfo={visitorInfo} />') &&
+      appSrc.includes('<VisitorInfoCard clientInfo={publicClientInfo} />'),
+    'Scenario 49: Both GuestView and App render the unified VisitorInfoCard component'
+  )
+  assert.ok(
+    guestSrc.includes('window.innerWidth <= 768') &&
+      guestSrc.includes('window.innerWidth > 768'),
+    'Scenario 49: VisitorInfoCard defaults to expanded on desktop (>768px) and collapsed on mobile (<=768px)'
+  )
+  assert.ok(
+    !guestSrc.includes('localStorage') && !appSrc.includes('localStorage'),
+    'Scenario 49: Neither GuestView nor App uses localStorage for visitor card state'
+  )
+  console.log('[PASS] Scenario 49: Unified VisitorInfoCard & mobile default collapsed state verified.')
+}
+
+console.log('\n=== ALL 49 LATENCY, SCOPE, ENROLLMENT, IPQA, TARGET-MANAGE & GUEST-VIEW CONTRACT TESTS PASSED ===')

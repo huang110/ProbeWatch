@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Broadcast, CheckCircle, CircleNotch, Clock, Desktop, Eye, Fingerprint, Funnel, GithubLogo, GlobeHemisphereWest, Key, LockKey, MagnifyingGlass, Pulse, Rows, ShareNetwork, ShieldCheck, SignIn, SignOut, SquaresFour, Star, Timer, User, WarningCircle, X } from '@phosphor-icons/react'
 import { numeric, safeArray, safeObject, safeText, formatBytes, formatRate, formatLatency, formatTimeOfDay, formatUptime, detectRegionAndFlag } from '../lib/format.js'
-import { fetchGuestStatus } from '../lib/api.js'
+import { fetchGuestStatus, fetchPublicClientInfo, buildVisitorCardViewModel } from '../lib/api.js'
 import { isWebAuthnSupported, loginWithPasskey } from '../lib/webauthn.js'
 import { getAllNodeCustomMeta, parseColoredTags } from '../lib/billing.js'
 import { StatusDot, UptimeBars, SegmentedBar, DistroIcon, VpsDotTrack, getLatencyBlocks, getLossBlocks } from './Common.jsx'
@@ -16,6 +16,110 @@ function maskVisitorIp(value) {
   // so the visitor can verify the egress IP they are using. Node telemetry
   // and public node identifiers remain sanitized by their own allow-lists.
   return text
+}
+
+export function VisitorInfoCard({ clientInfo }) {
+  const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false))
+  const [expanded, setExpanded] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 768 : true))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    let prevMobile = window.innerWidth <= 768
+    const syncViewport = () => {
+      const mobile = window.innerWidth <= 768
+      setIsMobileViewport(mobile)
+      if (mobile !== prevMobile) {
+        prevMobile = mobile
+        setExpanded(!mobile)
+      }
+    }
+    syncViewport()
+    window.addEventListener('resize', syncViewport)
+    return () => window.removeEventListener('resize', syncViewport)
+  }, [])
+
+  const vm = useMemo(() => buildVisitorCardViewModel(clientInfo), [clientInfo])
+  if (!clientInfo || (!vm.hasIp && !clientInfo.platform && !clientInfo.browser)) {
+    return null
+  }
+
+  return (
+    <aside
+      className={`floating-visitor-card ${expanded ? 'is-expanded' : 'is-collapsed'} ${isMobileViewport ? 'is-mobile-vp' : 'is-desktop-vp'}`}
+      aria-label="当前访问者信息"
+    >
+      <button
+        type="button"
+        className="floating-visitor-pill"
+        onClick={() => setExpanded(true)}
+        aria-expanded={expanded}
+        aria-label="展开访客信息"
+      >
+        <GlobeHemisphereWest size={14} className="text-blue" />
+        <span>访客信息</span>
+        <span className="visitor-conn-badge mono">{vm.connection}</span>
+      </button>
+
+      <div className="floating-visitor-full">
+        <div className="visitor-card-head">
+          <div className="visitor-card-head-left">
+            <GlobeHemisphereWest size={15} className="text-blue" />
+            <strong>{vm.title}</strong>
+            <span className="visitor-conn-badge mono">{vm.connection}</span>
+          </div>
+          <button
+            type="button"
+            className="floating-visitor-close-btn"
+            aria-label="收起访客信息"
+            title="收起为访客信息按钮"
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded(false)
+            }}
+          >
+            收起
+          </button>
+        </div>
+
+        <div className="visitor-card-rows">
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">公网 IP</span>
+            <span className="visitor-row-val mono">{maskVisitorIp(vm.ip) || '未知 IP'}</span>
+          </div>
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">位置</span>
+            <span className={`visitor-row-val ${vm.hasLocation ? '' : 'is-muted'}`}>{vm.locationText}</span>
+          </div>
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">运营商</span>
+            <span className={`visitor-row-val ${vm.hasIsp ? '' : 'is-muted'}`}>{vm.ispText}</span>
+          </div>
+          {vm.hasAsn && (
+            <div className="visitor-card-row">
+              <span className="visitor-row-label">ASN</span>
+              <span className="visitor-row-val mono visitor-asn-tag">{vm.asnText}</span>
+            </div>
+          )}
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">系统</span>
+            <span className="visitor-row-val">{vm.platformText}</span>
+          </div>
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">浏览器</span>
+            <span className="visitor-row-val">{vm.browserText}</span>
+          </div>
+          <div className="visitor-card-row">
+            <span className="visitor-row-label">访问时间</span>
+            <span className="visitor-row-val mono">{vm.visitedAtText}</span>
+          </div>
+        </div>
+
+        <div className="visitor-card-foot">
+          <span>{vm.sourceLabel}</span>
+        </div>
+      </div>
+    </aside>
+  )
 }
 
 
@@ -107,28 +211,16 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
   const [passkeyLoading, setPasskeyLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [internalStatus, setInternalStatus] = useState(null)
+  const [internalClientInfo, setInternalClientInfo] = useState(null)
   const [localRefreshing, setLocalRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('all')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [sortKey, setSortKey] = useState('default')
   const [liveRates, setLiveRates] = useState({})
-  const [visitorExpanded, setVisitorExpanded] = useState(false)
-  const [starredNodes, setStarredNodes] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('pb_starred_nodes') || '[]')
-    } catch {
-      return []
-    }
-  })
+  const [starredNodes, setStarredNodes] = useState([])
   const toggleStar = (nodeName) => {
-    setStarredNodes((prev) => {
-      const next = prev.includes(nodeName) ? prev.filter((n) => n !== nodeName) : [...prev, nodeName]
-      try {
-        localStorage.setItem('pb_starred_nodes', JSON.stringify(next))
-      } catch {}
-      return next
-    })
+    setStarredNodes((prev) => (prev.includes(nodeName) ? prev.filter((n) => n !== nodeName) : [...prev, nodeName]))
   }
   const isStarred = (nodeName) => starredNodes.includes(nodeName)
 
@@ -141,7 +233,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
     }
   }
 
-  const visitorInfo = clientInfo || {}
+  const visitorInfo = clientInfo || internalClientInfo
   const telemetryRef = useRef(new Map())
 
   // 当外部未传入 status 或 status 节点列表为空时，自驱动从公开状态 API 同步
@@ -159,8 +251,15 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
           if (active) setLocalRefreshing(false)
         })
     }
+    if (!clientInfo) {
+      fetchPublicClientInfo()
+        .then((res) => {
+          if (active && res) setInternalClientInfo(res)
+        })
+        .catch(() => {})
+    }
     return () => { active = false }
-  }, [status])
+  }, [status, clientInfo])
 
   // Close modal on ESC
   useEffect(() => {
@@ -314,7 +413,10 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
     names.forEach((name) => {
       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
       if (custom.tags) {
-        custom.tags.split(/[,，\s]+/).forEach((t) => { if (t.trim()) set.add(t.trim()) })
+        custom.tags.split(/[,，\s;]+/).forEach((t) => {
+          const clean = t.trim().replace(/<[a-zA-Z]+>$/, '').trim()
+          if (clean) set.add(clean)
+        })
       }
       const meta = detectRegionAndFlag(name, '')
       const flag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
@@ -403,43 +505,7 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
 
   return (
     <main className="guest-shell guest-mjj-shell">
-      {(visitorInfo.platform || visitorInfo.browser || visitorInfo.ip) && (
-        <aside className={`floating-visitor-card ${visitorExpanded ? 'is-expanded' : 'is-collapsed'}`} aria-label="当前访问者信息">
-          <div className="floating-visitor-pill" onClick={() => setVisitorExpanded(true)}>
-            <GlobeHemisphereWest size={13} className="text-blue" />
-            <span>访客信息</span>
-            <span className="pill-arrow">▲</span>
-          </div>
-          <div className="floating-visitor-full">
-            <div className="floating-public-node-head">
-              <div className="floating-public-node-avatar"><GlobeHemisphereWest size={15} /></div>
-              <div className="floating-public-node-title">
-                <strong>访客信息</strong>
-                <span>{[visitorInfo.location, visitorInfo.isp].filter(Boolean).join(' · ') || '公网访客'}</span>
-              </div>
-              <button
-                type="button"
-                className="floating-visitor-close-btn"
-                aria-label="关闭访客浮层"
-                onClick={(e) => { e.stopPropagation(); setVisitorExpanded(false) }}
-              >
-                ×
-              </button>
-            </div>
-            <div className="floating-public-node-welcome">欢迎访问 ProbeWatch</div>
-            <div className="floating-public-node-divider" />
-            <div className="floating-public-node-row"><Desktop size={13} /><span>{visitorInfo.platform || '未知系统'}</span></div>
-            <div className="floating-public-node-row"><GlobeHemisphereWest size={13} /><span>{visitorInfo.browser || '浏览器'}</span></div>
-            {visitorInfo.location && (
-              <div className="floating-public-node-row"><GlobeHemisphereWest size={13} /><span>{visitorInfo.location}</span></div>
-            )}
-            {visitorInfo.isp && (
-              <div className="floating-public-node-row"><ShieldCheck size={13} /><span>{visitorInfo.isp}</span></div>
-            )}
-            <div className="floating-public-node-row"><Timer size={13} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
-          </div>
-        </aside>
-      )}
+      <VisitorInfoCard clientInfo={visitorInfo} />
       {/* 游客预览横幅（仅在管理员预览时呈现） */}
       {isPreview && (
         <div className="guest-preview-banner">

@@ -4,7 +4,7 @@ import { normalizeAlert, normalizeNode, numeric, safeText, formatTimeOfDay, form
 import { fetchCsrfToken, fetchGuestStatus, fetchPublicClientInfo, fetchPublicVersion, performLogout } from './lib/api.js'
 import { getAllNodeCustomMeta } from './lib/billing.js'
 import { NodeDrawer } from './components/NodeDrawer.jsx'
-import { GuestView } from './components/GuestView.jsx'
+import { GuestView, VisitorInfoCard } from './components/GuestView.jsx'
 import { StatusPageView } from './components/StatusPageView.jsx'
 import { TOTPVerifyPage } from './components/TOTPVerifyPage.jsx'
 import { useLivePolling } from './lib/useLivePolling.js'
@@ -490,10 +490,6 @@ export function App() {
   const refreshInterval = 5
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [showVisitorCard, setShowVisitorCard] = useState(true)
-  useEffect(() => {
-    try { setShowVisitorCard(window.localStorage.getItem('probewatch:visitor-card') !== 'hidden') } catch {}
-  }, [])
   const [theme, setTheme] = useState(getSavedTheme)
   const coreAbortRef = useRef(null)
   const coreRequestRef = useRef(0)
@@ -513,6 +509,11 @@ export function App() {
         if (active) setApiVersion('')
         if (active) setLatestAgentVersion('')
       })
+    fetchPublicClientInfo()
+      .then((info) => {
+        if (active && info) setPublicClientInfo(info)
+      })
+      .catch(() => {})
     return () => { active = false }
   }, [])
 
@@ -1361,22 +1362,7 @@ export function App() {
       onLogout={performLogout}
     />
     <main className="main-content">
-      {showVisitorCard && publicClientInfo?.ip && (
-        <aside className="floating-visitor-card" aria-label="当前访问者公网信息">
-          <button type="button" className="floating-public-node-close" onClick={() => { setShowVisitorCard(false); try { window.localStorage.setItem('probewatch:visitor-card', 'hidden') } catch {} }} aria-label="关闭访问者信息">×</button>
-          <div className="floating-public-node-head">
-            <div className="floating-public-node-avatar"><Globe size={18} /></div>
-            <div className="floating-public-node-title"><strong>{me ? '管理员访问' : '访客访问'}</strong><span>{publicClientInfo.location || '公网访客'}</span></div>
-          </div>
-          <div className="floating-public-node-welcome">欢迎访问 ProbeWatch</div>
-          <div className="floating-public-node-divider" />
-          <div className="floating-public-node-row"><Desktop size={14} /><span>{publicClientInfo.platform || '未知系统'}</span></div>
-          <div className="floating-public-node-row"><Globe size={14} /><span>{publicClientInfo.browser || '浏览器'}</span></div>
-          <div className="floating-public-node-row"><ShareNetwork size={14} /><span className="mono">{maskPublicIp(publicClientInfo.ip)}</span></div>
-          <div className="floating-public-node-row"><ShieldCheck size={14} /><span>{publicClientInfo.isp || '公网访客'}</span></div>
-          <div className="floating-public-node-row"><Clock size={14} /><span>{new Date().toLocaleDateString('zh-CN')}</span></div>
-        </aside>
-      )}
+      <VisitorInfoCard clientInfo={publicClientInfo} />
       <Topbar
         activeNav={activeNav}
         clockText={clockText}
