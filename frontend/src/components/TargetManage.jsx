@@ -244,7 +244,10 @@ function resolveTargetRecentStatus(target, telemetryMap) {
       isFailed: false,
     }
   }
-  if (entry.failedNodes > 0 && entry.successNodes === 0) {
+  if (
+    (entry.latestFailedNodes > 0 && (entry.latestSuccessNodes || 0) === 0) ||
+    (entry.failedNodes > 0 && entry.successNodes === 0)
+  ) {
     return {
       tone: 'danger',
       label: '失败',
@@ -253,7 +256,7 @@ function resolveTargetRecentStatus(target, telemetryMap) {
       isFailed: true,
     }
   }
-  if (entry.failedNodes > 0 || entry.maxLossRate >= 0.2) {
+  if (entry.latestFailedNodes > 0 || entry.failedNodes > 0 || entry.maxLossRate >= 0.2) {
     return {
       tone: 'warning',
       label: '部分异常',
@@ -631,6 +634,12 @@ export function TargetTable({
                     {target.enabled ? '已启用' : isMedia ? '已停用 · IPQA 接管' : '已停用'}
                   </span>
                 </div>
+                {recentStatus.detail && recentStatus.tone !== 'unknown' && recentStatus.tone !== 'disabled' && (
+                  <div className="target-mobile-kv">
+                    <span className="kv-label">最近结果</span>
+                    <span className="kv-val target-status-reason">{recentStatus.detail}</span>
+                  </div>
+                )}
               </div>
 
               {isExpanded && (
@@ -814,7 +823,7 @@ export function TargetManage({
     return () => controller.abort()
   }, [load])
 
-  // 聚合在线节点的真实采样摘要 (/api/nodes/{uuid}/checks/summary & /mtr)，绝不伪造数值
+  // 聚合在线节点的真实采样结果 (/api/nodes/{uuid}/checks, /checks/summary & /mtr)，绝不伪造数值
   useEffect(() => {
     if (!Array.isArray(nodes) || nodes.length === 0 || targets.length === 0) return undefined
     const controller = new AbortController()
@@ -827,7 +836,13 @@ export function TargetManage({
     Promise.all(
       sampleNodes.map(async (node) => {
         const uuid = node.uuid || node.id
-        const [checksRes, mtrRes] = await Promise.all([
+        const [latestChecksRes, checksRes, mtrRes] = await Promise.all([
+          fetch(`/api/nodes/${encodeURIComponent(uuid)}/checks`, {
+            credentials: 'same-origin',
+            signal: controller.signal,
+          })
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => []),
           fetch(`/api/nodes/${encodeURIComponent(uuid)}/checks/summary`, {
             credentials: 'same-origin',
             signal: controller.signal,
@@ -842,6 +857,7 @@ export function TargetManage({
             .catch(() => []),
         ])
         return {
+          latestChecks: Array.isArray(latestChecksRes) ? latestChecksRes : [],
           checks: Array.isArray(checksRes) ? checksRes : [],
           mtr: Array.isArray(mtrRes) ? mtrRes : [],
         }
@@ -856,6 +872,8 @@ export function TargetManage({
               hasSample: false,
               successNodes: 0,
               failedNodes: 0,
+              latestSuccessNodes: 0,
+              latestFailedNodes: 0,
               maxLossRate: 0,
               latencySum: 0,
               latencyCount: 0,
@@ -867,7 +885,44 @@ export function TargetManage({
           return nextMap.get(tId)
         }
 
-        for (const { checks, mtr } of results) {
+        for (const { latestChecks, checks, mtr } of results) {
+          // 1. 最新单次检测结果 (/api/nodes/{uuid}/checks -> network_results_latest)
+          for (const item of latestChecks) {
+            const tId = item?.target_id || item?.result?.target_id
+            if (!tId) continue
+            const entry = ensureEntry(tId)
+            const checkedAt = item.checked_at || item?.result?.checked_at
+            if (checkedAt) {
+              if (!entry.lastCheckedAt || new Date(checkedAt) > new Date(entry.lastCheckedAt)) {
+                entry.lastCheckedAt = checkedAt
+              }
+            }
+            const res = item?.result || item
+            if (res && (res.status || res.error || typeof res.latency_ms === 'number')) {
+              entry.hasSample = true
+              const isDown = res.status === 'down' || res.status === 'failed' || Boolean(res.error)
+              if (isDown) {
+                entry.latestFailedNodes += 1
+                entry.failedNodes += 1
+                const errDetail = String(res.error || '').trim()
+                if (errDetail) {
+                  entry.failureReason = errDetail
+                } else if (res.status_code) {
+                  entry.failureReason = `HTTP 状态码异常 (${res.status_code})`
+                } else if (!entry.failureReason) {
+                  entry.failureReason = '最近一次探测失败'
+                }
+              } else {
+                entry.latestSuccessNodes += 1
+                entry.successNodes += 1
+                if (typeof res.latency_ms === 'number' && res.latency_ms > 0 && entry.avgLatencyMs === null) {
+                  entry.avgLatencyMs = res.latency_ms
+                }
+              }
+            }
+          }
+
+          // 2. 窗口期采样聚合 (/api/nodes/{uuid}/checks/summary)
           for (const c of checks) {
             const tId = c?.target_id
             if (!tId) continue
@@ -886,7 +941,9 @@ export function TargetManage({
               if (loss > entry.maxLossRate) entry.maxLossRate = loss
               if (failure > 0 && success === 0) {
                 entry.failedNodes += 1
-                entry.failureReason = '探测失败 (100% 丢包/超时)'
+                if (!entry.failureReason) {
+                  entry.failureReason = '探测失败 (100% 丢包/超时)'
+                }
               } else if (failure > 0) {
                 entry.failedNodes += 1
                 entry.successNodes += 1
@@ -904,8 +961,9 @@ export function TargetManage({
             }
           }
 
+          // 3. MTR 路由追踪最新结果 (/api/nodes/{uuid}/mtr)
           for (const m of mtr) {
-            const tId = m?.target_id || m?.id
+            const tId = m?.target_id || m?.id || m?.result?.target_id
             if (!tId) continue
             const entry = ensureEntry(tId)
             const checkedAt = m.checked_at || m.timestamp
@@ -916,9 +974,10 @@ export function TargetManage({
               }
             }
             entry.hasSample = true
-            if (m.success === false || m.error) {
+            const mRes = m?.result || m
+            if (mRes.reached === false || m.success === false || mRes.error || m.error) {
               entry.failedNodes += 1
-              entry.failureReason = m.error || 'MTR 路由追踪失败'
+              entry.failureReason = mRes.error || m.error || 'MTR 路由追踪未达目标'
             } else {
               entry.successNodes += 1
             }
@@ -932,7 +991,7 @@ export function TargetManage({
     return () => controller.abort()
   }, [nodes, targets])
 
-  // 顶部 4 个统计卡片真实计算
+  // 顶部 4 个统计卡片真实计算（已停用目标绝不计入失败）
   const summaryStats = useMemo(() => {
     const baseList = kinds ? targets.filter((t) => kinds.includes(t.kind)) : targets
     const total = baseList.length
@@ -941,6 +1000,7 @@ export function TargetManage({
     let failedCount = 0
     let sampledCount = 0
     for (const t of baseList) {
+      if (!t.enabled) continue
       const st = resolveTargetRecentStatus(t, telemetryMap)
       if (telemetryMap.get(t.id)?.hasSample) sampledCount += 1
       if (st.isFailed) failedCount += 1
@@ -1610,14 +1670,14 @@ export function TargetManage({
             <WarningCircle size={15} className={summaryStats.failedCount > 0 ? 'text-rose' : 'text-muted'} />
           </div>
           <div className={`stat-mini-val mono ${summaryStats.failedCount > 0 ? 'text-rose' : ''}`}>
-            {summaryStats.hasTelemetry ? summaryStats.failedCount : 0}
+            {summaryStats.hasTelemetry ? summaryStats.failedCount : '暂无数据'}
           </div>
           <div className="stat-mini-sub">
             {summaryStats.hasTelemetry
               ? summaryStats.failedCount > 0
                 ? `${summaryStats.failedCount} 个目标存在异常或丢包`
                 : '近期已采样目标全部正常'
-              : '暂无数据'}
+              : '暂无数据 · 等待首次采样回报'}
           </div>
         </div>
       </div>

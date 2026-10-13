@@ -17326,9 +17326,36 @@ main.guest-shell { max-width: 100vw; width: 100%; }
     justify-content: center;
   }
 
+  .target-toolbar {
+    overflow: hidden;
+    max-width: 100%;
+  }
+
+  .target-filter-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    width: 100%;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .target-filter-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .target-filter-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-height: 36px;
+  }
+
   .target-toolbar-right,
   .target-search-box {
     width: 100%;
+    max-width: 100%;
   }
 
   .target-drawer-panel {
@@ -17347,6 +17374,24 @@ main.guest-shell { max-width: 100vw; width: 100%; }
 
   .target-scope-mode-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .target-scope-mode-btn {
+    min-height: 38px;
+  }
+
+  .picker-search {
+    min-height: 38px;
+  }
+
+  .target-node-picker-item {
+    min-height: 42px;
+    padding: 8px 10px;
+  }
+
+  .target-tag-chip {
+    min-height: 36px;
+    padding: 6px 12px;
   }
 
   .target-region-rule-row {
