@@ -4056,6 +4056,18 @@ main.guest-shell { max-width: 100%; width: 100%; }
   }
 }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 .guest-nodes-section {
   margin-top: 0;
 }
@@ -4066,6 +4078,11 @@ main.guest-shell { max-width: 100%; width: 100%; }
   gap: 8px !important;
 }
 .section-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 6px;
 }
 .section-title-bar h2 {
@@ -4080,12 +4097,14 @@ main.guest-shell { max-width: 100%; width: 100%; }
   margin: 2px 0 0;
 }
 
-.guest-node-card {
+.guest-node-card,
+.nezha-vps-card.guest-node-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  justify-content: flex-start;
+  gap: 4px;
   padding: 10px 14px;
-  min-height: 340px;
+  min-height: 0;
   max-height: none;
   background: linear-gradient(165deg, rgba(22, 30, 42, 0.85), rgba(13, 18, 26, 0.95));
   border: 1px solid var(--border);
