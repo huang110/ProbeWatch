@@ -837,7 +837,7 @@ export function TargetManage({
       sampleNodes.map(async (node) => {
         const uuid = node.uuid || node.id
         const [latestChecksRes, checksRes, mtrRes] = await Promise.all([
-          fetch(`/api/nodes/${encodeURIComponent(uuid)}/checks`, {
+          fetch(`/api/nodes/${encodeURIComponent(uuid)}/network`, {
             credentials: 'same-origin',
             signal: controller.signal,
           })
