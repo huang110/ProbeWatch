@@ -22,6 +22,7 @@ import {
   Sliders,
   ShareNetwork,
   Star,
+  HardDrives,
 } from '@phosphor-icons/react'
 import { NodeEnroll } from './NodeEnroll.jsx'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
