@@ -38,6 +38,7 @@ type Server struct {
 	ipqaLimiter         *rateLimiter
 	terminalManager     *terminal.Manager
 	backupScheduler     *backup.Scheduler
+	agentReplayCache    *agentReplayCache
 	publicCacheMu       sync.RWMutex
 	publicCacheAt       time.Time
 	publicCache         publicStatusResponse
@@ -83,6 +84,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		ipqaLimiter:         newRateLimiter(60, time.Minute, 5000),
 		terminalManager:     terminal.NewManager(),
 		backupScheduler:     backupSched,
+		agentReplayCache:    newAgentReplayCache(),
 		trustedProxyNets:    trustedNets,
 		visitorGeoCache:     make(map[string]visitorGeoCacheEntry),
 		visitorGeoClient: &http.Client{

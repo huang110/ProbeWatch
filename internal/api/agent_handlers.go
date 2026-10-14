@@ -115,6 +115,9 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 	if request.Resource.IPQA != nil {
 		s.handleIPQAReport(r.Context(), node, request.Resource.IPQA, now)
 	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -157,6 +160,9 @@ func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
 		return
+	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -201,6 +207,9 @@ func (s *Server) mtrResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
 		return
 	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -243,6 +252,9 @@ func (s *Server) mediaResultAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
 		return
+	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -292,6 +304,9 @@ func (s *Server) speedtestResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
 		return
 	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -340,6 +355,9 @@ func (s *Server) syntheticResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "result unavailable")
 		return
 	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -359,13 +377,21 @@ func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusUnauthorized, "authentication failed")
 		return db.Node{}, "", time.Time{}, false
 	}
+	if reqUUID := strings.TrimSpace(r.Header.Get("X-Node-UUID")); reqUUID != "" && reqUUID != node.UUID {
+		writeJSONError(w, http.StatusConflict, "node identity conflict")
+		return db.Node{}, "", time.Time{}, false
+	}
 	if !s.agentLimiter.Allow(node.ID, now) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return db.Node{}, "", time.Time{}, false
 	}
-	requestID, err := parseAgentMetadata(r, now, s.agentClockSkew())
+	requestID, err := s.parseAgentMetadata(r, now, s.agentClockSkew())
 	if err != nil {
 		writeJSONError(w, http.StatusUnauthorized, "request authentication failed")
+		return db.Node{}, "", time.Time{}, false
+	}
+	if requestID != "" && s.agentReplayCache.Has(node.ID, requestID, now) {
+		writeJSONError(w, http.StatusConflict, "request already processed")
 		return db.Node{}, "", time.Time{}, false
 	}
 	return node, requestID, now, true

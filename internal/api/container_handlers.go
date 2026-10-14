@@ -19,15 +19,8 @@ func (s *Server) workloadAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	token, ok := parseBearer(r.Header.Get("Authorization"))
+	node, requestID, now, ok := s.authenticateAgentRequest(w, r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "authentication failed")
-		return
-	}
-	now := time.Now().UTC()
-	node, err := s.service.Store().AuthenticateNodeToken(r.Context(), token, now)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "authentication failed")
 		return
 	}
 	var report protocol.NodeWorkloadReport
@@ -46,6 +39,9 @@ func (s *Server) workloadAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.service.Store().SaveNodeWorkload(r.Context(), node.ID, report); err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "workload save failed")
 		return
+	}
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -29,6 +29,7 @@ type Config struct {
 	AgentTokenTTL          time.Duration
 	AgentNodeTokenTTL      time.Duration
 	AgentClockSkew         time.Duration
+	AgentStrictAuth        bool
 	MaxRequestBody         int64
 	AgentIgnoreUnsafeCert  bool
 	AgentEndpoint          string
@@ -117,6 +118,10 @@ func LoadServerConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AgentClockSkew, err = durationValue(lookup, "AGENT_CLOCK_SKEW", cfg.AgentClockSkew)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -256,6 +261,10 @@ func LoadAgentConfig() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AgentClockSkew, err = durationValue(lookup, "AGENT_CLOCK_SKEW", cfg.AgentClockSkew)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", false)
 	if err != nil {
 		return Config{}, err
 	}

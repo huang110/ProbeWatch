@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -137,20 +139,92 @@ func parseBearer(value string) (string, bool) {
 	return parts[1], true
 }
 
-func parseAgentMetadata(r *http.Request, now time.Time, skew time.Duration) (string, error) {
+type agentReplayCache struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+}
+
+func newAgentReplayCache() *agentReplayCache {
+	return &agentReplayCache{
+		entries: make(map[string]time.Time),
+	}
+}
+
+func (c *agentReplayCache) Has(nodeID string, requestID string, now time.Time) bool {
+	if requestID == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := nodeID + ":" + requestID
+	exp, exists := c.entries[key]
+	if !exists {
+		return false
+	}
+	if now.After(exp) {
+		delete(c.entries, key)
+		return false
+	}
+	return true
+}
+
+func (c *agentReplayCache) Add(nodeID string, requestID string, expiresAt time.Time) {
+	if requestID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.entries) > 2000 {
+		now := time.Now().UTC()
+		for k, exp := range c.entries {
+			if now.After(exp) {
+				delete(c.entries, k)
+			}
+		}
+	}
+	key := nodeID + ":" + requestID
+	c.entries[key] = expiresAt
+}
+
+func (s *Server) parseAgentMetadata(r *http.Request, now time.Time, skew time.Duration) (string, error) {
 	rawTimestamp := strings.TrimSpace(r.Header.Get("X-Probe-Timestamp"))
+	rawRequestID := strings.TrimSpace(r.Header.Get("X-Probe-Request-ID"))
+
+	// If missing timestamp or request ID:
+	if rawTimestamp == "" || rawRequestID == "" {
+		if s.cfg.AgentStrictAuth {
+			return "", errInvalidRequest
+		}
+		// Permissive fallback for existing agents without metadata headers
+		log.Printf("WARN: agent request missing timestamp/request-id from remote_addr=%s (permissive mode allowed)", r.RemoteAddr)
+		if rawRequestID == "" {
+			rawRequestID = fmt.Sprintf("compat-%d-%s", now.UnixNano(), strings.ReplaceAll(r.RemoteAddr, ":", "_"))
+		}
+		return rawRequestID, nil
+	}
+
 	timestamp, err := strconv.ParseInt(rawTimestamp, 10, 64)
 	if err != nil || timestamp <= 0 {
+		if s.cfg.AgentStrictAuth {
+			return "", errInvalidRequest
+		}
+		log.Printf("WARN: agent request invalid timestamp %q from remote_addr=%s", rawTimestamp, r.RemoteAddr)
+		return rawRequestID, nil
+	}
+
+	difference := now.Sub(time.Unix(timestamp, 0).UTC())
+	if difference > skew || difference < -skew {
+		if s.cfg.AgentStrictAuth {
+			return "", errInvalidRequest
+		}
+		log.Printf("WARN: agent clock skew exceeded (%v > %v) from remote_addr=%s (permissive mode allowed)", difference, skew, r.RemoteAddr)
+	}
+
+	if len([]byte(rawRequestID)) > maxRequestIDLength {
 		return "", errInvalidRequest
 	}
-	if difference := now.Sub(time.Unix(timestamp, 0).UTC()); difference > skew || difference < -skew {
-		return "", errInvalidRequest
-	}
-	requestID := strings.TrimSpace(r.Header.Get("X-Probe-Request-ID"))
-	if requestID == "" || len([]byte(requestID)) > maxRequestIDLength {
-		return "", errInvalidRequest
-	}
-	return requestID, nil
+
+	return rawRequestID, nil
 }
 
 func validateAgentPayloadTimestamp(unixSeconds int64, now time.Time, skew time.Duration) error {
