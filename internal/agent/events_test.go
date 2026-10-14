@@ -3,9 +3,11 @@ package agent
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -260,4 +262,87 @@ func TestReadLogTailDiskFileIntegration(t *testing.T) {
 	if lines[0] != "second log line" || lines[1] != "third log line" {
 		t.Fatalf("expected second and third lines, got: %v", lines)
 	}
+}
+
+func TestScanSystemdFailuresNoDuplicateReplay(t *testing.T) {
+	ctx := context.Background()
+
+	var outputToReturn string
+	collector := &EventCollector{
+		seenSignatures: make(map[string]int64),
+		systemdRunner: func(ctx context.Context) (io.Reader, error) {
+			return strings.NewReader(outputToReturn), nil
+		},
+	}
+
+	// 1. Initial scan with failure: must return event
+	outputToReturn = "nginx.service loaded failed failed Nginx Web Server\n"
+	t0 := int64(1000)
+	eventsT0 := collector.scanSystemdFailures(ctx, t0)
+	if len(eventsT0) != 1 {
+		t.Fatalf("expected 1 event at t0, got %d", len(eventsT0))
+	}
+	if !strings.Contains(eventsT0[0].Title, "nginx.service") {
+		t.Fatalf("unexpected event title: %s", eventsT0[0].Title)
+	}
+
+	// 2. Cache hits at 10s, 20s, 30s, 40s, 50s: must return nil/empty
+	for _, offset := range []int64{10, 20, 30, 40, 50} {
+		hits := collector.scanSystemdFailures(ctx, t0+offset)
+		if len(hits) != 0 {
+			t.Fatalf("expected empty events during cache window at offset +%ds, got %d", offset, len(hits))
+		}
+	}
+
+	// 3. Modifying returned events does not mutate internal cachedSystemdEvents
+	eventsT0[0].Title = "MUTATED"
+	if len(collector.cachedSystemdEvents) > 0 && collector.cachedSystemdEvents[0].Title == "MUTATED" {
+		t.Fatal("mutating returned slice corrupted internal cachedSystemdEvents")
+	}
+
+	// 4. At 60s: re-scan occurs. Same failure is still present, but 24h deduplication suppresses it
+	t60 := t0 + 60
+	eventsT60 := collector.scanSystemdFailures(ctx, t60)
+	if len(eventsT60) != 0 {
+		t.Fatalf("expected 0 events at t60 due to 24h deduplication, got %d", len(eventsT60))
+	}
+
+	// 5. Failure disappears at t120
+	t120 := t0 + 120
+	outputToReturn = "" // no failed units
+	eventsT120 := collector.scanSystemdFailures(ctx, t120)
+	if len(eventsT120) != 0 {
+		t.Fatalf("expected 0 events when no units failed, got %d", len(eventsT120))
+	}
+
+	// 6. 24h later: failure reappears. Signature should be pruned and new event generated
+	t24h := t0 + 86400 + 10
+	collector.pruneSignatures(t24h)
+	outputToReturn = "nginx.service loaded failed failed Nginx Web Server\n"
+	eventsReappear := collector.scanSystemdFailures(ctx, t24h)
+	if len(eventsReappear) != 1 {
+		t.Fatalf("expected 1 new event after 24h expiry, got %d", len(eventsReappear))
+	}
+}
+
+func TestScanSystemdFailuresConcurrencyRace(t *testing.T) {
+	ctx := context.Background()
+	collector := &EventCollector{
+		seenSignatures: make(map[string]int64),
+		systemdRunner: func(ctx context.Context) (io.Reader, error) {
+			return strings.NewReader("redis.service loaded failed failed Redis In-Memory Store\n"), nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(iter int) {
+			defer wg.Done()
+			collector.mu.Lock()
+			_ = collector.scanSystemdFailures(ctx, int64(1000+iter*5))
+			collector.mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
 }

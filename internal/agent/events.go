@@ -30,6 +30,7 @@ type EventCollector struct {
 
 	lastSystemdScan     int64
 	cachedSystemdEvents []protocol.SystemEvent
+	systemdRunner       func(ctx context.Context) (io.Reader, error)
 }
 
 var defaultCollector = &EventCollector{
@@ -39,6 +40,15 @@ var defaultCollector = &EventCollector{
 // GetDefaultEventCollector returns the global singleton EventCollector.
 func GetDefaultEventCollector() *EventCollector {
 	return defaultCollector
+}
+
+func (c *EventCollector) pruneSignatures(nowSec int64) {
+	cutoff := nowSec - 86400
+	for sig, ts := range c.seenSignatures {
+		if ts < cutoff {
+			delete(c.seenSignatures, sig)
+		}
+	}
 }
 
 // CollectSystemEvents scans system logs, kernel buffers, and systemd status for critical security and health events.
@@ -52,12 +62,7 @@ func (c *EventCollector) CollectSystemEvents(ctx context.Context) ([]protocol.Sy
 
 	// Prune seen signatures older than 24 hours
 	nowSec := time.Now().Unix()
-	cutoff := nowSec - 86400
-	for sig, ts := range c.seenSignatures {
-		if ts < cutoff {
-			delete(c.seenSignatures, sig)
-		}
-	}
+	c.pruneSignatures(nowSec)
 
 	events := make([]protocol.SystemEvent, 0)
 
@@ -216,24 +221,35 @@ func (c *EventCollector) scanAuthLogs(ctx context.Context, nowSec int64) []proto
 }
 
 func (c *EventCollector) scanSystemdFailures(ctx context.Context, nowSec int64) []protocol.SystemEvent {
-	// Cache systemctl --failed for 60 seconds to avoid high-frequency process execution
+	// Cache systemctl --failed for 60 seconds to avoid high-frequency process execution.
+	// In the caching window, do not replay previously reported events; return nil.
 	if c.lastSystemdScan > 0 && (nowSec-c.lastSystemdScan) < 60 {
-		return c.cachedSystemdEvents
+		return nil
 	}
 	c.lastSystemdScan = nowSec
 
-	var events []protocol.SystemEvent
+	var r io.Reader
+	if c.systemdRunner != nil {
+		reader, err := c.systemdRunner(ctx)
+		if err != nil {
+			return nil
+		}
+		r = reader
+	} else {
+		cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, "systemctl", "--failed", "--no-legend", "--no-pager")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil || cmd.Start() != nil {
-		return nil
+		cmd := exec.CommandContext(cmdCtx, "systemctl", "--failed", "--no-legend", "--no-pager")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil || cmd.Start() != nil {
+			return nil
+		}
+		defer func() { _ = cmd.Wait() }()
+		r = io.LimitReader(stdout, 64*1024)
 	}
 
-	scanner := bufio.NewScanner(io.LimitReader(stdout, 64*1024))
+	var events []protocol.SystemEvent
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -257,9 +273,8 @@ func (c *EventCollector) scanSystemdFailures(ctx context.Context, nowSec int64) 
 			}
 		}
 	}
-	_ = cmd.Wait()
 
-	c.cachedSystemdEvents = events
+	c.cachedSystemdEvents = append([]protocol.SystemEvent(nil), events...)
 	return events
 }
 
