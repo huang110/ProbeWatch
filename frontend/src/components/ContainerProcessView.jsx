@@ -401,7 +401,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
           </div>
         )}
 
-        {activeTab === 'processes' && (
+        {activeTab === 'processes' && selectedNode && (
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>排序指标:</span>
             {[
@@ -590,68 +590,80 @@ export function ContainerProcessView({ initialNodeId = '' }) {
           </div>
         )
       ) : (
-        /* Host Processes Table */
-        <div className="panel" style={{ overflowX: 'auto', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-          <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: 'var(--text-muted)', height: '40px' }}>
-                <th style={{ padding: '0 16px', width: '80px' }}>PID</th>
-                <th style={{ padding: '0 16px' }}>进程名称 (Comm)</th>
-                <th style={{ padding: '0 16px', width: '100px' }}>执行用户</th>
-                <th style={{ padding: '0 16px', width: '80px' }}>状态</th>
-                <th style={{ padding: '0 16px', width: '120px' }}>CPU 占比</th>
-                <th style={{ padding: '0 16px', width: '160px' }}>常驻内存 (RSS)</th>
-                <th style={{ padding: '0 16px', width: '80px' }}>线程数</th>
-                <th style={{ padding: '0 16px' }}>命令行预览</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedProcesses.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ padding: '36px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    暂无进程快照数据或当前节点不支持
-                  </td>
+        /* Host Processes View */
+        !selectedNode ? (
+          <div className="panel" style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <Rows size={48} style={{ opacity: 0.3, marginBottom: '12px' }} />
+            <div style={{ fontSize: '15px', color: 'var(--text-primary)', fontWeight: 500 }}>
+              请在右上角选择具体服务器节点以查看宿主机 Top 进程
+            </div>
+            <div style={{ fontSize: '13px', marginTop: '6px' }}>
+              宿主机进程数据属于单机实时快照，不支持全舰队聚合展示。
+            </div>
+          </div>
+        ) : (
+          <div className="panel" style={{ overflowX: 'auto', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: 'var(--text-muted)', height: '40px' }}>
+                  <th style={{ padding: '0 16px', width: '80px' }}>PID</th>
+                  <th style={{ padding: '0 16px' }}>进程名称 (Comm)</th>
+                  <th style={{ padding: '0 16px', width: '100px' }}>执行用户</th>
+                  <th style={{ padding: '0 16px', width: '80px' }}>状态</th>
+                  <th style={{ padding: '0 16px', width: '120px' }}>CPU 占比</th>
+                  <th style={{ padding: '0 16px', width: '160px' }}>常驻内存 (RSS)</th>
+                  <th style={{ padding: '0 16px', width: '80px' }}>线程数</th>
+                  <th style={{ padding: '0 16px' }}>命令行预览</th>
                 </tr>
-              ) : (
-                sortedProcesses.map((p) => (
-                  <tr key={p.pid} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', height: '42px' }}>
-                    <td style={{ padding: '0 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{p.pid}</td>
-                    <td style={{ padding: '0 16px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</td>
-                    <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{p.user || 'root'}</td>
-                    <td style={{ padding: '0 16px' }}>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          padding: '1px 6px',
-                          borderRadius: '3px',
-                          background: p.state === 'R' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.06)',
-                          color: p.state === 'R' ? '#10b981' : 'var(--text-muted)',
-                        }}
-                      >
-                        {p.state === 'R' ? 'R (运行)' : p.state === 'S' ? 'S (休眠)' : p.state === 'Z' ? 'Z (僵尸)' : p.state}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0 16px', color: p.cpu_percent > 20 ? '#f59e0b' : 'var(--text-primary)' }}>
-                      {Number.isFinite(Number(p.cpu_percent)) ? `${Number(p.cpu_percent).toFixed(1)}%` : '—'}
-                    </td>
-                    <td style={{ padding: '0 16px', color: 'var(--text-primary)' }}>
-                      {formatBytes(p.memory_rss_bytes)}
-                      {p.memory_percent > 0 && (
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>
-                          ({p.memory_percent.toFixed(1)}%)
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{Number.isFinite(Number(p.threads)) ? p.threads : '—'}</td>
-                    <td style={{ padding: '0 16px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '11px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {p.command_line || p.name}
+              </thead>
+              <tbody>
+                {sortedProcesses.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '36px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      暂无进程快照数据或当前节点不支持
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  sortedProcesses.map((p) => (
+                    <tr key={p.pid} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', height: '42px' }}>
+                      <td style={{ padding: '0 16px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{p.pid}</td>
+                      <td style={{ padding: '0 16px', fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</td>
+                      <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{p.user || 'root'}</td>
+                      <td style={{ padding: '0 16px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            padding: '1px 6px',
+                            borderRadius: '3px',
+                            background: p.state === 'R' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                            color: p.state === 'R' ? '#10b981' : 'var(--text-muted)',
+                          }}
+                        >
+                          {p.state === 'R' ? 'R (运行)' : p.state === 'S' ? 'S (休眠)' : p.state === 'Z' ? 'Z (僵尸)' : p.state}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0 16px', color: p.cpu_percent > 20 ? '#f59e0b' : 'var(--text-primary)' }}>
+                        {Number.isFinite(Number(p.cpu_percent)) ? `${Number(p.cpu_percent).toFixed(1)}%` : '—'}
+                      </td>
+                      <td style={{ padding: '0 16px', color: 'var(--text-primary)' }}>
+                        {formatBytes(p.memory_rss_bytes)}
+                        {p.memory_percent > 0 && (
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                            ({p.memory_percent.toFixed(1)}%)
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '0 16px', color: 'var(--text-muted)' }}>{Number.isFinite(Number(p.threads)) ? p.threads : '—'}</td>
+                      <td style={{ padding: '0 16px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '11px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.command_line || p.name}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </div>
   )

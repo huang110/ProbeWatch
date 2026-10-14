@@ -71,7 +71,6 @@ export function AlertCenterView({
   const [toastMsg, setToastMsg] = useState('')
 
   // 1. 通知渠道相关真实状态与后端同步
-  const [channelEnabled, setChannelEnabled] = useState(true)
   const [msgTemplate, setMsgTemplate] = useState('')
   const [channels, setChannels] = useState([])
   const [loadingChannels, setLoadingChannels] = useState(false)
@@ -703,20 +702,28 @@ export function AlertCenterView({
             </div>
           </div>
 
-          {/* 卡片 1: 开启通知 */}
+          {/* 卡片 1: 通知分发状态说明与全量测试 */}
           <div className="lite-card-box">
             <div className="lite-card-row">
               <div className="lite-card-meta">
-                <span className="lite-card-title">开启通知</span>
-                <span className="lite-card-desc">通过首选方式获取及时通知。</span>
+                <span className="lite-card-title">通知分发状态说明</span>
+                <span className="lite-card-desc">
+                  ProbeWatch 采用多通道独立控制机制，告警将通过下方已启用的各渠道独立分发。请在“已配置通知渠道”中分别启用或停用对应通道。
+                </span>
               </div>
               <button
                 type="button"
-                className={`switch-toggle ${channelEnabled ? 'active' : ''}`}
-                onClick={() => setChannelEnabled(!channelEnabled)}
-                aria-pressed={channelEnabled}
+                className="lite-btn-secondary flex items-center gap-1.5"
+                disabled={globalTesting || channels.length === 0}
+                onClick={handleGlobalTest}
+                title="向所有已启用的通知渠道发送测试消息"
               >
-                <span className="switch-thumb" />
+                {globalTesting ? (
+                  <CircleNotch size={14} className="animate-spin text-blue" />
+                ) : (
+                  <PaperPlaneTilt size={14} />
+                )}
+                <span>全量测试</span>
               </button>
             </div>
           </div>
