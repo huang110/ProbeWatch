@@ -3573,17 +3573,22 @@ func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerO
 		       COALESCE(SUM(containers_stopped), 0)
 		FROM node_workload_latest;
 	`)
-	_ = row.Scan(
+	if err := row.Scan(
 		&overview.TotalNodes,
 		&overview.NodesWithDocker,
 		&overview.TotalContainers,
 		&overview.RunningContainers,
 		&overview.StoppedContainers,
-	)
+	); err != nil {
+		return nil, err
+	}
 
-	_ = s.db.QueryRowContext(ctx, `
+	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM node_containers_latest WHERE health = 'unhealthy';
-	`).Scan(&overview.UnhealthyContainers)
+	`).Scan(&overview.UnhealthyContainers); err != nil {
+		return nil, err
+	}
+
 
 	cpuRows, err := s.db.QueryContext(ctx, `
 		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
