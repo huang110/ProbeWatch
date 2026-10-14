@@ -205,3 +205,87 @@ func TestOutboxReplayOnNetworkRecovery(t *testing.T) {
 		t.Fatalf("expected replayed reports to reach server, got %d", atomic.LoadInt32(&replayedReports))
 	}
 }
+
+// TestTaskTimeoutAndCleanupRunningTasks verifies that when a probe task times out or its context
+// is cancelled, runningTasks map and worker pool slots are cleanly released.
+func TestTaskTimeoutAndCleanupRunningTasks(t *testing.T) {
+	runner, err := New(config.Config{
+		AgentEndpoint:  "http://127.0.0.1:8080",
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	slowMTR := &slowMTRMonitor{delay: 500 * time.Millisecond}
+	runner.mtr = slowMTR
+	task := protocol.CheckTask{
+		ID:        "timeout-task-1",
+		Kind:      "mtr",
+		TimeoutMS: 50, // 50ms timeout
+	}
+
+	runner.probeMu.Lock()
+	runner.runningTasks[task.ID] = struct{}{}
+	runner.probeMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	runner.runProbeTask(ctx, task)
+
+	runner.probeMu.Lock()
+	_, stillRunning := runner.runningTasks[task.ID]
+	workerSemLen := len(runner.probeWorkerSem)
+	runner.probeMu.Unlock()
+
+	if stillRunning {
+		t.Fatalf("expected task %s to be removed from runningTasks after timeout", task.ID)
+	}
+	if workerSemLen != 0 {
+		t.Fatalf("expected worker sem slot to be released, got len %d", workerSemLen)
+	}
+}
+
+// TestOutboxReplayConcurrentSafety verifies that concurrent calls to replayOutboxLimited
+// are safely serialized by outboxReplayMu without data race or panic.
+func TestOutboxReplayConcurrentSafety(t *testing.T) {
+	dataDir, err := os.MkdirTemp("", "probewatch-agent-outbox-conc-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	runner, err := New(config.Config{
+		AgentEndpoint:  server.URL,
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+		AgentDataDir:   dataDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed outbox
+	outboxDir := filepath.Join(dataDir, "outbox")
+	_ = os.MkdirAll(outboxDir, 0700)
+	_ = os.WriteFile(filepath.Join(outboxDir, "item1.json"), []byte(`{"request_id":"req-1"}`), 0600)
+	_ = os.WriteFile(filepath.Join(outboxDir, "item2.json"), []byte(`{"request_id":"req-2"}`), 0600)
+
+	done := make(chan struct{})
+	for i := 0; i < 5; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = runner.replayOutboxLimited(context.Background())
+		}()
+	}
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+}

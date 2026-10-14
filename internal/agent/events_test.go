@@ -118,6 +118,39 @@ func TestQuerySystemLogsParameterValidation(t *testing.T) {
 		t.Fatalf("expected lines 5000 to be clamped to 1000, got: %v", args)
 	}
 
+	// Test unit parameter injection attacks
+	for _, badUnit := range []string{"nginx; id", "nginx && whoami", "$(id)", "`whoami`", "nginx|cat", "nginx\nid"} {
+		_, err := BuildJournalctlArgs(protocol.LogQueryRequest{
+			NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+			Unit:     badUnit,
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid unit name") {
+			t.Fatalf("expected invalid unit name error for %q, got: %v", badUnit, err)
+		}
+	}
+
+	// Test since parameter injection attacks
+	for _, badSince := range []string{"1h; id", "1h && whoami", "$(id)", "`whoami`", "1h|cat"} {
+		_, err := BuildJournalctlArgs(protocol.LogQueryRequest{
+			NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+			Since:    badSince,
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid since parameter") {
+			t.Fatalf("expected invalid since error for %q, got: %v", badSince, err)
+		}
+	}
+
+	// Test grep parameter newline and carriage return rejections
+	for _, badGrep := range []string{"err\nmalicious", "err\rmalicious", strings.Repeat("A", 129)} {
+		_, err := BuildJournalctlArgs(protocol.LogQueryRequest{
+			NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+			Grep:     badGrep,
+		})
+		if err == nil {
+			t.Fatalf("expected error for bad grep %q, got nil", badGrep)
+		}
+	}
+
 	// Valid query fallback
 	validReq := protocol.LogQueryRequest{
 		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
