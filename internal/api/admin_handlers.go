@@ -804,8 +804,6 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	var cpuTotal float64
 	var resourceCount int
 	seenChecks := make(map[string]struct{})
-	var rxFirst, txFirst, rxLast, txLast uint64
-	var haveCounters bool
 
 	nodeIDs := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -844,28 +842,55 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		if !at.Before(from) && !at.After(to) {
 			nc["resource_reporting"]++
 		}
-		if records, ok := historyMap[n.ID]; ok {
+
+		// Current cluster memory, filesystem, and latest network counters are aggregated
+		// from each node's latest snapshot, never multiplied across historical records.
+		if len(latest.Payload) > 0 {
+			var snap struct {
+				MemoryUsed      uint64 `json:"memory_used_bytes"`
+				MemoryTotal     uint64 `json:"memory_total_bytes"`
+				FilesystemUsed  uint64 `json:"filesystem_used_bytes"`
+				FilesystemTotal uint64 `json:"filesystem_total_bytes"`
+				NetworkRx       uint64 `json:"network_rx_bytes"`
+				NetworkTx       uint64 `json:"network_tx_bytes"`
+			}
+			if json.Unmarshal(latest.Payload, &snap) == nil {
+				resources["memory_used_bytes"] = resources["memory_used_bytes"].(uint64) + snap.MemoryUsed
+				resources["memory_total_bytes"] = resources["memory_total_bytes"].(uint64) + snap.MemoryTotal
+				resources["filesystem_used_bytes"] = resources["filesystem_used_bytes"].(uint64) + snap.FilesystemUsed
+				resources["filesystem_total_bytes"] = resources["filesystem_total_bytes"].(uint64) + snap.FilesystemTotal
+				resources["network_rx_bytes"] = resources["network_rx_bytes"].(uint64) + snap.NetworkRx
+				resources["network_tx_bytes"] = resources["network_tx_bytes"].(uint64) + snap.NetworkTx
+			}
+		}
+
+		// Historical records are strictly used for CPU averages and per-node traffic deltas.
+		if records, ok := historyMap[n.ID]; ok && len(records) > 0 {
+			var nodeRxFirst, nodeTxFirst, nodeRxLast, nodeTxLast uint64
+			var nodeHaveCounters bool
+
 			for _, record := range records {
 				var value struct {
-					CPU             float64 `json:"cpu_percent"`
-					Rx              uint64  `json:"network_rx_bytes"`
-					Tx              uint64  `json:"network_tx_bytes"`
-					MemoryUsed      uint64  `json:"memory_used_bytes"`
-					MemoryTotal     uint64  `json:"memory_total_bytes"`
-					FilesystemUsed  uint64  `json:"filesystem_used_bytes"`
-					FilesystemTotal uint64  `json:"filesystem_total_bytes"`
+					CPU float64 `json:"cpu_percent"`
+					Rx  uint64  `json:"network_rx_bytes"`
+					Tx  uint64  `json:"network_tx_bytes"`
 				}
 				if json.Unmarshal(record.Payload, &value) == nil {
-					if !haveCounters {
-						rxFirst, txFirst, haveCounters = value.Rx, value.Tx, true
+					if !nodeHaveCounters {
+						nodeRxFirst, nodeTxFirst, nodeHaveCounters = value.Rx, value.Tx, true
 					}
-					rxLast, txLast = value.Rx, value.Tx
+					nodeRxLast, nodeTxLast = value.Rx, value.Tx
 					cpuTotal += value.CPU
 					resourceCount++
-					resources["memory_used_bytes"] = resources["memory_used_bytes"].(uint64) + value.MemoryUsed
-					resources["memory_total_bytes"] = resources["memory_total_bytes"].(uint64) + value.MemoryTotal
-					resources["filesystem_used_bytes"] = resources["filesystem_used_bytes"].(uint64) + value.FilesystemUsed
-					resources["filesystem_total_bytes"] = resources["filesystem_total_bytes"].(uint64) + value.FilesystemTotal
+				}
+			}
+
+			if nodeHaveCounters {
+				if nodeRxLast >= nodeRxFirst {
+					resources["network_rx_bytes_delta"] = resources["network_rx_bytes_delta"].(uint64) + (nodeRxLast - nodeRxFirst)
+				}
+				if nodeTxLast >= nodeTxFirst {
+					resources["network_tx_bytes_delta"] = resources["network_tx_bytes_delta"].(uint64) + (nodeTxLast - nodeTxFirst)
 				}
 			}
 		}
@@ -878,30 +903,30 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, record := range records {
-				key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
-				if _, exists := seenChecks[key]; exists {
-					continue
+			key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+			if _, exists := seenChecks[key]; exists {
+				continue
+			}
+			seenChecks[key] = struct{}{}
+			var result struct {
+				Status  string `json:"status"`
+				Reached bool   `json:"reached"`
+				Error   string `json:"error"`
+				Latency int64  `json:"latency_ms"`
+			}
+			if json.Unmarshal(record.Payload, &result) == nil {
+				checksTotal++
+				ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
+				if ok {
+					checksSuccess++
 				}
-				seenChecks[key] = struct{}{}
-				var result struct {
-					Status  string `json:"status"`
-					Reached bool   `json:"reached"`
-					Error   string `json:"error"`
-					Latency int64  `json:"latency_ms"`
-				}
-				if json.Unmarshal(record.Payload, &result) == nil {
-					checksTotal++
-					ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
-					if ok {
-						checksSuccess++
-					}
-					if result.Latency > 0 {
-						latencyTotal += result.Latency
-						latencyCount++
-					}
+				if result.Latency > 0 {
+					latencyTotal += result.Latency
+					latencyCount++
 				}
 			}
 		}
+	}
 	checks := map[string]any{"total": checksTotal, "success": checksSuccess, "failure": checksTotal - checksSuccess, "success_rate": nil, "avg_latency_ms": nil}
 	if checksTotal > 0 {
 		checks["success_rate"] = float64(checksSuccess) * 100 / float64(checksTotal)
@@ -911,16 +936,6 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	if resourceCount > 0 {
 		resources["cpu_percent"] = cpuTotal / float64(resourceCount)
-	}
-	if haveCounters {
-		resources["network_rx_bytes"] = rxLast
-		resources["network_tx_bytes"] = txLast
-		if rxLast >= rxFirst {
-			resources["network_rx_bytes_delta"] = rxLast - rxFirst
-		}
-		if txLast >= txFirst {
-			resources["network_tx_bytes_delta"] = txLast - txFirst
-		}
 	}
 
 	database := map[string]any{
