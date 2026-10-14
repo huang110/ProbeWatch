@@ -22,14 +22,20 @@ import (
 )
 
 const (
-	maxReportAttempts = 3
-	reportRetryDelay  = 100 * time.Millisecond
-	maxOutboxFiles    = 100
-	maxOutboxFileSize = 1 << 20
-	maxOutboxAttempts = 8
-	maxOutboxAge      = 7 * 24 * time.Hour
-	maxConfigResponseBytes = 2 << 20
+	maxReportAttempts            = 3
+	reportRetryDelay             = 100 * time.Millisecond
+	maxOutboxFiles               = 100
+	maxOutboxFileSize            = 1 << 20
+	maxOutboxAttempts            = 8
+	maxOutboxAge                 = 7 * 24 * time.Hour
+	maxConfigResponseBytes       = 2 << 20
 	initialResourceFollowupDelay = 2 * time.Second
+	maxConcurrentProbeWorkers    = 4
+	maxBufferedProbeResults      = 100
+	defaultProbeTimeout          = 15 * time.Second
+	probeFastWaitTimeout         = 40 * time.Millisecond
+	maxOutboxReplayBatch         = 10
+	outboxReplayTimeout          = 10 * time.Second
 )
 
 // Runner is the outbound-only monitoring agent. It never opens a listener.
@@ -53,6 +59,13 @@ type Runner struct {
 	mtr       mtrMonitor
 	speedtest speedtestMonitor
 	synthetic syntheticMonitor
+
+	// Concurrency & buffer management for network probes
+	probeWorkerSem  chan struct{}
+	probeMu         sync.Mutex
+	runningTasks    map[string]struct{}
+	bufferedResults []protocol.CheckResult
+	outboxReplayMu  sync.Mutex
 
 	// configMaxAgeSeconds is the freshness window the control plane asked for
 	// (0 = no fail-closed enforcement, legacy behavior). lastRefreshSuccessAt
@@ -103,6 +116,9 @@ func New(cfg config.Config) (*Runner, error) {
 		cpu: newCPUTracker(), hardware: defaultHardwareCollector(), disk: newPlatformDiskTracker(), sockets: defaultSocketCollector(), health: defaultHostHealthCollector(), ipQuality: NewIPQualityCollector(), ipqa: NewIPQACollector(),
 		probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{},
 		speedtest: &monitor.SpeedtestRunner{}, synthetic: monitor.NewSyntheticMonitor(),
+		probeWorkerSem:  make(chan struct{}, maxConcurrentProbeWorkers),
+		runningTasks:    make(map[string]struct{}),
+		bufferedResults: make([]protocol.CheckResult, 0, 16),
 	}, nil
 }
 
@@ -150,6 +166,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer configTicker.Stop()
 	updateTicker := time.NewTicker(6 * time.Hour)
 	defer updateTicker.Stop()
+	outboxTicker := time.NewTicker(30 * time.Second)
+	defer outboxTicker.Stop()
 
 	// Initial workload & events report
 	go func() {
@@ -158,13 +176,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	}()
 
 	for {
-		if err := r.report(ctx); err != nil && ctx.Err() != nil {
-			return ctx.Err()
-		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if err := r.report(ctx); err != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
 		case <-workloadTicker.C:
 			_ = r.reportWorkload(ctx)
 		case <-eventsTicker.C:
@@ -173,6 +191,8 @@ func (r *Runner) Run(ctx context.Context) error {
 			_ = r.refresh(ctx)
 		case <-updateTicker.C:
 			r.autoCheckUpdate(ctx)
+		case <-outboxTicker.C:
+			_ = r.replayOutboxLimited(ctx)
 		}
 	}
 }
@@ -266,6 +286,54 @@ func (r *Runner) refresh(ctx context.Context) error {
 	return nil
 }
 
+func (r *Runner) runProbeTask(ctx context.Context, task protocol.CheckTask) {
+	select {
+	case r.probeWorkerSem <- struct{}{}:
+	case <-ctx.Done():
+		r.probeMu.Lock()
+		delete(r.runningTasks, task.ID)
+		r.probeMu.Unlock()
+		return
+	}
+	defer func() { <-r.probeWorkerSem }()
+
+	taskTimeout := defaultProbeTimeout
+	if task.TimeoutMS > 0 {
+		taskTimeout = time.Duration(task.TimeoutMS) * time.Millisecond
+		if taskTimeout > 30*time.Second {
+			taskTimeout = 30 * time.Second
+		}
+	}
+	taskCtx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	var result protocol.CheckResult
+	switch task.Kind {
+	case "mtr":
+		value := r.mtr.Run(taskCtx, task)
+		result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, MTR: &value}
+	case "media_http":
+		value := r.media.Run(taskCtx, task)
+		result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Media: &value}
+	case "speedtest":
+		value := r.speedtest.Run(taskCtx, task)
+		result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Speedtest: &value}
+	case "grpc", "websocket", "doh", "synthetic":
+		value := r.synthetic.Run(taskCtx, task)
+		result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Synthetic: &value}
+	default:
+		value := r.probe.Run(taskCtx, task)
+		result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Network: &value}
+	}
+
+	r.probeMu.Lock()
+	delete(r.runningTasks, task.ID)
+	if len(r.bufferedResults) < maxBufferedProbeResults {
+		r.bufferedResults = append(r.bufferedResults, result)
+	}
+	r.probeMu.Unlock()
+}
+
 func (r *Runner) report(ctx context.Context) error {
 	r.mu.Lock()
 	tasks := append([]protocol.CheckTask(nil), r.tasks...)
@@ -289,29 +357,60 @@ func (r *Runner) report(ctx context.Context) error {
 		}
 	}
 	r.mu.Unlock()
-	results := make([]protocol.CheckResult, 0, len(due))
-	for _, task := range due {
-		var result protocol.CheckResult
-		switch task.Kind {
-		case "mtr":
-			value := r.mtr.Run(ctx, task)
-			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, MTR: &value}
-		case "media_http":
-			value := r.media.Run(ctx, task)
-			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Media: &value}
-		case "speedtest":
-			value := r.speedtest.Run(ctx, task)
-			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Speedtest: &value}
-		case "grpc", "websocket", "doh", "synthetic":
-			value := r.synthetic.Run(ctx, task)
-			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Synthetic: &value}
-		default:
-			value := r.probe.Run(ctx, task)
-			result = protocol.CheckResult{ID: task.ID, Kind: task.Kind, Network: &value}
-		}
-		results = append(results, result)
+
+	// Dispatch due tasks to bounded worker pool without blocking the heartbeat loop
+	toLaunch := make([]protocol.CheckTask, 0, len(due))
+	r.probeMu.Lock()
+	if r.runningTasks == nil {
+		r.runningTasks = make(map[string]struct{})
 	}
-	request := protocol.ReportRequest{NodeUUID: r.cfg.AgentNodeUUID, ReportedAt: r.now().UTC().Unix(), Resource: collectResourceWith(r.startedAt, r.cpu, r.hardware, r.disk, r.sockets, r.health, r.ipQuality, r.ipqa), Results: results}
+	if r.probeWorkerSem == nil {
+		r.probeWorkerSem = make(chan struct{}, maxConcurrentProbeWorkers)
+	}
+	for _, task := range due {
+		if _, running := r.runningTasks[task.ID]; !running {
+			r.runningTasks[task.ID] = struct{}{}
+			toLaunch = append(toLaunch, task)
+		}
+	}
+	r.probeMu.Unlock()
+
+	if len(toLaunch) > 0 {
+		var wg sync.WaitGroup
+		for _, t := range toLaunch {
+			wg.Add(1)
+			go func(task protocol.CheckTask) {
+				defer wg.Done()
+				r.runProbeTask(ctx, task)
+			}(t)
+		}
+
+		// Wait briefly for fast tasks so immediate results can be bundled,
+		// but never block the heartbeat on slow tasks.
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(probeFastWaitTimeout):
+		case <-ctx.Done():
+		}
+	}
+
+	// Drain any completed probe results from buffer
+	r.probeMu.Lock()
+	results := r.bufferedResults
+	r.bufferedResults = make([]protocol.CheckResult, 0, 16)
+	r.probeMu.Unlock()
+
+	request := protocol.ReportRequest{
+		NodeUUID:   r.cfg.AgentNodeUUID,
+		ReportedAt: r.now().UTC().Unix(),
+		Resource:   collectResourceWith(r.startedAt, r.cpu, r.hardware, r.disk, r.sockets, r.health, r.ipQuality, r.ipqa),
+		Results:    results,
+	}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return err
@@ -321,6 +420,7 @@ func (r *Runner) report(ctx context.Context) error {
 		return err
 	}
 	if err = r.sendReport(ctx, requestID, payload); err == nil {
+		go func() { _ = r.replayOutboxLimited(context.Background()) }()
 		return nil
 	}
 	return r.enqueueReport(queuedReport{RequestID: requestID, Payload: payload, Attempts: 1, NextTry: time.Now().UTC().Add(reportRetryDelay)})
@@ -512,7 +612,15 @@ func (r *Runner) enqueueReport(item queuedReport) error {
 	return os.Rename(tmpName, filepath.Join(dir, name))
 }
 
-func (r *Runner) replayOutbox(ctx context.Context) error {
+func (r *Runner) replayOutboxLimited(ctx context.Context) error {
+	if !r.outboxReplayMu.TryLock() {
+		return nil
+	}
+	defer r.outboxReplayMu.Unlock()
+
+	replayCtx, cancel := context.WithTimeout(ctx, outboxReplayTimeout)
+	defer cancel()
+
 	dir, err := r.outboxDir()
 	if err != nil || dir == "" {
 		return err
@@ -525,7 +633,11 @@ func (r *Runner) replayOutbox(ctx context.Context) error {
 		return err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	processed := 0
 	for _, entry := range entries {
+		if processed >= maxOutboxReplayBatch || replayCtx.Err() != nil {
+			break
+		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
@@ -548,7 +660,11 @@ func (r *Runner) replayOutbox(ctx context.Context) error {
 			_ = os.Remove(path)
 			continue
 		}
-		if err := r.sendReport(ctx, item.RequestID, item.Payload); err == nil {
+		if r.now().Before(item.NextTry) {
+			continue
+		}
+		processed++
+		if err := r.sendReport(replayCtx, item.RequestID, item.Payload); err == nil {
 			_ = os.Remove(path)
 		} else {
 			item.Attempts++
@@ -556,9 +672,15 @@ func (r *Runner) replayOutbox(ctx context.Context) error {
 			if updated, marshalErr := json.Marshal(item); marshalErr == nil && len(updated) <= maxOutboxFileSize {
 				_ = os.WriteFile(path, updated, 0600)
 			}
+			// Stop current batch on send error to respect backoff
+			break
 		}
 	}
 	return nil
+}
+
+func (r *Runner) replayOutbox(ctx context.Context) error {
+	return r.replayOutboxLimited(ctx)
 }
 
 func min(a, b int) int {
