@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -1277,21 +1278,43 @@ func (r SystemEventBatchReport) Validate() error {
 	return nil
 }
 
+var (
+	ValidLogUnitRegex          = regexp.MustCompile(`^[a-zA-Z0-9_\.\@\-]+$`)
+	ValidLogPriorityRegex      = regexp.MustCompile(`^(emerg|alert|crit|err|warning|notice|info|debug|[0-7])$`)
+	ValidLogSinceRelativeRegex = regexp.MustCompile(`^-?[0-9]+[smhd]$`)
+	ValidLogSinceISORegex      = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9]{2}:[0-9]{2}:[0-9]{2})?$`)
+)
+
 func (q LogQueryRequest) Validate() error {
 	if err := validateUUID("node_uuid", q.NodeUUID); err != nil {
 		return err
 	}
-	if err := validateString("unit", q.Unit, maxIDLength, false); err != nil {
-		return err
+	if q.Unit != "" {
+		trimmed := strings.TrimSpace(q.Unit)
+		if len(trimmed) > 64 || !ValidLogUnitRegex.MatchString(trimmed) {
+			return errors.New("unit must match ^[a-zA-Z0-9_\\.\\@\\-]+$ and be at most 64 chars")
+		}
 	}
-	if err := validateString("priority", q.Priority, maxKindLength, false); err != nil {
-		return err
+	if q.Priority != "" {
+		trimmed := strings.TrimSpace(q.Priority)
+		if !ValidLogPriorityRegex.MatchString(trimmed) {
+			return errors.New("priority must be a valid log level (0-7 or emerg..debug)")
+		}
 	}
-	if err := validateString("grep", q.Grep, 256, false); err != nil {
-		return err
+	if q.Grep != "" {
+		trimmed := strings.TrimSpace(q.Grep)
+		if len(trimmed) > 128 {
+			return errors.New("grep must be at most 128 characters")
+		}
+		if strings.ContainsAny(trimmed, "\x00\r\n") {
+			return errors.New("grep cannot contain null bytes or newlines")
+		}
 	}
-	if err := validateString("since", q.Since, 32, false); err != nil {
-		return err
+	if q.Since != "" {
+		trimmed := strings.TrimSpace(q.Since)
+		if len(trimmed) > 32 || (!ValidLogSinceRelativeRegex.MatchString(trimmed) && !ValidLogSinceISORegex.MatchString(trimmed)) {
+			return errors.New("since must be a relative duration (e.g. 1h, -30m) or ISO8601 timestamp")
+		}
 	}
 	if q.Lines < 0 || q.Lines > 1000 {
 		return errors.New("lines must be between 0 and 1000")

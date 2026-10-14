@@ -45,11 +45,31 @@ func TestQuerySystemLogsParameterValidation(t *testing.T) {
 	// Test invalid unit with unsafe characters
 	invalidReq := protocol.LogQueryRequest{
 		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
-		Unit:     "nginx; rm -rf /",
+		Unit:     "; rm -rf /",
 	}
 	_, err := QuerySystemLogs(ctx, invalidReq)
 	if err == nil || !strings.Contains(err.Error(), "invalid unit") {
 		t.Fatalf("expected invalid unit error, got: %v", err)
+	}
+
+	// Test overlong unit (> 64 chars)
+	overlongUnit := protocol.LogQueryRequest{
+		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+		Unit:     strings.Repeat("a", 65),
+	}
+	_, err = QuerySystemLogs(ctx, overlongUnit)
+	if err == nil || !strings.Contains(err.Error(), "invalid unit") {
+		t.Fatalf("expected overlong unit error, got: %v", err)
+	}
+
+	// Test malicious since injection
+	invalidSince := protocol.LogQueryRequest{
+		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+		Since:    "; reboot",
+	}
+	_, err = QuerySystemLogs(ctx, invalidSince)
+	if err == nil || !strings.Contains(err.Error(), "invalid since") {
+		t.Fatalf("expected invalid since error on '; reboot', got: %v", err)
 	}
 
 	// Test invalid priority
@@ -60,6 +80,42 @@ func TestQuerySystemLogsParameterValidation(t *testing.T) {
 	_, err = QuerySystemLogs(ctx, invalidPri)
 	if err == nil || !strings.Contains(err.Error(), "invalid priority") {
 		t.Fatalf("expected invalid priority error, got: %v", err)
+	}
+
+	// Test malicious grep containing null byte
+	nullGrep := protocol.LogQueryRequest{
+		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+		Grep:     "valid\x00malicious",
+	}
+	_, err = QuerySystemLogs(ctx, nullGrep)
+	if err == nil || !strings.Contains(err.Error(), "disallowed") {
+		t.Fatalf("expected error on grep containing null byte, got: %v", err)
+	}
+
+	// Test command substitution attempt in grep: BuildJournalctlArgs must pass it as structured literal argument
+	cmdSubstReq := protocol.LogQueryRequest{
+		NodeUUID: "123e4567-e89b-12d3-a456-426614174000",
+		Grep:     "$(whoami)",
+		Lines:    5000, // tests lines truncation
+	}
+	args, err := BuildJournalctlArgs(cmdSubstReq)
+	if err != nil {
+		t.Fatalf("unexpected error on BuildJournalctlArgs: %v", err)
+	}
+	var foundGrep, foundLines bool
+	for i, a := range args {
+		if a == "--grep=$(whoami)" {
+			foundGrep = true
+		}
+		if a == "-n" && i+1 < len(args) && args[i+1] == "1000" {
+			foundLines = true
+		}
+	}
+	if !foundGrep {
+		t.Fatalf("expected literal structured arg '--grep=$(whoami)', got: %v", args)
+	}
+	if !foundLines {
+		t.Fatalf("expected lines 5000 to be clamped to 1000, got: %v", args)
 	}
 
 	// Valid query fallback

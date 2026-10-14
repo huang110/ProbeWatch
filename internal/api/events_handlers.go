@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,16 +22,8 @@ func (s *Server) eventsAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, ok := parseBearer(r.Header.Get("Authorization"))
+	node, requestID, now, ok := s.authenticateAgentRequest(w, r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "authentication failed")
-		return
-	}
-
-	now := time.Now().UTC()
-	node, err := s.service.Store().AuthenticateNodeToken(r.Context(), token, now)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "authentication failed")
 		return
 	}
 
@@ -55,6 +46,10 @@ func (s *Server) eventsAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.service.Store().SaveSystemEvents(r.Context(), node.ID, batch.Events); err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "events save failed")
 		return
+	}
+
+	if requestID != "" {
+		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -213,8 +208,10 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 	grep := r.URL.Query().Get("grep")
 	since := r.URL.Query().Get("since")
 	lines, _ := strconv.Atoi(r.URL.Query().Get("lines"))
-	if lines <= 0 || lines > 500 {
+	if lines <= 0 {
 		lines = 100
+	} else if lines > 1000 {
+		lines = 1000
 	}
 
 	req := protocol.LogQueryRequest{
@@ -231,23 +228,18 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 		return
 	}
 
-	// 1. If agent is connected via reverse tunnel, query directly through the tunnel
+	// 1. If agent is connected via reverse tunnel, query directly through the tunnel with POSIX quoted argv
 	if s.terminalManager != nil && s.terminalManager.IsNodeConnected(node.UUID) {
-		cmdStr := fmt.Sprintf("journalctl --no-pager -o short-iso -n %d", req.Lines)
-		if req.Unit != "" {
-			cmdStr += " -u " + req.Unit
-		}
-		if req.Priority != "" {
-			cmdStr += " -p " + req.Priority
-		}
-		if req.Since != "" {
-			cmdStr += " --since -" + req.Since
-		}
-		if req.Grep != "" {
-			cmdStr += fmt.Sprintf(" -g %q", req.Grep)
-		}
-
-		res, err := s.terminalManager.ExecuteCommand(r.Context(), node.UUID, cmdStr, 8)
+		cmdArgs, err := agent.BuildJournalctlArgs(req)
+		if err == nil {
+			var cmdParts []string
+			cmdParts = append(cmdParts, "journalctl")
+			for _, arg := range cmdArgs {
+				// POSIX safe single-quoting prevents shell command substitutions
+				cmdParts = append(cmdParts, "'"+strings.ReplaceAll(arg, "'", "'\\''")+"'")
+			}
+			cmdStr := strings.Join(cmdParts, " ")
+			res, err := s.terminalManager.ExecuteCommand(r.Context(), node.UUID, cmdStr, 8)
 		if err == nil {
 			var logLines []string
 			if res.Stdout != "" {
@@ -273,6 +265,7 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 			return
 		}
 	}
+}
 
 	// 2. Fallback to local system log query if running on the target node or server
 	resp, err := agent.QuerySystemLogs(r.Context(), req)

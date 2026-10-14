@@ -16,10 +16,74 @@ import (
 )
 
 var (
-	validUnitRegex     = regexp.MustCompile(`^[a-zA-Z0-9_\.\@\-]+$`)
-	validSinceRegex    = regexp.MustCompile(`^[0-9]+[smhd]$`)
-	validPriorityRegex = regexp.MustCompile(`^(emerg|alert|crit|err|warning|notice|info|debug|[0-7])$`)
+	validUnitRegex          = regexp.MustCompile(`^[a-zA-Z0-9_\.\@\-]+$`)
+	validSinceRelativeRegex = regexp.MustCompile(`^-?[0-9]+[smhd]$`)
+	validSinceISORegex      = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}([ T][0-9]{2}:[0-9]{2}:[0-9]{2})?$`)
+	validPriorityRegex      = regexp.MustCompile(`^(emerg|alert|crit|err|warning|notice|info|debug|[0-7])$`)
 )
+
+// BuildJournalctlArgs validates and constructs structured argv arguments for journalctl.
+func BuildJournalctlArgs(req protocol.LogQueryRequest) ([]string, error) {
+	linesLimit := req.Lines
+	if linesLimit <= 0 {
+		linesLimit = 100
+	} else if linesLimit > 1000 {
+		linesLimit = 1000
+	}
+
+	if req.Unit != "" {
+		trimmedUnit := strings.TrimSpace(req.Unit)
+		if len(trimmedUnit) > 64 || !validUnitRegex.MatchString(trimmedUnit) {
+			return nil, errors.New("invalid unit name")
+		}
+	}
+
+	if req.Priority != "" {
+		trimmedPri := strings.TrimSpace(req.Priority)
+		if !validPriorityRegex.MatchString(trimmedPri) {
+			return nil, errors.New("invalid priority parameter")
+		}
+	}
+
+	if req.Since != "" {
+		trimmedSince := strings.TrimSpace(req.Since)
+		if len(trimmedSince) > 32 || (!validSinceRelativeRegex.MatchString(trimmedSince) && !validSinceISORegex.MatchString(trimmedSince)) {
+			return nil, errors.New("invalid since parameter")
+		}
+	}
+
+	if req.Grep != "" {
+		trimmedGrep := strings.TrimSpace(req.Grep)
+		if len(trimmedGrep) > 128 {
+			return nil, errors.New("grep parameter exceeds maximum length 128")
+		}
+		if strings.ContainsAny(trimmedGrep, "\x00\r\n") {
+			return nil, errors.New("grep contains disallowed characters")
+		}
+	}
+
+	args := []string{"--no-pager", "-o", "short-iso", "-n", strconv.Itoa(linesLimit)}
+	if req.Unit != "" {
+		args = append(args, "-u", strings.TrimSpace(req.Unit))
+	}
+	if req.Priority != "" {
+		args = append(args, "-p", strings.TrimSpace(req.Priority))
+	}
+	if req.Since != "" {
+		trimmedSince := strings.TrimSpace(req.Since)
+		if strings.HasPrefix(trimmedSince, "-") {
+			args = append(args, "--since", trimmedSince)
+		} else if validSinceRelativeRegex.MatchString(trimmedSince) {
+			args = append(args, "--since", "-"+trimmedSince)
+		} else {
+			args = append(args, "--since", trimmedSince)
+		}
+	}
+	if req.Grep != "" {
+		args = append(args, "--grep="+strings.TrimSpace(req.Grep))
+	}
+	return args, nil
+}
 
 // QuerySystemLogs safely queries system logs on the local host using journalctl or syslog fallback.
 func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protocol.LogQueryResponse, error) {
@@ -34,22 +98,15 @@ func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protoc
 	}
 
 	linesLimit := req.Lines
-	if linesLimit <= 0 || linesLimit > 500 {
+	if linesLimit <= 0 {
 		linesLimit = 100
+	} else if linesLimit > 1000 {
+		linesLimit = 1000
 	}
 
-	if req.Unit != "" {
-		trimmedUnit := strings.TrimSpace(req.Unit)
-		if !validUnitRegex.MatchString(trimmedUnit) {
-			return nil, errors.New("invalid unit name")
-		}
-	}
-
-	if req.Priority != "" {
-		trimmedPri := strings.TrimSpace(req.Priority)
-		if !validPriorityRegex.MatchString(trimmedPri) {
-			return nil, errors.New("invalid priority parameter")
-		}
+	args, err := BuildJournalctlArgs(req)
+	if err != nil {
+		return nil, err
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
@@ -57,31 +114,6 @@ func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protoc
 
 	// Try journalctl first
 	if journalctlPath, err := exec.LookPath("journalctl"); err == nil && journalctlPath != "" {
-		args := []string{"--no-pager", "-o", "short-iso", "-n", strconv.Itoa(linesLimit)}
-
-		if req.Unit != "" {
-			args = append(args, "-u", strings.TrimSpace(req.Unit))
-		}
-
-		if req.Priority != "" {
-			args = append(args, "-p", strings.TrimSpace(req.Priority))
-		}
-
-		if req.Since != "" {
-			trimmedSince := strings.TrimSpace(req.Since)
-			if validSinceRegex.MatchString(trimmedSince) {
-				args = append(args, "--since", "-"+trimmedSince)
-			}
-		}
-
-		if req.Grep != "" {
-			trimmedGrep := strings.TrimSpace(req.Grep)
-			// Ensure grep doesn't contain null or newlines
-			if !strings.ContainsAny(trimmedGrep, "\x00\r\n") && len(trimmedGrep) <= 128 {
-				args = append(args, "-g", trimmedGrep)
-			}
-		}
-
 		cmd := exec.CommandContext(queryCtx, "journalctl", args...)
 		output, cmdErr := cmd.Output()
 		if cmdErr == nil {
