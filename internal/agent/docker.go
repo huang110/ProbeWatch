@@ -98,6 +98,13 @@ func CollectDockerWorkload() (bool, string, []protocol.ContainerSnapshot, error)
 	return CollectDockerWorkloadFromSocket(sock)
 }
 
+const (
+	maxScannedContainers        = 50
+	maxDockerStatsConcurrency   = 4
+	singleContainerStatsTimeout = 2 * time.Second
+	maxDockerResponseBody       = 512 * 1024
+)
+
 // CollectDockerWorkloadFromSocket collects docker metrics from a specified socket path.
 func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.ContainerSnapshot, error) {
 	client := &http.Client{
@@ -106,7 +113,7 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 				return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
 			},
 		},
-		Timeout: 4 * time.Second,
+		Timeout: 5 * time.Second,
 	}
 
 	// 1. Version check
@@ -118,7 +125,7 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 	defer vResp.Body.Close()
 	if vResp.StatusCode == http.StatusOK {
 		var ver dockerEngineVersion
-		if err := json.NewDecoder(vResp.Body).Decode(&ver); err == nil && ver.Version != "" {
+		if err := json.NewDecoder(io.LimitReader(vResp.Body, 64*1024)).Decode(&ver); err == nil && ver.Version != "" {
 			version = ver.Version
 		}
 	}
@@ -135,12 +142,16 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 	}
 
 	var rawList []dockerContainerListItem
-	if err := json.NewDecoder(cResp.Body).Decode(&rawList); err != nil {
+	if err := json.NewDecoder(io.LimitReader(cResp.Body, 1<<20)).Decode(&rawList); err != nil {
 		return true, version, nil, fmt.Errorf("decode containers list: %w", err)
 	}
 
-	snapshots := make([]protocol.ContainerSnapshot, 0, len(rawList))
-	for _, c := range rawList {
+	if len(rawList) > maxScannedContainers {
+		rawList = rawList[:maxScannedContainers]
+	}
+
+	snapshots := make([]protocol.ContainerSnapshot, len(rawList))
+	for i, c := range rawList {
 		snap := protocol.ContainerSnapshot{
 			ID:      c.ID,
 			Names:   c.Names,
@@ -173,43 +184,75 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 			snap.Ports = append(snap.Ports, portStr)
 		}
 
-		// If running, query one-shot stats
-		if snap.State == "running" {
-			if s, err := fetchContainerStats(client, c.ID); err == nil {
-				snap.CPUPercent = calculateCPUPercent(s)
-				snap.MemoryUsageBytes = calculateMemoryUsage(s)
-				snap.MemoryLimitBytes = s.MemoryStats.Limit
-				if snap.MemoryLimitBytes > 0 {
-					snap.MemoryPercent = (float64(snap.MemoryUsageBytes) / float64(snap.MemoryLimitBytes)) * 100.0
-					if snap.MemoryPercent > 100.0 {
-						snap.MemoryPercent = 100.0
-					}
-				}
-				for _, netStat := range s.Networks {
-					snap.NetworkRxBytes += netStat.RxBytes
-					snap.NetworkTxBytes += netStat.TxBytes
-				}
-				for _, blk := range s.BlkioStats.IOServiceBytesRecursive {
-					opLower := strings.ToLower(blk.Op)
-					if strings.Contains(opLower, "read") {
-						snap.BlockReadBytes += blk.Value
-					} else if strings.Contains(opLower, "write") {
-						snap.BlockWriteBytes += blk.Value
-					}
-				}
-				snap.PIDs = s.PIDsStats.Current
-			}
-		}
-
-		snapshots = append(snapshots, snap)
+		snapshots[i] = snap
 	}
+
+	// 3. Concurrently query stats for running containers with bounded concurrency
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxDockerStatsConcurrency)
+	for i := range snapshots {
+		if snapshots[i].State != "running" {
+			continue
+		}
+		idx := i
+		cid := rawList[idx].ID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			ctx, cancel := context.WithTimeout(context.Background(), singleContainerStatsTimeout)
+			defer cancel()
+
+			if s, err := fetchContainerStatsWithContext(ctx, client, cid); err == nil && s != nil {
+				applyContainerStats(&snapshots[idx], s)
+			}
+		}()
+	}
+	wg.Wait()
 
 	return true, version, snapshots, nil
 }
 
+func applyContainerStats(snap *protocol.ContainerSnapshot, s *dockerContainerStats) {
+	snap.CPUPercent = calculateCPUPercent(s)
+	snap.MemoryUsageBytes = calculateMemoryUsage(s)
+	snap.MemoryLimitBytes = s.MemoryStats.Limit
+	if snap.MemoryLimitBytes > 0 {
+		snap.MemoryPercent = (float64(snap.MemoryUsageBytes) / float64(snap.MemoryLimitBytes)) * 100.0
+		if snap.MemoryPercent > 100.0 {
+			snap.MemoryPercent = 100.0
+		}
+	}
+	for _, netStat := range s.Networks {
+		snap.NetworkRxBytes += netStat.RxBytes
+		snap.NetworkTxBytes += netStat.TxBytes
+	}
+	for _, blk := range s.BlkioStats.IOServiceBytesRecursive {
+		opLower := strings.ToLower(blk.Op)
+		if strings.Contains(opLower, "read") {
+			snap.BlockReadBytes += blk.Value
+		} else if strings.Contains(opLower, "write") {
+			snap.BlockWriteBytes += blk.Value
+		}
+	}
+	snap.PIDs = s.PIDsStats.Current
+}
+
 func fetchContainerStats(client *http.Client, containerID string) (*dockerContainerStats, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), singleContainerStatsTimeout)
+	defer cancel()
+	return fetchContainerStatsWithContext(ctx, client, containerID)
+}
+
+func fetchContainerStatsWithContext(ctx context.Context, client *http.Client, containerID string) (*dockerContainerStats, error) {
 	url := fmt.Sprintf("http://localhost/v1.24/containers/%s/stats?stream=false", containerID)
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -220,11 +263,12 @@ func fetchContainerStats(client *http.Client, containerID string) (*dockerContai
 	}
 
 	var stats dockerContainerStats
-	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDockerResponseBody)).Decode(&stats); err != nil {
 		return nil, err
 	}
 	return &stats, nil
 }
+
 
 func calculateCPUPercent(s *dockerContainerStats) float64 {
 	cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)

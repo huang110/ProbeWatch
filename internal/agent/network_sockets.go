@@ -5,6 +5,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
 )
@@ -14,9 +16,48 @@ type SocketCollector interface {
 	Collect() (*protocol.SocketStats, []protocol.ListeningPort, error)
 }
 
-// defaultSocketCollector returns the platform-specific socket collector.
+type cachedSocketCollector struct {
+	underlying  SocketCollector
+	mu          sync.Mutex
+	cachedStats *protocol.SocketStats
+	cachedPorts []protocol.ListeningPort
+	lastScan    time.Time
+	ttl         time.Duration
+}
+
+func newCachedSocketCollector(underlying SocketCollector, ttl time.Duration) SocketCollector {
+	return &cachedSocketCollector{
+		underlying: underlying,
+		ttl:        ttl,
+	}
+}
+
+func (c *cachedSocketCollector) Collect() (*protocol.SocketStats, []protocol.ListeningPort, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cachedStats != nil && time.Since(c.lastScan) < c.ttl {
+		return c.cachedStats, c.cachedPorts, nil
+	}
+
+	stats, ports, err := c.underlying.Collect()
+	if err != nil {
+		if c.cachedStats != nil {
+			// Keep previous valid result if scan fails
+			return c.cachedStats, c.cachedPorts, nil
+		}
+		return nil, nil, err
+	}
+
+	c.cachedStats = stats
+	c.cachedPorts = ports
+	c.lastScan = time.Now()
+	return stats, ports, nil
+}
+
+// defaultSocketCollector returns the platform-specific socket collector wrapped with a 60s cache.
 func defaultSocketCollector() SocketCollector {
-	return newPlatformSocketCollector()
+	return newCachedSocketCollector(newPlatformSocketCollector(), 60*time.Second)
 }
 
 // isPublicAddress checks whether a bound IP address is reachable from the public internet.

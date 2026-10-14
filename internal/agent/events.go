@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -24,8 +25,11 @@ var (
 )
 
 type EventCollector struct {
-	mu           sync.Mutex
+	mu             sync.Mutex
 	seenSignatures map[string]int64 // signature -> timestamp (epoch seconds)
+
+	lastSystemdScan     int64
+	cachedSystemdEvents []protocol.SystemEvent
 }
 
 var defaultCollector = &EventCollector{
@@ -89,16 +93,21 @@ func eventSig(category, title, source string) string {
 func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []protocol.SystemEvent {
 	var events []protocol.SystemEvent
 
-	// Try reading dmesg with timeout
+	// Try reading dmesg with timeout and limit output to 128KB to prevent memory exhaustion
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "dmesg", "-T")
-	output, err := cmd.Output()
 	var lines []string
-	if err == nil {
-		lines = strings.Split(string(output), "\n")
-		// Only inspect the last 200 lines of dmesg
+	if stdout, err := cmd.StdoutPipe(); err == nil && cmd.Start() == nil {
+		scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+			if len(lines) > 400 {
+				lines = lines[len(lines)-200:]
+			}
+		}
+		_ = cmd.Wait()
 		if len(lines) > 200 {
 			lines = lines[len(lines)-200:]
 		}
@@ -207,20 +216,26 @@ func (c *EventCollector) scanAuthLogs(ctx context.Context, nowSec int64) []proto
 }
 
 func (c *EventCollector) scanSystemdFailures(ctx context.Context, nowSec int64) []protocol.SystemEvent {
+	// Cache systemctl --failed for 60 seconds to avoid high-frequency process execution
+	if c.lastSystemdScan > 0 && (nowSec-c.lastSystemdScan) < 60 {
+		return c.cachedSystemdEvents
+	}
+	c.lastSystemdScan = nowSec
+
 	var events []protocol.SystemEvent
 
 	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "systemctl", "--failed", "--no-legend", "--no-pager")
-	output, err := cmd.Output()
-	if err != nil {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil || cmd.Start() != nil {
 		return nil
 	}
 
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	scanner := bufio.NewScanner(io.LimitReader(stdout, 64*1024))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
@@ -242,7 +257,9 @@ func (c *EventCollector) scanSystemdFailures(ctx context.Context, nowSec int64) 
 			}
 		}
 	}
+	_ = cmd.Wait()
 
+	c.cachedSystemdEvents = events
 	return events
 }
 
@@ -253,8 +270,19 @@ func readLogTail(path string, maxLines int) []string {
 	}
 	defer file.Close()
 
+	fi, err := file.Stat()
+	if err != nil {
+		return nil
+	}
+
+	// If file is larger than 64KB, seek towards end to avoid reading giant files from start
+	const tailChunkSize = 64 * 1024
+	if fi.Size() > tailChunkSize {
+		_, _ = file.Seek(-tailChunkSize, io.SeekEnd)
+	}
+
 	var lines []string
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, tailChunkSize))
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 		if len(lines) > maxLines*2 {

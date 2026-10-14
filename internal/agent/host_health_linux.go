@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
@@ -19,6 +20,14 @@ type linuxHostHealthCollector struct {
 	rebootFilePath  string
 	updatesFilePath string
 	systemctlCmd    string
+
+	mu                   sync.Mutex
+	cachedTotalUp        int
+	cachedSecUp          int
+	lastUpdateScan       time.Time
+	cachedFailedServices []string
+	lastFailedScan       time.Time
+	cacheTTL             time.Duration
 }
 
 func newPlatformHostHealthCollector() HostHealthCollector {
@@ -26,13 +35,32 @@ func newPlatformHostHealthCollector() HostHealthCollector {
 		rebootFilePath:  "/var/run/reboot-required",
 		updatesFilePath: "/var/lib/update-notifier/updates-available",
 		systemctlCmd:    "systemctl",
+		cacheTTL:        120 * time.Second,
 	}
 }
 
 func (c *linuxHostHealthCollector) Collect(snapshot *protocol.ResourceSnapshot) *protocol.HostHealthInfo {
 	reboot := checkRebootRequired(c.rebootFilePath)
-	totalUp, secUp := checkUpdatesAvailable(c.updatesFilePath)
-	failed := checkFailedServices(c.systemctlCmd)
+
+	c.mu.Lock()
+	now := time.Now()
+	ttl := c.cacheTTL
+	if ttl <= 0 {
+		ttl = 120 * time.Second
+	}
+
+	if c.lastUpdateScan.IsZero() || now.Sub(c.lastUpdateScan) >= ttl {
+		c.cachedTotalUp, c.cachedSecUp = checkUpdatesAvailable(c.updatesFilePath)
+		c.lastUpdateScan = now
+	}
+	totalUp, secUp := c.cachedTotalUp, c.cachedSecUp
+
+	if c.lastFailedScan.IsZero() || now.Sub(c.lastFailedScan) >= ttl {
+		c.cachedFailedServices = checkFailedServices(c.systemctlCmd)
+		c.lastFailedScan = now
+	}
+	failed := append([]string(nil), c.cachedFailedServices...)
+	c.mu.Unlock()
 
 	score, status, deductions := computeHealthScore(snapshot, reboot, secUp, failed)
 
