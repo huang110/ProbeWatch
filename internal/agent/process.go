@@ -3,14 +3,191 @@ package agent
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
 )
+
+// ProcCPUSample stores previous ticks and timestamp for a specific process.
+type ProcCPUSample struct {
+	TotalTicks uint64
+	Timestamp  time.Time
+	StartTime  uint64
+}
+
+// ProcessSampleTracker tracks CPU tick samples per PID with bounded capacity and thread-safety.
+type ProcessSampleTracker struct {
+	mu      sync.Mutex
+	samples map[int32]ProcCPUSample
+	maxSize int
+}
+
+// defaultProcessTracker is the package-level process tracker bounded to 512 entries.
+var defaultProcessTracker = NewProcessSampleTracker(512)
+
+// NewProcessSampleTracker creates a new ProcessSampleTracker.
+func NewProcessSampleTracker(maxSize int) *ProcessSampleTracker {
+	if maxSize <= 0 {
+		maxSize = 512
+	}
+	return &ProcessSampleTracker{
+		samples: make(map[int32]ProcCPUSample),
+		maxSize: maxSize,
+	}
+}
+
+// CalculateAndRecord computes the process CPU percentage over the elapsed duration.
+// Returns 0.0 on first sample, PID reuse, short intervals (<10ms), or errors.
+func (t *ProcessSampleTracker) CalculateAndRecord(pid int32, utime, stime, startTime uint64, now time.Time, numCPU int) float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	currentTicks := utime + stime
+	prev, exists := t.samples[pid]
+
+	// Enforce capacity bounds if a new PID is being added
+	if !exists && len(t.samples) >= t.maxSize {
+		for k := range t.samples {
+			delete(t.samples, k)
+			break
+		}
+	}
+
+	t.samples[pid] = ProcCPUSample{
+		TotalTicks: currentTicks,
+		Timestamp:  now,
+		StartTime:  startTime,
+	}
+
+	// First sample for this PID or PID was reused
+	if !exists || prev.StartTime != startTime {
+		return 0.0
+	}
+
+	deltaSec := now.Sub(prev.Timestamp).Seconds()
+	// Guard against short delta < 10ms or backward time
+	if deltaSec < 0.01 {
+		return 0.0
+	}
+
+	// Guard against counter rollover or clock reset
+	if currentTicks < prev.TotalTicks {
+		return 0.0
+	}
+
+	deltaTicks := float64(currentTicks - prev.TotalTicks)
+	const clkTck = 100.0 // Standard Linux sysconf(_SC_CLK_TCK)
+	cpuPercent := (deltaTicks / deltaSec / clkTck) * 100.0
+
+	if cpuPercent < 0.0 {
+		cpuPercent = 0.0
+	}
+
+	if numCPU <= 0 {
+		numCPU = 1
+	}
+	maxPercent := float64(numCPU) * 100.0
+	if cpuPercent > maxPercent {
+		cpuPercent = maxPercent
+	}
+
+	return math.Round(cpuPercent*100) / 100
+}
+
+// PruneExited removes any tracked PIDs that are no longer active.
+func (t *ProcessSampleTracker) PruneExited(activePIDs map[int32]struct{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for pid := range t.samples {
+		if _, ok := activePIDs[pid]; !ok {
+			delete(t.samples, pid)
+		}
+	}
+}
+
+// ProcStat contains parsed fields from /proc/[pid]/stat.
+type ProcStat struct {
+	PID       int32
+	Comm      string
+	State     string
+	PPID      int32
+	Threads   int32
+	UTime     uint64
+	STime     uint64
+	StartTime uint64
+}
+
+// parseProcessStat safely extracts fields from /proc/[pid]/stat string.
+func parseProcessStat(statStr string) (ProcStat, error) {
+	leftParen := strings.Index(statStr, "(")
+	rightParen := strings.LastIndex(statStr, ")")
+	if leftParen == -1 || rightParen == -1 || rightParen <= leftParen {
+		return ProcStat{}, fmt.Errorf("malformed proc stat: parentheses not found")
+	}
+
+	res := ProcStat{
+		Comm: statStr[leftParen+1 : rightParen],
+	}
+
+	before := strings.TrimSpace(statStr[:leftParen])
+	if pid, err := strconv.Atoi(before); err == nil {
+		res.PID = int32(pid)
+	}
+
+	after := strings.TrimSpace(statStr[rightParen+1:])
+	fields := strings.Fields(after)
+	if len(fields) < 1 {
+		return res, fmt.Errorf("malformed proc stat: empty fields after comm")
+	}
+
+	// fields[0]: state
+	res.State = fields[0]
+
+	// fields[1]: ppid
+	if len(fields) > 1 {
+		if ppid, err := strconv.Atoi(fields[1]); err == nil {
+			res.PPID = int32(ppid)
+		}
+	}
+
+	// fields[11]: utime (14th field in /proc/[pid]/stat)
+	if len(fields) > 11 {
+		if utime, err := strconv.ParseUint(fields[11], 10, 64); err == nil {
+			res.UTime = utime
+		}
+	}
+
+	// fields[12]: stime (15th field in /proc/[pid]/stat)
+	if len(fields) > 12 {
+		if stime, err := strconv.ParseUint(fields[12], 10, 64); err == nil {
+			res.STime = stime
+		}
+	}
+
+	// fields[17]: num_threads (20th field in /proc/[pid]/stat)
+	if len(fields) > 17 {
+		if threads, err := strconv.Atoi(fields[17]); err == nil {
+			res.Threads = int32(threads)
+		}
+	}
+
+	// fields[19]: starttime (22nd field in /proc/[pid]/stat)
+	if len(fields) > 19 {
+		if starttime, err := strconv.ParseUint(fields[19], 10, 64); err == nil {
+			res.StartTime = starttime
+		}
+	}
+
+	return res, nil
+}
 
 // CollectTopProcesses collects the top resource-consuming processes from the Linux /proc filesystem.
 func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
@@ -35,6 +212,7 @@ func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
 	}
 
 	var procs []protocol.ProcessSnapshot
+	activePIDs := make(map[int32]struct{}, len(entries))
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -44,6 +222,7 @@ func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
 		if err != nil || pid <= 0 {
 			continue
 		}
+		activePIDs[int32(pid)] = struct{}{}
 
 		snap, err := readProcessInfo(pid, totalMemBytes)
 		if err != nil {
@@ -53,8 +232,13 @@ func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
 		procs = append(procs, snap)
 	}
 
-	// Sort by RSS memory descending
+	defaultProcessTracker.PruneExited(activePIDs)
+
+	// Sort by CPU percent descending, then RSS memory descending
 	sort.Slice(procs, func(i, j int) bool {
+		if procs[i].CPUPercent != procs[j].CPUPercent {
+			return procs[i].CPUPercent > procs[j].CPUPercent
+		}
 		return procs[i].MemoryRSSBytes > procs[j].MemoryRSSBytes
 	})
 
@@ -77,36 +261,20 @@ func readProcessInfo(pid int, totalMemBytes uint64) (protocol.ProcessSnapshot, e
 		return snap, err
 	}
 
-	statStr := string(statData)
-	// Process comm is enclosed in parentheses, e.g. "123 (kworker/0:0) S 2 ..."
-	leftParen := strings.Index(statStr, "(")
-	rightParen := strings.LastIndex(statStr, ")")
-	if leftParen != -1 && rightParen != -1 && rightParen > leftParen {
-		snap.Name = statStr[leftParen+1 : rightParen]
-		after := strings.TrimSpace(statStr[rightParen+1:])
-		fields := strings.Fields(after)
-		// after fields:
-		// 0: state (e.g. S, R, Z)
-		// 1: ppid
-		// 2: pgrp
-		// ...
-		// 11: utime (field 14 of original)
-		// 12: stime (field 15 of original)
-		// ...
-		// 17: num_threads (field 20 of original)
-		if len(fields) > 0 {
-			snap.State = fields[0]
-		}
-		if len(fields) > 1 {
-			if ppid, err := strconv.Atoi(fields[1]); err == nil {
-				snap.PPID = int32(ppid)
-			}
-		}
-		if len(fields) > 17 {
-			if threads, err := strconv.Atoi(fields[17]); err == nil {
-				snap.Threads = int32(threads)
-			}
-		}
+	stat, err := parseProcessStat(string(statData))
+	if err == nil {
+		snap.Name = stat.Comm
+		snap.State = stat.State
+		snap.PPID = stat.PPID
+		snap.Threads = stat.Threads
+		snap.CPUPercent = defaultProcessTracker.CalculateAndRecord(
+			int32(pid),
+			stat.UTime,
+			stat.STime,
+			stat.StartTime,
+			time.Now(),
+			runtime.NumCPU(),
+		)
 	}
 
 	// 2. Read /proc/[pid]/status for VmRSS and Uid
