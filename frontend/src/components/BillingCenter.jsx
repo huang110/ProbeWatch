@@ -13,8 +13,10 @@ import {
   CURRENCY_RATES,
   calculateRemainingValue,
   convertCNYToCurrency,
+  fetchAllNodesBilling,
   getNodeBilling,
   getNodeCustomMeta,
+  migrateLocalStorageBillingToBackend,
 } from '../lib/billing.js'
 import { safeText } from '../lib/format.js'
 import { BillingModal } from './BillingModal.jsx'
@@ -32,6 +34,14 @@ export function BillingCenter({ nodes = [] }) {
     const timer = window.setInterval(() => setNowTick(Date.now()), 60000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // Synchronize server billing and migrate legacy localStorage once mounted
+  useEffect(() => {
+    if (nodes && nodes.length > 0) {
+      fetchAllNodesBilling(nodes).catch(() => {})
+      migrateLocalStorageBillingToBackend(nodes).catch(() => {})
+    }
+  }, [nodes])
 
   // Filters
   const [regionFilter, setRegionFilter] = useState('all')

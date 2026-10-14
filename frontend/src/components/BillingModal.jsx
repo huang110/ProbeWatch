@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { CalendarBlank, CaretDown, Check, Copy, Info, Sparkle, X } from '@phosphor-icons/react'
 import {
   calculateRemainingValue,
+  fetchAndCacheNodeBilling,
   generateForumSalesPost,
   getNodeBilling,
   resolveCurrency,
-  saveNodeBillingData,
+  saveNodeBillingRemote,
 } from '../lib/billing.js'
 import { safeText } from '../lib/format.js'
 
@@ -23,6 +24,34 @@ export function BillingModal({ node, onClose, onSaved }) {
   const [markup, setMarkup] = useState(0)
   const [copied, setCopied] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Load authoritative server data on open
+  useEffect(() => {
+    if (!nodeId) return
+    let cancelled = false
+    setIsLoading(true)
+    fetchAndCacheNodeBilling(nodeId)
+      .then((serverData) => {
+        if (cancelled || !serverData) return
+        if (serverData.price !== null && serverData.price !== undefined) setPrice(serverData.price)
+        if (serverData.currency) setCurrency(serverData.currency)
+        if (serverData.cycle) setCycle(serverData.cycle)
+        if (serverData.dueDate) setDueDate(serverData.dueDate)
+        if (serverData.autoRenew !== undefined) setAutoRenew(serverData.autoRenew)
+      })
+      .catch((err) => {
+        console.warn('Failed to load server billing:', err)
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [nodeId])
 
   // ESC 键关闭
   useEffect(() => {
@@ -45,16 +74,23 @@ export function BillingModal({ node, onClose, onSaved }) {
   const calc = calculateRemainingValue(currentBilling)
   const totalPriceCNY = Math.max(0, calc.remainingValueCNY + Number(markup))
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault()
-    saveNodeBillingData(nodeId, {
-      ...currentBilling,
-    })
-    setSaveSuccess(true)
-    setTimeout(() => {
-      if (onSaved) onSaved()
-      onClose()
-    }, 280)
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await saveNodeBillingRemote(nodeId, currentBilling)
+      setSaveSuccess(true)
+      setTimeout(() => {
+        if (onSaved) onSaved()
+        onClose()
+      }, 280)
+    } catch (err) {
+      console.error('save billing error:', err)
+      setSaveError(err.message || '保存账单失败，请检查网络或登录权限')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleCopyPost = () => {
@@ -250,13 +286,36 @@ export function BillingModal({ node, onClose, onSaved }) {
             </div>
           )}
 
+          {/* Error Banner */}
+          {saveError && (
+            <div
+              className="billing-error-banner"
+              style={{
+                marginTop: '12px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#ef4444',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <Info size={16} />
+              <span>{saveError}</span>
+            </div>
+          )}
+
           {/* Footer Actions */}
           <div className="edit-node-actions">
-            <button type="button" className="button button-quiet" onClick={onClose}>
+            <button type="button" className="button button-quiet" onClick={onClose} disabled={isSaving}>
               取消
             </button>
-            <button type="submit" className="button button-primary">
-              {saveSuccess ? (
+            <button type="submit" className="button button-primary" disabled={isSaving}>
+              {isSaving ? (
+                <span>保存中...</span>
+              ) : saveSuccess ? (
                 <>
                   <Check size={16} weight="bold" />
                   <span>已保存</span>

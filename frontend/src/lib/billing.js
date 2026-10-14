@@ -1,4 +1,5 @@
 // ProbeWatch - MJJ 专属小鸡账单与剩余价值计算引擎 (参考 Lite & Hostloc/NodeSeek 社区算法)
+import { fetchNodeBilling, saveNodeBilling } from './api.js'
 
 export const CURRENCY_RATES = {
   CNY: { symbol: '¥', name: '人民币', rate: 1.0 },
@@ -63,6 +64,109 @@ export const COMMON_MERCHANTS = [
 ]
 
 const STORAGE_KEY = 'probewatch_node_billing_v1'
+export const READONLY_CACHE_KEY = 'probewatch_billing_readonly_cache_v1'
+export const MIGRATION_FLAG_KEY = 'probewatch_billing_migrated_v1'
+
+// In-memory cache holding backend-authoritative billing records
+const inMemoryBillingCache = new Map()
+
+// Normalize raw server responses (CycleTrafficInfo / NodeBillingSettings) into a consistent frontend model
+export const normalizeServerBilling = (data) => {
+  if (!data || typeof data !== 'object') return null
+  const hasConfig =
+    (data.price !== undefined && data.price !== null && data.price !== '') ||
+    Boolean(data.merchant) ||
+    Boolean(data.cycle) ||
+    Boolean(data.due_date || data.dueDate) ||
+    (data.traffic_quota_bytes && Number(data.traffic_quota_bytes) > 0) ||
+    (data.trafficQuotaBytes && Number(data.trafficQuotaBytes) > 0)
+
+  return {
+    merchant: data.merchant || '',
+    price: data.price !== undefined && data.price !== null && data.price !== '' ? Number(data.price) : null,
+    currency: data.currency || 'CNY',
+    cycle: data.cycle || data.billingCycle || '',
+    startDate: data.start_date || data.startDate || '',
+    dueDate: data.due_date || data.dueDate || data.expiresAt || '',
+    autoRenew: data.auto_renew !== undefined ? Boolean(data.auto_renew) : (data.autoRenew !== undefined ? Boolean(data.autoRenew) : true),
+    resetDay: data.reset_day ?? data.resetDay ?? 1,
+    resetTime: data.reset_time || data.resetTime || '00:00:00',
+    trafficQuotaBytes: Number(data.traffic_quota_bytes ?? data.trafficQuotaBytes ?? 0),
+    bonusQuotaBytes: Number(data.bonus_quota_bytes ?? data.bonusQuotaBytes ?? 0),
+    accountingMethod: data.accounting_method || data.accountingMethod || 'total',
+    includedInterfaces: data.included_interfaces || data.includedInterfaces || '*',
+    cycleRxBytes: Number(data.cycle_rx_bytes ?? data.cycleRxBytes ?? 0),
+    cycleTxBytes: Number(data.cycle_tx_bytes ?? data.cycleTxBytes ?? 0),
+    cycleUsedBytes: Number(data.cycle_used_bytes ?? data.cycleUsedBytes ?? 0),
+    totalQuotaBytes: Number(data.total_quota_bytes ?? data.totalQuotaBytes ?? 0),
+    usedPercent: Number(data.used_percent ?? data.usedPercent ?? 0),
+    daysUntilReset: data.days_until_reset !== undefined ? Number(data.days_until_reset) : undefined,
+    periodStart: data.period_start || data.periodStart || '',
+    periodEnd: data.period_end || data.periodEnd || '',
+    updatedAt: data.updated_at || data.updatedAt || '',
+    notes: data.notes || '',
+    configured: Boolean(hasConfig),
+  }
+}
+
+const getStore = () => {
+  try {
+    const k = ['local', 'Storage'].join('')
+    return typeof window !== 'undefined' ? window[k] : null
+  } catch {
+    return null
+  }
+}
+
+export const getReadOnlyBillingCache = () => {
+  try {
+    const store = getStore()
+    const raw = store ? store.getItem(READONLY_CACHE_KEY) : null
+    if (!raw) return {}
+    return JSON.parse(raw)
+  } catch {
+    return {}
+  }
+}
+
+export const saveReadOnlyBillingCache = (cache) => {
+  try {
+    const store = getStore()
+    if (store) {
+      store.setItem(READONLY_CACHE_KEY, JSON.stringify(cache))
+    }
+  } catch (e) {
+    console.warn('saveReadOnlyBillingCache failed:', e)
+  }
+}
+
+export const setCachedServerBilling = (nodeId, data) => {
+  if (!nodeId) return
+  const normalized = normalizeServerBilling(data)
+  if (!normalized) return
+  inMemoryBillingCache.set(nodeId, normalized)
+  const currentReadOnly = getReadOnlyBillingCache()
+  currentReadOnly[nodeId] = normalized
+  saveReadOnlyBillingCache(currentReadOnly)
+}
+
+export const getCachedServerBilling = (nodeId) => {
+  if (!nodeId) return null
+  if (inMemoryBillingCache.has(nodeId)) {
+    return inMemoryBillingCache.get(nodeId)
+  }
+  const readOnly = getReadOnlyBillingCache()
+  if (readOnly[nodeId]) {
+    const normalized = normalizeServerBilling(readOnly[nodeId])
+    inMemoryBillingCache.set(nodeId, normalized)
+    return normalized
+  }
+  const legacy = getStoredBillingData()
+  if (legacy[nodeId]) {
+    return normalizeServerBilling(legacy[nodeId])
+  }
+  return null
+}
 
 // Convert a human readable traffic value (for example `500 GB` or `1 TB`)
 // to bytes. Empty and invalid values intentionally return null so callers can
@@ -82,6 +186,22 @@ export const parseTrafficBytes = (value) => {
 }
 
 export const getNodeTrafficConfig = (nodeId) => {
+  const cached = getCachedServerBilling(nodeId)
+  if (cached) {
+    const rawMethod = cached.accountingMethod || 'total'
+    const method = ({ sum: 'total', in: 'rx', out: 'tx' }[rawMethod] || rawMethod)
+    const quotaBytes = cached.trafficQuotaBytes || null
+    const allowanceBytes = cached.bonusQuotaBytes || 0
+    return {
+      quotaText: quotaBytes ? `${(quotaBytes / 1073741824).toFixed(1)} GB` : '',
+      allowanceText: allowanceBytes ? `${(allowanceBytes / 1073741824).toFixed(1)} GB` : '0 B',
+      quotaBytes,
+      allowanceBytes,
+      method,
+      offsetBytes: 0,
+    }
+  }
+
   const all = getStoredBillingData()
   const found = all[nodeId] || {}
   const quota = found.trafficQuota ?? (found.trafficQuotaGB !== undefined ? `${found.trafficQuotaGB} GB` : '')
@@ -96,15 +216,6 @@ export const getNodeTrafficConfig = (nodeId) => {
     allowanceBytes: parseTrafficBytes(allowance) || 0,
     method,
     offsetBytes: Number.isFinite(offset) ? offset : 0,
-  }
-}
-
-const getStore = () => {
-  try {
-    const k = ['local', 'Storage'].join('')
-    return typeof window !== 'undefined' ? window[k] : null
-  } catch {
-    return null
   }
 }
 
@@ -131,8 +242,14 @@ export const saveNodeBillingData = (nodeId, data) => {
     if (store) {
       store.setItem(STORAGE_KEY, JSON.stringify(current))
     }
+    // Also update in-memory cache and read-only cache if billing fields present
+    if (data.price !== undefined || data.dueDate || data.merchant) {
+      setCachedServerBilling(nodeId, current[nodeId])
+    }
     // Dispatch storage event for reactive UI updates
-    window.dispatchEvent(new Event('probewatch_billing_updated'))
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('probewatch_billing_updated'))
+    }
     return true
   } catch (e) {
     console.error('saveNodeBillingData error:', e)
@@ -141,22 +258,139 @@ export const saveNodeBillingData = (nodeId, data) => {
 }
 
 export const getNodeBilling = (nodeId, defaultName = '') => {
-  const all = getStoredBillingData()
-  const found = all[nodeId] || {}
+  const cached = getCachedServerBilling(nodeId)
+  if (cached) {
+    return cached
+  }
 
   // Keep an unconfigured node empty. Synthetic prices and dates make the
   // monitoring UI look like it has billing data when it does not.
   return {
-    merchant: found.merchant || '',
-    price: found.price !== undefined && found.price !== '' ? Number(found.price) : null,
-    currency: found.currency || 'CNY',
-    cycle: found.cycle || found.billingCycle || '',
-    startDate: found.startDate || '',
-    dueDate: found.dueDate || found.expiresAt || '',
-    autoRenew: found.autoRenew !== undefined ? Boolean(found.autoRenew) : false,
-    notes: found.notes || '',
-    configured: Object.keys(found).length > 0,
+    merchant: '',
+    price: null,
+    currency: 'CNY',
+    cycle: '',
+    startDate: '',
+    dueDate: '',
+    autoRenew: false,
+    notes: '',
+    configured: false,
+    resetDay: 1,
+    resetTime: '00:00:00',
+    trafficQuotaBytes: 0,
+    bonusQuotaBytes: 0,
+    accountingMethod: 'total',
+    includedInterfaces: '*',
+    cycleUsedBytes: 0,
+    totalQuotaBytes: 0,
+    usedPercent: 0,
   }
+}
+
+export const fetchAndCacheNodeBilling = async (nodeId, fetchImpl = fetchNodeBilling) => {
+  if (!nodeId) return null
+  const data = await fetchImpl(nodeId)
+  setCachedServerBilling(nodeId, data)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('probewatch_billing_updated'))
+  }
+  return inMemoryBillingCache.get(nodeId)
+}
+
+export const fetchAllNodesBilling = async (nodes = [], fetchImpl = fetchNodeBilling) => {
+  if (!Array.isArray(nodes) || nodes.length === 0) return []
+  const promises = nodes.map(async (n) => {
+    const id = n.uuid || n.id
+    if (!id) return null
+    try {
+      return await fetchAndCacheNodeBilling(id, fetchImpl)
+    } catch {
+      return null
+    }
+  })
+  const results = await Promise.allSettled(promises)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('probewatch_billing_updated'))
+  }
+  return results.map((r) => (r.status === 'fulfilled' ? r.value : null)).filter(Boolean)
+}
+
+export const saveNodeBillingRemote = async (nodeId, billingData, saveImpl = saveNodeBilling) => {
+  if (!nodeId) throw new Error('Missing node ID')
+
+  // Retain existing cached values (such as resetDay or quota) if not specified in billingData
+  const existing = getCachedServerBilling(nodeId) || {}
+
+  const payload = {
+    merchant: String(billingData.merchant ?? existing.merchant ?? '').trim(),
+    price: billingData.price !== null && billingData.price !== undefined && billingData.price !== '' ? Number(billingData.price) : (existing.price ?? 0),
+    currency: String(billingData.currency ?? existing.currency ?? 'CNY').trim(),
+    cycle: String(billingData.cycle ?? existing.cycle ?? 'annual').trim(),
+    start_date: billingData.startDate || billingData.start_date || existing.startDate || '',
+    due_date: billingData.dueDate || billingData.due_date || existing.dueDate || '',
+    auto_renew: billingData.autoRenew !== undefined ? Boolean(billingData.autoRenew) : (existing.autoRenew !== undefined ? Boolean(existing.autoRenew) : true),
+    reset_day: Number(billingData.resetDay ?? billingData.reset_day ?? existing.resetDay ?? 1),
+    reset_time: billingData.resetTime || billingData.reset_time || existing.resetTime || '00:00:00',
+    traffic_quota_bytes: Number(billingData.trafficQuotaBytes ?? billingData.traffic_quota_bytes ?? existing.trafficQuotaBytes ?? 0),
+    bonus_quota_bytes: Number(billingData.bonusQuotaBytes ?? billingData.bonus_quota_bytes ?? existing.bonusQuotaBytes ?? 0),
+    accounting_method: billingData.accountingMethod || billingData.accounting_method || existing.accountingMethod || 'total',
+    included_interfaces: billingData.includedInterfaces || billingData.included_interfaces || existing.includedInterfaces || '*',
+  }
+
+  const updatedServerInfo = await saveImpl(nodeId, payload)
+  setCachedServerBilling(nodeId, updatedServerInfo)
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('probewatch_billing_updated'))
+  }
+  return inMemoryBillingCache.get(nodeId)
+}
+
+export const migrateLocalStorageBillingToBackend = async (nodes = [], { fetchImpl = fetchNodeBilling, saveImpl = saveNodeBilling } = {}) => {
+  const store = getStore()
+  if (!store) return { migrated: 0, skipped: 0 }
+
+  if (store.getItem(MIGRATION_FLAG_KEY) === 'true') {
+    return { migrated: 0, skipped: 0, alreadyMigrated: true }
+  }
+
+  const legacyData = getStoredBillingData()
+  const keys = Object.keys(legacyData)
+  if (keys.length === 0) {
+    store.setItem(MIGRATION_FLAG_KEY, 'true')
+    return { migrated: 0, skipped: 0 }
+  }
+
+  let migrated = 0
+  let skipped = 0
+
+  for (const nodeId of keys) {
+    const item = legacyData[nodeId]
+    if (!item) continue
+    const hasMeaningfulBilling =
+      (item.price !== undefined && item.price !== null && item.price !== '') ||
+      Boolean(item.merchant) ||
+      Boolean(item.dueDate || item.expiresAt) ||
+      Boolean(item.cycle || item.billingCycle)
+
+    if (!hasMeaningfulBilling) {
+      skipped++
+      continue
+    }
+
+    try {
+      await saveNodeBillingRemote(nodeId, item, saveImpl)
+      migrated++
+    } catch (e) {
+      console.warn(`Migration skipped for node ${nodeId}:`, e.message)
+      skipped++
+    }
+  }
+
+  store.setItem(MIGRATION_FLAG_KEY, 'true')
+  // Retain read-only cache and remove raw legacy storage
+  store.removeItem(STORAGE_KEY)
+  return { migrated, skipped }
 }
 
 export const getNodeCustomMeta = (nodeId, defaultNode = {}) => {
