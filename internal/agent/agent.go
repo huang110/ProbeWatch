@@ -660,9 +660,6 @@ func (r *Runner) replayOutboxLimited(ctx context.Context) error {
 			_ = os.Remove(path)
 			continue
 		}
-		if r.now().Before(item.NextTry) {
-			continue
-		}
 		processed++
 		if err := r.sendReport(replayCtx, item.RequestID, item.Payload); err == nil {
 			_ = os.Remove(path)
@@ -672,8 +669,6 @@ func (r *Runner) replayOutboxLimited(ctx context.Context) error {
 			if updated, marshalErr := json.Marshal(item); marshalErr == nil && len(updated) <= maxOutboxFileSize {
 				_ = os.WriteFile(path, updated, 0600)
 			}
-			// Stop current batch on send error to respect backoff
-			break
 		}
 	}
 	return nil
