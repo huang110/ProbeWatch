@@ -245,7 +245,9 @@ func (r *Runner) reportWorkload(ctx context.Context) error {
 func (r *Runner) autoCheckUpdate(ctx context.Context) {
 	result, err := CheckUpdate(ctx, r.client, r.cfg.AgentEndpoint, r.cfg.AgentNodeToken)
 	if err == nil && result != nil && result.UpdateAvailable {
-		_ = DownloadAndApplyUpdate(ctx, r.client, r.cfg.AgentEndpoint, r.cfg.AgentNodeToken, result, r.cfg.AgentDataDir)
+		if err := DownloadAndApplyUpdate(ctx, r.client, r.cfg.AgentEndpoint, r.cfg.AgentNodeToken, result, r.cfg.AgentDataDir); err == nil {
+			_ = ApplyRuntimeStrategy()
+		}
 	}
 }
 

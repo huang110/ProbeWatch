@@ -67,9 +67,79 @@ func CheckUpdate(ctx context.Context, client *http.Client, endpoint, token strin
 	return &result, nil
 }
 
+type RuntimeStrategy string
+
+const (
+	StrategySupervisor RuntimeStrategy = "supervisor_managed"
+	StrategyContainer  RuntimeStrategy = "container_managed"
+	StrategyStandalone RuntimeStrategy = "restart_required"
+)
+
+// DetectRuntimeStrategy determines how the agent process lifecycle is managed.
+func DetectRuntimeStrategy() RuntimeStrategy {
+	if isContainerEnvironment() {
+		return StrategyContainer
+	}
+	if isSupervisorEnvironment() {
+		return StrategySupervisor
+	}
+	return StrategyStandalone
+}
+
+func isContainerEnvironment() bool {
+	if os.Getenv("PROBEWATCH_IN_CONTAINER") == "0" {
+		return false
+	}
+	if os.Getenv("PROBEWATCH_IN_CONTAINER") == "1" || os.Getenv("container") != "" {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+	return false
+}
+
+func isSupervisorEnvironment() bool {
+	if os.Getenv("INVOCATION_ID") != "" || os.Getenv("JOURNAL_STREAM") != "" || os.Getenv("SYSTEMD_EXEC_PID") != "" {
+		return true
+	}
+	if os.Getenv("RC_SERVICE") != "" {
+		return true
+	}
+	if os.Getenv("SUPERVISOR_ENABLED") == "1" {
+		return true
+	}
+	return false
+}
+
+// ApplyRuntimeStrategy handles process transition after a successful binary swap.
+// Under systemd/OpenRC supervisors, it gracefully exits so supervisor restarts with new binary.
+func ApplyRuntimeStrategy() RuntimeStrategy {
+	strategy := DetectRuntimeStrategy()
+	switch strategy {
+	case StrategySupervisor:
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
+	case StrategyContainer:
+		// Do not kill container process from inside
+	case StrategyStandalone:
+		// Standalone process: manual restart required
+	}
+	return strategy
+}
+
 // DownloadAndApplyUpdate downloads the new agent binary, verifies its checksum,
 // safely backs up the current binary to .bak, and swaps in the new executable.
 func DownloadAndApplyUpdate(ctx context.Context, client *http.Client, endpoint, token string, result *UpdateCheckResult, dataDir string) error {
+	return downloadAndApplyUpdateTo(ctx, client, endpoint, token, result, dataDir, "")
+}
+
+func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint, token string, result *UpdateCheckResult, dataDir, targetExecPath string) error {
 	if !result.UpdateAvailable {
 		return ErrNoUpdateAvailable
 	}
@@ -101,12 +171,17 @@ func DownloadAndApplyUpdate(ctx context.Context, client *http.Client, endpoint, 
 	}
 
 	// Determine current running binary path
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("determine executable path: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(execPath); err == nil {
-		execPath = resolved
+	execPath := targetExecPath
+	if execPath == "" {
+		p, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("determine executable path: %w", err)
+		}
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			execPath = resolved
+		} else {
+			execPath = p
+		}
 	}
 
 	// Stage new binary adjacent to current executable if writable, otherwise in dataDir
@@ -145,14 +220,16 @@ func DownloadAndApplyUpdate(ctx context.Context, client *http.Client, endpoint, 
 		}
 	}
 
-	// Backup existing executable
+	// Backup existing executable if present
 	bakPath := execPath + ".bak"
 	_ = os.Remove(bakPath)
-	if err := os.Rename(execPath, bakPath); err != nil {
-		// Try copy if rename fails (e.g. cross-device or permission edge case)
-		if copyErr := copyFile(execPath, bakPath); copyErr != nil {
-			_ = os.Remove(stagingPath)
-			return fmt.Errorf("backup existing binary to %s: %w", bakPath, err)
+	if _, err := os.Stat(execPath); err == nil {
+		if err := os.Rename(execPath, bakPath); err != nil {
+			// Try copy if rename fails (e.g. cross-device or permission edge case)
+			if copyErr := copyFile(execPath, bakPath); copyErr != nil {
+				_ = os.Remove(stagingPath)
+				return fmt.Errorf("backup existing binary to %s: %w", bakPath, err)
+			}
 		}
 	}
 
@@ -167,12 +244,14 @@ func DownloadAndApplyUpdate(ctx context.Context, client *http.Client, endpoint, 
 	_ = os.Chmod(execPath, 0755)
 
 	// Save upgrade status receipt in dataDir
+	strategy := DetectRuntimeStrategy()
 	receipt := map[string]any{
 		"from_version": version.AgentVersion,
 		"to_version":   result.LatestAgentVersion,
 		"upgraded_at":  time.Now().UTC().Unix(),
 		"checksum":     actualHash,
 		"status":       "pending_verification",
+		"strategy":     string(strategy),
 	}
 	if b, err := json.MarshalIndent(receipt, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(dataDir, "upgrade_receipt.json"), b, 0644)
@@ -191,12 +270,22 @@ func VerifyAndClearPendingUpgrade(dataDir string) {
 
 // Rollback restores the backup binary .bak to execPath if present.
 func Rollback() error {
-	execPath, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if resolved, err := filepath.EvalSymlinks(execPath); err == nil {
-		execPath = resolved
+	return RollbackTo("")
+}
+
+// RollbackTo restores the backup binary .bak to the target executable path if present.
+func RollbackTo(targetExecPath string) error {
+	execPath := targetExecPath
+	if execPath == "" {
+		p, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			execPath = resolved
+		} else {
+			execPath = p
+		}
 	}
 	bakPath := execPath + ".bak"
 	if _, err := os.Stat(bakPath); err != nil {
