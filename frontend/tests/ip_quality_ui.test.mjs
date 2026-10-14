@@ -717,4 +717,62 @@ console.log("=== Testing IPQA Status Strip Logic and CSS ===")
   console.log("[PASS] Strict IPv4/IPv6 existence, zero hardcodes, and songzhong contracts verified")
 }
 
+// -----------------------------------------------------------------------------
+// Test 8: Compact Typography, 3-Panel Alignment & Media Height Contract (User Request 5)
+// -----------------------------------------------------------------------------
+{
+  console.log("=== Testing 3-Panel Typography, Alignment & Media Height Contract ===")
+  const srcDir = existsSync(resolve(process.cwd(), "src"))
+    ? resolve(process.cwd(), "src")
+    : resolve(process.cwd(), "frontend/src")
+  const css = readFileSync(resolve(srcDir, 'styles.css'), 'utf8')
+  const nodeDetailSrc = readFileSync(resolve(srcDir, 'components/NodeDetailPage.jsx'), 'utf8')
+
+  // 1. Panels Top & Bottom Alignment via stretch & flex
+  assert.ok(css.includes(".ip-quality-detail-grid-three"), "styles.css must define .ip-quality-detail-grid-three")
+  assert.ok(css.includes("align-items: stretch;"), "Grid must stretch items to ensure top and bottom alignment")
+  assert.ok(css.includes("height: 100%;"), "Panels in grid must take 100% height")
+  assert.ok(css.includes(".ip-quality-panel-body {\n  flex: 1;\n  display: flex;\n  flex-direction: column;"), "Panel body must be flex-1 to fill the card")
+
+  // Panel 1 score list uses space-between to evenly distribute items and match panel 3 height
+  assert.ok(css.includes("justify-content: space-between;"), "Score list must use space-between for vertical distribution")
+
+  // Panel 2 factors use margin-bottom: auto and dnsbl-row uses margin-top: auto to pin to bottom
+  assert.ok(css.includes("margin-top: auto;\n  border-top: 1px solid"), "DNSBL row must pin to the bottom of factors panel")
+
+  // 2. Risk Score Typography (>= 12px)
+  assert.ok(css.includes(".ip-quality-score-label {\n  color: var(--text-2);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n  font-size: 12px;"), "Score label font size must be 12px")
+  assert.ok(css.includes(".ip-quality-score-value {\n  font-variant-numeric: tabular-nums;\n  font-weight: 700;\n  text-align: right;\n  min-width: 34px;\n  font-size: 12px;"), "Score value font size must be 12px with font-weight 700 and min-width 34px")
+  assert.ok(css.includes(".ip-quality-score-row {\n  display: grid;\n  grid-template-columns: minmax(84px, 118px) 1fr 34px;\n  align-items: center;\n  min-height: 25px;"), "Score row must have min-height 25px")
+
+  // 3. Database Factors Typography (>= 12px)
+  assert.ok(css.includes(".ip-quality-factor-cell {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  min-height: 30px;"), "Factor cell must have min-height 30px")
+  assert.ok(css.includes(".ip-quality-factor-cell .factor-label {\n  color: var(--text-2);\n  font-size: 12px;"), "Factor label font size must be 12px")
+  assert.ok(css.includes(".ip-quality-factor-cell .factor-val {\n  font-weight: 700;\n  font-size: 12px;"), "Factor val font size must be 12px with font-weight 700")
+  assert.ok(css.includes(".ip-quality-dnsbl-row .dnsbl-label {\n  color: var(--text-2);\n  font-size: 12px;"), "DNSBL label font size must be 12px")
+  assert.ok(css.includes(".ip-quality-dnsbl-row .dnsbl-val {\n  font-size: 11.5px;\n  font-weight: 600;"), "DNSBL val font size must be 11.5px with font-weight 600")
+
+  // 4. Streaming Media Compactness (<= 28px height, <= 4px gap)
+  assert.ok(css.includes(".ip-quality-media-list {\n  display: grid;\n  grid-template-columns: 1fr;\n  gap: 4px;"), "Media list gap must be 4px")
+  assert.ok(css.includes("height: 28px;\n  min-height: 28px;"), "Media row height must be 28px")
+  assert.ok(css.includes("padding: 2px 8px;"), "Media row padding must be 2px 8px")
+  assert.ok(css.includes(".ip-quality-media-icon {\n  width: 17px;\n  height: 17px;"), "Media icon must be 17px x 17px")
+  assert.ok(css.includes(".ip-quality-media-status,\n.ip-quality-media-row .media-status {\n  font-size: 11px;"), "Media status font size must be 11px")
+
+  // 5. Semantic Panel Classes in NodeDetailPage.jsx
+  assert.ok(nodeDetailSrc.includes("ip-quality-score-panel"), "NodeDetailPage must include semantic class ip-quality-score-panel")
+  assert.ok(nodeDetailSrc.includes("ip-quality-factors-panel"), "NodeDetailPage must include semantic class ip-quality-factors-panel")
+  assert.ok(nodeDetailSrc.includes("ip-quality-media-panel"), "NodeDetailPage must include semantic class ip-quality-media-panel")
+
+  // 6. Responsive Breakpoint Rules (1024px, 860px, 768px, 480px)
+  assert.ok(css.includes("@media (max-width: 1024px)"), "CSS must define 1024px breakpoint")
+  assert.ok(css.includes("@media (max-width: 860px)"), "CSS must define 860px breakpoint")
+  assert.ok(css.includes("@media (max-width: 768px)"), "CSS must define 768px breakpoint")
+  assert.ok(css.includes("@media (max-width: 480px)"), "CSS must define 480px breakpoint")
+  assert.ok(css.includes("height: 26px;\n    min-height: 26px;\n    padding: 2px 6px;"), "Mobile <= 480px must compress media row to 26px")
+
+  console.log("[PASS] 3-Panel Typography, Alignment & Media Height Contract verified")
+}
+
 console.log("=== ALL IP QUALITY, IPQA & STREAMING UI TESTS PASSED ===")
+

@@ -1942,7 +1942,7 @@ export function NodeDetailPage({
                 {/* 第二行：三个信息面板（风险评分 + 数据库标记 + 流媒体/AI 解锁） */}
                 <div className="ip-quality-detail-grid ip-quality-detail-grid-three">
                   {/* 面板 1: 风险评分 */}
-                  <section className="ip-quality-panel">
+                  <section className="ip-quality-panel ip-quality-score-panel">
                     <div className="ip-quality-panel-title">
                       <span className="panel-title-text">
                         <Gauge size={14} />
@@ -1976,7 +1976,7 @@ export function NodeDetailPage({
                   </section>
 
                   {/* 面板 2: 数据库标记 */}
-                  <section className="ip-quality-panel">
+                  <section className="ip-quality-panel ip-quality-factors-panel">
                     <div className="ip-quality-panel-title">
                       <span className="panel-title-text">
                         <Database size={14} />
@@ -1985,14 +1985,19 @@ export function NodeDetailPage({
                     </div>
                     <div className="ip-quality-panel-body">
                       <div className="ip-quality-factors-grid">
-                        {factorGridItems.map((fg) => (
-                          <div key={fg.key} className="ip-quality-factor-cell">
-                            <span className="factor-label">{fg.label}</span>
-                            <span className={`factor-val ${fg.hit ? 'factor-hit' : 'factor-clean'} mono`}>
-                              {fg.text}
-                            </span>
-                          </div>
-                        ))}
+                        {factorGridItems.map((fg) => {
+                          const valClass = fg.hit
+                            ? 'factor-hit'
+                            : (fg.text === '未命中' ? 'factor-clean' : (fg.text === '—' ? 'factor-unknown' : 'factor-clean'))
+                          return (
+                            <div key={fg.key} className="ip-quality-factor-cell">
+                              <span className="factor-label">{fg.label}</span>
+                              <span className={`factor-val ${valClass} mono`}>
+                                {fg.text}
+                              </span>
+                            </div>
+                          )
+                        })}
                       </div>
                       <div className="ip-quality-dnsbl-row">
                         <span className="dnsbl-label">邮件 DNSBL</span>
@@ -2004,7 +2009,7 @@ export function NodeDetailPage({
                   </section>
 
                   {/* 面板 3: 流媒体 / AI 解锁 */}
-                  <section className="ip-quality-panel">
+                  <section className="ip-quality-panel ip-quality-media-panel">
                     <div className="ip-quality-panel-title">
                       <span className="panel-title-text">
                         <Play size={14} />

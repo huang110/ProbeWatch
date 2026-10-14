@@ -89,6 +89,37 @@ def run():
             assert factors_grid.count() > 0, "Must render .ip-quality-factors-grid"
             assert media_grid.count() > 0, "Must render .ip-quality-media-list"
 
+            # Check Typography & Heights
+            score_font = page.evaluate("() => window.getComputedStyle(document.querySelector('.ip-quality-score-label'))?.fontSize")
+            factor_font = page.evaluate("() => window.getComputedStyle(document.querySelector('.factor-label'))?.fontSize")
+            media_h = page.evaluate("() => window.getComputedStyle(document.querySelector('.ip-quality-media-row'))?.height")
+            print(f"[{tag}] Typography & heights: score_font={score_font}, factor_font={factor_font}, media_row_height={media_h}")
+            if w >= 768:
+                assert float(score_font.replace('px', '')) >= 12.0, f"Score font too small: {score_font}"
+                assert float(factor_font.replace('px', '')) >= 12.0, f"Factor font too small: {factor_font}"
+                assert float(media_h.replace('px', '')) <= 28.5, f"Media row too tall: {media_h}"
+            else:
+                assert float(media_h.replace('px', '')) <= 28.5, f"Mobile media row too tall: {media_h}"
+
+            # Check Panel Alignments (Top and Bottom on 3-column layout)
+            if w >= 1024:
+                p1 = card.locator(".ip-quality-score-panel").bounding_box()
+                p2 = card.locator(".ip-quality-factors-panel").bounding_box()
+                p3 = card.locator(".ip-quality-media-panel").bounding_box()
+                if p1 and p2 and p3:
+                    print(f"[{tag}] Panel tops: p1={p1['y']:.1f}, p2={p2['y']:.1f}, p3={p3['y']:.1f}")
+                    print(f"[{tag}] Panel heights: p1={p1['height']:.1f}, p2={p2['height']:.1f}, p3={p3['height']:.1f}")
+                    assert abs(p1['y'] - p2['y']) <= 2.0, f"Panel 1 & 2 top alignment error: {p1['y']} vs {p2['y']}"
+                    assert abs(p2['y'] - p3['y']) <= 2.0, f"Panel 2 & 3 top alignment error: {p2['y']} vs {p3['y']}"
+                    assert abs(p1['height'] - p2['height']) <= 2.0, f"Panel 1 & 2 height error: {p1['height']} vs {p2['height']}"
+                    assert abs(p2['height'] - p3['height']) <= 2.0, f"Panel 2 & 3 height error: {p2['height']} vs {p3['height']}"
+
+            # Check zero forbidden hardcodes
+            card_text = card.inner_text()
+            assert "407 干净" not in card_text, "Forbidden hardcode '407 干净' found!"
+            assert "14 标记" not in card_text, "Forbidden hardcode '14 标记' found!"
+            assert "2 黑名单" not in card_text, "Forbidden hardcode '2 黑名单' found!"
+
             # Check score list items
             score_items = score_list.locator(".ip-quality-score-row").all_inner_texts()
             print(f"[{tag}] Score items: {', '.join(score_items)}")
@@ -265,6 +296,45 @@ def run():
         print(f"Saved Songzhong mobile screenshot: {sz_mob_shot}")
 
         context.close()
+
+        # Test 3: Empty State Verification (No fake conclusions or tabs)
+        print(f"\n==========================================")
+        print("Testing Empty State Verification")
+        print("==========================================")
+        empty_context = browser.new_context(viewport={"width": 1280, "height": 900}, color_scheme="dark")
+        empty_page = empty_context.new_page()
+
+        empty_data = {"ip_quality": {}}
+        def handle_empty_ipqa(route):
+            route.fulfill(json=empty_data)
+
+        def handle_empty_detail(route):
+            route.fulfill(json={
+                "uuid": NODE_UUID,
+                "name": "Ciallonet-Host",
+                "status": "online",
+                "ip_quality": {},
+            })
+
+        empty_page.route(f"**/api/public/nodes/{NODE_UUID}/detail*", handle_empty_detail)
+        empty_page.route(f"**/api/public/nodes/{NODE_UUID}/ip-quality*", handle_empty_ipqa)
+        empty_page.goto(f"{BASE_URL}/#/node-detail?uuid={NODE_UUID}")
+        empty_page.wait_for_selector(".komari-ip-quality-card", timeout=30000)
+        empty_card = empty_page.locator(".komari-ip-quality-card")
+
+        # Verify no protocol tabs are shown
+        assert empty_card.locator(".ip-family-tab").count() == 0, "Empty state must not show IPv4/IPv6 tabs"
+        empty_text = empty_card.inner_text()
+        assert "暂无 IP 质量数据" in empty_text or "暂无数据" in empty_text or "等待 Agent" in empty_text, "Must show empty state message"
+        assert "407 干净" not in empty_text
+        assert "2/7" not in empty_text
+        print("PASS: Empty state renders without fake conclusions or tabs")
+
+        empty_shot = os.path.join(ARTIFACT_DIR, "ipqa_verified_empty_state.png")
+        empty_card.screenshot(path=empty_shot)
+        print(f"Saved empty state verification screenshot: {empty_shot}")
+
+        empty_context.close()
         browser.close()
 
     print("\nALL VERIFICATIONS PASSED SUCCESSFULLY!")
