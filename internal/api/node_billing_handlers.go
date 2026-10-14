@@ -12,40 +12,22 @@ import (
 )
 
 func (s *Server) getNodeBilling(w http.ResponseWriter, r *http.Request, uuid string) {
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
 	info, err := s.service.Store().GetNodeCycleTraffic(r.Context(), node.ID, time.Now().UTC())
 	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "billing unavailable: "+err.Error())
+		writeJSONError(w, http.StatusServiceUnavailable, "billing unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) putNodeBilling(w http.ResponseWriter, r *http.Request, uuid string) {
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -57,7 +39,7 @@ func (s *Server) putNodeBilling(w http.ResponseWriter, r *http.Request, uuid str
 	req.NodeID = node.ID
 
 	if err := s.service.Store().UpsertNodeBillingSettings(r.Context(), req); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to save billing settings: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, "failed to save billing settings")
 		return
 	}
 
@@ -70,23 +52,14 @@ func (s *Server) putNodeBilling(w http.ResponseWriter, r *http.Request, uuid str
 }
 
 func (s *Server) resetNodeBilling(w http.ResponseWriter, r *http.Request, uuid string) {
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
 	now := time.Now().UTC()
 	if err := s.service.Store().ResetNodeBillingCycle(r.Context(), node.ID, now); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to reset billing cycle: "+err.Error())
+		writeJSONError(w, http.StatusInternalServerError, "failed to reset billing cycle")
 		return
 	}
 

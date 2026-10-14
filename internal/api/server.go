@@ -21,6 +21,7 @@ import (
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/deploy"
 	"github.com/probewatch/probewatch/internal/notify"
+	"github.com/probewatch/probewatch/internal/security"
 	"github.com/probewatch/probewatch/internal/terminal"
 )
 
@@ -339,6 +340,9 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if r.Method == http.MethodPut || r.Method == http.MethodPost {
+				if _, ok := s.authorizeNodeScope(w, r, uuid); !ok {
+					return
+				}
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.putNodeBilling(w, r, uuid)
 				}))).ServeHTTP(w, r)
@@ -349,6 +353,9 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(parts) == 5 && parts[3] == "billing" && parts[4] == "reset" {
 			if r.Method == http.MethodPost {
+				if _, ok := s.authorizeNodeScope(w, r, uuid); !ok {
+					return
+				}
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.resetNodeBilling(w, r, uuid)
 				}))).ServeHTTP(w, r)
@@ -375,12 +382,18 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if parts[4] == "sync" && r.Method == http.MethodPost {
+				if _, ok := s.authorizeNodeScope(w, r, uuid); !ok {
+					return
+				}
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.postNodeIPQASync(w, r, uuid)
 				}))).ServeHTTP(w, r)
 				return
 			}
 			if parts[4] == "test" && r.Method == http.MethodPost {
+				if _, ok := s.authorizeNodeScope(w, r, uuid); !ok {
+					return
+				}
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.postNodeIPQATest(w, r, uuid)
 				}))).ServeHTTP(w, r)
@@ -433,6 +446,11 @@ func (s *Server) nodeRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(parts) == 3 && parts[0] == "api" && parts[1] == "nodes" {
 			s.nodeSummaryRead(w, r, parts[2])
+			return
+		}
+	}
+	if len(parts) == 4 && parts[0] == "api" && parts[1] == "nodes" && (parts[3] == "rotate-token" || parts[3] == "revoke") && security.IsRFC4122UUID(parts[2]) {
+		if _, ok := s.authorizeNodeScope(w, r, parts[2]); !ok {
 			return
 		}
 	}

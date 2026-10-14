@@ -1,8 +1,6 @@
 package api
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,7 +9,6 @@ import (
 	"github.com/probewatch/probewatch/internal/agent"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
-	"github.com/probewatch/probewatch/internal/security"
 )
 
 // eventsAgent handles batch system event reporting from edge nodes.
@@ -62,18 +59,8 @@ func (s *Server) getNodeEvents(w http.ResponseWriter, r *http.Request, uuid stri
 		return
 	}
 
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -188,18 +175,8 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 		return
 	}
 
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 

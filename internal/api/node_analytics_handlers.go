@@ -1,13 +1,9 @@
 package api
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/probewatch/probewatch/internal/security"
 )
 
 // ---------------------------------------------------------------------------
@@ -40,10 +36,6 @@ func (s *Server) nodeChecksSummary(w http.ResponseWriter, r *http.Request, uuid 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
 	// The summary aggregates the whole window, so the limit accepted by
 	// parseHistoryWindow is validated but intentionally not applied: applying
 	// it would silently truncate the statistics.
@@ -52,13 +44,8 @@ func (s *Server) nodeChecksSummary(w http.ResponseWriter, r *http.Request, uuid 
 		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
 		return
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 	summaries, err := s.service.Store().GetCheckSummary(r.Context(), node.ID, from, to)
@@ -139,10 +126,6 @@ func (s *Server) nodeTraffic(w http.ResponseWriter, r *http.Request, uuid string
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
 	period := strings.TrimSpace(r.URL.Query().Get("period"))
 	if period == "" {
 		period = "day"
@@ -152,13 +135,8 @@ func (s *Server) nodeTraffic(w http.ResponseWriter, r *http.Request, uuid string
 		writeJSONError(w, http.StatusBadRequest, "invalid period")
 		return
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 	now := time.Now().UTC()

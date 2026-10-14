@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -56,13 +54,8 @@ func (s *Server) getNodeIPQA(w http.ResponseWriter, r *http.Request, uuid string
 	if !s.checkIPQARateLimit(w, r) {
 		return
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to query node")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -106,13 +99,8 @@ func (s *Server) getNodeIPQAHistory(w http.ResponseWriter, r *http.Request, uuid
 	if !s.checkIPQARateLimit(w, r) {
 		return
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to query node")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -154,13 +142,8 @@ func (s *Server) getNodeIPQAChanges(w http.ResponseWriter, r *http.Request, uuid
 	if !s.checkIPQARateLimit(w, r) {
 		return
 	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to query node")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -186,19 +169,13 @@ func (s *Server) postNodeIPQASync(w http.ResponseWriter, r *http.Request, uuid s
 	if !s.checkIPQARateLimit(w, r) {
 		return
 	}
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
+		return
+	}
 	user, err := s.service.CurrentUser(r, time.Now().UTC())
 	if err != nil {
 		writeAuthenticationError(w, err)
-		return
-	}
-
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to query node")
 		return
 	}
 
@@ -244,19 +221,13 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 	if !s.checkIPQARateLimit(w, r) {
 		return
 	}
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
+		return
+	}
 	user, err := s.service.CurrentUser(r, time.Now().UTC())
 	if err != nil {
 		writeAuthenticationError(w, err)
-		return
-	}
-
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "node not found")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "failed to query node")
 		return
 	}
 
@@ -302,7 +273,7 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 				OccurrenceCount: 1,
 				FirstSeenAt:     now,
 			}
-			_ = s.notifier.Dispatch(r.Context(), testAlert, node)
+			_ = s.notifier.Dispatch(r.Context(), testAlert, *node)
 			notificationSent = true
 		}
 

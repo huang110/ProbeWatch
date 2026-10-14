@@ -435,7 +435,7 @@ func (s *Server) patchNode(w http.ResponseWriter, r *http.Request, idOrUUID stri
 	user, hasUser := UserFromContext(ctx)
 	if hasUser {
 		if !user.CanAccessNode(node.UUID) {
-			writeJSONError(w, http.StatusForbidden, "access denied")
+			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
 			return
 		}
 		if user.Role != "admin" && user.Role != "operator" && user.Role != "" {

@@ -649,6 +649,24 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
 		writeAuthenticationError(w, err)
 		return
 	}
+
+	var targetNode db.Node
+	if security.IsRFC4122UUID(nodeID) {
+		targetNode, err = s.service.Store().GetNodeByUUID(r.Context(), nodeID)
+	} else {
+		targetNode, err = s.service.Store().GetNodeByID(r.Context(), nodeID)
+	}
+	if err == nil {
+		user, hasUser := UserFromContext(r.Context())
+		if !hasUser {
+			user, _ = s.service.CurrentUser(r, time.Now().UTC())
+		}
+		if !user.CanAccessNode(targetNode.UUID) {
+			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+			return
+		}
+	}
+
 	now := time.Now().UTC()
 	switch action {
 	case "rotate-token":
@@ -1086,27 +1104,54 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, respMap)
 }
 
-func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
+// authorizeNodeScope validates the node UUID format, authenticates the caller,
+// verifies the node exists, and enforces that the current user has access to the node.
+// Returns the node record and true on success, or writes the error response and returns nil, false.
+func (s *Server) authorizeNodeScope(w http.ResponseWriter, r *http.Request, uuid string) (*db.Node, bool) {
 	if !security.IsRFC4122UUID(uuid) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
+		return nil, false
 	}
-	if user, hasUser := UserFromContext(r.Context()); hasUser {
-		if !user.CanAccessNode(uuid) {
-			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
-			return
+
+	user, hasUser := UserFromContext(r.Context())
+	if !hasUser {
+		var err error
+		user, err = s.service.CurrentUser(r, time.Now().UTC())
+		if err != nil {
+			writeAuthenticationError(w, err)
+			return nil, false
 		}
 	}
+
+	if user.Disabled {
+		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+		return nil, false
+	}
+
+	if !user.CanAccessNode(uuid) {
+		writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+		return nil, false
+	}
+
 	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, db.ErrNodeNotFound) || errors.Is(err, db.ErrNodeDeleted) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
+		return nil, false
 	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+		return nil, false
+	}
+
+	return &node, true
+}
+
+func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.nodeSummary(r.Context(), node))
+	writeJSON(w, http.StatusOK, s.nodeSummary(r.Context(), *node))
 }
 
 type historyResourceResponse struct {
@@ -1165,23 +1210,8 @@ func (s *Server) nodeRead(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if !security.IsRFC4122UUID(parts[2]) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if user, hasUser := UserFromContext(r.Context()); hasUser {
-		if !user.CanAccessNode(parts[2]) {
-			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
-			return
-		}
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), parts[2])
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node results unavailable")
+	node, ok := s.authorizeNodeScope(w, r, parts[2])
+	if !ok {
 		return
 	}
 	if len(parts) == 5 {

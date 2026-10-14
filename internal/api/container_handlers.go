@@ -1,15 +1,12 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
-	"github.com/probewatch/probewatch/internal/security"
 )
 
 // workloadAgent handles edge node workload report ingestion (Docker containers & host top processes).
@@ -52,17 +49,8 @@ func (s *Server) getNodeContainers(w http.ResponseWriter, r *http.Request, uuid 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
@@ -107,17 +95,8 @@ func (s *Server) getNodeProcesses(w http.ResponseWriter, r *http.Request, uuid s
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !security.IsRFC4122UUID(uuid) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	node, err := s.service.Store().GetNodeByUUID(r.Context(), uuid)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node unavailable")
+	node, ok := s.authorizeNodeScope(w, r, uuid)
+	if !ok {
 		return
 	}
 
