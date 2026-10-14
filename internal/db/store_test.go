@@ -1429,3 +1429,56 @@ func TestSystemEventsStore(t *testing.T) {
 	}
 }
 
+func TestGetResourceHistoryMultiNodeOrderAsc(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	node1 := registerTestNode(t, store, "multi-order-node-1")
+	node2 := registerTestNode(t, store, "multi-order-node-2")
+
+	base := time.Now().UTC().Truncate(time.Second)
+	// Insert records out of chronological order
+	times := []time.Duration{
+		3 * time.Minute,
+		1 * time.Minute,
+		4 * time.Minute,
+		2 * time.Minute,
+	}
+
+	for _, offset := range times {
+		reportedAt := base.Add(offset)
+		_ = store.PersistAgentReport(ctx, AgentReportInput{
+			NodeID:          node1.Node.ID,
+			RequestID:       fmt.Sprintf("n1-%d", offset),
+			ReportedAt:      reportedAt,
+			Now:             reportedAt,
+			ResourcePayload: []byte(fmt.Sprintf(`{"offset":%d}`, offset)),
+		})
+		_ = store.PersistAgentReport(ctx, AgentReportInput{
+			NodeID:          node2.Node.ID,
+			RequestID:       fmt.Sprintf("n2-%d", offset),
+			ReportedAt:      reportedAt,
+			Now:             reportedAt,
+			ResourcePayload: []byte(fmt.Sprintf(`{"offset":%d}`, offset)),
+		})
+	}
+
+	res, err := store.GetResourceHistoryMultiNode(ctx, []string{node1.Node.ID, node2.Node.ID}, base, base.Add(10*time.Minute), 50)
+	if err != nil {
+		t.Fatalf("GetResourceHistoryMultiNode: %v", err)
+	}
+
+	for _, nid := range []string{node1.Node.ID, node2.Node.ID} {
+		records := res[nid]
+		if len(records) != len(times) {
+			t.Fatalf("node %s: expected %d records, got %d", nid, len(times), len(records))
+		}
+		for i := 1; i < len(records); i++ {
+			if records[i].ReportedAt.Before(records[i-1].ReportedAt) {
+				t.Fatalf("records not in ASC order: record[%d]=%v before record[%d]=%v",
+					i, records[i].ReportedAt, i-1, records[i-1].ReportedAt)
+			}
+		}
+	}
+}

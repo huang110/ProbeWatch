@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -474,5 +475,121 @@ func TestOutboxReplayRetryBackoff(t *testing.T) {
 	}
 	if !updatedItem.NextTry.After(time.Now().UTC()) {
 		t.Fatalf("expected NextTry to be in the future, got %v", updatedItem.NextTry)
+	}
+}
+
+// TestNewInitializesAllProbeMonitors verifies that Runner.New initializes all probe monitors
+// and concurrency control channels, preventing nil pointer dereferences.
+func TestNewInitializesAllProbeMonitors(t *testing.T) {
+	runner, err := New(config.Config{
+		AgentEndpoint:  "http://127.0.0.1:8080",
+		AgentNodeUUID:  "test-node-uuid",
+		AgentNodeToken: "test-node-token",
+	})
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	if runner.probe == nil {
+		t.Error("expected runner.probe to be non-nil")
+	}
+	if runner.media == nil {
+		t.Error("expected runner.media to be non-nil")
+	}
+	if runner.mtr == nil {
+		t.Error("expected runner.mtr to be non-nil")
+	}
+	if runner.speedtest == nil {
+		t.Error("expected runner.speedtest to be non-nil")
+	}
+	if runner.synthetic == nil {
+		t.Error("expected runner.synthetic to be non-nil")
+	}
+	if runner.fastProbeWorkerSem == nil {
+		t.Error("expected runner.fastProbeWorkerSem to be non-nil")
+	}
+	if runner.heavyProbeWorkerSem == nil {
+		t.Error("expected runner.heavyProbeWorkerSem to be non-nil")
+	}
+	if runner.runningTasks == nil {
+		t.Error("expected runner.runningTasks to be non-nil")
+	}
+}
+
+// TestNewProbeMonitorKindsDoNotPanic verifies that runProbeTask executes safely for all
+// supported probe kinds without panicking due to nil monitors.
+func TestNewProbeMonitorKindsDoNotPanic(t *testing.T) {
+	runner, err := New(config.Config{
+		AgentEndpoint:  "http://127.0.0.1:8080",
+		AgentNodeUUID:  "test-node-uuid",
+		AgentNodeToken: "test-node-token",
+	})
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	kinds := []string{"speedtest", "grpc", "websocket", "doh", "synthetic"}
+
+	// 1. Canceled context test as specified
+	ctxCanceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for _, kind := range kinds {
+		taskID := fmt.Sprintf("task-canceled-%s", kind)
+		runner.probeMu.Lock()
+		runner.runningTasks[taskID] = struct{}{}
+		runner.probeMu.Unlock()
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("runProbeTask panicked for kind %s with canceled ctx: %v", kind, r)
+				}
+			}()
+			runner.runProbeTask(ctxCanceled, protocol.CheckTask{
+				ID:        taskID,
+				Kind:      kind,
+				TimeoutMS: 50,
+			})
+		}()
+
+		runner.probeMu.Lock()
+		_, running := runner.runningTasks[taskID]
+		runner.probeMu.Unlock()
+		if running {
+			t.Fatalf("task %s was not cleaned up from runningTasks", taskID)
+		}
+	}
+
+	// 2. Active context test to guarantee probe execution path is exercised without panic
+	for _, kind := range kinds {
+		taskID := fmt.Sprintf("task-active-%s", kind)
+		runner.probeMu.Lock()
+		runner.runningTasks[taskID] = struct{}{}
+		runner.probeMu.Unlock()
+
+		ctxShort, cancelShort := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		func() {
+			defer func() {
+				cancelShort()
+				if r := recover(); r != nil {
+					t.Fatalf("runProbeTask panicked for kind %s with active ctx: %v", kind, r)
+				}
+			}()
+			runner.runProbeTask(ctxShort, protocol.CheckTask{
+				ID:        taskID,
+				Kind:      kind,
+				Host:      "127.0.0.1",
+				Port:      65530,
+				TimeoutMS: 50,
+			})
+		}()
+
+		runner.probeMu.Lock()
+		_, running := runner.runningTasks[taskID]
+		runner.probeMu.Unlock()
+		if running {
+			t.Fatalf("task %s was not cleaned up from runningTasks", taskID)
+		}
 	}
 }
