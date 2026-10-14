@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { TrendDown, TrendUp } from '@phosphor-icons/react'
 import { numeric, safeArray, formatTimeOfDay } from '../lib/format.js'
+import {
+  TELEMETRY_COLORS,
+  mapLatencyToColor,
+  getLatencyBlocks,
+  mapLossToColor,
+  getLossBlocks,
+} from '../lib/telemetryBlocks.js'
 
 export function StatusDot({ status, size = 'md' }) {
   return (
@@ -84,7 +91,22 @@ export function SegmentedBar({
   )
 }
 
-export function VpsDotTrack({ blocks = [], className = '' }) {
+export {
+  TELEMETRY_COLORS,
+  mapLatencyToColor,
+  getLatencyBlocks,
+  mapLossToColor,
+  getLossBlocks,
+}
+
+export function VpsDotTrack({ blocks = [], className = '', emptyText = '暂无采样' }) {
+  if (!blocks || blocks.length === 0) {
+    return (
+      <span className="vps-dot-track-empty mono" title="暂无历史采样数据">
+        {emptyText}
+      </span>
+    )
+  }
   return (
     <div className={`vps-dot-track ${className}`} aria-hidden="true">
       {blocks.map((color, i) => (
@@ -92,46 +114,6 @@ export function VpsDotTrack({ blocks = [], className = '' }) {
       ))}
     </div>
   )
-}
-
-export function getLatencyBlocks(latencyMs) {
-  if (latencyMs === null || latencyMs === undefined || latencyMs === '') return Array(16).fill('#64748b')
-  const val = Number(latencyMs) || 0
-  if (val <= 0) return Array(16).fill('#34d399')
-  if (val < 65) return Array(16).fill('#34d399')
-  if (val < 130) {
-    const arr = Array(16).fill('#34d399')
-    arr[11] = '#fbbf24'
-    return arr
-  }
-  // High latency / jitter (matches 191ms in screenshot)
-  return [
-    '#f43f5e', '#f43f5e', '#fb7185', '#fbbf24', '#fbbf24', '#e2e8f0', 
-    '#f43f5e', '#fb7185', '#e2e8f0', '#f43f5e', '#f43f5e', '#f43f5e', 
-    '#fb7185', '#fbbf24', '#34d399', '#34d399'
-  ]
-}
-
-export function getLossBlocks(lossPercent) {
-  if (lossPercent === null || lossPercent === undefined || lossPercent === '') return Array(16).fill('#64748b')
-  const lossNum = parseFloat(lossPercent) || 0
-  if (lossNum <= 0) return Array(16).fill('#34d399')
-  if (lossNum > 35) {
-    // Matches 48.3% row in screenshot: 5 red, 1 green, 8 red, 2 green
-    return [
-      '#f43f5e', '#f43f5e', '#f43f5e', '#f43f5e', '#fb7185', '#34d399',
-      '#f43f5e', '#f43f5e', '#f43f5e', '#fb7185', '#f43f5e', '#f43f5e',
-      '#f43f5e', '#f43f5e', '#34d399', '#34d399'
-    ]
-  }
-  // Low loss (e.g. 1.7% in screenshot: 13 green, 1 red, 2 green)
-  const count = Math.max(1, Math.round((lossNum / 100) * 16))
-  const arr = Array(16).fill('#34d399')
-  for (let i = 0; i < count; i++) {
-    const idx = (13 - i * 3 + 16) % 16
-    arr[idx] = '#f43f5e'
-  }
-  return arr
 }
 
 /**
