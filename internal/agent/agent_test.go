@@ -68,8 +68,6 @@ func (f *fakeSyntheticMonitor) Run(context.Context, protocol.CheckTask) protocol
 	}
 }
 
-
-
 func TestNewRequiresOutboundAgentCredentials(t *testing.T) {
 	if _, err := New(config.Config{}); err == nil {
 		t.Fatal("New accepted an agent without endpoint or credentials")
@@ -225,6 +223,7 @@ func TestOutboxPersistsAndReplaysReport(t *testing.T) {
 		t.Fatal("replay did not attempt request")
 	}
 	available = true
+	time.Sleep(120 * time.Millisecond)
 	if err := runner.replayOutbox(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -619,4 +618,3 @@ func TestReportRunsSyntheticTask(t *testing.T) {
 		t.Fatalf("unexpected synthetic result: %#v", res)
 	}
 }
-

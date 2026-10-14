@@ -183,6 +183,7 @@ func TestOutboxReplayOnNetworkRecovery(t *testing.T) {
 
 	// 2. Server recovers
 	serverHealthy.Store(true)
+	time.Sleep(120 * time.Millisecond) // Allow reportRetryDelay (100ms) to elapse
 
 	// Trigger outbox replay (which happens automatically in the new loop or after successful report)
 	err = runner.replayOutboxLimited(context.Background())
@@ -237,7 +238,7 @@ func TestTaskTimeoutAndCleanupRunningTasks(t *testing.T) {
 
 	runner.probeMu.Lock()
 	_, stillRunning := runner.runningTasks[task.ID]
-	workerSemLen := len(runner.probeWorkerSem)
+	workerSemLen := len(runner.heavyProbeWorkerSem)
 	runner.probeMu.Unlock()
 
 	if stillRunning {
@@ -287,5 +288,191 @@ func TestOutboxReplayConcurrentSafety(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		<-done
+	}
+}
+
+// TestProbeConcurrencyPoolSeparation verifies that saturated heavyProbeWorkerSem
+// does not block fastProbeWorkerSem from executing lightweight probes, and fast probes
+// do not consume heavy slots.
+func TestProbeConcurrencyPoolSeparation(t *testing.T) {
+	runner, err := New(config.Config{
+		AgentEndpoint:  "http://localhost:9999",
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cap(runner.fastProbeWorkerSem) != 8 {
+		t.Fatalf("expected fastProbeWorkerSem cap 8, got %d", cap(runner.fastProbeWorkerSem))
+	}
+	if cap(runner.heavyProbeWorkerSem) != 2 {
+		t.Fatalf("expected heavyProbeWorkerSem cap 2, got %d", cap(runner.heavyProbeWorkerSem))
+	}
+
+	// 1. Saturate heavy pool completely (2 slots)
+	runner.heavyProbeWorkerSem <- struct{}{}
+	runner.heavyProbeWorkerSem <- struct{}{}
+	if len(runner.heavyProbeWorkerSem) != 2 {
+		t.Fatalf("expected heavyProbeWorkerSem to be full (2)")
+	}
+
+	// 2. Launch a fast probe task (e.g. tcp) with a short timeout
+	fastTask := protocol.CheckTask{
+		ID:        "fast-task-1",
+		Kind:      "tcp",
+		TimeoutMS: 50,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	// runProbeTask must not hang or block on heavyProbeWorkerSem; it uses fastProbeWorkerSem
+	done := make(chan struct{})
+	go func() {
+		runner.runProbeTask(ctx, fastTask)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Fast probe executed and completed
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("fast probe was blocked while heavyProbeWorkerSem was saturated!")
+	}
+
+	// 3. Verify heavyProbeWorkerSem still has 2 slots occupied (untouched by fast probe)
+	if len(runner.heavyProbeWorkerSem) != 2 {
+		t.Fatalf("expected heavyProbeWorkerSem to remain at 2, got %d", len(runner.heavyProbeWorkerSem))
+	}
+
+	// Clean up heavy slots
+	<-runner.heavyProbeWorkerSem
+	<-runner.heavyProbeWorkerSem
+}
+
+// TestUnknownTaskClassificationAsHeavy verifies that unknown or custom task kinds
+// are routed to the heavy channel by default to prevent fast channel starvation.
+func TestUnknownTaskClassificationAsHeavy(t *testing.T) {
+	runner, err := New(config.Config{
+		AgentEndpoint:  "http://localhost:9999",
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fastKinds := []string{"tcp", "http", "https", "dns", "ping", "icmp", "TCP", "HTTP"}
+	for _, k := range fastKinds {
+		if !isFastProbeKind(k) {
+			t.Errorf("expected %q to be classified as fast", k)
+		}
+		if runner.selectProbeSem(k) != runner.fastProbeWorkerSem {
+			t.Errorf("expected %q to select fastProbeWorkerSem", k)
+		}
+	}
+
+	heavyKinds := []string{"mtr", "speedtest", "media_http", "synthetic", "grpc", "websocket", "doh"}
+	for _, k := range heavyKinds {
+		if isFastProbeKind(k) {
+			t.Errorf("expected %q to be classified as heavy", k)
+		}
+		if runner.selectProbeSem(k) != runner.heavyProbeWorkerSem {
+			t.Errorf("expected %q to select heavyProbeWorkerSem", k)
+		}
+	}
+
+	unknownKinds := []string{"custom_task", "unknown_proto", "heavy_benchmark", "", " "}
+	for _, k := range unknownKinds {
+		if isFastProbeKind(k) {
+			t.Errorf("expected unknown kind %q to be classified as heavy for safety", k)
+		}
+		if runner.selectProbeSem(k) != runner.heavyProbeWorkerSem {
+			t.Errorf("expected unknown kind %q to route to heavyProbeWorkerSem", k)
+		}
+	}
+}
+
+// TestOutboxReplayRetryBackoff verifies that items with future NextTry are skipped
+// and send failures advance NextTry with exponential backoff.
+func TestOutboxReplayRetryBackoff(t *testing.T) {
+	dataDir, err := os.MkdirTemp("", "probewatch-agent-backoff-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		// Always fail to test backoff calculation
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	runner, err := New(config.Config{
+		AgentEndpoint:  server.URL,
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+		AgentDataDir:   dataDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outboxDir := filepath.Join(dataDir, "outbox")
+	_ = os.MkdirAll(outboxDir, 0700)
+
+	// 1. Item with NextTry in the future should be skipped
+	futureItem := queuedReport{
+		RequestID: "req-future",
+		Payload:   []byte(`{"test":"future"}`),
+		Attempts:  1,
+		NextTry:   time.Now().UTC().Add(10 * time.Minute),
+	}
+	futureData, _ := json.Marshal(futureItem)
+	_ = os.WriteFile(filepath.Join(outboxDir, "future.json"), futureData, 0600)
+
+	ctx := context.Background()
+	_ = runner.replayOutboxLimited(ctx)
+
+	if callCount != 0 {
+		t.Fatalf("expected future item to be skipped, but server was called %d times", callCount)
+	}
+
+	// 2. Item ready for replay: will fail, then update Attempts and NextTry with backoff
+	readyItem := queuedReport{
+		RequestID: "req-ready",
+		Payload:   []byte(`{"test":"ready"}`),
+		Attempts:  2,
+		NextTry:   time.Now().UTC().Add(-1 * time.Minute), // in past, ready to retry
+	}
+	readyData, _ := json.Marshal(readyItem)
+	readyPath := filepath.Join(outboxDir, "ready.json")
+	_ = os.WriteFile(readyPath, readyData, 0600)
+
+	_ = runner.replayOutboxLimited(ctx)
+
+	if callCount != maxReportAttempts {
+		t.Fatalf("expected %d calls for ready item, got %d", maxReportAttempts, callCount)
+	}
+
+	// Read updated file from disk
+	updatedData, err := os.ReadFile(readyPath)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
+	var updatedItem queuedReport
+	if err := json.Unmarshal(updatedData, &updatedItem); err != nil {
+		t.Fatalf("failed to unmarshal updated item: %v", err)
+	}
+
+	if updatedItem.Attempts != 3 {
+		t.Fatalf("expected attempts to be incremented to 3, got %d", updatedItem.Attempts)
+	}
+	if !updatedItem.NextTry.After(time.Now().UTC()) {
+		t.Fatalf("expected NextTry to be in the future, got %v", updatedItem.NextTry)
 	}
 }

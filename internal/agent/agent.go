@@ -30,7 +30,8 @@ const (
 	maxOutboxAge                 = 7 * 24 * time.Hour
 	maxConfigResponseBytes       = 2 << 20
 	initialResourceFollowupDelay = 2 * time.Second
-	maxConcurrentProbeWorkers    = 4
+	maxConcurrentFastProbes      = 8
+	maxConcurrentHeavyProbes     = 2
 	maxBufferedProbeResults      = 100
 	defaultProbeTimeout          = 15 * time.Second
 	probeFastWaitTimeout         = 40 * time.Millisecond
@@ -61,11 +62,12 @@ type Runner struct {
 	synthetic syntheticMonitor
 
 	// Concurrency & buffer management for network probes
-	probeWorkerSem  chan struct{}
-	probeMu         sync.Mutex
-	runningTasks    map[string]struct{}
-	bufferedResults []protocol.CheckResult
-	outboxReplayMu  sync.Mutex
+	fastProbeWorkerSem  chan struct{}
+	heavyProbeWorkerSem chan struct{}
+	probeMu             sync.Mutex
+	runningTasks        map[string]struct{}
+	bufferedResults     []protocol.CheckResult
+	outboxReplayMu      sync.Mutex
 
 	// configMaxAgeSeconds is the freshness window the control plane asked for
 	// (0 = no fail-closed enforcement, legacy behavior). lastRefreshSuccessAt
@@ -115,10 +117,10 @@ func New(cfg config.Config) (*Runner, error) {
 		next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(),
 		cpu: newCPUTracker(), hardware: defaultHardwareCollector(), disk: newPlatformDiskTracker(), sockets: defaultSocketCollector(), health: defaultHostHealthCollector(), ipQuality: NewIPQualityCollector(), ipqa: NewIPQACollector(),
 		probe: &monitor.Probe{}, media: &monitor.MediaDetector{}, mtr: &monitor.MTRMonitor{},
-		speedtest: &monitor.SpeedtestRunner{}, synthetic: monitor.NewSyntheticMonitor(),
-		probeWorkerSem:  make(chan struct{}, maxConcurrentProbeWorkers),
-		runningTasks:    make(map[string]struct{}),
-		bufferedResults: make([]protocol.CheckResult, 0, 16),
+		fastProbeWorkerSem:  make(chan struct{}, maxConcurrentFastProbes),
+		heavyProbeWorkerSem: make(chan struct{}, maxConcurrentHeavyProbes),
+		runningTasks:        make(map[string]struct{}),
+		bufferedResults:     make([]protocol.CheckResult, 0, 16),
 	}, nil
 }
 
@@ -288,16 +290,33 @@ func (r *Runner) refresh(ctx context.Context) error {
 	return nil
 }
 
+func isFastProbeKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "tcp", "http", "https", "dns", "ping", "icmp":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Runner) selectProbeSem(kind string) chan struct{} {
+	if isFastProbeKind(kind) {
+		return r.fastProbeWorkerSem
+	}
+	return r.heavyProbeWorkerSem
+}
+
 func (r *Runner) runProbeTask(ctx context.Context, task protocol.CheckTask) {
+	sem := r.selectProbeSem(task.Kind)
 	select {
-	case r.probeWorkerSem <- struct{}{}:
+	case sem <- struct{}{}:
 	case <-ctx.Done():
 		r.probeMu.Lock()
 		delete(r.runningTasks, task.ID)
 		r.probeMu.Unlock()
 		return
 	}
-	defer func() { <-r.probeWorkerSem }()
+	defer func() { <-sem }()
 
 	taskTimeout := defaultProbeTimeout
 	if task.TimeoutMS > 0 {
@@ -366,8 +385,11 @@ func (r *Runner) report(ctx context.Context) error {
 	if r.runningTasks == nil {
 		r.runningTasks = make(map[string]struct{})
 	}
-	if r.probeWorkerSem == nil {
-		r.probeWorkerSem = make(chan struct{}, maxConcurrentProbeWorkers)
+	if r.fastProbeWorkerSem == nil {
+		r.fastProbeWorkerSem = make(chan struct{}, maxConcurrentFastProbes)
+	}
+	if r.heavyProbeWorkerSem == nil {
+		r.heavyProbeWorkerSem = make(chan struct{}, maxConcurrentHeavyProbes)
 	}
 	for _, task := range due {
 		if _, running := r.runningTasks[task.ID]; !running {
@@ -662,15 +684,31 @@ func (r *Runner) replayOutboxLimited(ctx context.Context) error {
 			_ = os.Remove(path)
 			continue
 		}
+		if !item.NextTry.IsZero() && item.NextTry.After(r.now().UTC()) {
+			continue
+		}
 		processed++
 		if err := r.sendReport(replayCtx, item.RequestID, item.Payload); err == nil {
 			_ = os.Remove(path)
+			// Slight pacing delay between replays to prevent burst traffic storm
+			select {
+			case <-replayCtx.Done():
+				break
+			case <-time.After(20 * time.Millisecond):
+			}
 		} else {
 			item.Attempts++
-			item.NextTry = time.Now().UTC().Add(reportRetryDelay * time.Duration(1<<min(item.Attempts, 6)))
+			attempts := item.Attempts
+			if attempts <= 0 {
+				attempts = 1
+			}
+			backoffFactor := time.Duration(1 << min(attempts-1, 6))
+			item.NextTry = r.now().UTC().Add(reportRetryDelay * backoffFactor)
 			if updated, marshalErr := json.Marshal(item); marshalErr == nil && len(updated) <= maxOutboxFileSize {
 				_ = os.WriteFile(path, updated, 0600)
 			}
+			// Stop further attempts in this batch to avoid hammering recovering server
+			break
 		}
 	}
 	return nil
