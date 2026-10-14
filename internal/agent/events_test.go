@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +165,99 @@ func TestQuerySystemLogsParameterValidation(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestReadLogTailSmallFile(t *testing.T) {
+	content := "line 1: boot sequence\nline 2: services started\nline 3: ready\n"
+	r := bytes.NewReader([]byte(content))
+
+	// Small file: size <= chunkSize, must retain full first line
+	lines := readLogTailChunk(r, int64(len(content)), 1024, 10)
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "line 1: boot sequence" {
+		t.Fatalf("expected first line to be preserved for small file, got %q", lines[0])
+	}
+	if lines[2] != "line 3: ready" {
+		t.Fatalf("expected last line %q, got %q", "line 3: ready", lines[2])
+	}
+}
+
+func TestReadLogTailLargeFileTruncationDiscardsPartialFirstLine(t *testing.T) {
+	// Full simulated log with a partial cut at chunkSize bytes from end
+	prefix := "0123456789prefix_cut_in_middle_of_line_"
+	chunkContent := "PARTIAL_BROKEN_SUFFIX\nline 2: fully intact\nline 3: fully intact\n"
+	fullContent := prefix + chunkContent
+
+	r := bytes.NewReader([]byte(fullContent))
+	chunkSize := int64(len(chunkContent))
+
+	// Size > chunkSize triggers seeking into the middle of the first line
+	lines := readLogTailChunk(r, int64(len(fullContent)), chunkSize, 10)
+
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 complete lines, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "line 2: fully intact" {
+		t.Fatalf("expected partial first line to be discarded and line 2 returned, got %q", lines[0])
+	}
+	if lines[1] != "line 3: fully intact" {
+		t.Fatalf("expected line 3 to be complete, got %q", lines[1])
+	}
+}
+
+func TestReadLogTailNoNewlineInChunk(t *testing.T) {
+	content := "PREFIX_TRUNCATED_BLOCK_WITHOUT_ANY_NEWLINE_IN_THE_TAIL_CHUNK"
+	r := bytes.NewReader([]byte(content))
+
+	// Chunk has no newlines at all and is truncated
+	lines := readLogTailChunk(r, int64(len(content)), 25, 10)
+	if len(lines) != 0 {
+		t.Fatalf("expected empty lines on truncated block with no newline, got: %v", lines)
+	}
+}
+
+func TestReadLogTailEmptyFile(t *testing.T) {
+	r := bytes.NewReader([]byte(""))
+	lines := readLogTailChunk(r, 0, 1024, 10)
+	if lines != nil {
+		t.Fatalf("expected nil for empty reader, got %v", lines)
+	}
+
+	dir := t.TempDir()
+	emptyPath := filepath.Join(dir, "empty.log")
+	_ = os.WriteFile(emptyPath, []byte(""), 0600)
+
+	fileLines := readLogTail(emptyPath, 10)
+	if fileLines != nil {
+		t.Fatalf("expected nil for empty file on disk, got %v", fileLines)
+	}
+}
+
+func TestReadLogTailSingleLineTruncated(t *testing.T) {
+	content := "LONG_PREFIX_BEFORE_CUT_SINGLE_LINE_NO_NEWLINE"
+	r := bytes.NewReader([]byte(content))
+
+	// Truncated and only 1 partial line
+	lines := readLogTailChunk(r, int64(len(content)), 15, 10)
+	if len(lines) != 0 {
+		t.Fatalf("expected 0 lines when only a partial line exists after cut, got: %v", lines)
+	}
+}
+
+func TestReadLogTailDiskFileIntegration(t *testing.T) {
+	dir := t.TempDir()
+	testPath := filepath.Join(dir, "sys.log")
+	content := "first log line\nsecond log line\nthird log line\n"
+	_ = os.WriteFile(testPath, []byte(content), 0600)
+
+	lines := readLogTail(testPath, 2)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines with maxLines=2, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "second log line" || lines[1] != "third log line" {
+		t.Fatalf("expected second and third lines, got: %v", lines)
 	}
 }

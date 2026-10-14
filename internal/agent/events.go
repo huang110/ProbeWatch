@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	oomRegex    = regexp.MustCompile(`(?i)(?:Out of memory:\s*Kill(?:ed)?\s*process\s*(\d+)\s*\(([^)]+)\)|Killed process\s*(\d+)\s*\(([^)]+)\)|invoked oom-killer)`)
-	kernelRegex = regexp.MustCompile(`(?i)(?:segfault at [0-9a-f]+|general protection fault|kernel BUG at|Kernel panic - not syncing)`)
+	oomRegex     = regexp.MustCompile(`(?i)(?:Out of memory:\s*Kill(?:ed)?\s*process\s*(\d+)\s*\(([^)]+)\)|Killed process\s*(\d+)\s*\(([^)]+)\)|invoked oom-killer)`)
+	kernelRegex  = regexp.MustCompile(`(?i)(?:segfault at [0-9a-f]+|general protection fault|kernel BUG at|Kernel panic - not syncing)`)
 	sshFailRegex = regexp.MustCompile(`(?i)Failed password for (?:invalid user )?([^\s]+) from ([0-9a-f\.\:]+) port (\d+)`)
 )
 
@@ -263,6 +263,8 @@ func (c *EventCollector) scanSystemdFailures(ctx context.Context, nowSec int64) 
 	return events
 }
 
+const tailChunkSize = 64 * 1024
+
 func readLogTail(path string, maxLines int) []string {
 	file, err := os.Open(path)
 	if err != nil {
@@ -271,20 +273,43 @@ func readLogTail(path string, maxLines int) []string {
 	defer file.Close()
 
 	fi, err := file.Stat()
-	if err != nil {
+	if err != nil || fi.Size() == 0 {
 		return nil
 	}
 
-	// If file is larger than 64KB, seek towards end to avoid reading giant files from start
-	const tailChunkSize = 64 * 1024
-	if fi.Size() > tailChunkSize {
-		_, _ = file.Seek(-tailChunkSize, io.SeekEnd)
+	return readLogTailChunk(file, fi.Size(), tailChunkSize, maxLines)
+}
+
+func readLogTailChunk(r io.ReadSeeker, size int64, chunkSize int64, maxLines int) []string {
+	if size <= 0 || chunkSize <= 0 || maxLines <= 0 {
+		return nil
 	}
 
+	isTruncated := false
+	if size > chunkSize {
+		isTruncated = true
+		if _, err := r.Seek(-chunkSize, io.SeekEnd); err != nil {
+			_, _ = r.Seek(0, io.SeekStart)
+			isTruncated = false
+		}
+	}
+
+	scanner := bufio.NewScanner(io.LimitReader(r, chunkSize))
+	buf := make([]byte, 4096)
+	scanner.Buffer(buf, int(chunkSize))
+
 	var lines []string
-	scanner := bufio.NewScanner(io.LimitReader(file, tailChunkSize))
+	firstLine := true
+
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		line := scanner.Text()
+		if isTruncated && firstLine {
+			// Discard the first partial/incomplete line caused by seeking into the middle of the file
+			firstLine = false
+			continue
+		}
+		firstLine = false
+		lines = append(lines, line)
 		if len(lines) > maxLines*2 {
 			lines = lines[len(lines)-maxLines:]
 		}
