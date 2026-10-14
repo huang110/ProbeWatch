@@ -814,9 +814,17 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 
 	// Optimized batch queries to eliminate N+1 roundtrips:
 	// 1 query for all latest node report timestamps
-	latestMap, _ := s.service.Store().GetAllResourceLatest(r.Context())
+	latestMap, err := s.service.Store().GetAllResourceLatest(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
 	// 1 query for history across all requested nodes
-	historyMap, _ := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, limit)
+	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, limit)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+		return
+	}
 
 	for _, n := range nodes {
 		latest, ok := latestMap[n.ID]
@@ -864,8 +872,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
-		if records, e := s.service.Store().GetResultHistoryMultiNode(r.Context(), kind, nodeIDs, from, to, limit); e == nil {
-			for _, record := range records {
+		records, err := s.service.Store().GetResultHistoryMultiNode(r.Context(), kind, nodeIDs, from, to, limit)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
+		for _, record := range records {
 				key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
 				if _, exists := seenChecks[key]; exists {
 					continue
@@ -890,7 +902,6 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	}
 	checks := map[string]any{"total": checksTotal, "success": checksSuccess, "failure": checksTotal - checksSuccess, "success_rate": nil, "avg_latency_ms": nil}
 	if checksTotal > 0 {
 		checks["success_rate"] = float64(checksSuccess) * 100 / float64(checksTotal)

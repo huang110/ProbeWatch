@@ -146,3 +146,69 @@ func TestOverviewPerformanceBaseline(t *testing.T) {
 		})
 	}
 }
+
+func TestOverviewDatabaseErrorReturns503(t *testing.T) {
+	testCases := []struct {
+		name      string
+		dropTable string
+	}{
+		{"GetAllResourceLatest_Failure", "resource_latest"},
+		{"GetResourceHistoryMultiNode_Failure", "resource_history"},
+		{"GetResultHistoryMultiNode_Failure", "network_results_history"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			service, store := newTask4Auth(t)
+			defer store.Close()
+			cfg := task4Config()
+			cfg.DatabasePath = store.DatabasePath()
+			server := NewServer(cfg, service)
+			handler := server.Handler()
+			session, _ := task4AdminSession(t, service, store)
+			cookie := task4SessionCookie(session)
+
+			now := time.Now().UTC()
+			regToken, err := store.CreateRegistrationToken(context.Background(), time.Hour)
+			if err != nil {
+				t.Fatalf("create reg token: %v", err)
+			}
+			_, err = store.RegisterNode(context.Background(), regToken.Token, db.NodeInput{
+				UUID: "550e8400-e29b-41d4-a716-446655440001",
+				Name: "test-node",
+			}, now)
+			if err != nil {
+				t.Fatalf("register node: %v", err)
+			}
+
+			// Drop the targeted table to trigger SQLite query error
+			if _, err := store.DB().Exec("DROP TABLE " + tc.dropTable); err != nil {
+				t.Fatalf("drop table %s: %v", tc.dropTable, err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+			req.AddCookie(cookie)
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("[%s] expected 503 Service Unavailable on database error, got %d: %s", tc.name, rec.Code, rec.Body.String())
+			}
+
+			body := rec.Body.String()
+			if body == "" {
+				t.Fatalf("[%s] expected non-empty response body", tc.name)
+			}
+
+			// Verify no sensitive tokens, UUIDs, or internal secrets are leaked in error body
+			var errResp map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+				t.Fatalf("[%s] expected JSON error response, got %v: %s", tc.name, err, body)
+			}
+			if errResp["error"] != "service unavailable" {
+				t.Fatalf("[%s] expected 'service unavailable' error, got %q", tc.name, errResp["error"])
+			}
+		})
+	}
+}

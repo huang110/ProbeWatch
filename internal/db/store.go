@@ -265,6 +265,10 @@ func OpenStore(databasePath string, pepper []byte) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) DatabasePath() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
