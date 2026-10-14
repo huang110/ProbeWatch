@@ -70,13 +70,60 @@ export const MIGRATION_FLAG_KEY = 'probewatch_billing_migrated_v1'
 // In-memory cache holding backend-authoritative billing records
 const inMemoryBillingCache = new Map()
 
+// Normalize billing cycles across legacy and canonical values
+export const normalizeBillingCycle = (cycle) => {
+  if (!cycle) return ''
+  const c = String(cycle).trim().toLowerCase()
+  switch (c) {
+    case 'month':
+      return 'month'
+    case 'quarter':
+      return 'quarter'
+    case 'semiannual':
+      return 'semiannual'
+    case 'annual':
+      return 'annual'
+    case 'biennial':
+      return 'biennial'
+    case 'triennial':
+      return 'triennial'
+    case 'free':
+      return 'free'
+
+    // Legacy & Aliases
+    case 'monthly':
+      return 'month'
+    case 'quarterly':
+      return 'quarter'
+    case 'half_year':
+    case 'half-year':
+    case 'semi-annual':
+      return 'semiannual'
+    case 'year':
+    case 'yearly':
+      return 'annual'
+    case 'two_year':
+    case '2year':
+      return 'biennial'
+    case 'three_year':
+    case '3year':
+      return 'triennial'
+    case 'one_time':
+    case 'onetime':
+      return 'onetime'
+    default:
+      return String(cycle).trim()
+  }
+}
+
 // Normalize raw server responses (CycleTrafficInfo / NodeBillingSettings) into a consistent frontend model
 export const normalizeServerBilling = (data) => {
   if (!data || typeof data !== 'object') return null
+  const rawCycle = data.cycle || data.billingCycle || ''
   const hasConfig =
     (data.price !== undefined && data.price !== null && data.price !== '') ||
     Boolean(data.merchant) ||
-    Boolean(data.cycle) ||
+    Boolean(rawCycle) ||
     Boolean(data.due_date || data.dueDate) ||
     (data.traffic_quota_bytes && Number(data.traffic_quota_bytes) > 0) ||
     (data.trafficQuotaBytes && Number(data.trafficQuotaBytes) > 0)
@@ -85,7 +132,7 @@ export const normalizeServerBilling = (data) => {
     merchant: data.merchant || '',
     price: data.price !== undefined && data.price !== null && data.price !== '' ? Number(data.price) : null,
     currency: data.currency || 'CNY',
-    cycle: data.cycle || data.billingCycle || '',
+    cycle: rawCycle ? normalizeBillingCycle(rawCycle) : '',
     startDate: data.start_date || data.startDate || '',
     dueDate: data.due_date || data.dueDate || data.expiresAt || '',
     autoRenew: data.auto_renew !== undefined ? Boolean(data.auto_renew) : (data.autoRenew !== undefined ? Boolean(data.autoRenew) : true),
@@ -440,10 +487,12 @@ export const parseColoredTags = (tagString = '') => {
 
 // 核心：计算剩余天数与剩余价值 (折合人民币 CNY)
 export const calculateRemainingValue = (billing) => {
-  if (billing?.cycle === 'free') {
+  if (normalizeBillingCycle(billing?.cycle) === 'free') {
     return {
       daysRemaining: 9999,
+      cycleDays: 0,
       isExpired: false,
+      isFree: true,
       remainingValueOriginal: 0,
       remainingValueCNY: 0,
       dailyCostCNY: 0,
@@ -456,6 +505,7 @@ export const calculateRemainingValue = (billing) => {
   if (!billing || !billing.cycle || billing.price === null || billing.price === undefined || !billing.dueDate) {
     return {
       daysRemaining: null,
+      cycleDays: 0,
       isExpired: false,
       remainingValueOriginal: 0,
       remainingValueCNY: 0,
@@ -471,7 +521,7 @@ export const calculateRemainingValue = (billing) => {
   const diffMs = due.getTime() - now.getTime()
   const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
 
-  const cycleObj = BILLING_CYCLES.find((c) => c.id === billing.cycle) || BILLING_CYCLES[3]
+  const cycleObj = BILLING_CYCLES.find((c) => c.id === normalizeBillingCycle(billing.cycle)) || BILLING_CYCLES[3]
   const cycleDays = cycleObj.days || 365
   const rateInfo = resolveCurrency(billing.currency)
   const exchangeRate = rateInfo.rate || 1.0
@@ -484,6 +534,7 @@ export const calculateRemainingValue = (billing) => {
   if (daysRemaining <= 0) {
     return {
       daysRemaining,
+      cycleDays,
       isExpired: true,
       remainingValueOriginal: 0,
       remainingValueCNY: 0,
@@ -491,6 +542,7 @@ export const calculateRemainingValue = (billing) => {
       annualCostCNY,
       statusTone: 'expired',
       statusText: `已逾期 ${Math.abs(daysRemaining)} 天`,
+      symbol: rateInfo.symbol,
     }
   }
 
@@ -512,6 +564,7 @@ export const calculateRemainingValue = (billing) => {
 
   return {
     daysRemaining,
+    cycleDays,
     isExpired: false,
     remainingValueOriginal: Math.round(remainingValueOriginal * 100) / 100,
     remainingValueCNY: Math.round(remainingValueCNY * 100) / 100,

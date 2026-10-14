@@ -5,6 +5,7 @@ import {
   fetchAndCacheNodeBilling,
   generateForumSalesPost,
   getNodeBilling,
+  normalizeBillingCycle,
   resolveCurrency,
   saveNodeBillingRemote,
 } from '../lib/billing.js'
@@ -16,7 +17,7 @@ export function BillingModal({ node, onClose, onSaved }) {
 
   const [price, setPrice] = useState(initial.price !== null && initial.price !== undefined ? initial.price : '')
   const [currency, setCurrency] = useState(initial.currency || '$')
-  const [cycle, setCycle] = useState(initial.cycle || 'annual')
+  const [cycle, setCycle] = useState(normalizeBillingCycle(initial.cycle) || 'annual')
   const [dueDate, setDueDate] = useState(initial.dueDate || '')
   const [autoRenew, setAutoRenew] = useState(initial.autoRenew !== undefined ? initial.autoRenew : true)
 
@@ -38,7 +39,7 @@ export function BillingModal({ node, onClose, onSaved }) {
         if (cancelled || !serverData) return
         if (serverData.price !== null && serverData.price !== undefined) setPrice(serverData.price)
         if (serverData.currency) setCurrency(serverData.currency)
-        if (serverData.cycle) setCycle(serverData.cycle)
+        if (serverData.cycle) setCycle(normalizeBillingCycle(serverData.cycle) || serverData.cycle)
         if (serverData.dueDate) setDueDate(serverData.dueDate)
         if (serverData.autoRenew !== undefined) setAutoRenew(serverData.autoRenew)
       })
@@ -66,7 +67,7 @@ export function BillingModal({ node, onClose, onSaved }) {
     merchant: initial.merchant || '云服务器',
     price: price === '' ? null : Number(price),
     currency: currency.trim() || '$',
-    cycle,
+    cycle: normalizeBillingCycle(cycle) || cycle,
     dueDate,
     autoRenew,
   }

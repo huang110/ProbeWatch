@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import {
   normalizeServerBilling,
+  normalizeBillingCycle,
   getNodeBilling,
   getNodeTrafficConfig,
   setCachedServerBilling,
@@ -334,6 +335,56 @@ globalThis.Event = class Event {
   assert.ok(post.includes('+¥30'), 'Forum post must include markup tag')
   assert.ok(post.includes('官方剩余价值：'), 'Forum post must include remaining value line')
   console.log('✓ Scenario 7: MJJ sales post and remaining value calculation preserved')
+}
+
+// -----------------------------------------------------------------------------
+// Scenario 8: normalizeBillingCycle canonical and legacy cycle handling
+// -----------------------------------------------------------------------------
+{
+  // Canonical cycles
+  assert.strictEqual(normalizeBillingCycle('month'), 'month')
+  assert.strictEqual(normalizeBillingCycle('quarter'), 'quarter')
+  assert.strictEqual(normalizeBillingCycle('semiannual'), 'semiannual')
+  assert.strictEqual(normalizeBillingCycle('annual'), 'annual')
+  assert.strictEqual(normalizeBillingCycle('biennial'), 'biennial')
+  assert.strictEqual(normalizeBillingCycle('triennial'), 'triennial')
+  assert.strictEqual(normalizeBillingCycle('free'), 'free')
+
+  // Legacy and alias cycles
+  assert.strictEqual(normalizeBillingCycle('monthly'), 'month')
+  assert.strictEqual(normalizeBillingCycle('quarterly'), 'quarter')
+  assert.strictEqual(normalizeBillingCycle('half_year'), 'semiannual')
+  assert.strictEqual(normalizeBillingCycle('half-year'), 'semiannual')
+  assert.strictEqual(normalizeBillingCycle('semi-annual'), 'semiannual')
+  assert.strictEqual(normalizeBillingCycle('year'), 'annual')
+  assert.strictEqual(normalizeBillingCycle('yearly'), 'annual')
+  assert.strictEqual(normalizeBillingCycle('two_year'), 'biennial')
+  assert.strictEqual(normalizeBillingCycle('2year'), 'biennial')
+  assert.strictEqual(normalizeBillingCycle('three_year'), 'triennial')
+  assert.strictEqual(normalizeBillingCycle('3year'), 'triennial')
+  assert.strictEqual(normalizeBillingCycle('one_time'), 'onetime')
+  assert.strictEqual(normalizeBillingCycle('onetime'), 'onetime')
+
+  // Case insensitivity & trimming
+  assert.strictEqual(normalizeBillingCycle('  Annual  '), 'annual')
+  assert.strictEqual(normalizeBillingCycle('MONTHLY'), 'month')
+
+  // Unknown cycles return original trimmed string
+  assert.strictEqual(normalizeBillingCycle('custom_cycle'), 'custom_cycle')
+  assert.strictEqual(normalizeBillingCycle(''), '')
+
+  // calculateRemainingValue with normalized cycles
+  const annualCalc = calculateRemainingValue({ price: 120, cycle: 'annual', dueDate: '2027-01-01' })
+  assert.strictEqual(annualCalc.cycleDays, 365)
+  const biennialCalc = calculateRemainingValue({ price: 240, cycle: 'biennial', dueDate: '2027-01-01' })
+  assert.strictEqual(biennialCalc.cycleDays, 730)
+  const triennialCalc = calculateRemainingValue({ price: 360, cycle: 'triennial', dueDate: '2027-01-01' })
+  assert.strictEqual(triennialCalc.cycleDays, 1095)
+  const freeCalc = calculateRemainingValue({ price: 0, cycle: 'free', dueDate: '2099-01-01' })
+  assert.strictEqual(freeCalc.isFree, true)
+  assert.strictEqual(freeCalc.remainingValueCNY, 0)
+
+  console.log('✓ Scenario 8: normalizeBillingCycle handles canonical, legacy, and unknown cycles properly')
 }
 
 console.log('\n=== All Billing Backend Unification Contract Tests Passed! ===')

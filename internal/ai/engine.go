@@ -247,16 +247,8 @@ func (s *AIService) RunDiagnosis(ctx context.Context) (*DiagnosisReport, error) 
 				rep.CostAudit.Currency = billingInfo.Currency
 			}
 
-			// Monthly cost normalization
-			monthlyCost := billingInfo.Price
-			switch billingInfo.Cycle {
-			case "quarter":
-				monthlyCost = billingInfo.Price / 3.0
-			case "half_year":
-				monthlyCost = billingInfo.Price / 6.0
-			case "year":
-				monthlyCost = billingInfo.Price / 12.0
-			}
+			// Monthly cost normalization using unified canonical cycle definitions
+			monthlyCost := CalculateMonthlyCost(billingInfo.Price, billingInfo.Cycle)
 			totalMonthlyCost += monthlyCost
 
 			// Traffic Quota Warning
@@ -575,4 +567,37 @@ func (s *AIService) generateRuleBasedAnswer(prompt string, diagnosis *DiagnosisR
 	}
 
 	return sb.String()
+}
+
+// NormalizeBillingCycle returns the canonical cycle name and its month divisor.
+// If the cycle is unrecognized, it returns an empty canonical string and 0.0 divisor.
+func NormalizeBillingCycle(cycle string) (string, float64) {
+	switch strings.ToLower(strings.TrimSpace(cycle)) {
+	case "quarter":
+		return "quarter", 3.0
+	case "half_year", "semiannual":
+		return "semiannual", 6.0
+	case "year", "annual":
+		return "annual", 12.0
+	case "biennial":
+		return "biennial", 24.0
+	case "triennial":
+		return "triennial", 36.0
+	case "free":
+		return "free", 0.0
+	case "month", "monthly":
+		return "month", 1.0
+	default:
+		return "", 0.0
+	}
+}
+
+// CalculateMonthlyCost calculates the monthly normalized cost for a billing price and cycle.
+// Unknown cycles return 0.0 instead of silently miscalculating as monthly.
+func CalculateMonthlyCost(price float64, cycle string) float64 {
+	canonical, divisor := NormalizeBillingCycle(cycle)
+	if canonical == "" || divisor == 0.0 {
+		return 0.0
+	}
+	return price / divisor
 }
