@@ -57,15 +57,7 @@ const METRIC_LABELS = {
   network_latency: '网络延迟',
 }
 
-// 官方 6 大预置网络检测目标及域名
-const DEFAULT_TARGET_CONFIGS = [
-  { name: '重庆电信', host: 'cq-ct-dualstack.ip.zstaticcdn.com:80' },
-  { name: '四川电信', host: 'sc-ct-dualstack.ip.zstaticcdn.com:80' },
-  { name: '重庆联通', host: 'cq-cu-dualstack.ip.zstaticcdn.com:80' },
-  { name: '四川联通', host: 'sc-cu-dualstack.ip.zstaticcdn.com:80' },
-  { name: '重庆移动', host: 'cq-cm-dualstack.ip.zstaticcdn.com:80' },
-  { name: '四川移动', host: 'sc-cm-dualstack.ip.zstaticcdn.com:80' },
-]
+
 
 export function AlertCenterView({
   alerts = [],
@@ -153,18 +145,6 @@ export function AlertCenterView({
       )
     })
   }, [loadRules, loadSearch])
-
-  // 4. 流量定时报告相关状态
-  const [reportPushTime, setReportPushTime] = useState('00:00')
-  const [reportSearch, setReportSearch] = useState('')
-  const [selectedReportNodes, setSelectedReportNodes] = useState([])
-
-  // 5. 延迟监测告警相关状态
-  const [latencyAlertView, setLatencyAlertView] = useState('tasks') // 'tasks' | 'servers'
-  const [latencyStatusFilter, setLatencyStatusFilter] = useState('all')
-  const [latencySearch, setLatencySearch] = useState('')
-  const [selectedLatencyAlerts, setSelectedLatencyAlerts] = useState([])
-  const [latencyPage, setLatencyPage] = useState(1)
 
   // 后端渠道与配置加载
   const loadChannelsAndSettings = async () => {
@@ -639,45 +619,7 @@ export function AlertCenterView({
     return []
   }, [nodes, offlineGracePeriod])
 
-  // 延迟监测告警笛卡尔积矩阵 (Image 5: 6 任务 × 12 节点 = 72 项)
-  const latencyAlertMatrix = useMemo(() => {
-    const list = []
-    DEFAULT_TARGET_CONFIGS.forEach((target) => {
-      displayNodes.forEach((node) => {
-        list.push({
-          id: `${target.name}-${node.id}`,
-          task: target.name,
-          server: node.name,
-          targetHost: target.host,
-          status: '未配置',
-          window: '-',
-          lossThreshold: '-',
-          minSamples: '-',
-          cooldown: '-',
-          lastNotified: '从未触发',
-        })
-      })
-    })
-    return list
-  }, [displayNodes])
 
-  // 延迟监测矩阵搜索与过滤
-  const filteredLatencyAlerts = useMemo(() => {
-    return latencyAlertMatrix.filter((item) => {
-      if (latencyStatusFilter !== 'all' && item.status !== latencyStatusFilter) return false
-      if (latencySearch) {
-        const q = latencySearch.toLowerCase().trim()
-        if (
-          !item.task.toLowerCase().includes(q) &&
-          !item.server.toLowerCase().includes(q) &&
-          !item.targetHost.toLowerCase().includes(q)
-        ) {
-          return false
-        }
-      }
-      return true
-    })
-  }, [latencyAlertMatrix, latencyStatusFilter, latencySearch])
 
   // 离线节点搜索过滤
   const filteredOfflineNodes = useMemo(() => {
@@ -685,13 +627,6 @@ export function AlertCenterView({
     const q = offlineSearch.toLowerCase().trim()
     return displayNodes.filter((n) => n.name.toLowerCase().includes(q))
   }, [displayNodes, offlineSearch])
-
-  // 流量报告节点搜索过滤
-  const filteredReportNodes = useMemo(() => {
-    if (!reportSearch) return displayNodes
-    const q = reportSearch.toLowerCase().trim()
-    return displayNodes.filter((n) => n.name.toLowerCase().includes(q))
-  }, [displayNodes, reportSearch])
 
   // 切换 tab
   const handleTabClick = (tabKey, routeKey) => {
@@ -1162,57 +1097,66 @@ export function AlertCenterView({
           <div className="notify-header-row">
             <div className="notify-title-col">
               <h1>离线通知设置</h1>
-              <p>按节点设置离线宽限期与冷却时间，减少短暂断连造成的重复通知。</p>
+              <p>设置全局离线宽限期与冷却时间，减少短暂网络抖动造成的重复误报。</p>
             </div>
           </div>
 
-          {/* 搜索与工具条 */}
+          {/* 全局离线通知宽限期配置卡片 (真实对接后端 /api/alerts/settings) */}
+          <div className="lite-card-box mb-4">
+            <div className="lite-card-row">
+              <div className="lite-card-meta">
+                <span className="lite-card-title">全局离线通知宽限期</span>
+                <span className="lite-card-desc">
+                  客户端断连后，如果在宽限期内未重新上报遥测数据，监控服务将向已启用的通知渠道派发离线告警（后端存储生效设置，默认 180 秒）。
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  className="field-input mono"
+                  style={{ width: '96px', height: '32px', textAlign: 'center' }}
+                  value={offlineGracePeriod}
+                  onChange={(e) => setOfflineGracePeriod(Number(e.target.value) || 30)}
+                  min={30}
+                  max={3600}
+                />
+                <button
+                  type="button"
+                  className="lite-btn-primary"
+                  onClick={handleSaveGracePeriod}
+                >
+                  保存设置
+                </button>
+                <button
+                  type="button"
+                  className="lite-btn-quiet"
+                  onClick={async () => {
+                    setOfflineGracePeriod(180)
+                    try {
+                      await saveAlertSettings({ offline_grace_seconds: '180' })
+                      showToast('已恢复全局默认离线宽限期 (180秒)')
+                    } catch (err) {
+                      showToast(`保存失败: ${err.message}`)
+                    }
+                  }}
+                >
+                  恢复默认 (180秒)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 搜索过滤栏 */}
           <div className="lite-toolbar-row">
             <div className="lite-search-box">
               <MagnifyingGlass size={15} />
               <input
                 type="text"
                 className="lite-search-input"
-                placeholder="搜索"
+                placeholder="搜索探针服务器"
                 value={offlineSearch}
                 onChange={(e) => setOfflineSearch(e.target.value)}
               />
-            </div>
-
-            <div className="lite-toolbar-right">
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedOfflineNodes.length === filteredOfflineNodes.length) {
-                    setSelectedOfflineNodes([])
-                  } else {
-                    setSelectedOfflineNodes(filteredOfflineNodes.map((n) => n.id))
-                  }
-                }}
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedOfflineNodes.length === 0) {
-                    showToast('请先勾选需要批量修改的服务器')
-                  } else {
-                    showToast(`已批量设置 ${selectedOfflineNodes.length} 台服务器宽限期为 180秒`)
-                  }
-                }}
-              >
-                批量修改
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => showToast('已恢复全局默认离线配置 (宽限期 180秒)')}
-              >
-                默认配置
-              </button>
             </div>
           </div>
 
@@ -1222,47 +1166,17 @@ export function AlertCenterView({
               <table className="monitor-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '40px' }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredOfflineNodes.length > 0 &&
-                          selectedOfflineNodes.length === filteredOfflineNodes.length
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedOfflineNodes(filteredOfflineNodes.map((n) => n.id))
-                          } else {
-                            setSelectedOfflineNodes([])
-                          }
-                        }}
-                      />
-                    </th>
                     <th>服务器</th>
                     <th style={{ width: '120px' }}>状态</th>
-                    <th style={{ width: '140px' }}>宽限期</th>
+                    <th style={{ width: '180px' }}>生效宽限期 (全局)</th>
                     <th style={{ minWidth: '180px' }}>最后通知</th>
                     <th style={{ width: '80px', textAlign: 'right' }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOfflineNodes.map((node) => {
-                    const isSelected = selectedOfflineNodes.includes(node.id)
                     return (
                       <tr key={node.id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {
-                              setSelectedOfflineNodes((prev) =>
-                                prev.includes(node.id)
-                                  ? prev.filter((i) => i !== node.id)
-                                  : [...prev, node.id]
-                              )
-                            }}
-                          />
-                        </td>
                         <td>
                           <span style={{ fontWeight: 600 }}>{node.name}</span>
                         </td>
@@ -1275,13 +1189,13 @@ export function AlertCenterView({
                             <span className="badge badge-mint font-bold">在线</span>
                           )}
                         </td>
-                        <td className="mono">{node.gracePeriod}</td>
+                        <td className="mono">{offlineGracePeriod} 秒</td>
                         <td className="mono text-muted">{node.lastNotified}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button
                             type="button"
                             className="icon-action-btn"
-                            title="修改离线通知宽限期"
+                            title="修改全局离线通知宽限期"
                             onClick={() => setEditingOfflineNode(node)}
                           >
                             <PencilSimple size={15} />
@@ -1296,31 +1210,18 @@ export function AlertCenterView({
 
             {/* 底部分页与提示 */}
             <div className="lite-pagination-row">
-              <div className="lite-callout-note" style={{ maxWidth: '600px' }}>
+              <div className="lite-callout-note" style={{ maxWidth: '640px' }}>
                 <div>
-                  <strong>为了避免频繁发送通知，我们设置了宽限期：</strong>
+                  <strong>避免频繁网络抖动告警的离线机制：</strong>
                   <br />
-                  <span>宽限期：客户端离线后，如果在这段时间内没有重新上线，就会发送离线通知</span>
+                  <span>宽限期：客户端离线后，如果在这段时间内没有重新上线，后端扫描器将自动触发离线通知。当前后端采用全局统一宽限期。</span>
                 </div>
               </div>
 
               <div className="lite-pagination-right">
                 <span>
-                  已选 {selectedOfflineNodes.length} / 共 {displayNodes.length}
+                  共 {filteredOfflineNodes.length} 台服务器
                 </span>
-                <select className="lite-page-select" defaultValue="20">
-                  <option value="20">20 条/页</option>
-                  <option value="50">50 条/页</option>
-                </select>
-                <div className="flex items-center gap-1">
-                  <button type="button" className="lite-page-nav-btn" disabled>
-                    &lt;
-                  </button>
-                  <span className="mono">1/1</span>
-                  <button type="button" className="lite-page-nav-btn" disabled>
-                    &gt;
-                  </button>
-                </div>
               </div>
             </div>
           </div>
@@ -1771,430 +1672,84 @@ export function AlertCenterView({
       )}
 
       {/* ====================================================================
-          TAB 4: 流量定时报告 (严格匹配 Image 4: media_1790307401109.png)
+          TAB 4: 流量定时报告 (功能尚未接入)
          ==================================================================== */}
       {currentTab === 'traffic_report' && (
-        <>
+        <div className="space-y-4">
           <div className="notify-header-row">
             <div className="notify-title-col">
               <h1>流量定时报告</h1>
-              <p>按节点设置日报、周报与月报的推送周期和内容。</p>
+              <p>定时报告（日报、周报、月报）与自动化推送设置。</p>
             </div>
           </div>
 
-          {/* 顶部双列分栏卡片: 推送时间与立即发送 */}
-          <div className="lite-top-card-split">
-            {/* 左分栏: 报告推送时间 */}
-            <div className="lite-split-col">
-              <div className="lite-card-meta">
-                <span className="lite-card-title">报告推送时间</span>
-                <span className="lite-card-desc">日报、周报和月报均按北京时间在此时刻推送</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="relative flex items-center">
-                  <input
-                    type="text"
-                    className="field-input mono"
-                    style={{ width: '88px', height: '32px', textAlign: 'center' }}
-                    value={reportPushTime}
-                    onChange={(e) => setReportPushTime(e.target.value)}
-                  />
-                  <Clock size={14} className="absolute right-2 text-muted pointer-events-none" />
-                </div>
-                <button
-                  type="button"
-                  className="lite-btn-quiet"
-                  onClick={() => showToast(`推送时刻已设置为 ${reportPushTime}`)}
-                >
-                  保存
-                </button>
-              </div>
+          <div className="lite-card-box p-6 text-center space-y-3">
+            <div className="inline-flex p-3 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              <Clock size={32} />
             </div>
-
-            {/* 右分栏: 发送日报消息 */}
-            <div className="lite-split-col">
-              <div className="lite-card-meta">
-                <span className="lite-card-title">发送日报消息</span>
-                <span className="lite-card-desc">立即发送北京时间今日 00:00 至当前时刻的日报</span>
-              </div>
+            <h3 className="font-bold text-base">流量定时报告功能尚未接入</h3>
+            <p className="text-sm text-muted max-w-lg mx-auto" style={{ lineHeight: 1.6 }}>
+              当前版本服务端尚未引入 Cron 定时汇总与流式报表推送引擎。我们已规划在后续版本提供每日/每周流量统计推送。
+              <br />
+              如需对节点超量使用进行实时告警，请在「负载通知」中添加 <strong>周期流量使用率 (traffic_percent)</strong> 告警规则。
+            </p>
+            <div className="pt-2">
               <button
                 type="button"
                 className="lite-btn-primary"
-                onClick={() => showToast('已成功触发即时日报推送')}
+                onClick={() => setCurrentTab('load')}
               >
-                立即发送
+                前往「负载通知」配置流量阈值规则
               </button>
             </div>
           </div>
-
-          {/* 工具栏 */}
-          <div className="lite-toolbar-row">
-            <div className="lite-search-box">
-              <MagnifyingGlass size={15} />
-              <input
-                type="text"
-                className="lite-search-input"
-                placeholder="搜索"
-                value={reportSearch}
-                onChange={(e) => setReportSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="lite-toolbar-right">
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedReportNodes.length === filteredReportNodes.length) {
-                    setSelectedReportNodes([])
-                  } else {
-                    setSelectedReportNodes(filteredReportNodes.map((n) => n.id))
-                  }
-                }}
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedReportNodes.length === 0) {
-                    showToast('请先勾选需要批量修改的服务器')
-                  } else {
-                    showToast(`已批量更新 ${selectedReportNodes.length} 台服务器流量报告参数`)
-                  }
-                }}
-              >
-                批量修改
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => showToast('已恢复默认流量报告配置 (日报+周报)')}
-              >
-                默认配置
-              </button>
-            </div>
-          </div>
-
-          {/* 流量报告表格 */}
-          <div className="monitor-table-card">
-            <div className="table-scroll">
-              <table className="monitor-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '40px' }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredReportNodes.length > 0 &&
-                          selectedReportNodes.length === filteredReportNodes.length
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedReportNodes(filteredReportNodes.map((n) => n.id))
-                          } else {
-                            setSelectedReportNodes([])
-                          }
-                        }}
-                      />
-                    </th>
-                    <th>服务器</th>
-                    <th style={{ width: '120px' }}>状态</th>
-                    <th style={{ width: '160px' }}>定时类型</th>
-                    <th style={{ minWidth: '180px' }}>报告内容</th>
-                    <th style={{ width: '80px', textAlign: 'right' }}>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredReportNodes.map((node) => {
-                    const isSelected = selectedReportNodes.includes(node.id)
-                    return (
-                      <tr key={node.id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {
-                              setSelectedReportNodes((prev) =>
-                                prev.includes(node.id)
-                                  ? prev.filter((i) => i !== node.id)
-                                  : [...prev, node.id]
-                              )
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 600 }}>{node.name}</span>
-                        </td>
-                        <td>
-                          <span className="badge badge-mint font-bold">启用</span>
-                        </td>
-                        <td>{node.reportType}</td>
-                        <td>{node.reportContent}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            className="icon-action-btn"
-                            title="修改报告推送设置"
-                            onClick={() => showToast(`已打开 ${node.name} 的定时报告修改面板`)}
-                          >
-                            <PencilSimple size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="lite-pagination-row">
-              <div />
-              <div className="lite-pagination-right">
-                <span>
-                  已选 {selectedReportNodes.length} / 共 {displayNodes.length}
-                </span>
-                <select className="lite-page-select" defaultValue="20">
-                  <option value="20">20 条/页</option>
-                  <option value="50">50 条/页</option>
-                </select>
-                <div className="flex items-center gap-1">
-                  <button type="button" className="lite-page-nav-btn" disabled>
-                    &lt;
-                  </button>
-                  <span className="mono">1/1</span>
-                  <button type="button" className="lite-page-nav-btn" disabled>
-                    &gt;
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
+        </div>
       )}
 
+
       {/* ====================================================================
-          TAB 5: 延迟监测告警 (严格匹配 Image 5: media_1790307417925.png)
+          TAB 5: 延迟监测告警 (功能整合提示)
          ==================================================================== */}
       {currentTab === 'latency_alert' && (
-        <>
+        <div className="space-y-4">
           <div className="notify-header-row">
             <div className="notify-title-col">
               <h1>延迟监测告警</h1>
-              <p>根据延迟监测结果设置丢包阈值、统计窗口和冷却时间。</p>
+              <p>针对探针端网络延迟与丢包率的监测告警设置。</p>
             </div>
           </div>
 
-          {/* 视图切换与筛选条 */}
-          <div className="lite-toolbar-row">
-            <div className="flex items-center gap-3">
-              <div className="monitor-view-toggle">
-                <button
-                  type="button"
-                  className={`monitor-toggle-btn ${latencyAlertView === 'tasks' ? 'active' : ''}`}
-                  onClick={() => setLatencyAlertView('tasks')}
-                >
-                  <WifiHigh size={14} className="inline mr-1" />
-                  任务视图
-                </button>
-                <button
-                  type="button"
-                  className={`monitor-toggle-btn ${latencyAlertView === 'servers' ? 'active' : ''}`}
-                  onClick={() => setLatencyAlertView('servers')}
-                >
-                  服务器视图
-                </button>
-              </div>
-
-              <select
-                className="monitor-filter-select"
-                value={latencyStatusFilter}
-                onChange={(e) => setLatencyStatusFilter(e.target.value)}
-              >
-                <option value="all">状态</option>
-                <option value="未配置">未配置</option>
-                <option value="已启用">已启用</option>
-              </select>
-
-              <div className="lite-search-box">
-                <MagnifyingGlass size={15} />
-                <input
-                  type="text"
-                  className="lite-search-input"
-                  placeholder="搜索"
-                  value={latencySearch}
-                  onChange={(e) => setLatencySearch(e.target.value)}
-                />
-              </div>
+          <div className="lite-card-box p-6 text-center space-y-3">
+            <div className="inline-flex p-3 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              <WifiHigh size={32} />
             </div>
-
-            <div className="lite-toolbar-right">
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedLatencyAlerts.length === filteredLatencyAlerts.length) {
-                    setSelectedLatencyAlerts([])
-                  } else {
-                    setSelectedLatencyAlerts(filteredLatencyAlerts.map((i) => i.id))
-                  }
-                }}
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => {
-                  if (selectedLatencyAlerts.length === 0) {
-                    showToast('请先勾选需要批量修改的延迟告警项')
-                  } else {
-                    showToast(`已批量配置 ${selectedLatencyAlerts.length} 个延迟告警规则`)
-                  }
-                }}
-              >
-                批量修改
-              </button>
-              <button
-                type="button"
-                className="lite-btn-quiet"
-                onClick={() => showToast('已恢复默认配置 (丢包超 15% 报警)')}
-              >
-                默认配置
-              </button>
+            <h3 className="font-bold text-base">独立延迟矩阵已整合至告警规则中心</h3>
+            <p className="text-sm text-muted max-w-lg mx-auto" style={{ lineHeight: 1.6 }}>
+              服务端当前已统一通过<strong>多指标告警引擎</strong>对网络延迟与丢包率进行实时评估，无需维护分散的矩阵配置。
+              <br />
+              您可以在「负载通知」中直接创建 <strong>丢包率 (network_loss)</strong> 与 <strong>网络延迟 (network_latency)</strong> 规则，支持灵活设置持续判定窗口、告警级别与适用节点过滤。
+            </p>
+            <div className="pt-2 flex justify-center gap-3">
               <button
                 type="button"
                 className="lite-btn-primary"
-                onClick={() => showToast('已打开延迟告警添加面板')}
+                onClick={() => {
+                  setCurrentTab('load')
+                  handleOpenAddRule()
+                }}
               >
-                <Plus size={14} weight="bold" />
-                <span>添加</span>
+                新建网络延迟/丢包规则
+              </button>
+              <button
+                type="button"
+                className="lite-btn-quiet"
+                onClick={() => setCurrentTab('load')}
+              >
+                查看现有规则
               </button>
             </div>
           </div>
-
-          {/* 矩阵表格 (72 项分页展示，严格对齐 Image 5) */}
-          <div className="monitor-table-card">
-            <div className="table-scroll">
-              <table className="monitor-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '40px' }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredLatencyAlerts.length > 0 &&
-                          selectedLatencyAlerts.length === filteredLatencyAlerts.length
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedLatencyAlerts(filteredLatencyAlerts.map((i) => i.id))
-                          } else {
-                            setSelectedLatencyAlerts([])
-                          }
-                        }}
-                      />
-                    </th>
-                    <th style={{ minWidth: '100px' }}>任务</th>
-                    <th style={{ minWidth: '120px' }}>服务器</th>
-                    <th style={{ minWidth: '220px' }}>目标</th>
-                    <th style={{ width: '90px' }}>状态</th>
-                    <th style={{ width: '90px' }}>统计窗口</th>
-                    <th style={{ width: '90px' }}>丢包阈值</th>
-                    <th style={{ width: '100px' }}>最少样本数</th>
-                    <th style={{ width: '90px' }}>冷却时间</th>
-                    <th style={{ minWidth: '120px' }}>最后通知</th>
-                    <th style={{ width: '80px', textAlign: 'right' }}>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLatencyAlerts.slice(0, 20).map((row) => {
-                    const isSelected = selectedLatencyAlerts.includes(row.id)
-                    return (
-                      <tr key={row.id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {
-                              setSelectedLatencyAlerts((prev) =>
-                                prev.includes(row.id)
-                                  ? prev.filter((i) => i !== row.id)
-                                  : [...prev, row.id]
-                              )
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <strong style={{ color: 'var(--text-1)' }}>{row.task}</strong>
-                        </td>
-                        <td>{row.server}</td>
-                        <td className="mono text-muted text-xs">{row.targetHost}</td>
-                        <td>
-                          <span className="badge badge-amber font-bold">{row.status}</span>
-                        </td>
-                        <td className="mono text-muted">{row.window}</td>
-                        <td className="mono text-muted">{row.lossThreshold}</td>
-                        <td className="mono text-muted">{row.minSamples}</td>
-                        <td className="mono text-muted">{row.cooldown}</td>
-                        <td className="mono text-muted">{row.lastNotified}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            className="icon-action-btn"
-                            title="配置丢包与延迟告警阈值"
-                            onClick={() => showToast(`已打开 ${row.task} - ${row.server} 的阈值配置`)}
-                          >
-                            <PencilSimple size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="lite-pagination-row">
-              <div />
-              <div className="lite-pagination-right">
-                <span>
-                  已选 {selectedLatencyAlerts.length} / 共 {filteredLatencyAlerts.length}
-                </span>
-                <select className="lite-page-select" defaultValue="20">
-                  <option value="20">20 条/页</option>
-                  <option value="50">50 条/页</option>
-                </select>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="lite-page-nav-btn"
-                    disabled={latencyPage <= 1}
-                    onClick={() => setLatencyPage((p) => Math.max(1, p - 1))}
-                  >
-                    &lt;
-                  </button>
-                  <span className="mono">
-                    {latencyPage}/{Math.max(1, Math.ceil(filteredLatencyAlerts.length / 20))}
-                  </span>
-                  <button
-                    type="button"
-                    className="lite-page-nav-btn"
-                    disabled={latencyPage >= Math.ceil(filteredLatencyAlerts.length / 20)}
-                    onClick={() =>
-                      setLatencyPage((p) =>
-                        Math.min(Math.ceil(filteredLatencyAlerts.length / 20), p + 1)
-                      )
-                    }
-                  >
-                    &gt;
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
+        </div>
       )}
 
       {/* ====================================================================
@@ -2205,38 +1760,30 @@ export function AlertCenterView({
           <div className="notify-header-row">
             <div className="notify-title-col">
               <h1>通用设置</h1>
-              <p>全局通知免打扰时段、过期通知与通道安全连接配置。</p>
+              <p>全局通知免打扰时段与高级调度选项。</p>
             </div>
           </div>
 
-          <div className="lite-card-box">
-            <div className="lite-card-row">
-              <div className="lite-card-meta">
-                <span className="lite-card-title">夜间免打扰静音时段</span>
-                <span className="lite-card-desc">在设定的时段内暂停发送一般通知，仅致命告警（P0）穿透推送</span>
-              </div>
-              <button
-                type="button"
-                className="switch-toggle"
-                onClick={() => showToast('夜间免打扰时段已更新')}
-              >
-                <span className="switch-thumb" />
-              </button>
+          <div className="lite-card-box p-6 text-center space-y-3">
+            <div className="inline-flex p-3 rounded-full" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              <Sliders size={32} />
             </div>
-          </div>
-
-          <div className="lite-card-box">
-            <div className="lite-card-row">
-              <div className="lite-card-meta">
-                <span className="lite-card-title">服务器到期提前提醒</span>
-                <span className="lite-card-desc">自动根据成本中心资费到期时间，在到期前 7 天、3 天发送续费预警通知</span>
-              </div>
+            <h3 className="font-bold text-base">定时免打扰守护尚未接入</h3>
+            <p className="text-sm text-muted max-w-lg mx-auto" style={{ lineHeight: 1.6 }}>
+              夜间免打扰静音时段与自动到期推送功能尚在服务端排期中。
+              <br />
+              如需在维护期间暂停告警推送，请前往「负载通知」中的 <strong>活跃静默与维护窗口 (Alert Silences)</strong>，支持指定节点、指定时间段的临时静默。
+            </p>
+            <div className="pt-2">
               <button
                 type="button"
-                className="switch-toggle active"
-                onClick={() => showToast('到期预警已启用')}
+                className="lite-btn-primary"
+                onClick={() => {
+                  setCurrentTab('load')
+                  setLoadSubTab('silences')
+                }}
               >
-                <span className="switch-thumb" />
+                前往「静默与防抖」设置维护窗口
               </button>
             </div>
           </div>
