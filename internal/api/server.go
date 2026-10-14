@@ -27,6 +27,7 @@ import (
 type overviewCacheEntry struct {
 	payload   []byte
 	expiresAt time.Time
+	createdAt time.Time
 }
 
 type Server struct {

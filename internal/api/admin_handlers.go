@@ -754,36 +754,128 @@ func parseHistoryWindow(r *http.Request, now time.Time) (time.Time, time.Time, i
 	return from.UTC(), to.UTC(), limit, true
 }
 
+const maxOverviewCacheEntries = 128
+const overviewBucketDuration = 5 * time.Second
+
+func buildOverviewCacheKey(r *http.Request, now time.Time) (string, time.Time, bool) {
+	user, hasUser := UserFromContext(r.Context())
+	scope := "public:anon"
+	if hasUser {
+		if user.IsAdmin() {
+			scope = "admin:" + user.ID
+		} else {
+			scope = "user:" + user.ID + ":" + user.AllowedNodes
+		}
+	}
+
+	q := r.URL.Query()
+	hasExplicitFrom := q.Get("from") != ""
+	hasExplicitTo := q.Get("to") != ""
+
+	if !hasExplicitFrom && !hasExplicitTo {
+		// Bucket relative window by 5 seconds
+		bucket := now.Unix() / int64(overviewBucketDuration.Seconds()) * int64(overviewBucketDuration.Seconds())
+		bucketTime := time.Unix(bucket, 0).UTC()
+		rangeParam := strings.ToLower(strings.TrimSpace(q.Get("range")))
+		if rangeParam == "" {
+			rangeParam = "default"
+		}
+		limit := q.Get("limit")
+		if limit == "" {
+			limit = "default"
+		}
+		key := fmt.Sprintf("%s:rel:%s:%s:%d", scope, rangeParam, limit, bucket)
+		return key, bucketTime, true
+	}
+
+	// Absolute window: preserve exact timestamps
+	fromStr := q.Get("from")
+	toStr := q.Get("to")
+	limit := q.Get("limit")
+	if limit == "" {
+		limit = "default"
+	}
+	key := fmt.Sprintf("%s:abs:%s:%s:%s", scope, fromStr, toStr, limit)
+	return key, now, false
+}
+
+func (s *Server) getOverviewCache(key string, now time.Time) ([]byte, bool) {
+	s.overviewCacheMu.RLock()
+	entry, hit := s.overviewCache[key]
+	s.overviewCacheMu.RUnlock()
+
+	if !hit {
+		return nil, false
+	}
+	if now.After(entry.expiresAt) {
+		s.overviewCacheMu.Lock()
+		if current, exists := s.overviewCache[key]; exists && now.After(current.expiresAt) {
+			delete(s.overviewCache, key)
+		}
+		s.overviewCacheMu.Unlock()
+		return nil, false
+	}
+	return entry.payload, true
+}
+
+func (s *Server) setOverviewCache(key string, payload []byte, ttl time.Duration, now time.Time) {
+	s.overviewCacheMu.Lock()
+	defer s.overviewCacheMu.Unlock()
+
+	// 1. Purge expired entries
+	for k, entry := range s.overviewCache {
+		if now.After(entry.expiresAt) {
+			delete(s.overviewCache, k)
+		}
+	}
+
+	// 2. Capacity eviction (FIFO based on createdAt)
+	if len(s.overviewCache) >= maxOverviewCacheEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		first := true
+		for k, entry := range s.overviewCache {
+			if first || entry.createdAt.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = entry.createdAt
+				first = false
+			}
+		}
+		if oldestKey != "" {
+			delete(s.overviewCache, oldestKey)
+		}
+	}
+
+	// 3. Store new entry
+	s.overviewCache[key] = overviewCacheEntry{
+		payload:   payload,
+		expiresAt: now.Add(ttl),
+		createdAt: now,
+	}
+}
+
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, 405, "method not allowed")
 		return
 	}
 	now := time.Now().UTC()
-	from, to, limit, ok := parseHistoryWindow(r, now)
+	cacheKey, windowNow, isRelative := buildOverviewCacheKey(r, now)
+
+	if cachedPayload, hit := s.getOverviewCache(cacheKey, now); hit {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cachedPayload)
+		return
+	}
+
+	from, to, limit, ok := parseHistoryWindow(r, windowNow)
 	if !ok {
 		writeJSONError(w, 400, "invalid query parameters")
 		return
 	}
 
 	user, hasUser := UserFromContext(r.Context())
-	cacheKey := "all"
-	if hasUser {
-		cacheKey = user.ID + ":" + user.AllowedNodes
-	}
-	cacheKey += fmt.Sprintf(":%d:%d:%d", from.Unix(), to.Unix(), limit)
-
-	s.overviewCacheMu.RLock()
-	cached, hit := s.overviewCache[cacheKey]
-	s.overviewCacheMu.RUnlock()
-
-	if hit && time.Now().Before(cached.expiresAt) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(cached.payload)
-		return
-	}
-
 	nodes, err := s.service.Store().ListNodes(r.Context())
 	if err != nil {
 		writeJSONError(w, 503, "service unavailable")
@@ -978,14 +1070,13 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		"generated_at":  now,
 	}
 
-	// Cache payload with 2-second TTL for fast subsequent reads
+	// Cache payload with bounded cache and bucketing
 	if payloadBytes, err := json.Marshal(respMap); err == nil {
-		s.overviewCacheMu.Lock()
-		s.overviewCache[cacheKey] = overviewCacheEntry{
-			payload:   payloadBytes,
-			expiresAt: time.Now().Add(2 * time.Second),
+		ttl := 2 * time.Second
+		if isRelative {
+			ttl = overviewBucketDuration
 		}
-		s.overviewCacheMu.Unlock()
+		s.setOverviewCache(cacheKey, payloadBytes, ttl, now)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(payloadBytes)
