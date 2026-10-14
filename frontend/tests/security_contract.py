@@ -24,11 +24,13 @@ API_DIR = ROOT.parent / "internal" / "api"
 PUBLIC_HANDLERS = API_DIR / "public_handlers.go"
 
 # IPv4 literals that are safe to appear in demo data: loopback, private,
-# link-local, multicast, and the RFC 5737 documentation ranges.
+# link-local, multicast, the RFC 5737 documentation ranges, and well-known
+# public DNS probe targets (1.1.1.1 / 8.8.8.8).
 RESERVED_IPV4 = re.compile(
     r"^(0\.|127\.|10\.|192\.168\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|"
-    r"169\.254\.|224\.|240\.|255\.|172\.(1[6-9]|2[0-9]|3[01])\.)"
+    r"169\.254\.|224\.|240\.|255\.|172\.(1[6-9]|2[0-9]|3[01])\.|1\.1\.1\.1$|8\.8\.8\.8$)"
 )
+
 
 
 def test_demo_frontend_does_not_ship_real_node_ips():
@@ -396,3 +398,47 @@ def test_drawer_stays_a_summary_dialog_without_full_analytics():
     assert "打开完整详情" in drawer
     for management_call in ("/api/nodes", "/checks/summary", "/traffic?period=", "/resource/history"):
         assert management_call not in drawer, f"summary drawer must not fetch {management_call}"
+
+
+def test_public_fleet_container_overview_is_a_sanitized_allow_list():
+    container_handlers = (API_DIR / "container_handlers.go").read_text(encoding="utf-8")
+    assert "publicFleetContainerOverviewResponse" in container_handlers
+    match = re.search(
+        r"type publicFleetContainerOverviewResponse struct\s*\{([^}]+)\}",
+        container_handlers,
+    )
+    assert match, "publicFleetContainerOverviewResponse struct not found"
+    struct_body = match.group(1)
+    tags = set(re.findall(r'json:"([^",]+)[^"]*"', struct_body))
+    expected = {
+        "total_nodes",
+        "nodes_with_docker",
+        "total_containers",
+        "running_containers",
+        "stopped_containers",
+        "unhealthy_containers",
+    }
+    assert tags == expected, f"public container overview tags mismatch: {tags} != {expected}"
+    forbidden = (
+        "top_cpu_containers",
+        "top_memory_containers",
+        "container_id",
+        "name",
+        "image",
+        "ports",
+        "node_uuid",
+        "hostname",
+        "command",
+        "mount",
+        "environment",
+        "token",
+        "ip",
+    )
+    for tag in tags:
+        for f in forbidden:
+            assert f not in tag, f"tag {tag} contains forbidden {f}"
+
+
+if __name__ == "__main__":
+    test_public_fleet_container_overview_is_a_sanitized_allow_list()
+    print("All security contract assertions passed.")

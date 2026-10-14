@@ -166,7 +166,20 @@ func (s *Server) fleetContainerOverviewHandler(w http.ResponseWriter, r *http.Re
 	_ = json.NewEncoder(w).Encode(overview)
 }
 
+// publicFleetContainerOverviewResponse is the strict allow-listed shape for the guest container overview.
+// Container names, IDs, images, ports, and resource consumption details are strictly omitted.
+type publicFleetContainerOverviewResponse struct {
+	TotalNodes          int `json:"total_nodes"`
+	NodesWithDocker     int `json:"nodes_with_docker"`
+	TotalContainers     int `json:"total_containers"`
+	RunningContainers   int `json:"running_containers"`
+	StoppedContainers   int `json:"stopped_containers"`
+	UnhealthyContainers int `json:"unhealthy_containers"`
+}
+
 // publicFleetContainerOverviewHandler returns sanitized fleet container overview for guest dashboards.
+// Sensitive workload details such as container names, IDs, images, ports, and top resource consumers
+// are strictly omitted from the public response.
 func (s *Server) publicFleetContainerOverviewHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -184,6 +197,15 @@ func (s *Server) publicFleetContainerOverviewHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	res := publicFleetContainerOverviewResponse{
+		TotalNodes:          overview.TotalNodes,
+		NodesWithDocker:     overview.NodesWithDocker,
+		TotalContainers:     overview.TotalContainers,
+		RunningContainers:   overview.RunningContainers,
+		StoppedContainers:   overview.StoppedContainers,
+		UnhealthyContainers: overview.UnhealthyContainers,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(overview)
+	_ = json.NewEncoder(w).Encode(res)
 }
