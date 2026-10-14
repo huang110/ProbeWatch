@@ -765,12 +765,30 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 400, "invalid query parameters")
 		return
 	}
+
+	user, hasUser := UserFromContext(r.Context())
+	cacheKey := "all"
+	if hasUser {
+		cacheKey = user.ID + ":" + user.AllowedNodes
+	}
+	cacheKey += fmt.Sprintf(":%d:%d:%d", from.Unix(), to.Unix(), limit)
+
+	s.overviewCacheMu.RLock()
+	cached, hit := s.overviewCache[cacheKey]
+	s.overviewCacheMu.RUnlock()
+
+	if hit && time.Now().Before(cached.expiresAt) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached.payload)
+		return
+	}
+
 	nodes, err := s.service.Store().ListNodes(r.Context())
 	if err != nil {
 		writeJSONError(w, 503, "service unavailable")
 		return
 	}
-	user, hasUser := UserFromContext(r.Context())
 	if hasUser && !user.IsAdmin() && user.AllowedNodes != "*" && user.AllowedNodes != "" {
 		filtered := make([]db.Node, 0, len(nodes))
 		for _, n := range nodes {
@@ -789,12 +807,24 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	var rxFirst, txFirst, rxLast, txLast uint64
 	var haveCounters bool
 
+	nodeIDs := make([]string, len(nodes))
+	for i, n := range nodes {
+		nodeIDs[i] = n.ID
+	}
+
+	// Optimized batch queries to eliminate N+1 roundtrips:
+	// 1 query for all latest node report timestamps
+	latestMap, _ := s.service.Store().GetAllResourceLatest(r.Context())
+	// 1 query for history across all requested nodes
+	historyMap, _ := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, limit)
+
 	for _, n := range nodes {
-		at, _, e := s.service.Store().GetResourceLatest(r.Context(), n.ID)
-		if e != nil {
+		latest, ok := latestMap[n.ID]
+		if !ok {
 			nc["offline"]++
 			continue
 		}
+		at := latest.ReportedAt
 		age := now.Sub(at)
 		if age <= 2*time.Minute {
 			nc["online"]++
@@ -806,7 +836,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		if !at.Before(from) && !at.After(to) {
 			nc["resource_reporting"]++
 		}
-		if records, e := s.service.Store().GetResourceHistory(r.Context(), n.ID, from, to, limit); e == nil {
+		if records, ok := historyMap[n.ID]; ok {
 			for _, record := range records {
 				var value struct {
 					CPU             float64 `json:"cpu_percent"`
@@ -830,32 +860,32 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 					resources["filesystem_total_bytes"] = resources["filesystem_total_bytes"].(uint64) + value.FilesystemTotal
 				}
 			}
-
 		}
-		for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
-			if records, e := s.service.Store().GetResultHistory(r.Context(), kind, n.ID, from, to, limit); e == nil {
-				for _, record := range records {
-					key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
-					if _, exists := seenChecks[key]; exists {
-						continue
+	}
+
+	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
+		if records, e := s.service.Store().GetResultHistoryMultiNode(r.Context(), kind, nodeIDs, from, to, limit); e == nil {
+			for _, record := range records {
+				key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+				if _, exists := seenChecks[key]; exists {
+					continue
+				}
+				seenChecks[key] = struct{}{}
+				var result struct {
+					Status  string `json:"status"`
+					Reached bool   `json:"reached"`
+					Error   string `json:"error"`
+					Latency int64  `json:"latency_ms"`
+				}
+				if json.Unmarshal(record.Payload, &result) == nil {
+					checksTotal++
+					ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
+					if ok {
+						checksSuccess++
 					}
-					seenChecks[key] = struct{}{}
-					var result struct {
-						Status  string `json:"status"`
-						Reached bool   `json:"reached"`
-						Error   string `json:"error"`
-						Latency int64  `json:"latency_ms"`
-					}
-					if json.Unmarshal(record.Payload, &result) == nil {
-						checksTotal++
-						ok := result.Status == "success" || result.Status == "available" || (kind == db.TargetKindMTR && result.Reached && result.Error == "")
-						if ok {
-							checksSuccess++
-						}
-						if result.Latency > 0 {
-							latencyTotal += result.Latency
-							latencyCount++
-						}
+					if result.Latency > 0 {
+						latencyTotal += result.Latency
+						latencyCount++
 					}
 				}
 			}
@@ -912,7 +942,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, 200, map[string]any{
+	respMap := map[string]any{
 		"nodes":         nc,
 		"checks":        checks,
 		"resources":     resources,
@@ -920,7 +950,23 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		"targets_count": targetsCount,
 		"window":        map[string]time.Time{"from": from, "to": to},
 		"generated_at":  now,
-	})
+	}
+
+	// Cache payload with 2-second TTL for fast subsequent reads
+	if payloadBytes, err := json.Marshal(respMap); err == nil {
+		s.overviewCacheMu.Lock()
+		s.overviewCache[cacheKey] = overviewCacheEntry{
+			payload:   payloadBytes,
+			expiresAt: time.Now().Add(2 * time.Second),
+		}
+		s.overviewCacheMu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payloadBytes)
+		return
+	}
+
+	writeJSON(w, 200, respMap)
 }
 
 func (s *Server) nodeSummaryRead(w http.ResponseWriter, r *http.Request, uuid string) {

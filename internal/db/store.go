@@ -1507,6 +1507,126 @@ func (s *Store) GetResultHistory(ctx context.Context, kind TargetKind, nodeID st
 	return out, nil
 }
 
+// ResourceLatestSummary contains the reported_at timestamp and payload for a node.
+type ResourceLatestSummary struct {
+	NodeID     string
+	ReportedAt time.Time
+	Payload    []byte
+}
+
+// GetAllResourceLatest returns the latest reported_at timestamp and payload for all nodes in one query.
+func (s *Store) GetAllResourceLatest(ctx context.Context) (map[string]ResourceLatestSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id, reported_at, payload FROM resource_latest`)
+	if err != nil {
+		return nil, fmt.Errorf("query all resource latest: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]ResourceLatestSummary)
+	for rows.Next() {
+		var nodeID string
+		var reportedAt int64
+		var payload []byte
+		if err := rows.Scan(&nodeID, &reportedAt, &payload); err != nil {
+			return nil, fmt.Errorf("scan resource latest: %w", err)
+		}
+		out[nodeID] = ResourceLatestSummary{
+			NodeID:     nodeID,
+			ReportedAt: time.Unix(0, reportedAt).UTC(),
+			Payload:    payload,
+		}
+	}
+	return out, rows.Err()
+}
+
+// GetResourceHistoryMultiNode returns resource history for multiple nodes in one query.
+func (s *Store) GetResourceHistoryMultiNode(ctx context.Context, nodeIDs []string, from, to time.Time, limit int) (map[string][]ResourceHistoryRecord, error) {
+	if len(nodeIDs) == 0 {
+		return make(map[string][]ResourceHistoryRecord), nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	placeholders := make([]string, len(nodeIDs))
+	args := make([]any, 0, len(nodeIDs)+2)
+	for i, nid := range nodeIDs {
+		placeholders[i] = "?"
+		args = append(args, nid)
+	}
+	args = append(args, unixNano(from), unixNano(to))
+
+	q := fmt.Sprintf(`SELECT node_id, reported_at, recorded_at, payload FROM resource_history WHERE node_id IN (%s) AND reported_at >= ? AND reported_at <= ? ORDER BY reported_at ASC`,
+		strings.Join(placeholders, ","))
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query resource history multi node: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]ResourceHistoryRecord)
+	for rows.Next() {
+		var r ResourceHistoryRecord
+		var a, b int64
+		if err := rows.Scan(&r.NodeID, &a, &b, &r.Payload); err != nil {
+			return nil, fmt.Errorf("scan resource history multi node: %w", err)
+		}
+		r.ReportedAt = time.Unix(0, a).UTC()
+		r.RecordedAt = time.Unix(0, b).UTC()
+		if json.Valid(r.Payload) {
+			if len(out[r.NodeID]) < limit {
+				out[r.NodeID] = append(out[r.NodeID], r)
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// GetResultHistoryMultiNode returns result history for a target kind across multiple nodes in one query.
+func (s *Store) GetResultHistoryMultiNode(ctx context.Context, kind TargetKind, nodeIDs []string, from, to time.Time, limit int) ([]ResultHistoryRecord, error) {
+	if len(nodeIDs) == 0 {
+		return nil, nil
+	}
+	table, col, err := historyTable(kind)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	placeholders := make([]string, len(nodeIDs))
+	args := make([]any, 0, len(nodeIDs)+3)
+	for i, nid := range nodeIDs {
+		placeholders[i] = "?"
+		args = append(args, nid)
+	}
+	args = append(args, unixNano(from), unixNano(to), limit*len(nodeIDs))
+
+	q := fmt.Sprintf(`SELECT %s, node_id, checked_at, recorded_at, payload FROM %s WHERE node_id IN (%s) AND checked_at >= ? AND checked_at <= ? ORDER BY checked_at DESC LIMIT ?`,
+		col, table, strings.Join(placeholders, ","))
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query result history multi node: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]ResultHistoryRecord, 0)
+	for rows.Next() {
+		var r ResultHistoryRecord
+		var a, b int64
+		if err := rows.Scan(&r.TargetID, &r.NodeID, &a, &b, &r.Payload); err != nil {
+			return nil, fmt.Errorf("scan result history multi node: %w", err)
+		}
+		r.CheckedAt = time.Unix(0, a).UTC()
+		r.RecordedAt = time.Unix(0, b).UTC()
+		if json.Valid(r.Payload) {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
+}
+
 func historyTable(kind TargetKind) (string, string, error) {
 	switch kind {
 	case TargetKindTCP, TargetKindHTTP, TargetKindHTTPS, TargetKindDNS:
@@ -1935,18 +2055,18 @@ func evaluateMTRPathChangeAlertTx(ctx context.Context, tx *sql.Tx, nodeID string
 
 func (s *Store) evaluateResourceAlertTx(ctx context.Context, tx *sql.Tx, nodeID string, payload []byte, now time.Time) error {
 	var r struct {
-		CPUPercent           float64              `json:"cpu_percent"`
-		Load1                float64              `json:"load1"`
-		Load5                float64              `json:"load5"`
-		Load15               float64              `json:"load15"`
-		MemoryTotalBytes     uint64               `json:"memory_total_bytes"`
-		MemoryUsedBytes      uint64               `json:"memory_used_bytes"`
-		FilesystemTotalBytes uint64                `json:"filesystem_total_bytes"`
-		FilesystemUsedBytes  uint64                `json:"filesystem_used_bytes"`
-		CPUTempC             float64               `json:"cpu_temp_c"`
-		Disks                []protocol.DiskStat   `json:"disks"`
-		Mounts               []protocol.MountStat  `json:"mounts"`
-		SocketStats          *protocol.SocketStats `json:"socket_stats"`
+		CPUPercent           float64                  `json:"cpu_percent"`
+		Load1                float64                  `json:"load1"`
+		Load5                float64                  `json:"load5"`
+		Load15               float64                  `json:"load15"`
+		MemoryTotalBytes     uint64                   `json:"memory_total_bytes"`
+		MemoryUsedBytes      uint64                   `json:"memory_used_bytes"`
+		FilesystemTotalBytes uint64                   `json:"filesystem_total_bytes"`
+		FilesystemUsedBytes  uint64                   `json:"filesystem_used_bytes"`
+		CPUTempC             float64                  `json:"cpu_temp_c"`
+		Disks                []protocol.DiskStat      `json:"disks"`
+		Mounts               []protocol.MountStat     `json:"mounts"`
+		SocketStats          *protocol.SocketStats    `json:"socket_stats"`
 		HealthInfo           *protocol.HostHealthInfo `json:"health_info"`
 	}
 	if err := json.Unmarshal(payload, &r); err != nil {
@@ -3589,7 +3709,6 @@ func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerO
 		return nil, err
 	}
 
-
 	cpuRows, err := s.db.QueryContext(ctx, `
 		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
 		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
@@ -3835,7 +3954,3 @@ func (s *Store) GetSystemEventsOverview(ctx context.Context) (*SystemEventsOverv
 
 	return overview, nil
 }
-
-
-
-

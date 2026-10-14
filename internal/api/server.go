@@ -24,6 +24,11 @@ import (
 	"github.com/probewatch/probewatch/internal/terminal"
 )
 
+type overviewCacheEntry struct {
+	payload   []byte
+	expiresAt time.Time
+}
+
 type Server struct {
 	cfg                 config.Config
 	service             *auth.Service
@@ -39,6 +44,8 @@ type Server struct {
 	terminalManager     *terminal.Manager
 	backupScheduler     *backup.Scheduler
 	agentReplayCache    *agentReplayCache
+	overviewCacheMu     sync.RWMutex
+	overviewCache       map[string]overviewCacheEntry
 	publicCacheMu       sync.RWMutex
 	publicCacheAt       time.Time
 	publicCache         publicStatusResponse
@@ -85,6 +92,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		terminalManager:     terminal.NewManager(),
 		backupScheduler:     backupSched,
 		agentReplayCache:    newAgentReplayCache(),
+		overviewCache:       make(map[string]overviewCacheEntry),
 		trustedProxyNets:    trustedNets,
 		visitorGeoCache:     make(map[string]visitorGeoCacheEntry),
 		visitorGeoClient: &http.Client{
@@ -233,7 +241,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/mcp", s.mcpHandler)
 
 	// Deployment script endpoints
-	
+
 	// Terminal & Remote Execution endpoints
 	mux.HandleFunc("/api/agent/v1/terminal/tunnel", s.agentTerminalTunnel)
 	mux.Handle("/api/admin/terminal/status", middleware.RequireAuth(http.HandlerFunc(s.terminalStatus)))
@@ -556,4 +564,3 @@ func (s *Server) installScriptHandler(w http.ResponseWriter, r *http.Request) {
 	script := bytes.ReplaceAll(deploy.InstallScript, []byte("\r\n"), []byte("\n"))
 	_, _ = w.Write(script)
 }
-

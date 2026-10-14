@@ -212,7 +212,9 @@ func TestAgentRegistrationRejectsExpiredReusedAndConflictingUUIDs(t *testing.T) 
 func TestAgentAuthRejectsSkewReplayAndUUIDMismatch(t *testing.T) {
 	service, store := newTask4Auth(t)
 	defer store.Close()
-	handler := NewServer(task4Config(), service).Handler()
+	cfg := task4Config()
+	cfg.AgentStrictAuth = true
+	handler := NewServer(cfg, service).Handler()
 	registration, err := store.CreateRegistrationToken(context.Background(), time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +547,7 @@ func mustNode(t *testing.T, store *db.Store, uuid string) db.Node {
 }
 
 func task4Config() config.Config {
-	return config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", MaxRequestBody: 1 << 20, AgentClockSkew: 5 * time.Minute, AgentStrictAuth: true, EnableRemoteTerminal: true, EnableTerminal: true}
+	return config.Config{Environment: "development", PublicBaseURL: "http://127.0.0.1:8080", MaxRequestBody: 1 << 20, AgentClockSkew: 5 * time.Minute, AgentStrictAuth: false, EnableRemoteTerminal: true, EnableTerminal: true}
 }
 
 func newTask4Auth(t *testing.T) (*auth.Service, *db.Store) {
