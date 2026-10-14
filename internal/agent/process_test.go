@@ -195,3 +195,120 @@ func TestProcessTrackerPruningAndCapacity(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessTrackerDefaultCapacity(t *testing.T) {
+	if defaultProcessTracker.maxSize != 4096 {
+		t.Fatalf("expected defaultProcessTracker maxSize to be 4096, got %d", defaultProcessTracker.maxSize)
+	}
+	tr0 := NewProcessSampleTracker(0)
+	if tr0.maxSize != 4096 {
+		t.Fatalf("expected NewProcessSampleTracker(0) to default to 4096, got %d", tr0.maxSize)
+	}
+}
+
+func TestProcessTrackerDeterministicOldestEviction(t *testing.T) {
+	// Bounded capacity of 4
+	tracker := NewProcessSampleTracker(4)
+	t0 := time.Now()
+
+	// Initial samples for PIDs 1..4 at t0
+	for pid := int32(1); pid <= 4; pid++ {
+		tracker.CalculateAndRecord(pid, 10, 10, 1000, t0, 1)
+	}
+
+	// In the next tick at t1 (+1s), PIDs 2, 3, 4 are updated (they are active)
+	// PID 1 is NOT updated (representing an inactive/stale process)
+	t1 := t0.Add(1 * time.Second)
+	for pid := int32(2); pid <= 4; pid++ {
+		tracker.CalculateAndRecord(pid, 20, 20, 1000, t1, 1)
+	}
+
+	// Now a new PID 5 appears at t1
+	tracker.CalculateAndRecord(5, 5, 5, 2000, t1, 1)
+
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+
+	// Capacity must be bounded to 4
+	if len(tracker.samples) != 4 {
+		t.Fatalf("expected tracker size 4, got %d", len(tracker.samples))
+	}
+
+	// PID 1 must be evicted because its sample was oldest (t0)
+	if _, ok := tracker.samples[1]; ok {
+		t.Errorf("PID 1 should have been evicted as the oldest sample")
+	}
+
+	// Active PIDs 2, 3, 4 and new PID 5 must all be present
+	for _, pid := range []int32{2, 3, 4, 5} {
+		if _, ok := tracker.samples[pid]; !ok {
+			t.Errorf("active PID %d should have been retained", pid)
+		}
+	}
+}
+
+func TestProcessTrackerExitedProcessPriorityEviction(t *testing.T) {
+	// Tracker capacity of 5
+	tracker := NewProcessSampleTracker(5)
+	t0 := time.Now()
+
+	// 5 processes active in round 1
+	for pid := int32(101); pid <= 105; pid++ {
+		tracker.CalculateAndRecord(pid, 100, 50, 1000, t0, 1)
+	}
+
+	// In round 2 (+10s), PIDs 102..105 are sampled again. PID 101 has exited.
+	t1 := t0.Add(10 * time.Second)
+	for pid := int32(102); pid <= 105; pid++ {
+		tracker.CalculateAndRecord(pid, 150, 75, 1000, t1, 1)
+	}
+
+	// A new process 106 arrives in round 2
+	tracker.CalculateAndRecord(106, 10, 10, 2000, t1, 1)
+
+	tracker.mu.Lock()
+	// PID 101 (exited process with old timestamp) must be the one evicted
+	if _, ok := tracker.samples[101]; ok {
+		t.Errorf("exited PID 101 should have been prioritized for eviction")
+	}
+	// Active PIDs 102-105 and 106 must remain
+	for _, pid := range []int32{102, 103, 104, 105, 106} {
+		if _, ok := tracker.samples[pid]; !ok {
+			t.Errorf("active PID %d should not have been evicted", pid)
+		}
+	}
+	tracker.mu.Unlock()
+
+	// In round 3 (+10s), active PIDs continue running smoothly without baseline loss
+	t2 := t1.Add(10 * time.Second)
+	// Delta ticks = (200 + 100) - (150 + 75) = 300 - 225 = 75 ticks over 10s -> 7.5%
+	cpu := tracker.CalculateAndRecord(102, 200, 100, 1000, t2, 1)
+	if cpu != 7.5 {
+		t.Errorf("expected smooth 7.5%% CPU for active PID 102, got %f", cpu)
+	}
+}
+
+func TestProcessCPUSmoothRunningState(t *testing.T) {
+	tracker := NewProcessSampleTracker(64)
+	pid := int32(8888)
+	startTime := uint64(5000)
+	t0 := time.Now()
+
+	// Initial sample returns 0.0
+	cpu := tracker.CalculateAndRecord(pid, 100, 100, startTime, t0, 1)
+	if cpu != 0.0 {
+		t.Fatalf("first sample must return 0.0, got %f", cpu)
+	}
+
+	// 10 consecutive ticks of 50 ticks/second (50% CPU on 1 core)
+	currentTicks := uint64(200)
+	currTime := t0
+	for step := 1; step <= 10; step++ {
+		currTime = currTime.Add(1 * time.Second)
+		currentTicks += 50
+		cpu = tracker.CalculateAndRecord(pid, currentTicks/2, currentTicks/2, startTime, currTime, 1)
+		if cpu != 50.0 {
+			t.Fatalf("step %d: expected smooth 50.0%% CPU, got %f", step, cpu)
+		}
+	}
+}

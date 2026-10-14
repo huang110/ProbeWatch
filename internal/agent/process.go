@@ -29,13 +29,13 @@ type ProcessSampleTracker struct {
 	maxSize int
 }
 
-// defaultProcessTracker is the package-level process tracker bounded to 512 entries.
-var defaultProcessTracker = NewProcessSampleTracker(512)
+// defaultProcessTracker is the package-level process tracker bounded to 4096 entries.
+var defaultProcessTracker = NewProcessSampleTracker(4096)
 
 // NewProcessSampleTracker creates a new ProcessSampleTracker.
 func NewProcessSampleTracker(maxSize int) *ProcessSampleTracker {
 	if maxSize <= 0 {
-		maxSize = 512
+		maxSize = 4096
 	}
 	return &ProcessSampleTracker{
 		samples: make(map[int32]ProcCPUSample),
@@ -54,9 +54,18 @@ func (t *ProcessSampleTracker) CalculateAndRecord(pid int32, utime, stime, start
 
 	// Enforce capacity bounds if a new PID is being added
 	if !exists && len(t.samples) >= t.maxSize {
-		for k := range t.samples {
-			delete(t.samples, k)
-			break
+		var oldestPID int32
+		var oldestTime time.Time
+		first := true
+		for k, s := range t.samples {
+			if first || s.Timestamp.Before(oldestTime) || (s.Timestamp.Equal(oldestTime) && k < oldestPID) {
+				oldestPID = k
+				oldestTime = s.Timestamp
+				first = false
+			}
+		}
+		if !first {
+			delete(t.samples, oldestPID)
 		}
 	}
 
@@ -223,6 +232,18 @@ func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
 			continue
 		}
 		activePIDs[int32(pid)] = struct{}{}
+	}
+
+	defaultProcessTracker.PruneExited(activePIDs)
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
 
 		snap, err := readProcessInfo(pid, totalMemBytes)
 		if err != nil {
@@ -231,8 +252,6 @@ func CollectTopProcesses(limit int) ([]protocol.ProcessSnapshot, error) {
 		}
 		procs = append(procs, snap)
 	}
-
-	defaultProcessTracker.PruneExited(activePIDs)
 
 	// Sort by CPU percent descending, then RSS memory descending
 	sort.Slice(procs, func(i, j int) bool {
