@@ -109,12 +109,15 @@ const (
 
 // CollectDockerWorkloadFromSocket collects docker metrics from a specified socket path.
 func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.ContainerSnapshot, error) {
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
-			},
+	tr := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
 		},
+	}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{
+		Transport: tr,
 		Timeout: 5 * time.Second,
 	}
 

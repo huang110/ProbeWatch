@@ -251,6 +251,24 @@ func maskToken(token string) string {
 	return token[:4] + "******" + token[len(token)-4:]
 }
 
+func (s *Server) resolveNotificationChannel(ctx context.Context, id string) (db.NotificationChannel, error) {
+	ch, err := s.service.Store().GetNotificationChannel(ctx, id)
+	if err == nil { return ch, nil }
+	now := time.Now().UTC()
+	switch id {
+	case "env-telegram":
+		if strings.TrimSpace(s.cfg.TelegramBotToken) == "" || strings.TrimSpace(s.cfg.TelegramChatID) == "" { return db.NotificationChannel{}, err }
+		b, _ := json.Marshal(map[string]string{"bot_token": s.cfg.TelegramBotToken, "chat_id": s.cfg.TelegramChatID})
+		return db.NotificationChannel{ID: id, Name: "Telegram (环境变量)", Type: "telegram", Config: string(b), Enabled: true, Events: "[]", CreatedAt: now, UpdatedAt: now}, nil
+	case "env-webhook":
+		if strings.TrimSpace(s.cfg.WebhookURL) == "" { return db.NotificationChannel{}, err }
+		b, _ := json.Marshal(map[string]string{"webhook_url": s.cfg.WebhookURL})
+		return db.NotificationChannel{ID: id, Name: "Webhook (环境变量)", Type: "webhook", Config: string(b), Enabled: true, Events: "[]", CreatedAt: now, UpdatedAt: now}, nil
+	default:
+		return db.NotificationChannel{}, err
+	}
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -313,7 +331,7 @@ func maskNotificationChannel(ch db.NotificationChannel) db.NotificationChannel {
 }
 
 func (s *Server) getNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
-	ch, err := s.service.Store().GetNotificationChannel(r.Context(), id)
+	ch, err := s.resolveNotificationChannel(r.Context(), id)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "channel not found")
 		return
@@ -354,7 +372,7 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeRequestError(w, err)
 		return
 	}
-	existing, _ := s.service.Store().GetNotificationChannel(r.Context(), id)
+	existing, _ := s.resolveNotificationChannel(r.Context(), id)
 	config := req.Config
 	var incomingCfg, existingCfg map[string]any
 	if json.Unmarshal([]byte(config), &incomingCfg) == nil && json.Unmarshal([]byte(existing.Config), &existingCfg) == nil {
@@ -393,7 +411,7 @@ func (s *Server) deleteNotificationChannel(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) testNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
-	ch, err := s.service.Store().GetNotificationChannel(r.Context(), id)
+	ch, err := s.resolveNotificationChannel(r.Context(), id)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "channel not found")
 		return
@@ -1048,7 +1066,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	// 1 query for history across all requested nodes
 	// Keep every resource sample for the selected window so traffic deltas
 	// cover the full 24h/7d/30d range rather than only the latest page.
-	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, 0)
+	historyLimit := limit
+	if historyLimit < 1000 { historyLimit = 1000 }
+	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, historyLimit)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return

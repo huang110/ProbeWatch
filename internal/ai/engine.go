@@ -340,7 +340,7 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 			if billingInfo.DueDate != "" {
 				if dueTime, err := time.Parse("2006-01-02", billingInfo.DueDate); err == nil {
 					daysLeft := int(math.Ceil(dueTime.Sub(now).Hours() / 24.0))
-					if daysLeft >= -30 && daysLeft <= 7 && billingInfo.Cycle != "free" {
+					if daysLeft >= -30 && daysLeft <= 7 && billingInfo.Cycle != "free" && billingInfo.Price > 0 {
 						rep.Summary.ExpiringNodes++
 						sev := SeverityWarning
 						if daysLeft <= 3 {

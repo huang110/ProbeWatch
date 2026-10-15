@@ -98,7 +98,7 @@ export function BillingCenter({ nodes = [] }) {
     [portfolio]
   )
   const expiringSoonCount = useMemo(
-    () => portfolio.filter((item) => !item.calc.isExpired && item.calc.daysRemaining !== null && item.calc.daysRemaining <= 30 && item.billing.cycle !== 'free').length,
+    () => portfolio.filter((item) => !item.calc.isExpired && item.calc.daysRemaining !== null && item.calc.daysRemaining <= 30 && item.billing.cycle !== 'free' && Number(item.billing.price) > 0).length,
     [portfolio]
   )
 

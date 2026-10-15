@@ -583,8 +583,10 @@ export function AlertCenterView({
 
   const handleSaveGracePeriod = async () => {
     try {
-      await saveAlertSettings({ offline_grace_seconds: String(offlineGracePeriod) })
-      showToast(`已成功保存离线宽限期为 ${offlineGracePeriod} 秒`)
+      const sec = Math.max(30, Math.min(86400, parseInt(offlineGracePeriod, 10) || 180))
+      setOfflineGracePeriod(sec)
+      await saveAlertSettings({ offline_grace_seconds: String(sec) })
+      showToast(`已成功保存离线宽限期为 ${sec} 秒`)
     } catch (err) {
       showToast(`保存失败: ${err.message}`)
     }
@@ -1124,9 +1126,9 @@ export function AlertCenterView({
                   className="field-input mono"
                   style={{ width: '96px', height: '32px', textAlign: 'center' }}
                   value={offlineGracePeriod}
-                  onChange={(e) => setOfflineGracePeriod(Number(e.target.value) || 30)}
+                  onChange={(e) => setOfflineGracePeriod(e.target.value)}
                   min={30}
-                  max={3600}
+                  max={86400}
                 />
                 <button
                   type="button"
@@ -1177,7 +1179,7 @@ export function AlertCenterView({
                     <th>服务器</th>
                     <th style={{ width: '120px' }}>状态</th>
                     <th style={{ width: '180px' }}>生效宽限期 (全局)</th>
-                    <th style={{ minWidth: '180px' }}>最后通知</th>
+                    <th style={{ minWidth: '180px' }}>最后上报</th>
                     <th style={{ width: '80px', textAlign: 'right' }}>操作</th>
                   </tr>
                 </thead>
@@ -2240,7 +2242,7 @@ export function AlertCenterView({
                   value={offlineGracePeriod}
                   onChange={(e) => setOfflineGracePeriod(e.target.value)}
                   min={30}
-                  max={3600}
+                  max={86400}
                 />
                 <span className="text-muted text-xs mt-1 block">
                   推荐 180 秒（3 分钟），有效过滤由于网络抖动短暂重连产生的误告警。

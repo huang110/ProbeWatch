@@ -1547,6 +1547,9 @@ func (s *Store) GetResourceHistoryMultiNode(ctx context.Context, nodeIDs []strin
 	if len(nodeIDs) == 0 {
 		return make(map[string][]ResourceHistoryRecord), nil
 	}
+	if limit <= 0 {
+		limit = 100
+	}
 	placeholders := make([]string, len(nodeIDs))
 	args := make([]any, 0, len(nodeIDs)+2)
 	for i, nid := range nodeIDs {
