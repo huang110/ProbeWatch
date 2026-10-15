@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -279,4 +280,245 @@ func TestPopulatePublicIPQualityDTO_DualStackAndIPv6Fallback(t *testing.T) {
 	if dtoV6.Scores["IPQS"] != 95 || dtoV6.Risk != "low" {
 		t.Fatalf("expected IPv6 fallback scores and risk, got scores=%v risk=%q", dtoV6.Scores, dtoV6.Risk)
 	}
+}
+
+func TestIPQANotificationCooldownUnifiedKey(t *testing.T) {
+	srv, service, store, node1 := setupTestServerForIPQA(t)
+	ctx := context.Background()
+
+	// Ensure notifier is enabled by registering a notification channel
+	nowUTC := time.Now().UTC()
+	err := store.UpsertNotificationChannel(ctx, db.NotificationChannel{
+		ID:        "chan-1",
+		Name:      "Test-Channel",
+		Type:      "telegram",
+		Config:    `{"bot_token":"test-token","chat_id":"test-chat"}`,
+		Enabled:   true,
+		CreatedAt: nowUTC,
+		UpdatedAt: nowUTC,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Register a second node with different ID and UUID
+	token2, err := store.CreateRegistrationToken(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg2 := task4Register(t, srv.Handler(), protocol.RegisterRequest{
+		NodeUUID:          "020ae432-2c08-4eef-9133-18289643549f",
+		Name:              "Test Node 2",
+		RegistrationToken: token2.Token,
+	})
+	node2 := mustNode(t, store, reg2.NodeUUID)
+
+	// Verify node1.ID != node1.UUID
+	if node1.ID == node1.UUID {
+		t.Fatalf("node.ID should differ from node.UUID, got ID=%s UUID=%s", node1.ID, node1.UUID)
+	}
+
+	session, _ := task4AdminSession(t, service, store)
+
+	// Reset cooldown state before tests
+	resetCooldowns := func() {
+		ipqaCooldownMu.Lock()
+		ipqaLastNotify = make(map[string]time.Time)
+		ipqaNotifiedKeys = make(map[string]struct{})
+		ipqaCooldownMu.Unlock()
+	}
+
+	sendManualTest := func(node db.Node) *httptest.ResponseRecorder {
+		csrf := task4CSRF(t, srv.Handler(), session)
+		req := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/test", bytes.NewBufferString(`{"window":"today","force_send":true}`))
+		req.AddCookie(task4SessionCookie(session))
+		req.Header.Set("X-CSRF-Token", csrf)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://127.0.0.1:8080")
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	makeIPQAInfo := func(date string, sev string, alertCount int) *protocol.IPQAInfo {
+		return &protocol.IPQAInfo{
+			Enabled:           true,
+			Installed:         true,
+			LastCheckedAt:     time.Now().UTC().Unix(),
+			LatestArchiveDate: date,
+			HighestSeverity:   sev,
+			AlertCount:        alertCount,
+		}
+	}
+
+	// Scenario 1: Auto IPQA alert sets node.ID cooldown -> subsequent manual test blocked by 5m cooldown
+	t.Run("AutoReportBlocksSubsequentManualTest", func(t *testing.T) {
+		resetCooldowns()
+		now := time.Now().UTC()
+		info := makeIPQAInfo("2026-10-15-A", "CRITICAL", 3)
+
+		// Trigger auto report alert
+		srv.handleIPQAReport(ctx, node1, info, now)
+
+		// Verify cooldown was recorded under node1.ID (NOT node1.UUID)
+		ipqaCooldownMu.Lock()
+		_, hasID := ipqaLastNotify[node1.ID]
+		_, hasUUID := ipqaLastNotify[node1.UUID]
+		ipqaCooldownMu.Unlock()
+
+		if !hasID {
+			t.Fatalf("expected cooldown key to be node.ID (%s)", node1.ID)
+		}
+		if hasUUID {
+			t.Fatalf("cooldown key should NOT be node.UUID (%s)", node1.UUID)
+		}
+
+		// Subsequent manual test for node1 within 5m must be blocked with HTTP 429
+		rec := sendManualTest(node1)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 Too Many Requests, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// Scenario 2: Manual test sets node.ID cooldown -> subsequent auto IPQA alert blocked
+	t.Run("ManualTestBlocksSubsequentAutoReport", func(t *testing.T) {
+		resetCooldowns()
+
+		// First manual test succeeds
+		rec := sendManualTest(node1)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for initial manual test, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		// Check cooldown map
+		ipqaCooldownMu.Lock()
+		lastSent, hasID := ipqaLastNotify[node1.ID]
+		_, hasUUID := ipqaLastNotify[node1.UUID]
+		ipqaCooldownMu.Unlock()
+
+		if !hasID {
+			t.Fatalf("manual test must write cooldown key under node.ID (%s)", node1.ID)
+		}
+		if hasUUID {
+			t.Fatalf("manual test must NOT write cooldown key under node.UUID (%s)", node1.UUID)
+		}
+
+		// Now simulate auto report arriving 30 seconds later
+		info := makeIPQAInfo("2026-10-15-B", "WARNING", 1)
+		srv.handleIPQAReport(ctx, node1, info, lastSent.Add(30*time.Second))
+
+		// Dedupe key must NOT have been marked as sent because cooldown blocked it
+		dedupeKey := fmt.Sprintf("%s:%s:%s", node1.ID, "2026-10-15-B", "warning")
+		ipqaCooldownMu.Lock()
+		_, wasNotified := ipqaNotifiedKeys[dedupeKey]
+		ipqaCooldownMu.Unlock()
+
+		if wasNotified {
+			t.Fatalf("auto report should have been suppressed by cooldown from manual test")
+		}
+	})
+
+	// Scenario 3: Two different nodes do not affect each other
+	t.Run("CooldownIsolationBetweenNodes", func(t *testing.T) {
+		resetCooldowns()
+
+		// Set cooldown on node1
+		rec1 := sendManualTest(node1)
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("expected node1 manual test 200, got %d", rec1.Code)
+		}
+
+		// node2 manual test should still succeed
+		rec2 := sendManualTest(node2)
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("expected node2 manual test 200, got %d: %s", rec2.Code, rec2.Body.String())
+		}
+
+		// node2 auto report should be blocked by its OWN manual test, not node1
+		info := makeIPQAInfo("2026-10-15-C", "CRITICAL", 2)
+		srv.handleIPQAReport(ctx, node2, info, time.Now().UTC())
+
+		dedupeKey2 := fmt.Sprintf("%s:%s:%s", node2.ID, "2026-10-15-C", "critical")
+		ipqaCooldownMu.Lock()
+		_, wasNotified2 := ipqaNotifiedKeys[dedupeKey2]
+		ipqaCooldownMu.Unlock()
+		if wasNotified2 {
+			t.Fatalf("node2 auto report should be blocked by node2's own cooldown")
+		}
+	})
+
+	// Scenario 4: Concurrency test - concurrent manual test calls only send one
+	t.Run("ConcurrentManualTestsCooldownRace", func(t *testing.T) {
+		resetCooldowns()
+		const concurrentCalls = 10
+		type resInfo struct {
+			code int
+			body string
+		}
+		resChan := make(chan resInfo, concurrentCalls)
+
+		sessions := make([]string, concurrentCalls)
+		csrfTokens := make([]string, concurrentCalls)
+		for i := 0; i < concurrentCalls; i++ {
+			s, c := task4AdminSession(t, service, store)
+			sessions[i] = s
+			csrfTokens[i] = c
+		}
+
+		for i := 0; i < concurrentCalls; i++ {
+			idx := i
+			go func() {
+				req := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node1.UUID+"/ipqa/test", bytes.NewBufferString(`{"window":"today","force_send":true}`))
+				req.AddCookie(task4SessionCookie(sessions[idx]))
+				req.Header.Set("X-CSRF-Token", csrfTokens[idx])
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Origin", "http://127.0.0.1:8080")
+				rec := httptest.NewRecorder()
+				srv.Handler().ServeHTTP(rec, req)
+				resChan <- resInfo{code: rec.Code, body: rec.Body.String()}
+			}()
+		}
+
+		status200Count := 0
+		status429Count := 0
+		var otherCodes []string
+		for i := 0; i < concurrentCalls; i++ {
+			res := <-resChan
+			if res.code == http.StatusOK {
+				status200Count++
+			} else if res.code == http.StatusTooManyRequests {
+				status429Count++
+			} else {
+				otherCodes = append(otherCodes, fmt.Sprintf("code=%d body=%s", res.code, res.body))
+			}
+		}
+
+		if len(otherCodes) > 0 {
+			t.Logf("other response codes: %v", otherCodes)
+		}
+
+		if status200Count != 1 {
+			t.Errorf("expected exactly 1 concurrent test to succeed with 200, got %d", status200Count)
+		}
+		if status429Count != concurrentCalls-1 {
+			t.Errorf("expected %d calls to be 429 Too Many Requests, got %d", concurrentCalls-1, status429Count)
+		}
+	})
+
+	// Scenario 5: Expiration allows sending again after 5 minutes
+	t.Run("CooldownExpiryAllowsSubsequentNotification", func(t *testing.T) {
+		resetCooldowns()
+
+		// Set cooldown timestamp to 6 minutes ago
+		sixMinutesAgo := time.Now().UTC().Add(-6 * time.Minute)
+		ipqaCooldownMu.Lock()
+		ipqaLastNotify[node1.ID] = sixMinutesAgo
+		ipqaCooldownMu.Unlock()
+
+		// Manual test should succeed now
+		rec := sendManualTest(node1)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK after cooldown expiry, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
 }

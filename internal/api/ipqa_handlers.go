@@ -252,13 +252,13 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 	if req.ForceSend {
 		// Enforce notification cooldown
 		ipqaCooldownMu.Lock()
-		lastNotified, exists := ipqaLastNotify[node.UUID]
+		lastNotified, exists := ipqaLastNotify[node.ID]
 		if exists && now.Sub(lastNotified) < ipqaNotifyCooldown {
 			ipqaCooldownMu.Unlock()
 			writeJSONError(w, http.StatusTooManyRequests, "notification cooldown active, please wait")
 			return
 		}
-		ipqaLastNotify[node.UUID] = now
+		ipqaLastNotify[node.ID] = now
 		ipqaCooldownMu.Unlock()
 
 		if s.notifier != nil {
