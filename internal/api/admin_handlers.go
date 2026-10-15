@@ -28,6 +28,7 @@ type alertResponse struct {
 	Reason          string     `json:"reason"`
 	Severity        string     `json:"severity"`
 	Status          string     `json:"status"`
+	Fingerprint     string     `json:"fingerprint"`
 	OccurrenceCount int        `json:"occurrence_count"`
 	FirstSeenAt     time.Time  `json:"first_seen_at"`
 	LastSeenAt      time.Time  `json:"last_seen_at"`
@@ -35,7 +36,7 @@ type alertResponse struct {
 }
 
 func alertResponseFrom(a db.AlertEvent) alertResponse {
-	return alertResponse{ID: a.ID, NodeID: a.NodeID, Category: a.Category, TargetID: a.TargetID, Reason: a.Reason, Severity: a.Severity, Status: a.Status, OccurrenceCount: a.OccurrenceCount, FirstSeenAt: a.FirstSeenAt, LastSeenAt: a.LastSeenAt, ResolvedAt: a.ResolvedAt}
+	return alertResponse{ID: a.ID, NodeID: a.NodeID, Category: a.Category, TargetID: a.TargetID, Reason: a.Reason, Severity: a.Severity, Status: a.Status, Fingerprint: a.Fingerprint, OccurrenceCount: a.OccurrenceCount, FirstSeenAt: a.FirstSeenAt, LastSeenAt: a.LastSeenAt, ResolvedAt: a.ResolvedAt}
 }
 
 func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +49,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.ackAlert)).ServeHTTP(w, r)
 		return
 	}
+	mw := NewMiddleware(s.service, s.cfg)
 
 	// Alert Rules endpoints
 	if cleanPath == "/api/alerts/rules" {
@@ -55,7 +57,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			s.listAlertRules(w, r)
 		case http.MethodPost:
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createAlertRule)).ServeHTTP(w, r)
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createAlertRule))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -70,13 +72,13 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 			case http.MethodGet:
 				s.getAlertRule(w, r, ruleID)
 			case http.MethodPut:
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.updateAlertRule(w, r, ruleID)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 			case http.MethodDelete:
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.deleteAlertRule(w, r, ruleID)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 			default:
 				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 			}
@@ -88,9 +90,9 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 				writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 				return
 			}
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.toggleAlertRule(w, r, ruleID)
-			})).ServeHTTP(w, r)
+			}))).ServeHTTP(w, r)
 			return
 		}
 	}
@@ -101,7 +103,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			s.listAlertSilences(w, r)
 		case http.MethodPost:
-			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(s.createAlertSilence)).ServeHTTP(w, r)
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createAlertSilence))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -113,9 +115,9 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		if len(parts) == 5 {
 			silenceID := parts[4]
 			if r.Method == http.MethodDelete {
-				NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.deleteAlertSilence(w, r, silenceID)
-				})).ServeHTTP(w, r)
+				}))).ServeHTTP(w, r)
 				return
 			}
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")

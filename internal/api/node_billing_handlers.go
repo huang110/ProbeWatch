@@ -85,6 +85,7 @@ type publicBillingResponse struct {
 }
 
 func (s *Server) publicNodeBilling(w http.ResponseWriter, r *http.Request, uuid string) {
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) { writeJSONError(w, http.StatusTooManyRequests, "too many requests"); return }
 	if !security.IsRFC4122UUID(uuid) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
 		return

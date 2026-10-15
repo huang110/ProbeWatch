@@ -334,7 +334,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 		found = true
 
-		if result.primaryIPv4 == "" && stat.IPv4 != "" && isPublicIP(stat.IPv4) {
+		if result.primaryIPv4 == "" && stat.IPv4 != "" && !isVirtualInterface(name) && isPublicIP(stat.IPv4) {
 			result.primaryIPv4 = stat.IPv4
 		}
 		if result.primaryIPv6 == "" && stat.IPv6 != "" && !isVirtualInterface(name) && isPublicIP(stat.IPv6) {
@@ -354,7 +354,9 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 
 func isPublicIP(raw string) bool {
 	ip := net.ParseIP(strings.TrimSpace(raw))
-	return ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast()
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() { return false }
+	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 { return false }
+	return true
 }
 
 type networkStats struct{ rx, tx uint64 }

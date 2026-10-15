@@ -38,18 +38,12 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 		authenticated = true
 	} else if s.service != nil {
 		if _, err := s.service.AuthenticateWithError(r, time.Now().UTC()); err == nil {
-			authenticated = true
-			if user, userErr := s.service.CurrentUser(r, time.Now().UTC()); userErr == nil {
+			if user, userErr := s.service.CurrentUser(r, time.Now().UTC()); userErr == nil && !user.Disabled {
+				authenticated = true
 				fullAccess = user.IsAdmin() || user.AllowedNodes == "*"
 			}
 		}
 	}
-	if authenticated && token != "" { fullAccess = true }
-	if !fullAccess {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
-
 	if !authenticated {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -60,6 +54,10 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 				"message": "Unauthorized: invalid or missing MCP token",
 			},
 		})
+		return
+	}
+	if !fullAccess {
+		writeJSONError(w, http.StatusForbidden, "administrator access required")
 		return
 	}
 

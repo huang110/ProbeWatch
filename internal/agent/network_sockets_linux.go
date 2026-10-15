@@ -94,9 +94,9 @@ func (c *linuxSocketCollector) Collect() (*protocol.SocketStats, []protocol.List
 	udpEntries := parseProcNetFile(c.udpPath, "udp", false)
 	for _, entry := range udpEntries {
 		stats.UDPTotal++
-		candidates = append(candidates, entry)
-		if entry.inode != "" && entry.inode != "0" {
-			listeningInodes[entry.inode] = true
+		if entry.state == "07" {
+			candidates = append(candidates, entry)
+			if entry.inode != "" && entry.inode != "0" { listeningInodes[entry.inode] = true }
 		}
 	}
 
@@ -104,9 +104,9 @@ func (c *linuxSocketCollector) Collect() (*protocol.SocketStats, []protocol.List
 	udp6Entries := parseProcNetFile(c.udp6Path, "udp6", true)
 	for _, entry := range udp6Entries {
 		stats.UDPTotal++
-		candidates = append(candidates, entry)
-		if entry.inode != "" && entry.inode != "0" {
-			listeningInodes[entry.inode] = true
+		if entry.state == "07" {
+			candidates = append(candidates, entry)
+			if entry.inode != "" && entry.inode != "0" { listeningInodes[entry.inode] = true }
 		}
 	}
 
