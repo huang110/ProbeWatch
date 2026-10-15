@@ -353,8 +353,8 @@ export function AlertCenterView({
         reason: snoozeReason.trim() || '例行排查维护',
         starts_at: now,
         ends_at: endsAt,
-        node_filter: snoozeScope === 'node' && snoozeTarget ? (snoozeTarget.node_id || '*') : '*',
-        category: snoozeScope === 'category' && snoozeTarget ? (snoozeTarget.category || '*') : '*',
+        node_filter: snoozeScope === 'node' && snoozeTarget ? (snoozeTarget.node_id || '*') : (snoozeScope === 'fingerprint' && snoozeTarget && !snoozeTarget.fingerprint ? (snoozeTarget.node_id || '*') : '*'),
+        category: snoozeScope === 'category' && snoozeTarget ? (snoozeTarget.category || '*') : (snoozeScope === 'fingerprint' && snoozeTarget && !snoozeTarget.fingerprint ? (snoozeTarget.category || '*') : '*'),
         fingerprint: snoozeScope === 'fingerprint' && snoozeTarget ? (snoozeTarget.fingerprint || '') : '',
       }
       await createAlertSilence(payload)
@@ -1497,9 +1497,9 @@ export function AlertCenterView({
                             </span>
                           </td>
                           <td className="font-semibold">{alert.node_name || alert.node_id}</td>
-                          <td className="mono">{alert.type}</td>
+                          <td className="mono">{alert.category || alert.type || '—'}</td>
                           <td>{alert.message || alert.title}</td>
-                          <td className="mono text-muted">{formatAlertTime(alert.created_at)}</td>
+                          <td className="mono text-muted">{formatAlertTime(alert.lastSeen || alert.last_seen_at || alert.created_at)}</td>
                           <td>
                             <span className={`badge badge-${alert.status === 'open' ? 'rose' : 'mint'}`}>
                               {alert.status === 'open' ? '未解决' : '已确认'}

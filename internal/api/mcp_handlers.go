@@ -36,6 +36,7 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 	fullAccess := false
 	if token != "" && s.aiService.ValidateMCPToken(r.Context(), token) {
 		authenticated = true
+		fullAccess = true
 	} else if s.service != nil {
 		if _, err := s.service.AuthenticateWithError(r, time.Now().UTC()); err == nil {
 			if user, userErr := s.service.CurrentUser(r, time.Now().UTC()); userErr == nil && !user.Disabled {

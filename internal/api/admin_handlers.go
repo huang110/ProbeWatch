@@ -35,6 +35,14 @@ type alertResponse struct {
 	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
 }
 
+func mapKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func alertResponseFrom(a db.AlertEvent) alertResponse {
 	return alertResponse{ID: a.ID, NodeID: a.NodeID, Category: a.Category, TargetID: a.TargetID, Reason: a.Reason, Severity: a.Severity, Status: a.Status, Fingerprint: a.Fingerprint, OccurrenceCount: a.OccurrenceCount, FirstSeenAt: a.FirstSeenAt, LastSeenAt: a.LastSeenAt, ResolvedAt: a.ResolvedAt}
 }
@@ -595,12 +603,31 @@ func (s *Server) ackAlert(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	session, err := s.service.AuthenticateWithError(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
 		return
 	}
-	a, err := s.service.Store().AckAlert(r.Context(), parts[2], session.AdminUserID, time.Now().UTC())
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+	if !fullAccess {
+		alerts, listErr := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{NodeIDs: mapKeys(allowedIDs), Limit: 1000})
+		if listErr != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
+		found := false
+		for _, candidate := range alerts {
+			if candidate.ID == parts[2] { found = true; break }
+		}
+		if !found {
+			writeJSONError(w, http.StatusNotFound, "alert not found")
+			return
+		}
+	}
+	a, err := s.service.Store().AckAlert(r.Context(), parts[2], user.ID, time.Now().UTC())
 	if errors.Is(err, db.ErrAlertNotFound) {
 		writeJSONError(w, http.StatusNotFound, "alert not found")
 		return

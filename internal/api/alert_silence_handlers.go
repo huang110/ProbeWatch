@@ -117,5 +117,14 @@ func (s *Server) listFlappingAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targets := s.notifier.FlappingTracker().GetActiveFlapping()
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope"); return }
+	if !fullAccess {
+		filtered := targets[:0]
+		for _, target := range targets { if _, allowed := allowedIDs[target.NodeID]; allowed { filtered = append(filtered, target) } }
+		targets = filtered
+	}
 	writeJSON(w, http.StatusOK, targets)
 }

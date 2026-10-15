@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -111,7 +112,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			var snapshot protocol.ResourceSnapshot
 			if json.Unmarshal(payload, &snapshot) == nil {
-				if snapshot.IPv4 != "" {
+				if isPublicMeshIP(snapshot.IPv4) {
 					info.IP = snapshot.IPv4
 				} else if snapshot.IPv6 != "" {
 					info.IP = snapshot.IPv6
@@ -324,6 +325,13 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		Stats:       stats,
 		GeneratedAt: time.Now().UTC().Unix(),
 	})
+}
+
+func isPublicMeshIP(raw string) bool {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() { return false }
+	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 { return false }
+	return true
 }
 
 // findProbeResult checks if srcNode has probed a target representing dstNode.
