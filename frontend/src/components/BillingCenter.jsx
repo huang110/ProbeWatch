@@ -523,7 +523,7 @@ export function BillingCenter({ nodes = [] }) {
                           </td>
 
                           <td className="mono">
-                            {billing.cycle === 'free' ? (
+                            {billing.cycle === 'free' || Number(billing.price) < 0 ? (
                               <span className="text-mint">免费永久</span>
                             ) : (
                               <>

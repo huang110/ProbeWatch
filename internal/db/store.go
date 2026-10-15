@@ -1421,9 +1421,8 @@ func (s *Store) GetResourceLatest(ctx context.Context, nodeID string) (time.Time
 }
 
 func (s *Store) GetResourceHistory(ctx context.Context, nodeID string, from, to time.Time, limit int) ([]ResourceHistoryRecord, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+	// A non-positive limit means all records in the requested time window.
+	// Overview uses this mode for accurate traffic deltas across long ranges.
 	fromNano := unixNano(from)
 	toNano := unixNano(to)
 	span := toNano - fromNano
@@ -1548,9 +1547,6 @@ func (s *Store) GetResourceHistoryMultiNode(ctx context.Context, nodeIDs []strin
 	if len(nodeIDs) == 0 {
 		return make(map[string][]ResourceHistoryRecord), nil
 	}
-	if limit <= 0 {
-		limit = 100
-	}
 	placeholders := make([]string, len(nodeIDs))
 	args := make([]any, 0, len(nodeIDs)+2)
 	for i, nid := range nodeIDs {
@@ -1578,7 +1574,7 @@ func (s *Store) GetResourceHistoryMultiNode(ctx context.Context, nodeIDs []strin
 		r.ReportedAt = time.Unix(0, a).UTC()
 		r.RecordedAt = time.Unix(0, b).UTC()
 		if json.Valid(r.Payload) {
-			if len(out[r.NodeID]) < limit {
+			if limit <= 0 || len(out[r.NodeID]) < limit {
 				out[r.NodeID] = append(out[r.NodeID], r)
 			}
 		}

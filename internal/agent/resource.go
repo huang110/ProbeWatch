@@ -268,7 +268,7 @@ type networkFullStats struct {
 
 func isVirtualInterface(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{"veth", "docker", "podman", "br-", "vmbr", "fwbr", "fwpr", "fwln", "vnet", "macvtap", "ipvtap", "ovs-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
+	for _, prefix := range []string{"veth", "docker", "podman", "br-", "vmbr", "fwbr", "fwpr", "fwln", "vnet", "macvtap", "ipvtap", "ovs-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "ppp", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
@@ -306,7 +306,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 			continue
 		}
 		name := strings.TrimSpace(parts[0])
-		if name == "lo" || strings.Contains(name, ".") {
+		if name == "lo" {
 			continue
 		}
 		fields := strings.Fields(parts[1])
@@ -341,7 +341,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 
 		result.interfaces = append(result.interfaces, stat)
-		if !isVirtualInterface(name) && !(hasMainEth && isDSAChildInterface(name)) {
+		if !isVirtualInterface(name) && !strings.Contains(name, ".") && !(hasMainEth && isDSAChildInterface(name)) {
 			result.rx += rx
 			result.tx += tx
 		} else if isBridgeInterface(name) {
@@ -358,7 +358,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 	}
 	if result.primaryIPv4 == "" {
-		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) && (!isVirtualInterface(stat.Name) || isBridgeInterface(stat.Name)) { result.primaryIPv4 = stat.IPv4; break } }
+		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
 	}
 	if result.primaryIPv4 == "" {
 		for _, stat := range result.interfaces { if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break } }

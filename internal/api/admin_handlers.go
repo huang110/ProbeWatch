@@ -361,6 +361,13 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		for key, value := range incomingCfg { if text, ok := value.(string); ok && strings.Contains(text, "******") { if old, exists := existingCfg[key]; exists { incomingCfg[key] = old } } }
 		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
 	}
+	if json.Unmarshal([]byte(config), &incomingCfg) == nil {
+		for key, fallback := range map[string]string{"bot_token": s.cfg.TelegramBotToken, "webhook_url": s.cfg.WebhookURL} {
+			if id != "env-telegram" && id != "env-webhook" { break }
+			if text, ok := incomingCfg[key].(string); ok && strings.Contains(text, "******") && strings.TrimSpace(fallback) != "" { incomingCfg[key] = fallback }
+		}
+		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
+	}
 	ch := db.NotificationChannel{
 		ID:        id,
 		Name:      strings.TrimSpace(req.Name),
@@ -505,6 +512,10 @@ func (s *Server) saveAlertSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, v := range body {
 		if k != "offline_grace_seconds" && k != "msg_template" { continue }
+		if k == "offline_grace_seconds" {
+			val, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil || val < 30 || val > 86400 { writeJSONError(w, http.StatusBadRequest, "offline_grace_seconds must be between 30 and 86400"); return }
+		}
 		if err := s.service.Store().SetSetting(r.Context(), k, v); err != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "failed to save settings")
 			return
@@ -635,7 +646,7 @@ func (s *Server) ackAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !fullAccess {
-		alerts, listErr := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{NodeIDs: mapKeys(allowedIDs), Limit: 1000})
+		alerts, listErr := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{NodeIDs: mapKeys(allowedIDs), Statuses: []string{db.AlertStatusOpen, db.AlertStatusAcked}, Limit: 1000})
 		if listErr != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
@@ -1035,7 +1046,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 1 query for history across all requested nodes
-	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, limit)
+	// Keep every resource sample for the selected window so traffic deltas
+	// cover the full 24h/7d/30d range rather than only the latest page.
+	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, 0)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
@@ -1112,14 +1125,14 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindMTR, db.TargetKindMediaHTTP} {
+	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS, db.TargetKindMTR, db.TargetKindMediaHTTP} {
 		records, err := s.service.Store().GetResultHistoryMultiNode(r.Context(), kind, nodeIDs, from, to, limit)
 		if err != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
 		for _, record := range records {
-			key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+		key := record.NodeID + "\x00" + record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
 			if _, exists := seenChecks[key]; exists {
 				continue
 			}
