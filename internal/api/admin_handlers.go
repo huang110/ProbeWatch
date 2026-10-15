@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/probewatch/probewatch/internal/auth"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
 	"github.com/probewatch/probewatch/internal/security"
@@ -486,6 +487,18 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+
+	fullAccess, allowedUUIDs, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+
 	q := r.URL.Query()
 	statuses := q["status"]
 	if len(statuses) == 1 && strings.Contains(statuses[0], ",") {
@@ -500,12 +513,66 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	from, to, limit, ok := parseHistoryWindow(r, time.Now().UTC())
-	if !ok {
+	from, to, limit, okHistory := parseHistoryWindow(r, time.Now().UTC())
+	if !okHistory {
 		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
 		return
 	}
-	alerts, err := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{Statuses: statuses, From: from, To: to, Limit: limit})
+
+	reqNode := q.Get("node_id")
+	if reqNode == "" {
+		reqNode = q.Get("uuid")
+	}
+
+	var targetNodeIDs []string
+	if !fullAccess {
+		if reqNode != "" {
+			resolvedID := ""
+			if _, ok := allowedIDs[reqNode]; ok {
+				resolvedID = reqNode
+			} else if _, ok := allowedUUIDs[reqNode]; ok {
+				nodes, _ := s.service.Store().ListNodes(r.Context())
+				for _, n := range nodes {
+					if n.UUID == reqNode {
+						resolvedID = n.ID
+						break
+					}
+				}
+			}
+			if resolvedID == "" {
+				writeJSON(w, http.StatusOK, make([]alertResponse, 0))
+				return
+			}
+			targetNodeIDs = []string{resolvedID}
+		} else {
+			if len(allowedIDs) == 0 {
+				writeJSON(w, http.StatusOK, make([]alertResponse, 0))
+				return
+			}
+			targetNodeIDs = make([]string, 0, len(allowedIDs))
+			for nid := range allowedIDs {
+				targetNodeIDs = append(targetNodeIDs, nid)
+			}
+		}
+	} else {
+		if reqNode != "" {
+			resolvedID := reqNode
+			if security.IsRFC4122UUID(reqNode) {
+				if node, err := s.service.Store().GetNodeByUUID(r.Context(), reqNode); err == nil {
+					resolvedID = node.ID
+				}
+			}
+			targetNodeIDs = []string{resolvedID}
+		}
+	}
+
+	alerts, err := s.service.Store().ListAlerts(r.Context(), db.AlertQuery{
+		Statuses: statuses,
+		NodeIDs:  targetNodeIDs,
+		From:     from,
+		To:       to,
+		Limit:    limit,
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
@@ -1104,6 +1171,78 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, respMap)
 }
 
+// authenticateUser resolves and validates the caller admin user, checking disabled status.
+func (s *Server) authenticateUser(w http.ResponseWriter, r *http.Request) (*db.AdminUser, bool) {
+	user, hasUser := UserFromContext(r.Context())
+	if !hasUser {
+		rawToken := auth.ExtractAPIToken(r)
+		if rawToken != "" {
+			_, caller, err := s.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+			if err != nil {
+				writeAuthenticationError(w, err)
+				return nil, false
+			}
+			user = *caller
+			hasUser = true
+		} else {
+			var err error
+			user, err = s.service.CurrentUser(r, time.Now().UTC())
+			if err != nil {
+				writeAuthenticationError(w, err)
+				return nil, false
+			}
+		}
+	}
+
+	if user.Disabled {
+		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+		return nil, false
+	}
+
+	return &user, true
+}
+
+// getUserNodeScope resolves the allowed node IDs and UUIDs for the given user.
+// When fullAccess is true, the user has unrestricted fleet access (admin or AllowedNodes == "*").
+// When fullAccess is false, allowedUUIDs and allowedIDs contain the allowed node identifiers.
+func (s *Server) getUserNodeScope(ctx context.Context, user *db.AdminUser) (fullAccess bool, allowedUUIDs map[string]struct{}, allowedIDs map[string]struct{}, err error) {
+	if user.IsAdmin() || user.AllowedNodes == "*" {
+		return true, nil, nil, nil
+	}
+
+	allowedUUIDs = make(map[string]struct{})
+	allowedIDs = make(map[string]struct{})
+
+	raw := strings.TrimSpace(user.AllowedNodes)
+	if raw == "" {
+		return false, allowedUUIDs, allowedIDs, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			allowedUUIDs[p] = struct{}{}
+		}
+	}
+	if len(allowedUUIDs) == 0 {
+		return false, allowedUUIDs, allowedIDs, nil
+	}
+
+	nodes, err := s.service.Store().ListNodes(ctx)
+	if err != nil {
+		return false, nil, nil, fmt.Errorf("list nodes for scope: %w", err)
+	}
+
+	for _, n := range nodes {
+		if _, ok := allowedUUIDs[n.UUID]; ok {
+			allowedIDs[n.ID] = struct{}{}
+		}
+	}
+
+	return false, allowedUUIDs, allowedIDs, nil
+}
+
 // authorizeNodeScope validates the node UUID format, authenticates the caller,
 // verifies the node exists, and enforces that the current user has access to the node.
 // Returns the node record and true on success, or writes the error response and returns nil, false.
@@ -1113,18 +1252,8 @@ func (s *Server) authorizeNodeScope(w http.ResponseWriter, r *http.Request, uuid
 		return nil, false
 	}
 
-	user, hasUser := UserFromContext(r.Context())
-	if !hasUser {
-		var err error
-		user, err = s.service.CurrentUser(r, time.Now().UTC())
-		if err != nil {
-			writeAuthenticationError(w, err)
-			return nil, false
-		}
-	}
-
-	if user.Disabled {
-		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
 		return nil, false
 	}
 

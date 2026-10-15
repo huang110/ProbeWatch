@@ -9,6 +9,7 @@ import (
 	"github.com/probewatch/probewatch/internal/agent"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 // eventsAgent handles batch system event reporting from edge nodes.
@@ -95,15 +96,76 @@ func (s *Server) fleetEventsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+
+	fullAccess, allowedUUIDs, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+
 	category := r.URL.Query().Get("category")
 	severity := r.URL.Query().Get("severity")
-	nodeID := r.URL.Query().Get("node_id")
+	reqNode := r.URL.Query().Get("node_id")
+	if reqNode == "" {
+		reqNode = r.URL.Query().Get("uuid")
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 
-	events, err := s.service.Store().ListSystemEvents(r.Context(), nodeID, category, severity, limit)
+	var targetNodeIDs []string
+	if !fullAccess {
+		if reqNode != "" {
+			resolvedID := ""
+			if _, ok := allowedIDs[reqNode]; ok {
+				resolvedID = reqNode
+			} else if _, ok := allowedUUIDs[reqNode]; ok {
+				nodes, _ := s.service.Store().ListNodes(r.Context())
+				for _, n := range nodes {
+					if n.UUID == reqNode {
+						resolvedID = n.ID
+						break
+					}
+				}
+			}
+			if resolvedID == "" {
+				writeJSON(w, http.StatusOK, map[string]any{"events": make([]db.SystemEventRecord, 0)})
+				return
+			}
+			targetNodeIDs = []string{resolvedID}
+		} else {
+			if len(allowedIDs) == 0 {
+				writeJSON(w, http.StatusOK, map[string]any{"events": make([]db.SystemEventRecord, 0)})
+				return
+			}
+			targetNodeIDs = make([]string, 0, len(allowedIDs))
+			for nid := range allowedIDs {
+				targetNodeIDs = append(targetNodeIDs, nid)
+			}
+		}
+	} else {
+		if reqNode != "" {
+			resolvedID := reqNode
+			if security.IsRFC4122UUID(reqNode) {
+				if node, err := s.service.Store().GetNodeByUUID(r.Context(), reqNode); err == nil {
+					resolvedID = node.ID
+				}
+			}
+			targetNodeIDs = []string{resolvedID}
+		}
+	}
+
+	var events []db.SystemEventRecord
+	if fullAccess && reqNode == "" {
+		events, err = s.service.Store().ListSystemEvents(r.Context(), "", category, severity, limit)
+	} else {
+		events, err = s.service.Store().ListSystemEventsForNodes(r.Context(), targetNodeIDs, category, severity, limit)
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "events query failed")
 		return
@@ -124,7 +186,37 @@ func (s *Server) eventsOverviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	overview, err := s.service.Store().GetSystemEventsOverview(r.Context())
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+
+	var overview *db.SystemEventsOverview
+	if fullAccess {
+		overview, err = s.service.Store().GetSystemEventsOverview(r.Context())
+	} else {
+		if len(allowedIDs) == 0 {
+			overview = &db.SystemEventsOverview{
+				TotalEvents24h:    0,
+				CriticalEvents24h: 0,
+				WarningEvents24h:  0,
+				CategoryCounts:    make(map[string]int64),
+				RecentEvents:      make([]db.SystemEventRecord, 0),
+			}
+		} else {
+			nodeIDs := make([]string, 0, len(allowedIDs))
+			for nid := range allowedIDs {
+				nodeIDs = append(nodeIDs, nid)
+			}
+			overview, err = s.service.Store().GetSystemEventsOverviewForNodes(r.Context(), nodeIDs)
+		}
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "overview unavailable")
 		return
@@ -217,32 +309,32 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 			}
 			cmdStr := strings.Join(cmdParts, " ")
 			res, err := s.terminalManager.ExecuteCommand(r.Context(), node.UUID, cmdStr, 8)
-		if err == nil {
-			var logLines []string
-			if res.Stdout != "" {
-				raw := strings.Split(res.Stdout, "\n")
-				for _, l := range raw {
-					l = strings.TrimRight(l, "\r\n")
-					if l != "" {
-						logLines = append(logLines, l)
+			if err == nil {
+				var logLines []string
+				if res.Stdout != "" {
+					raw := strings.Split(res.Stdout, "\n")
+					for _, l := range raw {
+						l = strings.TrimRight(l, "\r\n")
+						if l != "" {
+							logLines = append(logLines, l)
+						}
 					}
+				} else if res.Stderr != "" {
+					logLines = strings.Split(res.Stderr, "\n")
 				}
-			} else if res.Stderr != "" {
-				logLines = strings.Split(res.Stderr, "\n")
-			}
 
-			writeJSON(w, http.StatusOK, protocol.LogQueryResponse{
-				NodeUUID:   node.UUID,
-				NodeName:   node.Name,
-				Unit:       req.Unit,
-				LinesCount: len(logLines),
-				Lines:      logLines,
-				QueriedAt:  time.Now().Unix(),
-			})
-			return
+				writeJSON(w, http.StatusOK, protocol.LogQueryResponse{
+					NodeUUID:   node.UUID,
+					NodeName:   node.Name,
+					Unit:       req.Unit,
+					LinesCount: len(logLines),
+					Lines:      logLines,
+					QueriedAt:  time.Now().Unix(),
+				})
+				return
+			}
 		}
 	}
-}
 
 	// 2. Fallback to local system log query if running on the target node or server
 	resp, err := agent.QuerySystemLogs(r.Context(), req)

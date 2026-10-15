@@ -2254,6 +2254,7 @@ func (s *Store) ResolveAlert(ctx context.Context, nodeID string, evaluation Aler
 
 type AlertQuery struct {
 	Statuses []string
+	NodeIDs  []string
 	From     time.Time
 	To       time.Time
 	Limit    int
@@ -2263,8 +2264,11 @@ func (s *Store) ListAlerts(ctx context.Context, query AlertQuery) ([]AlertEvent,
 	if query.Limit <= 0 || query.Limit > 1000 {
 		query.Limit = 100
 	}
-	args := make([]any, 0, len(query.Statuses)+3)
-	where := make([]string, 0, 3)
+	if query.NodeIDs != nil && len(query.NodeIDs) == 0 {
+		return []AlertEvent{}, nil
+	}
+	args := make([]any, 0, len(query.Statuses)+len(query.NodeIDs)+3)
+	where := make([]string, 0, 4)
 	if len(query.Statuses) > 0 {
 		marks := make([]string, len(query.Statuses))
 		for i, status := range query.Statuses {
@@ -2272,6 +2276,14 @@ func (s *Store) ListAlerts(ctx context.Context, query AlertQuery) ([]AlertEvent,
 			args = append(args, status)
 		}
 		where = append(where, "status IN ("+strings.Join(marks, ",")+")")
+	}
+	if len(query.NodeIDs) > 0 {
+		marks := make([]string, len(query.NodeIDs))
+		for i, nid := range query.NodeIDs {
+			marks[i] = "?"
+			args = append(args, nid)
+		}
+		where = append(where, "node_id IN ("+strings.Join(marks, ",")+")")
 	}
 	if !query.From.IsZero() {
 		where = append(where, "last_seen_at >= ?")
@@ -3684,19 +3696,46 @@ func (s *Store) ListNodeContainers(ctx context.Context, nodeID string) ([]NodeCo
 }
 
 func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerOverview, error) {
+	return s.GetFleetContainerOverviewForNodes(ctx, nil)
+}
+
+func (s *Store) GetFleetContainerOverviewForNodes(ctx context.Context, nodeIDs []string) (*FleetContainerOverview, error) {
 	overview := &FleetContainerOverview{
 		TopCPUContainers:    make([]NodeContainerRecord, 0),
 		TopMemoryContainers: make([]NodeContainerRecord, 0),
 	}
 
-	row := s.db.QueryRowContext(ctx, `
+	if nodeIDs != nil && len(nodeIDs) == 0 {
+		return overview, nil
+	}
+
+	var nodeWhereWorkload string
+	var nodeWhereContainers string
+	var nodeWhereContainersWithC string
+	var inArgs []any
+	if len(nodeIDs) > 0 {
+		marks := make([]string, len(nodeIDs))
+		for i, nid := range nodeIDs {
+			marks[i] = "?"
+			inArgs = append(inArgs, nid)
+		}
+		inClause := strings.Join(marks, ",")
+		nodeWhereWorkload = "WHERE node_id IN (" + inClause + ")"
+		nodeWhereContainers = "AND node_id IN (" + inClause + ")"
+		nodeWhereContainersWithC = "AND c.node_id IN (" + inClause + ")"
+	}
+
+	workloadQuery := fmt.Sprintf(`
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN docker_available = 1 THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(containers_total), 0),
 		       COALESCE(SUM(containers_running), 0),
 		       COALESCE(SUM(containers_stopped), 0)
-		FROM node_workload_latest;
-	`)
+		FROM node_workload_latest
+		%s;
+	`, nodeWhereWorkload)
+
+	row := s.db.QueryRowContext(ctx, workloadQuery, inArgs...)
 	if err := row.Scan(
 		&overview.TotalNodes,
 		&overview.NodesWithDocker,
@@ -3707,22 +3746,26 @@ func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerO
 		return nil, err
 	}
 
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM node_containers_latest WHERE health = 'unhealthy';
-	`).Scan(&overview.UnhealthyContainers); err != nil {
+	unhealthyQuery := fmt.Sprintf(`
+		SELECT COUNT(*) FROM node_containers_latest WHERE health = 'unhealthy' %s;
+	`, nodeWhereContainers)
+
+	if err := s.db.QueryRowContext(ctx, unhealthyQuery, inArgs...).Scan(&overview.UnhealthyContainers); err != nil {
 		return nil, err
 	}
 
-	cpuRows, err := s.db.QueryContext(ctx, `
+	cpuQuery := fmt.Sprintf(`
 		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
 		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
 		       c.block_read_bytes, c.block_write_bytes, c.pids, c.ports, c.reported_at
 		FROM node_containers_latest c
 		LEFT JOIN nodes n ON n.id = c.node_id
-		WHERE c.state = 'running'
+		WHERE c.state = 'running' %s
 		ORDER BY c.cpu_percent DESC
 		LIMIT 10;
-	`)
+	`, nodeWhereContainersWithC)
+
+	cpuRows, err := s.db.QueryContext(ctx, cpuQuery, inArgs...)
 	if err == nil {
 		defer cpuRows.Close()
 		for cpuRows.Next() {
@@ -3743,16 +3786,18 @@ func (s *Store) GetFleetContainerOverview(ctx context.Context) (*FleetContainerO
 		}
 	}
 
-	memRows, err := s.db.QueryContext(ctx, `
+	memQuery := fmt.Sprintf(`
 		SELECT c.node_id, COALESCE(n.name, c.node_id), c.container_id, c.name, c.image, c.state, c.status, c.health,
 		       c.cpu_percent, c.mem_usage_bytes, c.mem_limit_bytes, c.mem_percent, c.net_rx_bytes, c.net_tx_bytes,
 		       c.block_read_bytes, c.block_write_bytes, c.pids, c.ports, c.reported_at
 		FROM node_containers_latest c
 		LEFT JOIN nodes n ON n.id = c.node_id
-		WHERE c.state = 'running'
+		WHERE c.state = 'running' %s
 		ORDER BY c.mem_usage_bytes DESC
 		LIMIT 10;
-	`)
+	`, nodeWhereContainersWithC)
+
+	memRows, err := s.db.QueryContext(ctx, memQuery, inArgs...)
 	if err == nil {
 		defer memRows.Close()
 		for memRows.Next() {
@@ -3856,17 +3901,37 @@ func (s *Store) SaveSystemEvents(ctx context.Context, nodeID string, events []pr
 }
 
 func (s *Store) ListSystemEvents(ctx context.Context, nodeID string, category string, severity string, limit int) ([]SystemEventRecord, error) {
+	var nodeIDs []string
+	if nodeID != "" {
+		nodeIDs = []string{nodeID}
+	}
+	return s.ListSystemEventsForNodes(ctx, nodeIDs, category, severity, limit)
+}
+
+func (s *Store) ListSystemEventsForNodes(ctx context.Context, nodeIDs []string, category string, severity string, limit int) ([]SystemEventRecord, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+
+	if nodeIDs != nil && len(nodeIDs) == 0 {
+		return []SystemEventRecord{}, nil
 	}
 
 	var where []string
 	var args []any
 
-	if nodeID != "" {
+	if len(nodeIDs) == 1 {
 		where = append(where, "e.node_id = ?")
-		args = append(args, nodeID)
+		args = append(args, nodeIDs[0])
+	} else if len(nodeIDs) > 1 {
+		marks := make([]string, len(nodeIDs))
+		for i, nid := range nodeIDs {
+			marks[i] = "?"
+			args = append(args, nid)
+		}
+		where = append(where, "e.node_id IN ("+strings.Join(marks, ",")+")")
 	}
+
 	if category != "" {
 		where = append(where, "e.category = ?")
 		args = append(args, category)
@@ -3917,29 +3982,51 @@ func (s *Store) ListSystemEvents(ctx context.Context, nodeID string, category st
 }
 
 func (s *Store) GetSystemEventsOverview(ctx context.Context) (*SystemEventsOverview, error) {
+	return s.GetSystemEventsOverviewForNodes(ctx, nil)
+}
+
+func (s *Store) GetSystemEventsOverviewForNodes(ctx context.Context, nodeIDs []string) (*SystemEventsOverview, error) {
 	overview := &SystemEventsOverview{
 		CategoryCounts: make(map[string]int64),
 		RecentEvents:   make([]SystemEventRecord, 0),
 	}
 
+	if nodeIDs != nil && len(nodeIDs) == 0 {
+		return overview, nil
+	}
+
 	cutoff24h := time.Now().Add(-24 * time.Hour).Unix()
 
-	row := s.db.QueryRowContext(ctx, `
+	var nodeWhere string
+	var inArgs []any
+	inArgs = append(inArgs, cutoff24h)
+	if len(nodeIDs) > 0 {
+		marks := make([]string, len(nodeIDs))
+		for i, nid := range nodeIDs {
+			marks[i] = "?"
+			inArgs = append(inArgs, nid)
+		}
+		nodeWhere = "AND node_id IN (" + strings.Join(marks, ",") + ")"
+	}
+
+	queryRow := fmt.Sprintf(`
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END), 0)
 		FROM system_events_history
-		WHERE occurred_at >= ?;
-	`, cutoff24h)
+		WHERE occurred_at >= ? %s;
+	`, nodeWhere)
+	row := s.db.QueryRowContext(ctx, queryRow, inArgs...)
 	_ = row.Scan(&overview.TotalEvents24h, &overview.CriticalEvents24h, &overview.WarningEvents24h)
 
-	catRows, err := s.db.QueryContext(ctx, `
+	catQuery := fmt.Sprintf(`
 		SELECT category, COUNT(*)
 		FROM system_events_history
-		WHERE occurred_at >= ?
+		WHERE occurred_at >= ? %s
 		GROUP BY category;
-	`, cutoff24h)
+	`, nodeWhere)
+	catRows, err := s.db.QueryContext(ctx, catQuery, inArgs...)
 	if err == nil {
 		defer catRows.Close()
 		for catRows.Next() {
@@ -3951,7 +4038,7 @@ func (s *Store) GetSystemEventsOverview(ctx context.Context) (*SystemEventsOverv
 		}
 	}
 
-	recent, err := s.ListSystemEvents(ctx, "", "", "", 15)
+	recent, err := s.ListSystemEventsForNodes(ctx, nodeIDs, "", "", 15)
 	if err == nil {
 		overview.RecentEvents = recent
 	}

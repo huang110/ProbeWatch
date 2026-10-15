@@ -47,8 +47,11 @@ type UpdateUserInput struct {
 
 // CanAccessNode returns whether the user has permission to view/operate on a given node UUID.
 func (u AdminUser) CanAccessNode(nodeUUID string) bool {
-	if u.Role == RoleAdmin || u.AllowedNodes == "*" || strings.TrimSpace(u.AllowedNodes) == "" {
+	if u.Role == RoleAdmin || u.AllowedNodes == "*" {
 		return true
+	}
+	if strings.TrimSpace(u.AllowedNodes) == "" {
+		return false
 	}
 	parts := strings.Split(u.AllowedNodes, ",")
 	for _, p := range parts {
@@ -239,9 +242,6 @@ func (s *Store) UpdateAdminUser(ctx context.Context, id string, input UpdateUser
 	allowedNodes := current.AllowedNodes
 	if input.AllowedNodes != nil {
 		allowedNodes = strings.TrimSpace(*input.AllowedNodes)
-		if allowedNodes == "" {
-			allowedNodes = "*"
-		}
 	}
 	disabled := current.Disabled
 	if input.Disabled != nil {

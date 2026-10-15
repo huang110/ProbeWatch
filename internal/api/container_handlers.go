@@ -66,15 +66,15 @@ func (s *Server) getNodeContainers(w http.ResponseWriter, r *http.Request, uuid 
 	workload, _ := s.service.Store().GetNodeWorkload(r.Context(), node.ID)
 
 	response := map[string]any{
-		"node_id":         node.ID,
-		"node_uuid":       node.UUID,
-		"node_name":       node.Name,
-		"docker_available": false,
-		"docker_version":   "",
-		"containers_total": 0,
+		"node_id":            node.ID,
+		"node_uuid":          node.UUID,
+		"node_name":          node.Name,
+		"docker_available":   false,
+		"docker_version":     "",
+		"containers_total":   0,
 		"containers_running": 0,
 		"containers_stopped": 0,
-		"containers":      containers,
+		"containers":         containers,
 	}
 
 	if workload != nil {
@@ -131,7 +131,35 @@ func (s *Server) fleetContainerOverviewHandler(w http.ResponseWriter, r *http.Re
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	overview, err := s.service.Store().GetFleetContainerOverview(r.Context())
+
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+
+	var overview *db.FleetContainerOverview
+	if fullAccess {
+		overview, err = s.service.Store().GetFleetContainerOverview(r.Context())
+	} else {
+		if len(allowedIDs) == 0 {
+			overview = &db.FleetContainerOverview{
+				TopCPUContainers:    make([]db.NodeContainerRecord, 0),
+				TopMemoryContainers: make([]db.NodeContainerRecord, 0),
+			}
+		} else {
+			nodeIDs := make([]string, 0, len(allowedIDs))
+			for nid := range allowedIDs {
+				nodeIDs = append(nodeIDs, nid)
+			}
+			overview, err = s.service.Store().GetFleetContainerOverviewForNodes(r.Context(), nodeIDs)
+		}
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "fleet overview unavailable")
 		return

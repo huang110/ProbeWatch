@@ -129,17 +129,62 @@ func (s *AIService) ValidateMCPToken(ctx context.Context, token string) bool {
 }
 
 func (s *AIService) RunDiagnosis(ctx context.Context) (*DiagnosisReport, error) {
-	nodes, err := s.store.ListNodes(ctx)
+	return s.RunDiagnosisForNodes(ctx, nil)
+}
+
+func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map[string]struct{}) (*DiagnosisReport, error) {
+	allNodes, err := s.store.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list nodes: %w", err)
 	}
 
+	nodes := make([]db.Node, 0, len(allNodes))
+	if allowedNodeIDs == nil {
+		nodes = allNodes
+	} else {
+		for _, n := range allNodes {
+			if _, ok := allowedNodeIDs[n.ID]; ok {
+				nodes = append(nodes, n)
+			}
+		}
+	}
+
+	now := time.Now().UTC()
+	if allowedNodeIDs != nil && len(nodes) == 0 {
+		rep := &DiagnosisReport{
+			GeneratedAt:  now.Unix(),
+			HealthScore:  100,
+			HealthStatus: "HEALTHY",
+			Summary: DiagnosisSummary{
+				TotalNodes:   0,
+				ActiveAlerts: 0,
+			},
+			Findings: make([]Finding, 0),
+			CostAudit: CostAuditSummary{
+				Currency:      "CNY",
+				ExpiringNodes: make([]ExpiringNodeAudit, 0),
+				QuotaWarnings: make([]QuotaWarning, 0),
+				IdleNodes:     make([]IdleNodeAudit, 0),
+			},
+		}
+		rep.MarkdownReport = GenerateMarkdownSummary(rep)
+		return rep, nil
+	}
+
+	var alertNodeIDs []string
+	if allowedNodeIDs != nil {
+		alertNodeIDs = make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			alertNodeIDs = append(alertNodeIDs, n.ID)
+		}
+	}
+
 	alerts, _ := s.store.ListAlerts(ctx, db.AlertQuery{
 		Statuses: []string{"open"},
+		NodeIDs:  alertNodeIDs,
 		Limit:    100,
 	})
 
-	now := time.Now().UTC()
 	rep := &DiagnosisReport{
 		GeneratedAt: now.Unix(),
 		Summary: DiagnosisSummary{
@@ -147,7 +192,10 @@ func (s *AIService) RunDiagnosis(ctx context.Context) (*DiagnosisReport, error) 
 			ActiveAlerts: len(alerts),
 		},
 		CostAudit: CostAuditSummary{
-			Currency: "CNY",
+			Currency:      "CNY",
+			ExpiringNodes: make([]ExpiringNodeAudit, 0),
+			QuotaWarnings: make([]QuotaWarning, 0),
+			IdleNodes:     make([]IdleNodeAudit, 0),
 		},
 	}
 

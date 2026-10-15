@@ -16,12 +16,28 @@ func (s *Server) aiDiagnose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+
 	if s.aiService == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service not initialized"})
 		return
 	}
 
-	report, err := s.aiService.RunDiagnosis(r.Context())
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
+
+	var report *ai.DiagnosisReport
+	if fullAccess {
+		report, err = s.aiService.RunDiagnosis(r.Context())
+	} else {
+		report, err = s.aiService.RunDiagnosisForNodes(r.Context(), allowedIDs)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to run diagnosis: %v", err)})
 		return
