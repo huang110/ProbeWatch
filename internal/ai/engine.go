@@ -27,7 +27,13 @@ type AIService struct {
 }
 
 var billingCurrencyRatesCNY = map[string]float64{
-	"CNY": 1, "RMB": 1, "USD": 7.20, "EUR": 7.85, "GBP": 9.30, "CAD": 5.20, "HKD": 0.92, "JPY": 0.048,
+	"CNY": 1, "RMB": 1, "¥": 1, "￥": 1,
+	"USD": 7.20, "$": 7.20, "US$": 7.20,
+	"EUR": 7.85, "€": 7.85,
+	"GBP": 9.30, "£": 9.30,
+	"CAD": 5.20, "C$": 5.20, "CA$": 5.20,
+	"HKD": 0.92, "HK$": 0.92,
+	"JPY": 0.048, "JP¥": 0.048, "円": 0.048,
 }
 
 func billingPriceToCNY(amount float64, currency string) float64 {

@@ -243,10 +243,13 @@ func getInterfaceIPs() map[string]ifaceIPs {
 			if ip == nil || ip.IsLoopback() {
 				continue
 			}
-			if ipv4 := ip.To4(); ipv4 != nil && v4 == "" {
-				v4 = ipv4.String()
+			if ipv4 := ip.To4(); ipv4 != nil {
+				candidate := ipv4.String()
+				if v4 == "" || (!isPublicIP(v4) && isPublicIP(candidate)) {
+					v4 = candidate
+				}
 			} else if ip.To16() != nil && v6 == "" {
-				if ip.IsGlobalUnicast() && !strings.HasPrefix(ip.String(), "fe80:") {
+				if ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() {
 					v6 = ip.String()
 				}
 			}
@@ -333,7 +336,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		if result.primaryIPv4 == "" && stat.IPv4 != "" && isPublicIP(stat.IPv4) {
 			result.primaryIPv4 = stat.IPv4
 		}
-		if result.primaryIPv6 == "" && stat.IPv6 != "" {
+		if result.primaryIPv6 == "" && stat.IPv6 != "" && !isVirtualInterface(name) && isPublicIP(stat.IPv6) {
 			result.primaryIPv6 = stat.IPv6
 		}
 	}

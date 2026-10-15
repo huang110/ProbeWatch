@@ -114,16 +114,10 @@ export function BillingCenter({ nodes = [] }) {
     // 12 months array (0 to 11)
     const months = Array.from({ length: 12 }, (_, i) => {
       const mStr = String(i + 1).padStart(2, '0')
-      // Base monthly cost + projected renewals occurring in this month
+      // Amortized monthly view: each month uses the same normalized total.
+      // Renewal dates are shown separately in node details and must not be
+      // added again, otherwise annualCostCNY is double-counted.
       let amountCNY = totalMonthlyCostCNY
-      portfolio.forEach((p) => {
-        if (p.billing.dueDate) {
-          const d = new Date(p.billing.dueDate)
-          if (!isNaN(d.getTime()) && d.getMonth() === i) {
-            amountCNY += p.calc.annualCostCNY
-          }
-        }
-      })
       // Ensure positive values matching realistic curves
       const conv = convertCNYToCurrency(amountCNY, currency)
       return {

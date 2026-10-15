@@ -248,11 +248,13 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 	for _, ev := range overview.RecentEvents {
 		title := "系统状态异常"
 		switch ev.Category {
-		case "security":
-			title = "安全事件拦截"
+		case "ssh_auth", "security":
+			title = "安全登录鉴权拦截"
+		case "oom":
+			title = "内存保护触发 (OOM)"
 		case "kernel":
 			title = "内核保护事件"
-		case "system":
+		case "service", "system":
 			title = "系统服务状态异常"
 		}
 		sanitizedRecent = append(sanitizedRecent, map[string]any{
