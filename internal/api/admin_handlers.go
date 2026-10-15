@@ -344,7 +344,7 @@ func (s *Server) createNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusServiceUnavailable, "failed to save channel")
 		return
 	}
-	writeJSON(w, http.StatusCreated, ch)
+	writeJSON(w, http.StatusCreated, maskNotificationChannel(ch))
 }
 
 func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
@@ -355,7 +355,11 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 	}
 	existing, _ := s.service.Store().GetNotificationChannel(r.Context(), id)
 	config := req.Config
-	if strings.Contains(config, "******") && existing.Config != "" { config = existing.Config }
+	var incomingCfg, existingCfg map[string]any
+	if json.Unmarshal([]byte(config), &incomingCfg) == nil && json.Unmarshal([]byte(existing.Config), &existingCfg) == nil {
+		for key, value := range incomingCfg { if text, ok := value.(string); ok && strings.Contains(text, "******") { if old, exists := existingCfg[key]; exists { incomingCfg[key] = old } } }
+		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
+	}
 	ch := db.NotificationChannel{
 		ID:        id,
 		Name:      strings.TrimSpace(req.Name),
@@ -369,7 +373,7 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusServiceUnavailable, "failed to update channel")
 		return
 	}
-	writeJSON(w, http.StatusOK, ch)
+	writeJSON(w, http.StatusOK, maskNotificationChannel(ch))
 }
 
 func (s *Server) deleteNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {

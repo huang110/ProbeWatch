@@ -120,7 +120,8 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 
 	// 1. Version check
 	version := "unknown"
-	vResp, err := client.Get("http://localhost/v1.24/version")
+	vResp, err := client.Get("http://localhost/version")
+	if err == nil && vResp.StatusCode != http.StatusOK { vResp.Body.Close(); vResp, err = client.Get("http://localhost/v1.24/version") }
 	if err != nil {
 		return false, "", nil, nil
 	}
@@ -129,11 +130,12 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 		var ver dockerEngineVersion
 		if err := json.NewDecoder(io.LimitReader(vResp.Body, 64*1024)).Decode(&ver); err == nil && ver.Version != "" {
 			version = ver.Version
-		}
+		} else { vResp.Body.Close(); vResp, err = client.Get("http://localhost/v1.24/version"); if err == nil { defer vResp.Body.Close(); _ = json.NewDecoder(io.LimitReader(vResp.Body, 64*1024)).Decode(&ver); if ver.Version != "" { version = ver.Version } } }
 	}
 
 	// 2. Container list
-	cResp, err := client.Get("http://localhost/v1.24/containers/json?all=1")
+	cResp, err := client.Get("http://localhost/containers/json?all=1")
+	if err == nil && cResp.StatusCode != http.StatusOK { cResp.Body.Close(); cResp, err = client.Get("http://localhost/v1.24/containers/json?all=1") }
 	if err != nil {
 		return true, version, nil, fmt.Errorf("list docker containers: %w", err)
 	}
@@ -145,7 +147,11 @@ func CollectDockerWorkloadFromSocket(sockPath string) (bool, string, []protocol.
 
 	var rawList []dockerContainerListItem
 	if err := json.NewDecoder(io.LimitReader(cResp.Body, 1<<20)).Decode(&rawList); err != nil {
-		return true, version, nil, fmt.Errorf("decode containers list: %w", err)
+		cResp.Body.Close()
+		legacy, legacyErr := client.Get("http://localhost/v1.24/containers/json?all=1")
+		if legacyErr != nil { return true, version, nil, fmt.Errorf("decode containers list: %w", err) }
+		defer legacy.Body.Close()
+		if decodeErr := json.NewDecoder(io.LimitReader(legacy.Body, 1<<20)).Decode(&rawList); decodeErr != nil { return true, version, nil, fmt.Errorf("decode containers list: %w", err) }
 	}
 
 	if len(rawList) > maxScannedContainers {
@@ -249,7 +255,7 @@ func fetchContainerStats(client *http.Client, containerID string) (*dockerContai
 }
 
 func fetchContainerStatsWithContext(ctx context.Context, client *http.Client, containerID string) (*dockerContainerStats, error) {
-	url := fmt.Sprintf("http://localhost/v1.24/containers/%s/stats?stream=false", containerID)
+	url := fmt.Sprintf("http://localhost/containers/%s/stats?stream=false", containerID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -257,6 +263,14 @@ func fetchContainerStatsWithContext(ctx context.Context, client *http.Client, co
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		legacyURL := fmt.Sprintf("http://localhost/v1.24/containers/%s/stats?stream=false", containerID)
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, legacyURL, nil)
+		if err != nil { return nil, err }
+		resp, err = client.Do(req)
+		if err != nil { return nil, err }
 	}
 	defer resp.Body.Close()
 

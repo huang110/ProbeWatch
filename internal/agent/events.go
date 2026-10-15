@@ -119,6 +119,16 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 		}
 	}
 	if len(lines) == 0 {
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 3*time.Second)
+		fallback := exec.CommandContext(fallbackCtx, "dmesg")
+		if stdout, err := fallback.StdoutPipe(); err == nil && fallback.Start() == nil {
+			scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
+			for scanner.Scan() { lines = append(lines, scanner.Text()); if len(lines) > 200 { lines = lines[len(lines)-200:] } }
+			_ = fallback.Wait()
+		}
+		fallbackCancel()
+	}
+	if len(lines) == 0 {
 		// Fallback: check /var/log/kern.log or /var/log/messages
 		lines = readLogTail("/var/log/kern.log", 150)
 		if len(lines) == 0 {

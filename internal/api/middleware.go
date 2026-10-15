@@ -119,9 +119,10 @@ func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handle
 				rawToken := auth.ExtractAPIToken(r)
 				var err error
 				if rawToken != "" {
-					_, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+					tokenRecord, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
 					err = tokenErr
 					if caller != nil { user = *caller }
+					if err == nil && tokenRecord != nil { r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true)) }
 				} else {
 					user, err = m.service.CurrentUser(r, time.Now().UTC())
 				}
@@ -169,9 +170,10 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			rawToken := auth.ExtractAPIToken(r)
 			var err error
 			if rawToken != "" {
-				_, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+					tokenRecord, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
 				err = tokenErr
 				if caller != nil { user = *caller }
+					if err == nil && tokenRecord != nil { r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true)) }
 			} else {
 				user, err = m.service.CurrentUser(r, time.Now().UTC())
 			}
@@ -193,6 +195,7 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusForbidden, "viewer role is read-only")
 			return
 		}
+		if tok, ok := TokenFromContext(r.Context()); ok && !tokenAllowsWrite(tok.Scopes) { writeJSONError(w, http.StatusForbidden, "api token lacks write scope"); return }
 		if m.cfg.MaxRequestBody > 0 {
 			body, err := io.ReadAll(io.LimitReader(r.Body, m.cfg.MaxRequestBody+1))
 			if err != nil {
@@ -244,6 +247,12 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 		}
 		buffered.commit(w)
 	})
+}
+
+func tokenAllowsWrite(scopes string) bool {
+	if strings.TrimSpace(scopes) == "" || strings.TrimSpace(scopes) == "*" { return true }
+	for _, scope := range strings.Split(scopes, ",") { scope = strings.TrimSpace(scope); if scope == "write" || scope == "write:*" || strings.HasPrefix(scope, "write:") { return true } }
+	return false
 }
 
 func writeAuthenticationError(w http.ResponseWriter, err error) {

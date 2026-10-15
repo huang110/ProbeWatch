@@ -812,7 +812,7 @@ export function AlertCenterView({
                           ) : (
                             subscribedEvents.map((ev) => (
                               <span key={ev} className="badge badge-subtle text-xs mono">
-                                {ev === 'node' ? '节点离线' : ev === 'resource' ? '资源负载' : ev === 'network' ? '网络质量' : ev === 'mtr' ? 'MTR路由' : ev === 'media' ? '流媒体' : ev}
+                                {ev === 'node' ? '节点离线' : ev === 'resource' ? '资源负载' : ev === 'network' ? '网络质量' : ev === 'mtr' ? 'MTR路由' : ev === 'media' ? '流媒体' : ev === 'ipqa' ? 'IP质量' : ev === 'traffic' ? '流量限额' : ev === 'billing' ? '账单到期' : ev}
                               </span>
                             ))
                           )}
