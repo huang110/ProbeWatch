@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/security"
 )
 
