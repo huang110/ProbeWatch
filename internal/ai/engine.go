@@ -346,6 +346,9 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 						if daysLeft <= 3 {
 							sev = SeverityCritical
 						}
+						if billingInfo.AutoRenew {
+							sev = SeverityInfo
+						}
 						findings = append(findings, Finding{
 							ID:             fmt.Sprintf("expiry-%s", node.ID),
 							Category:       CategoryCost,

@@ -31,11 +31,15 @@ func (s *Server) putNodeBilling(w http.ResponseWriter, r *http.Request, uuid str
 		return
 	}
 
-	var req db.NodeBillingSettings
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := s.service.Store().GetNodeBillingSettings(r.Context(), node.ID)
+	if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "failed to load billing settings"); return }
+	var body map[string]json.RawMessage
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &body); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	encoded, _ := json.Marshal(body)
+	if err := json.Unmarshal(encoded, &req); err != nil { writeJSONError(w, http.StatusBadRequest, "invalid request body"); return }
 	req.NodeID = node.ID
 
 	if err := s.service.Store().UpsertNodeBillingSettings(r.Context(), req); err != nil {

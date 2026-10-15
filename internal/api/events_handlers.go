@@ -352,13 +352,5 @@ func (s *Server) queryNodeLogs(w http.ResponseWriter, r *http.Request, uuid stri
 		}
 	}
 
-	// 2. Fallback to local system log query if running on the target node or server
-	resp, err := agent.QuerySystemLogs(r.Context(), req)
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "log query failed: "+err.Error())
-		return
-	}
-	resp.NodeName = node.Name
-
-	writeJSON(w, http.StatusOK, resp)
+	writeJSONError(w, http.StatusServiceUnavailable, "该节点未开启远程终端通道或当前离线，无法实时拉取远端日志")
 }

@@ -147,7 +147,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	if cleanPath == "/api/alerts/channels" {
 		switch r.Method {
 		case http.MethodGet:
-			s.listNotificationChannels(w, r)
+			mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.listNotificationChannels)).ServeHTTP(w, r)
 		case http.MethodPost:
 			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createNotificationChannel))).ServeHTTP(w, r)
 		default:
@@ -203,7 +203,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	if cleanPath == "/api/alerts/settings" {
 		switch r.Method {
 		case http.MethodGet:
-			s.getAlertSettings(w, r)
+			mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.getAlertSettings)).ServeHTTP(w, r)
 		case http.MethodPost, http.MethodPut:
 			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.saveAlertSettings))).ServeHTTP(w, r)
 		default:
@@ -216,9 +216,10 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsRoute(w http.ResponseWriter, r *http.Request) {
+	mw := NewMiddleware(s.service, s.cfg)
 	switch r.Method {
 	case http.MethodGet:
-		s.getAlertSettings(w, r)
+		mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.getAlertSettings)).ServeHTTP(w, r)
 	case http.MethodPost, http.MethodPut:
 		mw := NewMiddleware(s.service, s.cfg)
 		mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.saveAlertSettings))).ServeHTTP(w, r)
@@ -465,14 +466,16 @@ func (s *Server) testNotificationDirect(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.service.Store().GetAllSettings(r.Context())
+	all, err := s.service.Store().GetAllSettings(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
-	if _, ok := settings["offline_grace_seconds"]; !ok {
-		settings["offline_grace_seconds"] = "180"
+	settings := map[string]string{}
+	for _, key := range []string{"offline_grace_seconds", "msg_template"} {
+		if value, ok := all[key]; ok { settings[key] = value }
 	}
+	if _, ok := settings["offline_grace_seconds"]; !ok { settings["offline_grace_seconds"] = "180" }
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -483,6 +486,7 @@ func (s *Server) saveAlertSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k, v := range body {
+		if k != "offline_grace_seconds" && k != "msg_template" { continue }
 		if err := s.service.Store().SetSetting(r.Context(), k, v); err != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "failed to save settings")
 			return

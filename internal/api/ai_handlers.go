@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/probewatch/probewatch/internal/ai"
+	"github.com/probewatch/probewatch/internal/db"
 )
 
 func (s *Server) aiDiagnose(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +93,8 @@ func (s *Server) aiSettingsRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mw := NewMiddleware(s.service, s.cfg)
+	handler := func(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		settings, err := s.aiService.GetAISettings(r.Context())
@@ -129,6 +132,8 @@ func (s *Server) aiSettingsRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+	}
+	mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(handler)).ServeHTTP(w, r)
 }
 
 func (s *Server) aiMCPTokenRegenerate(w http.ResponseWriter, r *http.Request) {

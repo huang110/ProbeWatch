@@ -173,11 +173,8 @@ func (s *Server) postNodeIPQASync(w http.ResponseWriter, r *http.Request, uuid s
 	if !ok {
 		return
 	}
-	user, err := s.service.CurrentUser(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
-	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
 
 	// Cooldown check to prevent sync abuse
 	ipqaCooldownMu.Lock()
@@ -225,11 +222,8 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 	if !ok {
 		return
 	}
-	user, err := s.service.CurrentUser(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
-	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
 
 	var req testIPQARequest
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024*32)).Decode(&req)

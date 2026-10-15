@@ -268,7 +268,7 @@ type networkFullStats struct {
 
 func isVirtualInterface(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{"veth", "docker", "podman", "br-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
+	for _, prefix := range []string{"veth", "docker", "podman", "br-", "vmbr", "fwbr", "fwpr", "fwln", "vnet", "macvtap", "ipvtap", "ovs-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
 		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
@@ -345,6 +345,12 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		for _, stat := range result.interfaces {
 			if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break }
 		}
+	}
+	if result.primaryIPv4 == "" {
+		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
+	}
+	if result.primaryIPv6 == "" {
+		for _, stat := range result.interfaces { if stat.IPv6 != "" && isPublicIP(stat.IPv6) { result.primaryIPv6 = stat.IPv6; break } }
 	}
 	if !found {
 		return networkFullStats{}, fmt.Errorf("no network interfaces")

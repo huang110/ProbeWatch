@@ -74,9 +74,7 @@ func (s *Server) createAlertSilence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actor := "admin"
-	if session, err := s.service.AuthenticateWithError(r, time.Now().UTC()); err == nil && session.AdminUserID != "" {
-		actor = session.AdminUserID
-	}
+	if user, ok := s.authenticateUser(w, r); ok { actor = user.ID } else { return }
 
 	silence := db.AlertSilence{
 		ID:          id,
