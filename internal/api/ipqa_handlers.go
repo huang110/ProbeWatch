@@ -20,7 +20,10 @@ var (
 	ipqaLastSync     = make(map[string]time.Time)
 	ipqaLastNotify   = make(map[string]time.Time)
 	ipqaNotifiedKeys = make(map[string]struct{})
+	ipqaLastArchive  = make(map[string]ipqaArchiveStamp)
 )
+
+type ipqaArchiveStamp struct { date string; checkedAt int64 }
 
 const (
 	ipqaSyncCooldown   = 5 * time.Second
@@ -299,6 +302,12 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 	if ipqa == nil || !ipqa.Enabled || !ipqa.Installed {
 		return
 	}
+	stamp := ipqaArchiveStamp{date: ipqa.LatestArchiveDate, checkedAt: ipqa.LastCheckedAt}
+	ipqaCooldownMu.Lock()
+	previous, unchanged := ipqaLastArchive[node.ID]
+	if unchanged && previous == stamp { ipqaCooldownMu.Unlock(); return }
+	ipqaLastArchive[node.ID] = stamp
+	ipqaCooldownMu.Unlock()
 
 	// 1. Persist IPv4 archive
 	if ipqa.LatestArchiveDate != "" && ipqa.IPv4 != nil {

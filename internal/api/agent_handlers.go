@@ -72,6 +72,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusConflict, "node identity conflict")
 		return
 	}
+	validResults := make([]protocol.CheckResult, 0, len(request.Results))
 	for _, result := range request.Results {
 		if err := checkResultTimestamp(result, now, maxOutboxAgeForReports(s.agentClockSkew())); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid report")
@@ -81,14 +82,15 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) { continue }
 			writeTargetBindingError(w, err); return
 		}
+		validResults = append(validResults, result)
 	}
 	resourcePayload, err := json.Marshal(request.Resource)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
-	results := make([]db.AgentResultInput, 0, len(request.Results))
-	for _, result := range request.Results {
+	results := make([]db.AgentResultInput, 0, len(validResults))
+	for _, result := range validResults {
 		input, err := agentResultInput(result, now)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid report")
