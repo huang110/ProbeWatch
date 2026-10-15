@@ -342,12 +342,10 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 	}
 	if result.primaryIPv4 == "" {
-		for _, stat := range result.interfaces {
-			if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break }
-		}
+		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
 	}
 	if result.primaryIPv4 == "" {
-		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
+		for _, stat := range result.interfaces { if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break } }
 	}
 	if result.primaryIPv6 == "" {
 		for _, stat := range result.interfaces { if stat.IPv6 != "" && isPublicIP(stat.IPv6) { result.primaryIPv6 = stat.IPv6; break } }

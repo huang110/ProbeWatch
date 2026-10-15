@@ -551,8 +551,10 @@ export function BillingCenter({ nodes = [] }) {
                           <td>
                             <div className="mono">{billing.dueDate || '长期有效'}</div>
                             <div className="cost-node-sub">
-                              {calc.daysRemaining <= 0 ? (
+                              {calc.daysRemaining < 0 ? (
                                 <span className="text-rose font-bold">已逾期</span>
+                              ) : calc.daysRemaining === 0 ? (
+                                <span className="text-amber font-bold">今日到期</span>
                               ) : calc.daysRemaining > 3650 ? (
                                 <span className="text-mint">长期有效</span>
                               ) : (

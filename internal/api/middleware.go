@@ -116,8 +116,15 @@ func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user, ok := UserFromContext(r.Context())
 			if !ok {
+				rawToken := auth.ExtractAPIToken(r)
 				var err error
-				user, err = m.service.CurrentUser(r, time.Now().UTC())
+				if rawToken != "" {
+					_, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+					err = tokenErr
+					if caller != nil { user = *caller }
+				} else {
+					user, err = m.service.CurrentUser(r, time.Now().UTC())
+				}
 				if err != nil {
 					writeAuthenticationError(w, err)
 					return
@@ -159,8 +166,15 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 
 		user, ok := UserFromContext(r.Context())
 		if !ok {
+			rawToken := auth.ExtractAPIToken(r)
 			var err error
-			user, err = m.service.CurrentUser(r, time.Now().UTC())
+			if rawToken != "" {
+				_, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+				err = tokenErr
+				if caller != nil { user = *caller }
+			} else {
+				user, err = m.service.CurrentUser(r, time.Now().UTC())
+			}
 			if err != nil {
 				writeAuthenticationError(w, err)
 				return

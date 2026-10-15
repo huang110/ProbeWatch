@@ -89,7 +89,7 @@ export function AlertCenterView({
   const [formBarkKey, setFormBarkKey] = useState('')
   const [formBarkServer, setFormBarkServer] = useState('https://api.day.app')
   const [formWebhookUrl, setFormWebhookUrl] = useState('')
-  const [formEvents, setFormEvents] = useState(['node', 'resource', 'network', 'mtr', 'traffic', 'billing'])
+  const [formEvents, setFormEvents] = useState(['node', 'resource', 'network', 'mtr', 'media', 'ipqa', 'traffic', 'billing'])
 
   // 2. 离线通知设置相关状态
   const [offlineSearch, setOfflineSearch] = useState('')
@@ -1015,6 +1015,7 @@ export function AlertCenterView({
                     { id: 'network', label: '网络丢包与延迟' },
                     { id: 'mtr', label: 'MTR 路由拓扑' },
                     { id: 'media', label: '流媒体/AI 解锁' },
+                    { id: 'ipqa', label: 'IP 质量告警' },
                     { id: 'traffic', label: '流量限额预警' },
                     { id: 'billing', label: '账单到期提醒' },
                   ].map((item) => (

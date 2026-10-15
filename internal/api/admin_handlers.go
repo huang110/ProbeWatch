@@ -63,7 +63,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	if cleanPath == "/api/alerts/rules" {
 		switch r.Method {
 		case http.MethodGet:
-			s.listAlertRules(w, r)
+			mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.listAlertRules)).ServeHTTP(w, r)
 		case http.MethodPost:
 			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createAlertRule))).ServeHTTP(w, r)
 		default:
@@ -78,7 +78,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 			ruleID := parts[4]
 			switch r.Method {
 			case http.MethodGet:
-				s.getAlertRule(w, r, ruleID)
+				mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.getAlertRule(w, r, ruleID) })).ServeHTTP(w, r)
 			case http.MethodPut:
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.updateAlertRule(w, r, ruleID)
@@ -109,7 +109,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	if cleanPath == "/api/alerts/silences" {
 		switch r.Method {
 		case http.MethodGet:
-			s.listAlertSilences(w, r)
+			mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.listAlertSilences)).ServeHTTP(w, r)
 		case http.MethodPost:
 			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(s.createAlertSilence))).ServeHTTP(w, r)
 		default:
@@ -162,7 +162,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 			channelID := parts[4]
 			switch r.Method {
 			case http.MethodGet:
-				s.getNotificationChannel(w, r, channelID)
+				mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.getNotificationChannel(w, r, channelID) })).ServeHTTP(w, r)
 			case http.MethodPut:
 				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.updateNotificationChannel(w, r, channelID)
@@ -298,7 +298,17 @@ func (s *Server) listNotificationChannels(w http.ResponseWriter, r *http.Request
 			})
 		}
 	}
+	for i := range channels { channels[i] = maskNotificationChannel(channels[i]) }
 	writeJSON(w, http.StatusOK, channels)
+}
+
+func maskNotificationChannel(ch db.NotificationChannel) db.NotificationChannel {
+	var cfg map[string]any
+	if json.Unmarshal([]byte(ch.Config), &cfg) == nil {
+		for _, key := range []string{"bot_token", "webhook_url", "device_key"} { if value, ok := cfg[key].(string); ok && value != "" { cfg[key] = maskToken(value) } }
+		if encoded, err := json.Marshal(cfg); err == nil { ch.Config = string(encoded) }
+	}
+	return ch
 }
 
 func (s *Server) getNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
@@ -307,7 +317,7 @@ func (s *Server) getNotificationChannel(w http.ResponseWriter, r *http.Request, 
 		writeJSONError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, ch)
+	writeJSON(w, http.StatusOK, maskNotificationChannel(ch))
 }
 
 func (s *Server) createNotificationChannel(w http.ResponseWriter, r *http.Request) {
@@ -343,11 +353,14 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeRequestError(w, err)
 		return
 	}
+	existing, _ := s.service.Store().GetNotificationChannel(r.Context(), id)
+	config := req.Config
+	if strings.Contains(config, "******") && existing.Config != "" { config = existing.Config }
 	ch := db.NotificationChannel{
 		ID:        id,
 		Name:      strings.TrimSpace(req.Name),
 		Type:      strings.TrimSpace(strings.ToLower(req.Type)),
-		Config:    req.Config,
+		Config:    config,
 		Enabled:   req.Enabled,
 		Events:    req.Events,
 		UpdatedAt: time.Now().UTC(),
@@ -743,33 +756,22 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
 		writeRequestError(w, err)
 		return
 	}
-	session, err := s.service.AuthenticateWithError(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
-	}
-
 	var targetNode db.Node
 	if security.IsRFC4122UUID(nodeID) {
 		targetNode, err = s.service.Store().GetNodeByUUID(r.Context(), nodeID)
 	} else {
 		targetNode, err = s.service.Store().GetNodeByID(r.Context(), nodeID)
 	}
-	if err == nil {
-		user, hasUser := UserFromContext(r.Context())
-		if !hasUser {
-			user, _ = s.service.CurrentUser(r, time.Now().UTC())
-		}
-		if !user.CanAccessNode(targetNode.UUID) {
-			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
-			return
-		}
-	}
+	if err != nil { writeJSONError(w, http.StatusNotFound, "node not found"); return }
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
+	if !user.CanWrite() { writeJSONError(w, http.StatusForbidden, "viewer role is read-only"); return }
+	if !user.CanAccessNode(targetNode.UUID) { writeJSONError(w, http.StatusForbidden, "access to node denied by scope"); return }
 
 	now := time.Now().UTC()
 	switch action {
 	case "rotate-token":
-		token, err := s.service.Store().RotateNodeTokenWithTTL(r.Context(), nodeID, session.AdminUserID, now, s.agentNodeTokenTTL())
+	token, err := s.service.Store().RotateNodeTokenWithTTL(r.Context(), targetNode.ID, user.ID, now, s.agentNodeTokenTTL())
 		if err != nil {
 			writeNodeActionError(w, err)
 			return
@@ -777,7 +779,7 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"node_token": token})
 	case "revoke":
-		if err := s.service.Store().RevokeNodeToken(r.Context(), nodeID, session.AdminUserID, now); err != nil {
+		if err := s.service.Store().RevokeNodeToken(r.Context(), targetNode.ID, user.ID, now); err != nil {
 			writeNodeActionError(w, err)
 			return
 		}

@@ -551,6 +551,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
               {filteredFindings.map((finding) => {
                 let badgeStyle = { background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)' }
                 let badgeText = '需注意'
+                if (finding.severity === 'info') badgeText = '信息提醒'
                 if (finding.severity === 'critical') {
                   badgeStyle = { background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e', border: '1px solid rgba(244, 63, 94, 0.3)' }
                   badgeText = '紧急'

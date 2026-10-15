@@ -227,6 +227,8 @@ func GenerateMarkdownSummary(rep *DiagnosisReport) string {
 			badge := "⚠️ [需注意]"
 			if f.Severity == SeverityCritical {
 				badge = "🚨 [紧急]"
+			} else if f.Severity == SeverityInfo {
+				badge = "ℹ️ [信息提醒]"
 			} else if f.Severity == SeverityOptimize {
 				badge = "💡 [优化建议]"
 			}
