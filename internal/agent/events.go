@@ -191,6 +191,12 @@ func (c *EventCollector) scanAuthLogs(ctx context.Context, nowSec int64) []proto
 	if len(lines) == 0 {
 		lines = readLogTail("/var/log/secure", 100)
 	}
+	if len(lines) == 0 {
+		cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(cmdCtx, "journalctl", "-u", "ssh", "-u", "sshd", "-n", "100", "--no-pager")
+		if output, err := cmd.Output(); err == nil { lines = strings.Split(string(output), "\n") }
+	}
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -203,7 +209,7 @@ func (c *EventCollector) scanAuthLogs(ctx context.Context, nowSec int64) []proto
 			ip := matches[2]
 			port := matches[3]
 			title := fmt.Sprintf("SSH authentication failed for user '%s' from %s:%s", user, ip, port)
-			sig := eventSig("ssh_auth", title, "sshd")
+			sig := eventSig("ssh_auth", fmt.Sprintf("%s@%s", user, ip), "sshd")
 			if c.isNewEvent(sig, nowSec) {
 				events = append(events, protocol.SystemEvent{
 					ID:         "evt-" + sig[:12],

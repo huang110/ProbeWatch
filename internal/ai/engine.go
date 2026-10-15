@@ -437,8 +437,8 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 	return rep, nil
 }
 
-func (s *AIService) Chat(ctx context.Context, prompt string) (*AIChatResponse, error) {
-	diagnosis, err := s.RunDiagnosis(ctx)
+func (s *AIService) Chat(ctx context.Context, prompt string, allowedNodeIDs map[string]struct{}) (*AIChatResponse, error) {
+	diagnosis, err := s.RunDiagnosisForNodes(ctx, allowedNodeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("run diagnosis for chat: %w", err)
 	}
@@ -655,6 +655,9 @@ func NormalizeBillingCycle(cycle string) (string, float64) {
 // CalculateMonthlyCost calculates the monthly normalized cost for a billing price and cycle.
 // Unknown cycles return 0.0 instead of silently miscalculating as monthly.
 func CalculateMonthlyCost(price float64, cycle string) float64 {
+	if price <= 0 {
+		return 0
+	}
 	canonical, divisor := NormalizeBillingCycle(cycle)
 	if canonical == "" || divisor == 0.0 {
 		return 0.0

@@ -25,7 +25,6 @@ func (s *Server) aiDiagnose(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service not initialized"})
 		return
 	}
-
 	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
@@ -56,6 +55,13 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service not initialized"})
 		return
 	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
+		return
+	}
 
 	var req struct {
 		Prompt string `json:"prompt"`
@@ -70,7 +76,8 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.aiService.Chat(r.Context(), strings.TrimSpace(req.Prompt))
+	if fullAccess { allowedIDs = nil }
+	resp, err := s.aiService.Chat(r.Context(), strings.TrimSpace(req.Prompt), allowedIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to process chat: %v", err)})
 		return

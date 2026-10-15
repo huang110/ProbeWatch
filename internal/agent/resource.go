@@ -267,8 +267,9 @@ type networkFullStats struct {
 }
 
 func isVirtualInterface(name string) bool {
-	for _, prefix := range []string{"veth", "docker", "br-", "tun", "tap", "wg", "tailscale", "zt", "virbr", "flannel", "cni", "cali"} {
-		if strings.HasPrefix(name, prefix) {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range []string{"veth", "docker", "podman", "br-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
+		if strings.HasPrefix(lower, prefix) {
 			return true
 		}
 	}
