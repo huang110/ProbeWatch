@@ -757,6 +757,7 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var targetNode db.Node
+	var err error
 	if security.IsRFC4122UUID(nodeID) {
 		targetNode, err = s.service.Store().GetNodeByUUID(r.Context(), nodeID)
 	} else {
