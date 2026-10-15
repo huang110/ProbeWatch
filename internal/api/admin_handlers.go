@@ -136,7 +136,6 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Channel endpoints
-	mw := NewMiddleware(s.service, s.cfg)
 	if cleanPath == "/api/alerts/channels" {
 		switch r.Method {
 		case http.MethodGet:
