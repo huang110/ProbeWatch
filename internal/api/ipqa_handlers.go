@@ -200,7 +200,7 @@ func (s *Server) postNodeIPQASync(w http.ResponseWriter, r *http.Request, uuid s
 		ResourceType: "node",
 		ResourceID:   node.UUID,
 		Detail:       fmt.Sprintf("Manual IPQA sync requested for node %s", node.Name),
-		IPAddress:    r.RemoteAddr,
+		IPAddress:    s.publicClientIP(r),
 		StatusCode:   http.StatusOK,
 		CreatedAt:    now.UTC(),
 	})
@@ -285,7 +285,7 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 			ResourceType: "node",
 			ResourceID:   node.UUID,
 			Detail:       fmt.Sprintf("Admin triggered IPQA test notification for node %s", node.Name),
-			IPAddress:    r.RemoteAddr,
+			IPAddress:    s.publicClientIP(r),
 			StatusCode:   http.StatusOK,
 			CreatedAt:    now,
 		})
@@ -391,7 +391,7 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 }
 
 func (s *Server) checkIPQARateLimit(w http.ResponseWriter, r *http.Request) bool {
-	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(r.RemoteAddr, time.Now()) {
+	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(publicLimiterKey(r), time.Now()) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return false
 	}

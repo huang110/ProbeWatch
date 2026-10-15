@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	nvmePartitionRe  = regexp.MustCompile(`^(nvme\d+n\d+)p\d+$`)
+	nvmePartitionRe  = regexp.MustCompile(`^((?:nvme\d+n\d+|mmcblk\d+|md\d+|nbd\d+))p\d+$`)
 	trailingDigitsRe = regexp.MustCompile(`^(.*[a-zA-Z])\d+$`)
 )
 

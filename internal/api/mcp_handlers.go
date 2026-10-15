@@ -33,12 +33,21 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authenticated := false
+	fullAccess := false
 	if token != "" && s.aiService.ValidateMCPToken(r.Context(), token) {
 		authenticated = true
 	} else if s.service != nil {
 		if _, err := s.service.AuthenticateWithError(r, time.Now().UTC()); err == nil {
 			authenticated = true
+			if user, userErr := s.service.CurrentUser(r, time.Now().UTC()); userErr == nil {
+				fullAccess = user.IsAdmin() || user.AllowedNodes == "*"
+			}
 		}
+	}
+	if authenticated && token != "" { fullAccess = true }
+	if !fullAccess {
+		w.WriteHeader(http.StatusForbidden)
+		return
 	}
 
 	if !authenticated {

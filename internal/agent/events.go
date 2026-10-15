@@ -29,6 +29,7 @@ type EventCollector struct {
 	seenSignatures map[string]int64 // signature -> timestamp (epoch seconds)
 
 	lastSystemdScan     int64
+	lastAuthJournalScan int64
 	cachedSystemdEvents []protocol.SystemEvent
 	systemdRunner       func(ctx context.Context) (io.Reader, error)
 }
@@ -192,6 +193,16 @@ func (c *EventCollector) scanAuthLogs(ctx context.Context, nowSec int64) []proto
 		lines = readLogTail("/var/log/secure", 100)
 	}
 	if len(lines) == 0 {
+		lines = readLogTail("/var/log/messages", 100)
+	}
+	if len(lines) == 0 {
+		if nowSec-c.lastAuthJournalScan < 60 {
+			return nil
+		}
+		c.lastAuthJournalScan = nowSec
+		if _, err := exec.LookPath("journalctl"); err != nil {
+			return nil
+		}
 		cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(cmdCtx, "journalctl", "-u", "ssh", "-u", "sshd", "-n", "100", "--no-pager")

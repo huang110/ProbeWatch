@@ -140,6 +140,12 @@ func (s *Server) aiMCPTokenRegenerate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service not initialized"})
 		return
 	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
+	if !user.IsAdmin() && user.AllowedNodes != "*" {
+		writeJSONError(w, http.StatusForbidden, "administrator access required")
+		return
+	}
 
 	token, err := s.aiService.RegenerateMCPToken(r.Context())
 	if err != nil {
@@ -157,6 +163,12 @@ func (s *Server) mcpConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.aiService == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service not initialized"})
+		return
+	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok { return }
+	if !user.IsAdmin() && user.AllowedNodes != "*" {
+		writeJSONError(w, http.StatusForbidden, "administrator access required")
 		return
 	}
 

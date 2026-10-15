@@ -1043,8 +1043,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 
 		// Historical records are strictly used for CPU averages and per-node traffic deltas.
 		if records, ok := historyMap[n.ID]; ok && len(records) > 0 {
-			var nodeRxFirst, nodeTxFirst, nodeRxLast, nodeTxLast uint64
+			var nodeRxPrev, nodeTxPrev uint64
 			var nodeHaveCounters bool
+			var nodeRxDelta, nodeTxDelta uint64
 
 			for _, record := range records {
 				var value struct {
@@ -1053,22 +1054,19 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 					Tx  uint64  `json:"network_tx_bytes"`
 				}
 				if json.Unmarshal(record.Payload, &value) == nil {
-					if !nodeHaveCounters {
-						nodeRxFirst, nodeTxFirst, nodeHaveCounters = value.Rx, value.Tx, true
+					if nodeHaveCounters {
+						if value.Rx >= nodeRxPrev { nodeRxDelta += value.Rx - nodeRxPrev } else { nodeRxDelta += value.Rx }
+						if value.Tx >= nodeTxPrev { nodeTxDelta += value.Tx - nodeTxPrev } else { nodeTxDelta += value.Tx }
 					}
-					nodeRxLast, nodeTxLast = value.Rx, value.Tx
+					nodeRxPrev, nodeTxPrev, nodeHaveCounters = value.Rx, value.Tx, true
 					cpuTotal += value.CPU
 					resourceCount++
 				}
 			}
 
 			if nodeHaveCounters {
-				if nodeRxLast >= nodeRxFirst {
-					resources["network_rx_bytes_delta"] = resources["network_rx_bytes_delta"].(uint64) + (nodeRxLast - nodeRxFirst)
-				}
-				if nodeTxLast >= nodeTxFirst {
-					resources["network_tx_bytes_delta"] = resources["network_tx_bytes_delta"].(uint64) + (nodeTxLast - nodeTxFirst)
-				}
+				resources["network_rx_bytes_delta"] = resources["network_rx_bytes_delta"].(uint64) + nodeRxDelta
+				resources["network_tx_bytes_delta"] = resources["network_tx_bytes_delta"].(uint64) + nodeTxDelta
 			}
 		}
 	}

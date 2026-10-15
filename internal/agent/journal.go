@@ -162,16 +162,15 @@ func readFilteredLogTail(path string, maxLines int, grep string) []string {
 		return nil
 	}
 	defer file.Close()
+	isTruncated := false
 	if info, err := file.Stat(); err == nil && info.Size() > 256*1024 {
-		if _, err := file.Seek(-256*1024, io.SeekEnd); err == nil {
-			reader := bufio.NewReader(file)
-			_, _ = reader.ReadString('\n')
-		}
+		if _, err := file.Seek(-256*1024, io.SeekEnd); err == nil { isTruncated = true }
 	}
 
 	grepLower := strings.ToLower(strings.TrimSpace(grep))
 	var lines []string
 	scanner := bufio.NewScanner(file)
+	if isTruncated { _ = scanner.Scan() }
 	for scanner.Scan() {
 		text := scanner.Text()
 		if grepLower != "" && !strings.Contains(strings.ToLower(text), grepLower) {
