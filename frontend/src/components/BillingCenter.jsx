@@ -115,12 +115,12 @@ export function BillingCenter({ nodes = [] }) {
     const months = Array.from({ length: 12 }, (_, i) => {
       const mStr = String(i + 1).padStart(2, '0')
       // Base monthly cost + projected renewals occurring in this month
-      let amountCNY = totalMonthlyCostCNY * 0.4 // Base amortized
+      let amountCNY = totalMonthlyCostCNY
       portfolio.forEach((p) => {
         if (p.billing.dueDate) {
           const d = new Date(p.billing.dueDate)
           if (!isNaN(d.getTime()) && d.getMonth() === i) {
-            amountCNY += (p.calc.annualCostCNY * 0.5) // Add renewal spike
+            amountCNY += p.calc.annualCostCNY
           }
         }
       })

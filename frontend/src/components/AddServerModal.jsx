@@ -127,7 +127,7 @@ export function AddServerModal({ onClose, onInstalled }) {
   const extraBashEnvs = buildEnvSnippet()
 
   const linuxScript = enrollment
-    ? `curl -sSL ${originUrl}/deploy/install.sh -o install.sh && sudo PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh install.sh agent`
+    ? `curl -sSL ${originUrl}/deploy/install.sh -o install.sh && PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh install.sh agent`
     : ''
 
   const openwrtScript = enrollment

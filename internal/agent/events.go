@@ -116,7 +116,8 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 		if len(lines) > 200 {
 			lines = lines[len(lines)-200:]
 		}
-	} else {
+	}
+	if len(lines) == 0 {
 		// Fallback: check /var/log/kern.log or /var/log/messages
 		lines = readLogTail("/var/log/kern.log", 150)
 		if len(lines) == 0 {

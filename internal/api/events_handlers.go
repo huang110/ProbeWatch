@@ -231,6 +231,11 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	now := time.Now().UTC()
+	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 
 	overview, err := s.service.Store().GetSystemEventsOverview(r.Context())
 	if err != nil {
@@ -241,12 +246,21 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 	// Sanitize recent events to hide private IPs or sensitive tokens in messages
 	sanitizedRecent := make([]map[string]any, 0, len(overview.RecentEvents))
 	for _, ev := range overview.RecentEvents {
+		title := "系统状态异常"
+		switch ev.Category {
+		case "security":
+			title = "安全事件拦截"
+		case "kernel":
+			title = "内核保护事件"
+		case "system":
+			title = "系统服务状态异常"
+		}
 		sanitizedRecent = append(sanitizedRecent, map[string]any{
 			"id":          ev.ID,
-			"node_name":   ev.NodeName,
+			"node_name":   sanitizeNodeName(ev.NodeName),
 			"category":    ev.Category,
 			"severity":    ev.Severity,
-			"title":       ev.Title,
+			"title":       title,
 			"occurred_at": ev.OccurredAt,
 		})
 	}

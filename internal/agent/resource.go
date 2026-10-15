@@ -263,6 +263,15 @@ type networkFullStats struct {
 	primaryIPv6 string
 }
 
+func isVirtualInterface(name string) bool {
+	for _, prefix := range []string{"veth", "docker", "br-", "tun", "tap", "wg", "tailscale", "zt", "virbr", "flannel", "cni", "cali"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func readNetworkCounters() (networkFullStats, error) {
 	data, err := os.ReadFile("/proc/net/dev")
 	if err != nil {
@@ -315,21 +324,33 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 
 		result.interfaces = append(result.interfaces, stat)
-		result.rx += rx
-		result.tx += tx
+		if !isVirtualInterface(name) {
+			result.rx += rx
+			result.tx += tx
+		}
 		found = true
 
-		if result.primaryIPv4 == "" && stat.IPv4 != "" {
+		if result.primaryIPv4 == "" && stat.IPv4 != "" && isPublicIP(stat.IPv4) {
 			result.primaryIPv4 = stat.IPv4
 		}
 		if result.primaryIPv6 == "" && stat.IPv6 != "" {
 			result.primaryIPv6 = stat.IPv6
 		}
 	}
+	if result.primaryIPv4 == "" {
+		for _, stat := range result.interfaces {
+			if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break }
+		}
+	}
 	if !found {
 		return networkFullStats{}, fmt.Errorf("no network interfaces")
 	}
 	return result, nil
+}
+
+func isPublicIP(raw string) bool {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	return ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast()
 }
 
 type networkStats struct{ rx, tx uint64 }

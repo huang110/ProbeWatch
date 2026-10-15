@@ -26,6 +26,16 @@ type AIService struct {
 	client *http.Client
 }
 
+var billingCurrencyRatesCNY = map[string]float64{
+	"CNY": 1, "RMB": 1, "USD": 7.20, "EUR": 7.85, "GBP": 9.30, "CAD": 5.20, "HKD": 0.92, "JPY": 0.048,
+}
+
+func billingPriceToCNY(amount float64, currency string) float64 {
+	code := strings.ToUpper(strings.TrimSpace(currency))
+	if rate, ok := billingCurrencyRatesCNY[code]; ok { return amount * rate }
+	return amount
+}
+
 func NewAIService(store *db.Store, cfg *config.Config) *AIService {
 	return &AIService{
 		store: store,
@@ -291,12 +301,8 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 		// 3. Billing & Cost Audit
 		billingInfo, err := s.store.GetNodeCycleTraffic(ctx, node.ID, now)
 		if err == nil {
-			if billingInfo.Currency != "" {
-				rep.CostAudit.Currency = billingInfo.Currency
-			}
-
 			// Monthly cost normalization using unified canonical cycle definitions
-			monthlyCost := CalculateMonthlyCost(billingInfo.Price, billingInfo.Cycle)
+			monthlyCost := CalculateMonthlyCost(billingPriceToCNY(billingInfo.Price, billingInfo.Currency), billingInfo.Cycle)
 			totalMonthlyCost += monthlyCost
 
 			// Traffic Quota Warning
@@ -372,17 +378,17 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 					Title:          fmt.Sprintf("闲置 VPS 资源浪费 (低负载与低流量) - %s", node.Name),
 					NodeID:         node.ID,
 					NodeName:       node.Name,
-					Summary:        fmt.Sprintf("当前节点 CPU 占用仅 %.1f%%，本周期流量仅消耗 %.2f GB，月租折合 %.2f %s。", snap.CPUPercent, trafficGB, monthlyCost, billingInfo.Currency),
+					Summary:        fmt.Sprintf("当前节点 CPU 占用仅 %.1f%%，本周期流量仅消耗 %.2f GB，月租折合 %.2f CNY。", snap.CPUPercent, trafficGB, monthlyCost),
 					RootCause:      "实例长期处于非工作空闲状态或测试环境遗留。",
-					Recommendation: fmt.Sprintf("建议评估业务整合或退订，可每月节约 %.2f %s 开支。", monthlyCost, billingInfo.Currency),
+					Recommendation: fmt.Sprintf("建议评估业务整合或退订，可每月节约 %.2f CNY 开支。", monthlyCost),
 				})
 				rep.CostAudit.IdleNodes = append(rep.CostAudit.IdleNodes, IdleNodeAudit{
 					NodeID:              node.ID,
 					NodeName:            node.Name,
 					CPUPercent:          snap.CPUPercent,
 					MonthlyTrafficGB:    trafficGB,
-					MonthlyCost:         monthlyCost,
-					Currency:            billingInfo.Currency,
+						MonthlyCost:         monthlyCost,
+					Currency:            "CNY",
 					OptimizationSavings: monthlyCost,
 					Suggestion:          "建议业务合并或到期不续费以节约预算",
 				})
