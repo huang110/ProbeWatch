@@ -64,7 +64,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
-	if err := validateAgentPayloadTimestamp(request.ReportedAt, now, s.agentClockSkew()); err != nil {
+	if err := validateAgentPayloadTimestamp(request.ReportedAt, now, maxOutboxAgeForReports(s.agentClockSkew())); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
@@ -73,13 +73,13 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, result := range request.Results {
-		if err := checkResultTimestamp(result, now, s.agentClockSkew()); err != nil {
+		if err := checkResultTimestamp(result, now, maxOutboxAgeForReports(s.agentClockSkew())); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid report")
 			return
 		}
 		if err := s.validateTargetBinding(r.Context(), db.TargetKind(result.Kind), result.ID); err != nil {
-			writeTargetBindingError(w, err)
-			return
+			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) { continue }
+			writeTargetBindingError(w, err); return
 		}
 	}
 	resourcePayload, err := json.Marshal(request.Resource)
@@ -497,6 +497,11 @@ func validateResultTimestamp(unixSeconds int64, now time.Time, skew time.Duratio
 		return nil
 	}
 	return validateAgentPayloadTimestamp(unixSeconds, now, skew)
+}
+
+func maxOutboxAgeForReports(skew time.Duration) time.Duration {
+	if skew < 7*24*time.Hour { return 7 * 24 * time.Hour }
+	return skew
 }
 
 func checkResultTimestamp(result protocol.CheckResult, now time.Time, skew time.Duration) error {

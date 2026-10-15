@@ -34,7 +34,7 @@ const (
 	maxConcurrentHeavyProbes     = 2
 	maxBufferedProbeResults      = 100
 	defaultProbeTimeout          = 15 * time.Second
-	probeFastWaitTimeout         = 40 * time.Millisecond
+	probeFastWaitTimeout         = 400 * time.Millisecond
 	maxOutboxReplayBatch         = 10
 	outboxReplayTimeout          = 10 * time.Second
 )
@@ -177,6 +177,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Initial workload & events report
 	go func() {
+		_ = r.report(ctx)
 		_ = r.reportWorkload(ctx)
 		_ = r.reportEvents(ctx)
 	}()
@@ -190,9 +191,9 @@ func (r *Runner) Run(ctx context.Context) error {
 				return ctx.Err()
 			}
 		case <-workloadTicker.C:
-			_ = r.reportWorkload(ctx)
+			go func() { _ = r.reportWorkload(ctx) }()
 		case <-eventsTicker.C:
-			_ = r.reportEvents(ctx)
+			go func() { _ = r.reportEvents(ctx) }()
 		case <-configTicker.C:
 			_ = r.refresh(ctx)
 		case <-updateTicker.C:

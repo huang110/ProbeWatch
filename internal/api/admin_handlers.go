@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sort"
 	"strings"
 	"time"
 
@@ -1082,6 +1083,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 
 		// Historical records are strictly used for CPU averages and per-node traffic deltas.
 		if records, ok := historyMap[n.ID]; ok && len(records) > 0 {
+			sort.SliceStable(records, func(i, j int) bool { return records[i].ReportedAt.Before(records[j].ReportedAt) })
 			var nodeRxPrev, nodeTxPrev uint64
 			var nodeHaveCounters bool
 			var nodeRxDelta, nodeTxDelta uint64

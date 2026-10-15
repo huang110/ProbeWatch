@@ -278,7 +278,7 @@ func isVirtualInterface(name string) bool {
 
 func isBridgeInterface(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	return strings.HasPrefix(lower, "vmbr") || strings.HasPrefix(lower, "br-") || strings.HasPrefix(lower, "ovs-")
+	return strings.HasPrefix(lower, "vmbr") || lower == "br-lan" || strings.HasPrefix(lower, "ovs-")
 }
 
 func readNetworkCounters() (networkFullStats, error) {
@@ -291,6 +291,7 @@ func readNetworkCounters() (networkFullStats, error) {
 
 func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networkFullStats, error) {
 	var result networkFullStats
+	var bridgeRx, bridgeTx uint64
 	found := false
 	for _, line := range strings.Split(data, "\n") {
 		parts := strings.SplitN(line, ":", 2)
@@ -333,9 +334,12 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 
 		result.interfaces = append(result.interfaces, stat)
-		if !isVirtualInterface(name) || isBridgeInterface(name) {
+		if !isVirtualInterface(name) {
 			result.rx += rx
 			result.tx += tx
+		} else if isBridgeInterface(name) {
+			bridgeRx += rx
+			bridgeTx += tx
 		}
 		found = true
 
@@ -358,6 +362,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 	if result.primaryIPv6 == "" {
 		for _, stat := range result.interfaces { if stat.IPv6 != "" && isPublicIP(stat.IPv6) { result.primaryIPv6 = stat.IPv6; break } }
 	}
+	if result.rx == 0 && result.tx == 0 { result.rx, result.tx = bridgeRx, bridgeTx }
 	if !found {
 		return networkFullStats{}, fmt.Errorf("no network interfaces")
 	}
