@@ -329,8 +329,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 
 func isPublicMeshIP(raw string) bool {
 	ip := net.ParseIP(strings.TrimSpace(raw))
-	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() { return false }
-	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 { return false }
+	if ip == nil || ip.IsLoopback() { return false }
 	return true
 }
 

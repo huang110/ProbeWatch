@@ -333,7 +333,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 
 		result.interfaces = append(result.interfaces, stat)
-		if !isVirtualInterface(name) {
+		if !isVirtualInterface(name) || isBridgeInterface(name) {
 			result.rx += rx
 			result.tx += tx
 		}

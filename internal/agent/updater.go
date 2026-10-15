@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/version"
@@ -235,11 +236,15 @@ func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint
 
 	// Atomically move staging binary to execPath
 	if err := os.Rename(stagingPath, execPath); err != nil {
+		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
+			if copyErr := copyFile(stagingPath, execPath); copyErr == nil { _ = os.Remove(stagingPath); _ = os.Chmod(execPath, 0755); goto installed }
+		}
 		// Attempt rollback from .bak
 		_ = os.Rename(bakPath, execPath)
 		_ = os.Remove(stagingPath)
 		return fmt.Errorf("install new binary: %w (restored from backup)", err)
 	}
+installed:
 
 	_ = os.Chmod(execPath, 0755)
 
