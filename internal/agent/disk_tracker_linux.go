@@ -47,7 +47,8 @@ func parseLinuxDiskstats(path string) (map[string]rawDiskMetrics, error) {
 			strings.HasPrefix(dev, "ram") ||
 			strings.HasPrefix(dev, "sr") ||
 			strings.HasPrefix(dev, "fd") ||
-			strings.HasPrefix(dev, "dm-") {
+			strings.HasPrefix(dev, "dm-") ||
+			strings.HasPrefix(dev, "md") {
 			continue
 		}
 

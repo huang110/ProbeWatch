@@ -266,7 +266,7 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 				Category:        "ipqa",
 				Severity:        "info",
 				Reason:          fmt.Sprintf("[IPQA 手动测试] %s: %s", node.Name, summaryText),
-				Status:          "firing",
+				Status:          db.AlertStatusOpen,
 				OccurrenceCount: 1,
 				FirstSeenAt:     now,
 			}
@@ -384,7 +384,7 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 			Category:        "ipqa",
 			Severity:        sev,
 			Reason:          reason,
-			Status:          "firing",
+			Status:          db.AlertStatusOpen,
 			OccurrenceCount: 1,
 			FirstSeenAt:     now,
 		}

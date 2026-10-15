@@ -292,6 +292,13 @@ func readNetworkCounters() (networkFullStats, error) {
 func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networkFullStats, error) {
 	var result networkFullStats
 	var bridgeRx, bridgeTx uint64
+	hasMainEth := false
+	for _, line := range strings.Split(data, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 { continue }
+		name := strings.TrimSpace(parts[0])
+		if name == "eth0" || name == "eno1" { hasMainEth = true; break }
+	}
 	found := false
 	for _, line := range strings.Split(data, "\n") {
 		parts := strings.SplitN(line, ":", 2)
@@ -299,7 +306,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 			continue
 		}
 		name := strings.TrimSpace(parts[0])
-		if name == "lo" {
+		if name == "lo" || strings.Contains(name, ".") {
 			continue
 		}
 		fields := strings.Fields(parts[1])
@@ -334,7 +341,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 
 		result.interfaces = append(result.interfaces, stat)
-		if !isVirtualInterface(name) {
+		if !isVirtualInterface(name) && !(hasMainEth && isDSAChildInterface(name)) {
 			result.rx += rx
 			result.tx += tx
 		} else if isBridgeInterface(name) {
@@ -343,7 +350,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 		found = true
 
-		if result.primaryIPv4 == "" && stat.IPv4 != "" && !isVirtualInterface(name) && isPublicIP(stat.IPv4) {
+		if result.primaryIPv4 == "" && stat.IPv4 != "" && !isVirtualInterface(name) && !(hasMainEth && isDSAChildInterface(name)) && isPublicIP(stat.IPv4) {
 			result.primaryIPv4 = stat.IPv4
 		}
 		if result.primaryIPv6 == "" && stat.IPv6 != "" && !isVirtualInterface(name) && isPublicIP(stat.IPv6) {
@@ -367,6 +374,16 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		return networkFullStats{}, fmt.Errorf("no network interfaces")
 	}
 	return result, nil
+}
+
+func isDSAChildInterface(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "wan" { return true }
+	if strings.HasPrefix(lower, "lan") {
+		for _, r := range lower[3:] { if r < '0' || r > '9' { return false } }
+		return len(lower) > 3
+	}
+	return false
 }
 
 func isPublicIP(raw string) bool {

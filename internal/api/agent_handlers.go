@@ -79,7 +79,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.validateTargetBinding(r.Context(), db.TargetKind(result.Kind), result.ID); err != nil {
-			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) { continue }
+			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) || errors.Is(err, db.ErrTargetKindMismatch) { continue }
 			writeTargetBindingError(w, err); return
 		}
 		validResults = append(validResults, result)
@@ -114,7 +114,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "report unavailable")
 		return
 	}
-	if request.Resource.IPQA != nil {
+	if request.Resource.IPQA != nil && now.Sub(time.Unix(request.ReportedAt, 0).UTC()) <= 2*time.Minute {
 		s.handleIPQAReport(r.Context(), node, request.Resource.IPQA, now)
 	}
 	if requestID != "" {

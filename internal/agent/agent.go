@@ -68,6 +68,8 @@ type Runner struct {
 	runningTasks        map[string]struct{}
 	bufferedResults     []protocol.CheckResult
 	outboxReplayMu      sync.Mutex
+	workloadMu          sync.Mutex
+	eventsMu            sync.Mutex
 
 	// configMaxAgeSeconds is the freshness window the control plane asked for
 	// (0 = no fail-closed enforcement, legacy behavior). lastRefreshSuccessAt
@@ -175,11 +177,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	outboxTicker := time.NewTicker(30 * time.Second)
 	defer outboxTicker.Stop()
 
-	// Initial workload & events report
+	// Start the first probe report after the initial resource snapshot has had
+	// a moment to settle. This avoids competing disk samples at startup.
 	go func() {
-		_ = r.report(ctx)
-		_ = r.reportWorkload(ctx)
-		_ = r.reportEvents(ctx)
+		timer := time.NewTimer(initialResourceFollowupDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+			_ = r.report(ctx)
+			_ = r.reportWorkload(ctx)
+			_ = r.reportEvents(ctx)
+		}
 	}()
 
 	for {
@@ -205,6 +214,10 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) reportEvents(ctx context.Context) error {
+	if !r.eventsMu.TryLock() {
+		return nil
+	}
+	defer r.eventsMu.Unlock()
 	collector := GetDefaultEventCollector()
 	events, err := collector.CollectSystemEvents(ctx)
 	if err != nil || len(events) == 0 {
@@ -221,6 +234,10 @@ func (r *Runner) reportEvents(ctx context.Context) error {
 }
 
 func (r *Runner) reportWorkload(ctx context.Context) error {
+	if !r.workloadMu.TryLock() {
+		return nil
+	}
+	defer r.workloadMu.Unlock()
 	dockerAvail, dockerVer, containers, _ := CollectDockerWorkload()
 	procs, _ := CollectTopProcesses(15)
 
