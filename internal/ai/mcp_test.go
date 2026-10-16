@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,8 +106,12 @@ func TestMCPServerAndTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected jsonrpc error: %v", err)
 	}
-	if callNonexistentResp.Error == nil {
-		t.Fatalf("expected error for nonexistent node query, got success")
+	mcpRes, ok := callNonexistentResp.Result.(MCPCallResult)
+	if !ok || !mcpRes.IsError {
+		t.Fatalf("expected IsError=true for nonexistent node query, got: %+v", callNonexistentResp.Result)
+	}
+	if len(mcpRes.Content) == 0 || !strings.Contains(mcpRes.Content[0].Text, "node not found") {
+		t.Fatalf("expected 'node not found' error message, got: %+v", mcpRes.Content)
 	}
 
 	// 4b. Test MCP Tool Call with zero total bytes (no division by zero or NaN)
