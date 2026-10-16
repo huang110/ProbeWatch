@@ -275,7 +275,7 @@ func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
 
 	// 1. Create a channel
 	createBody := `{"name":"Telegram Alert","type":"telegram","config":"{\"bot_token\":\"12345:abc\",\"chat_id\":\"98765\"}","enabled":true,"events":"[\"offline\"]"}`
-	recCreate, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/channels", createBody)
+	recCreate, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/channels", createBody)
 	if recCreate.Code != http.StatusCreated {
 		t.Fatalf("expected 201 on create channel, got %d: %s", recCreate.Code, recCreate.Body.String())
 	}
