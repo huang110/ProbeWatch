@@ -264,8 +264,14 @@ func GenerateMarkdownSummary(rep *DiagnosisReport) string {
 			if exp.AutoRenew {
 				autoStr = "自动续费"
 			}
-			sb.WriteString(fmt.Sprintf("| %s | %s | **%d 天** | %.2f %s | %s |\n",
-				exp.NodeName, exp.DueDate, exp.DaysLeft, exp.Price, exp.Currency, autoStr))
+			daysLeftStr := fmt.Sprintf("剩余 %d 天", exp.DaysLeft)
+			if exp.DaysLeft < 0 {
+				daysLeftStr = fmt.Sprintf("已逾期 %d 天", -exp.DaysLeft)
+			} else if exp.DaysLeft == 0 {
+				daysLeftStr = "今日到期"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | **%s** | %.2f %s | %s |\n",
+				exp.NodeName, exp.DueDate, daysLeftStr, exp.Price, exp.Currency, autoStr))
 		}
 		sb.WriteString("\n")
 	}

@@ -228,11 +228,15 @@ func (s *Server) parseAgentMetadata(r *http.Request, now time.Time, skew time.Du
 }
 
 func validateAgentPayloadTimestamp(unixSeconds int64, now time.Time, skew time.Duration) error {
+	return validateAgentPayloadTimestampWithPastSkew(unixSeconds, now, skew, skew)
+}
+
+func validateAgentPayloadTimestampWithPastSkew(unixSeconds int64, now time.Time, pastSkew, futureSkew time.Duration) error {
 	if unixSeconds <= 0 {
 		return errInvalidRequest
 	}
 	payloadTime := time.Unix(unixSeconds, 0).UTC()
-	if payloadTime.After(now.Add(skew)) || payloadTime.Before(now.Add(-skew)) {
+	if payloadTime.After(now.Add(futureSkew)) || payloadTime.Before(now.Add(-pastSkew)) {
 		return errInvalidRequest
 	}
 	return nil

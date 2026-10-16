@@ -34,7 +34,7 @@ const (
 	maxConcurrentHeavyProbes     = 2
 	maxBufferedProbeResults      = 100
 	defaultProbeTimeout          = 15 * time.Second
-	probeFastWaitTimeout         = 400 * time.Millisecond
+	probeFastWaitTimeout         = 40 * time.Millisecond
 	maxOutboxReplayBatch         = 10
 	outboxReplayTimeout          = 10 * time.Second
 )
@@ -490,6 +490,14 @@ func newRequestID() (string, error) {
 }
 
 func (r *Runner) sendReport(ctx context.Context, requestID string, payload []byte) error {
+	return r.sendReportRequest(ctx, requestID, payload, false)
+}
+
+func (r *Runner) sendReplayReport(ctx context.Context, requestID string, payload []byte) error {
+	return r.sendReportRequest(ctx, requestID, payload, true)
+}
+
+func (r *Runner) sendReportRequest(ctx context.Context, requestID string, payload []byte, isReplay bool) error {
 	var last error
 	for attempt := 0; attempt < maxReportAttempts; attempt++ {
 		if attempt > 0 {
@@ -501,7 +509,7 @@ func (r *Runner) sendReport(ctx context.Context, requestID string, payload []byt
 			case <-timer.C:
 			}
 		}
-		last = r.doJSONWithRequest(ctx, http.MethodPost, "/report", requestID, payload)
+		last = r.doJSONWithRequestAndReplay(ctx, http.MethodPost, "/report", requestID, payload, isReplay)
 		if last == nil {
 			return nil
 		}
@@ -510,6 +518,10 @@ func (r *Runner) sendReport(ctx context.Context, requestID string, payload []byt
 }
 
 func (r *Runner) doJSONWithRequest(ctx context.Context, method, path, requestID string, payload []byte) error {
+	return r.doJSONWithRequestAndReplay(ctx, method, path, requestID, payload, false)
+}
+
+func (r *Runner) doJSONWithRequestAndReplay(ctx context.Context, method, path, requestID string, payload []byte, isReplay bool) error {
 	endpoint := strings.TrimRight(r.cfg.AgentEndpoint, "/") + path
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(payload)))
 	if err != nil {
@@ -519,6 +531,9 @@ func (r *Runner) doJSONWithRequest(ctx context.Context, method, path, requestID 
 	req.Header.Set("X-Probe-Timestamp", fmt.Sprintf("%d", time.Now().UTC().Unix()))
 	req.Header.Set("X-Probe-Request-ID", requestID)
 	req.Header.Set("Content-Type", "application/json")
+	if isReplay {
+		req.Header.Set("X-Outbox-Replay", "true")
+	}
 	response, err := r.client.Do(req)
 	if err != nil {
 		return err
@@ -697,7 +712,7 @@ func (r *Runner) replayOutboxLimited(ctx context.Context) error {
 			continue
 		}
 		processed++
-		if err := r.sendReport(replayCtx, item.RequestID, item.Payload); err == nil {
+		if err := r.sendReplayReport(replayCtx, item.RequestID, item.Payload); err == nil {
 			_ = os.Remove(path)
 			// Slight pacing delay between replays to prevent burst traffic storm
 			select {

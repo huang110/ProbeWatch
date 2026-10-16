@@ -329,8 +329,52 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 
 func isPublicMeshIP(raw string) bool {
 	ip := net.ParseIP(strings.TrimSpace(raw))
-	if ip == nil || ip.IsLoopback() { return false }
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+		return false
+	}
 	return true
+}
+
+func isGenericHostname(hostname string) bool {
+	h := strings.ToLower(strings.TrimSpace(hostname))
+	if h == "" || len(h) < 3 {
+		return true
+	}
+	generic := map[string]bool{
+		"localhost": true, "localhost.localdomain": true,
+		"debian": true, "ubuntu": true, "centos": true, "alpine": true, "arch": true, "fedora": true,
+		"linux": true, "server": true, "vps": true, "node": true, "vm": true, "test": true,
+		"default": true, "instance": true, "docker": true,
+	}
+	return generic[h]
+}
+
+func matchesTargetNodeName(targetName, nodeName string) bool {
+	tName := strings.TrimSpace(strings.ToLower(targetName))
+	nName := strings.TrimSpace(strings.ToLower(nodeName))
+	if tName == "" || nName == "" {
+		return false
+	}
+	if tName == nName {
+		return true
+	}
+	for _, prefix := range []string{"to-", "mesh-", "peer-", "node-", "ping-"} {
+		if tName == prefix+nName {
+			return true
+		}
+		if strings.HasPrefix(tName, prefix+nName+"-") || strings.HasPrefix(tName, prefix+nName+"_") || strings.HasPrefix(tName, prefix+nName+" ") {
+			return true
+		}
+	}
+	for _, sep := range []string{" - ", " -> ", " ->", ": ", " / "} {
+		if strings.HasPrefix(tName, nName+sep) || strings.HasSuffix(tName, sep+nName) {
+			return true
+		}
+	}
+	return false
 }
 
 // findProbeResult checks if srcNode has probed a target representing dstNode.
@@ -349,15 +393,15 @@ func findProbeResult(srcNodeID string, dstNode MeshNodeInfo, targets map[string]
 		if dstNode.IP != "" && strings.EqualFold(t.Host, dstNode.IP) {
 			return res, res.CheckedAt, targetID, true
 		}
-		if dstNode.Hostname != "" && strings.EqualFold(t.Host, dstNode.Hostname) {
+		if dstNode.Hostname != "" && !isGenericHostname(dstNode.Hostname) && strings.EqualFold(t.Host, dstNode.Hostname) {
 			return res, res.CheckedAt, targetID, true
 		}
 		// Match by target identity
 		if targetID == dstNode.ID || targetID == dstNode.UUID || targetID == "node-"+dstNode.ID || targetID == "node-"+dstNode.UUID {
 			return res, res.CheckedAt, targetID, true
 		}
-		// Match by target name containing destination node name
-		if strings.EqualFold(t.Name, dstNode.Name) || (len(dstNode.Name) >= 3 && strings.Contains(strings.ToLower(t.Name), strings.ToLower(dstNode.Name))) {
+		// Match by target name corresponding to destination node name
+		if matchesTargetNodeName(t.Name, dstNode.Name) {
 			return res, res.CheckedAt, targetID, true
 		}
 	}

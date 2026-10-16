@@ -60,82 +60,137 @@ function generateNezhaSpline(pts, bottomY = 88) {
   return { line, area }
 }
 
-export function ChecksLatencyLines({ rows, networkHistory = [] }) {
-  const [hoveredIdx, setHoveredIdx] = useState(null)
-  const targets = safeArray(rows).filter((r) => r && r.name)
-  const allowedIds = new Set(targets.map((t) => t.targetId || t.target_id).filter(Boolean))
-  const historyForTargets = Array.isArray(networkHistory)
-    ? (allowedIds.size > 0 ? networkHistory.filter((item) => allowedIds.has(item.target_id)) : networkHistory)
-    : []
-  const isTimeMode = historyForTargets.length > 0
+const TARGET_COLORS = ['#6366f1', '#10b981', '#3b82f6', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316']
 
+export function ChecksLatencyLines({ rows, networkHistory = [] }) {
+  const [selectedTargetId, setSelectedTargetId] = useState('all')
+  const [hoveredPoint, setHoveredPoint] = useState(null)
+
+  const targets = safeArray(rows).filter((r) => r && r.name)
   if (!targets.length) return null
+
+  const targetList = targets.map((t, idx) => ({
+    id: t.targetId || t.target_id || t.key || String(idx),
+    name: cleanTargetLabel(t.name || t.target_id, '探测目标'),
+    kind: (t.kind || 'TCP').toUpperCase(),
+    latency: t.latency,
+    color: TARGET_COLORS[idx % TARGET_COLORS.length],
+  }))
 
   const baselineY = 88
   const topY = 16
   const midY = (topY + baselineY) / 2
   const plotHeight = baselineY - topY
 
-  let points = []
-  let validLatencies = []
-  let slot = 0
-  let maxLat = 10
+  const allowedIds = new Set(targetList.map((t) => t.id))
+  const rawHistory = Array.isArray(networkHistory)
+    ? (allowedIds.size > 0 ? networkHistory.filter((item) => allowedIds.has(item.target_id)) : networkHistory)
+    : []
 
-  if (isTimeMode) {
-    // 按照检测采样时间正序排列（从早到晚）
-    const sortedHistory = [...historyForTargets].sort(
-      (a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0)
-    )
+  const isTimeMode = rawHistory.length > 0
 
-    validLatencies = sortedHistory
-      .map((item) => {
-        const res = item.result || {}
-        return numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
-      })
-      .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
+  // 1. Group history points by target
+  const targetSeries = useMemo(() => {
+    if (!isTimeMode) return []
+    return targetList.map((target) => {
+      const items = rawHistory
+        .filter((item) => item.target_id === target.id)
+        .sort((a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0))
 
-    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 10
-    maxLat = Math.max(Math.ceil(rawMax * 1.25), 5)
-    const count = sortedHistory.length
-    slot = 100 / Math.max(count, 1)
-
-    points = sortedHistory.map((item, i) => {
-      const res = item.result || {}
-      const lat = numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
-      const hasLat = lat !== null && lat >= 0 && Number.isFinite(lat)
-      const effectiveLat = hasLat ? lat : 0
-      const x = i * slot + slot / 2
-      const y = baselineY - Math.min((effectiveLat / maxLat) * plotHeight, plotHeight)
-      const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
-      const matched = targets.find(
-        (t) => t.key?.startsWith(item.target_id) || t.name === item.target_id || t.target_id === item.target_id
-      )
-      const targetName = cleanTargetLabel(matched?.name || item.target_id, 'TCP 探测目标')
-      const targetKind = (matched?.kind || 'TCP').toUpperCase()
+      const validLatencies = items
+        .map((item) => {
+          const res = item.result || {}
+          return numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
+        })
+        .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
 
       return {
-        x,
-        y,
-        hasLat,
-        latency: lat,
-        time: item.checked_at,
-        isOk,
-        targetName,
-        targetKind,
-        error: res.error,
+        target,
+        items,
+        validLatencies,
       }
     })
-  } else {
-    // 降级兼容：按目标列表横向排布
-    validLatencies = targets
-      .map((r) => r.latency)
-      .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
-    const rawMax = validLatencies.length ? Math.max(...validLatencies) : 10
-    maxLat = Math.max(Math.ceil(rawMax * 1.25), 5)
-    const count = targets.length
-    slot = 100 / Math.max(count, 1)
+  }, [rawHistory, targetList, isTimeMode])
 
-    points = targets.map((r, i) => {
+  // Filter series to display
+  const displayedSeries = useMemo(() => {
+    if (!isTimeMode) return []
+    if (selectedTargetId === 'all') {
+      const withItems = targetSeries.filter((s) => s.items.length > 0)
+      return withItems.length > 0 ? withItems : targetSeries
+    }
+    return targetSeries.filter((s) => s.target.id === selectedTargetId)
+  }, [targetSeries, selectedTargetId, isTimeMode])
+
+  // Global or filtered max latency
+  const maxLat = useMemo(() => {
+    let allLat = []
+    if (isTimeMode) {
+      for (const s of displayedSeries) {
+        allLat.push(...s.validLatencies)
+      }
+    } else {
+      allLat = targets
+        .map((r) => r.latency)
+        .filter((l) => l !== null && l >= 0 && Number.isFinite(l))
+    }
+    const rawMax = allLat.length ? Math.max(...allLat) : 10
+    return Math.max(Math.ceil(rawMax * 1.25), 5)
+  }, [isTimeMode, displayedSeries, targets])
+
+  // Compute spline and points for each series
+  const renderedSeries = useMemo(() => {
+    if (!isTimeMode) return []
+
+    return displayedSeries.map((s) => {
+      const count = s.items.length
+      const slot = 100 / Math.max(count, 1)
+
+      const points = s.items.map((item, i) => {
+        const res = item.result || {}
+        const lat = numeric(res.latency_ms ?? item.latency_ms ?? item.latency)
+        const hasLat = lat !== null && lat >= 0 && Number.isFinite(lat)
+        const effectiveLat = hasLat ? lat : 0
+        const x = i * slot + slot / 2
+        const y = baselineY - Math.min((effectiveLat / maxLat) * plotHeight, plotHeight)
+        const isOk = res.status === 'success' || (res.status_code && res.status_code < 400)
+
+        return {
+          x,
+          y,
+          hasLat,
+          latency: lat,
+          time: item.checked_at,
+          isOk,
+          targetName: s.target.name,
+          targetKind: s.target.kind,
+          targetColor: s.target.color,
+          error: res.error,
+          slot,
+          index: i,
+        }
+      })
+
+      const spline = generateNezhaSpline(
+        points.map((p) => ({ x: p.x, y: p.y })),
+        baselineY
+      )
+
+      return {
+        target: s.target,
+        points,
+        spline,
+      }
+    })
+  }, [displayedSeries, isTimeMode, maxLat, baselineY, plotHeight])
+
+  // Fallback points when no time series history
+  const fallbackPoints = useMemo(() => {
+    if (isTimeMode) return []
+    const count = targets.length
+    const slot = 100 / Math.max(count, 1)
+
+    return targets.map((r, i) => {
       const x = i * slot + slot / 2
       const hasLat = r.latency !== null && r.latency >= 0 && Number.isFinite(r.latency)
       const lat = hasLat ? r.latency : 0
@@ -147,27 +202,100 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         latency: r.latency,
         target: r,
         targetName: r.name,
-        targetKind: r.kind,
+        targetKind: (r.kind || 'TCP').toUpperCase(),
+        targetColor: TARGET_COLORS[i % TARGET_COLORS.length],
         isOk: r.lossRate === 0 || r.lossRate === null,
         time: r.lastChecked,
+        slot,
+        index: i,
       }
     })
+  }, [isTimeMode, targets, maxLat, baselineY, plotHeight])
+
+  const fallbackSpline = useMemo(() => {
+    if (isTimeMode || !fallbackPoints.length) return { line: '', area: '' }
+    return generateNezhaSpline(
+      fallbackPoints.map((p) => ({ x: p.x, y: p.y })),
+      baselineY
+    )
+  }, [isTimeMode, fallbackPoints, baselineY])
+
+  // All points for hover tracking
+  const allRenderedPoints = useMemo(() => {
+    if (isTimeMode) {
+      const pts = []
+      for (const s of renderedSeries) {
+        pts.push(...s.points)
+      }
+      return pts
+    }
+    return fallbackPoints
+  }, [isTimeMode, renderedSeries, fallbackPoints])
+
+  const handleCanvasMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    if (!rect.width || !allRenderedPoints.length) return
+    const mousePercent = ((e.clientX - rect.left) / rect.width) * 100
+    let closest = null
+    let minDist = Infinity
+    for (const p of allRenderedPoints) {
+      const dist = Math.abs(p.x - mousePercent)
+      if (dist < minDist) {
+        minDist = dist
+        closest = p
+      }
+    }
+    setHoveredPoint(closest)
   }
 
-  const spline = generateNezhaSpline(
-    points.map((p) => ({ x: p.x, y: p.y })),
-    baselineY
-  )
-
-  const active = hoveredIdx !== null && points[hoveredIdx] ? points[hoveredIdx] : null
+  const active = hoveredPoint
+  const isSingleTarget = selectedTargetId !== 'all' || renderedSeries.length === 1
+  const singleSeries = isSingleTarget && renderedSeries.length === 1 ? renderedSeries[0] : null
 
   return (
-    <div className="checks-chart-wrap nezha-checks-wrap" onMouseLeave={() => setHoveredIdx(null)}>
+    <div className="checks-chart-wrap nezha-checks-wrap" onMouseLeave={() => setHoveredPoint(null)}>
+      {/* 目标胶囊切换栏 */}
+      {targetList.length > 1 && (
+        <div className="checks-target-capsules">
+          <button
+            type="button"
+            className={`target-capsule-btn ${selectedTargetId === 'all' ? 'active' : ''}`}
+            onClick={() => {
+              setSelectedTargetId('all')
+              setHoveredPoint(null)
+            }}
+          >
+            全部目标 ({targetList.length})
+          </button>
+          {targetList.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`target-capsule-btn ${selectedTargetId === t.id ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedTargetId(t.id)
+                setHoveredPoint(null)
+              }}
+              style={{
+                borderColor: selectedTargetId === t.id ? t.color : undefined,
+                color: selectedTargetId === t.id ? t.color : undefined,
+              }}
+            >
+              <span className="capsule-dot" style={{ backgroundColor: t.color }} />
+              {t.name}
+              {t.latency !== null && t.latency !== undefined ? ` (${Math.round(t.latency)}ms)` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* 哪吒 2.0 简约单行悬浮指示 */}
       <div className={`traffic-hover-banner nezha-hover-banner ${active ? 'active' : ''}`}>
         {active ? (
           <div className="hover-badge-content">
-            <span className="hover-stat mono" style={{ fontWeight: 600 }}>{active.targetName}</span>
+            <span className="hover-stat mono" style={{ fontWeight: 600, color: active.targetColor || 'inherit' }}>
+              {active.targetName}
+            </span>
             <span className="hover-sep" aria-hidden="true" />
             <span className="hover-stat text-mint mono">
               协议: <b>{active.targetKind}</b>
@@ -198,14 +326,18 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
             <Clock size={13} className="text-mint inline-icon" />
             <span>
               {isTimeMode
-                ? '哪吒 2.0 TCP 延迟历史走势 · 鼠标滑过节点查看对应时间点的检测延迟与状态'
+                ? '哪吒 2.0 TCP 独立目标历史走势 · 点击胶囊聚焦目标，滑过节点查看实时延迟'
                 : '哪吒 2.0 探测质量流线 · 鼠标滑过节点查看目标延迟与丢包'}
             </span>
           </div>
         )}
       </div>
 
-      <div className="checks-svg-canvas nezha-svg-canvas">
+      <div
+        className="checks-svg-canvas nezha-svg-canvas"
+        onMouseMove={handleCanvasMouseMove}
+        onMouseLeave={() => setHoveredPoint(null)}
+      >
         <svg
           className="checks-line-svg nezha-spline-svg"
           viewBox="0 0 100 100"
@@ -218,6 +350,12 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
               <stop offset="0%" stopColor="#6366f1" stopOpacity="0.12" />
               <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
             </linearGradient>
+            {renderedSeries.map((s, idx) => (
+              <linearGradient key={`grad-${s.target.id}`} id={`nezha-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={s.target.color} stopOpacity="0.14" />
+                <stop offset="100%" stopColor={s.target.color} stopOpacity="0.0" />
+              </linearGradient>
+            ))}
           </defs>
 
           {/* 参考水平极细虚线 */}
@@ -225,56 +363,65 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
           <line className="nezha-grid-line" x1="0" y1={midY} x2="100" y2={midY} />
           <line className="nezha-grid-line" x1="0" y1={baselineY} x2="100" y2={baselineY} />
 
-          {/* 渐变微透明面积 */}
-          {validLatencies.length > 0 && (
-            <path className="nezha-area-fill" d={spline.area} fill="url(#nezha-checks-lat-grad)" />
+          {/* 时序模式：独立曲线渲染 */}
+          {isTimeMode ? (
+            <>
+              {/* 单目标聚焦时渲染半透明面积填充 */}
+              {isSingleTarget && singleSeries && singleSeries.spline.area && (
+                <path
+                  className="nezha-area-fill"
+                  d={singleSeries.spline.area}
+                  fill={`url(#nezha-grad-${renderedSeries.indexOf(singleSeries)})`}
+                />
+              )}
+
+              {/* 每个目标独立的极细延迟曲线，彻底消除多目标交叉锯齿 */}
+              {renderedSeries.map((s) => (
+                <path
+                  key={`line-${s.target.id}`}
+                  className="nezha-line-stroke"
+                  d={s.spline.line}
+                  fill="none"
+                  stroke={s.target.color}
+                  strokeWidth={isSingleTarget ? '1.2' : '1.0'}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+            </>
+          ) : (
+            <>
+              {fallbackSpline.area && (
+                <path className="nezha-area-fill" d={fallbackSpline.area} fill="url(#nezha-checks-lat-grad)" />
+              )}
+              {fallbackSpline.line && (
+                <path
+                  className="nezha-line-stroke nezha-line-tx"
+                  d={fallbackSpline.line}
+                  fill="none"
+                  stroke="#6366f1"
+                  strokeWidth="1.0"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </>
           )}
 
-          {/* 哪吒 2.0 极细延迟线条 (0.95px) */}
-          {validLatencies.length > 0 && (
-            <path
-              className="nezha-line-stroke nezha-line-tx"
-              d={spline.line}
-              fill="none"
-              stroke="#6366f1"
-              strokeWidth="0.95"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {/* 交互垂直十字线 */}
+          {active && (
+            <line
+              className="nezha-crosshair"
+              x1={active.x}
+              y1={topY - 3}
+              x2={active.x}
+              y2={baselineY}
+              stroke={active.targetColor || undefined}
             />
           )}
-
-          {/* 交互交叉线与发光点 */}
-          {points.map((p, index) => {
-            const isHovered = hoveredIdx === index
-
-            return (
-              <g key={`check-pt-${index}`}>
-                {isHovered && (
-                  <line
-                    className="nezha-crosshair"
-                    x1={p.x}
-                    y1={topY - 3}
-                    x2={p.x}
-                    y2={baselineY}
-                  />
-                )}
-                {/* 鼠标灵敏捕捉区 */}
-                <rect
-                  x={index * slot}
-                  y="0"
-                  width={slot}
-                  height="100"
-                  fill="transparent"
-                  style={{ cursor: 'crosshair' }}
-                  onMouseEnter={() => setHoveredIdx(index)}
-                  onMouseMove={() => setHoveredIdx(index)}
-                />
-              </g>
-            )
-          })}
         </svg>
 
-        {/* 交互真圆高亮指示点（HTML 像素渲染，彻底杜绝 SVG 非等比拉伸导致圆点被压扁拉长） */}
+        {/* 交互真圆高亮指示点 */}
         {active && (
           <div className="nezha-chart-dots" aria-hidden="true">
             <div
@@ -285,37 +432,40 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
                   ? 'dot-mint'
                   : 'dot-blue'
               }`}
-              style={{ left: `${active.x}%`, top: `${active.y}%` }}
+              style={{
+                left: `${active.x}%`,
+                top: `${active.y}%`,
+                backgroundColor: active.targetColor || undefined,
+                boxShadow: active.targetColor ? `0 0 8px ${active.targetColor}` : undefined,
+              }}
             />
           </div>
         )}
 
-        {/* Y 轴刻度标注（标准 HTML 浮层，彻底解决 SVG 非等比拉伸导致数字变形变大） */}
-        {validLatencies.length > 0 && (
-          <div className="nezha-y-axis-labels mono" aria-hidden="true">
-            <span style={{ top: `${topY}%` }}>{maxLat} ms</span>
-            <span style={{ top: `${midY}%` }}>{(maxLat / 2).toFixed(maxLat >= 10 ? 0 : 1)} ms</span>
-            <span style={{ top: `${baselineY}%` }}>0 ms</span>
-          </div>
-        )}
+        {/* Y 轴刻度标注 */}
+        <div className="nezha-y-axis-labels mono" aria-hidden="true">
+          <span style={{ top: `${topY}%` }}>{maxLat} ms</span>
+          <span style={{ top: `${midY}%` }}>{(maxLat / 2).toFixed(maxLat >= 10 ? 0 : 1)} ms</span>
+          <span style={{ top: `${baselineY}%` }}>0 ms</span>
+        </div>
       </div>
 
-      {/* X 轴刻度指示：历史时序模式按时间显示，目标模式按目标名称显示 */}
+      {/* X 轴刻度指示 */}
       {isTimeMode ? (
         <div className="checks-time-axis nezha-time-axis mono" aria-hidden="true">
-          <span>{formatTimeOfDay(points[0]?.time)}</span>
-          {points.length > 2 && (
-            <span>{formatTimeOfDay(points[Math.floor(points.length / 2)]?.time)}</span>
+          <span>{formatTimeOfDay(allRenderedPoints[0]?.time)}</span>
+          {allRenderedPoints.length > 2 && (
+            <span>{formatTimeOfDay(allRenderedPoints[Math.floor(allRenderedPoints.length / 2)]?.time)}</span>
           )}
-          <span>{formatTimeOfDay(points[points.length - 1]?.time)}</span>
+          <span>{formatTimeOfDay(allRenderedPoints[allRenderedPoints.length - 1]?.time)}</span>
         </div>
       ) : (
         <div className="checks-time-axis nezha-time-axis mono">
           {targets.map((t, idx) => (
             <span
               key={`x-${idx}`}
-              className={`axis-target-name ${hoveredIdx === idx ? 'axis-active' : ''}`}
-              style={{ width: `${slot}%`, textAlign: 'center' }}
+              className={`axis-target-name ${active?.targetName === t.name ? 'axis-active' : ''}`}
+              style={{ width: `${100 / Math.max(targets.length, 1)}%`, textAlign: 'center' }}
             >
               {t.name}
             </span>

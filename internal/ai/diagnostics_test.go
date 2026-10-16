@@ -116,3 +116,30 @@ func TestGenerateMarkdownSummary(t *testing.T) {
 		t.Fatalf("expected health score in markdown report, got: %s", md)
 	}
 }
+
+func TestExpiringNodesOverdueFormatting(t *testing.T) {
+	rep := &DiagnosisReport{
+		GeneratedAt:  1700000000,
+		HealthScore:  90,
+		HealthStatus: "HEALTHY",
+		CostAudit: CostAuditSummary{
+			TotalMonthlyCost: 50.0,
+			Currency:         "USD",
+			ExpiringNodes: []ExpiringNodeAudit{
+				{NodeName: "Overdue-Node", DueDate: "2026-10-10", DaysLeft: -5, Price: 10, Currency: "USD"},
+				{NodeName: "Today-Node", DueDate: "2026-10-15", DaysLeft: 0, Price: 15, Currency: "USD"},
+				{NodeName: "Future-Node", DueDate: "2026-10-20", DaysLeft: 5, Price: 25, Currency: "USD"},
+			},
+		},
+	}
+	md := GenerateMarkdownSummary(rep)
+	if !strings.Contains(md, "已逾期 5 天") {
+		t.Errorf("expected '已逾期 5 天' in markdown, got:\n%s", md)
+	}
+	if !strings.Contains(md, "今日到期") {
+		t.Errorf("expected '今日到期' in markdown, got:\n%s", md)
+	}
+	if !strings.Contains(md, "剩余 5 天") {
+		t.Errorf("expected '剩余 5 天' in markdown, got:\n%s", md)
+	}
+}

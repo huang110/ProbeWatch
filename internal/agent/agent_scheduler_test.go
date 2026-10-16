@@ -48,6 +48,7 @@ func TestSlowTaskDoesNotBlockHeartbeat(t *testing.T) {
 		AgentEndpoint:  server.URL,
 		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
 		AgentNodeToken: "node-secret",
+		AgentDataDir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -253,19 +253,78 @@ func maskToken(token string) string {
 
 func (s *Server) resolveNotificationChannel(ctx context.Context, id string) (db.NotificationChannel, error) {
 	ch, err := s.service.Store().GetNotificationChannel(ctx, id)
-	if err == nil { return ch, nil }
+	if err == nil {
+		return ch, nil
+	}
 	now := time.Now().UTC()
 	switch id {
 	case "env-telegram":
-		if strings.TrimSpace(s.cfg.TelegramBotToken) == "" || strings.TrimSpace(s.cfg.TelegramChatID) == "" { return db.NotificationChannel{}, err }
+		del, _ := s.service.Store().GetSetting(ctx, "env_telegram_deleted", "false")
+		if del == "true" {
+			return db.NotificationChannel{}, err
+		}
+		if strings.TrimSpace(s.cfg.TelegramBotToken) == "" || strings.TrimSpace(s.cfg.TelegramChatID) == "" {
+			return db.NotificationChannel{}, err
+		}
 		b, _ := json.Marshal(map[string]string{"bot_token": s.cfg.TelegramBotToken, "chat_id": s.cfg.TelegramChatID})
-		return db.NotificationChannel{ID: id, Name: "Telegram (环境变量)", Type: "telegram", Config: string(b), Enabled: true, Events: "[]", CreatedAt: now, UpdatedAt: now}, nil
+		return db.NotificationChannel{ID: id, Name: "Telegram Bot (环境变量)", Type: "telegram", Config: string(b), Enabled: true, Events: "[]", CreatedAt: now, UpdatedAt: now}, nil
 	case "env-webhook":
-		if strings.TrimSpace(s.cfg.WebhookURL) == "" { return db.NotificationChannel{}, err }
+		del, _ := s.service.Store().GetSetting(ctx, "env_webhook_deleted", "false")
+		if del == "true" {
+			return db.NotificationChannel{}, err
+		}
+		if strings.TrimSpace(s.cfg.WebhookURL) == "" {
+			return db.NotificationChannel{}, err
+		}
 		b, _ := json.Marshal(map[string]string{"webhook_url": s.cfg.WebhookURL})
 		return db.NotificationChannel{ID: id, Name: "Webhook (环境变量)", Type: "webhook", Config: string(b), Enabled: true, Events: "[]", CreatedAt: now, UpdatedAt: now}, nil
 	default:
 		return db.NotificationChannel{}, err
+	}
+}
+
+func (s *Server) seedEnvNotificationChannels(ctx context.Context) {
+	now := time.Now().UTC()
+	if strings.TrimSpace(s.cfg.TelegramBotToken) != "" && strings.TrimSpace(s.cfg.TelegramChatID) != "" {
+		del, _ := s.service.Store().GetSetting(ctx, "env_telegram_deleted", "false")
+		seeded, _ := s.service.Store().GetSetting(ctx, "env_telegram_seeded", "false")
+		if del != "true" && seeded != "true" {
+			conf, _ := json.Marshal(map[string]string{
+				"bot_token": s.cfg.TelegramBotToken,
+				"chat_id":   s.cfg.TelegramChatID,
+			})
+			_ = s.service.Store().UpsertNotificationChannel(ctx, db.NotificationChannel{
+				ID:        "env-telegram",
+				Name:      "Telegram Bot (环境变量)",
+				Type:      "telegram",
+				Config:    string(conf),
+				Enabled:   true,
+				Events:    "[]",
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+			_ = s.service.Store().SetSetting(ctx, "env_telegram_seeded", "true")
+		}
+	}
+	if strings.TrimSpace(s.cfg.WebhookURL) != "" {
+		del, _ := s.service.Store().GetSetting(ctx, "env_webhook_deleted", "false")
+		seeded, _ := s.service.Store().GetSetting(ctx, "env_webhook_seeded", "false")
+		if del != "true" && seeded != "true" {
+			conf, _ := json.Marshal(map[string]string{
+				"webhook_url": s.cfg.WebhookURL,
+			})
+			_ = s.service.Store().UpsertNotificationChannel(ctx, db.NotificationChannel{
+				ID:        "env-webhook",
+				Name:      "Webhook (环境变量)",
+				Type:      "webhook",
+				Config:    string(conf),
+				Enabled:   true,
+				Events:    "[]",
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+			_ = s.service.Store().SetSetting(ctx, "env_webhook_seeded", "true")
+		}
 	}
 }
 
@@ -278,46 +337,15 @@ func randomHex(n int) string {
 }
 
 func (s *Server) listNotificationChannels(w http.ResponseWriter, r *http.Request) {
+	s.seedEnvNotificationChannels(r.Context())
 	channels, err := s.service.Store().ListNotificationChannels(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
-	// Synthesize fallback channels from env if DB has none
-	if len(channels) == 0 {
-		if strings.TrimSpace(s.cfg.TelegramBotToken) != "" && strings.TrimSpace(s.cfg.TelegramChatID) != "" {
-			conf, _ := json.Marshal(map[string]string{
-				"bot_token": maskToken(s.cfg.TelegramBotToken),
-				"chat_id":   s.cfg.TelegramChatID,
-			})
-			channels = append(channels, db.NotificationChannel{
-				ID:        "env-telegram",
-				Name:      "Telegram Bot (环境变量)",
-				Type:      "telegram",
-				Config:    string(conf),
-				Enabled:   true,
-				Events:    "[]",
-				CreatedAt: time.Now().UTC(),
-				UpdatedAt: time.Now().UTC(),
-			})
-		}
-		if strings.TrimSpace(s.cfg.WebhookURL) != "" {
-			conf, _ := json.Marshal(map[string]string{
-				"webhook_url": s.cfg.WebhookURL,
-			})
-			channels = append(channels, db.NotificationChannel{
-				ID:        "env-webhook",
-				Name:      "Webhook (环境变量)",
-				Type:      "webhook",
-				Config:    string(conf),
-				Enabled:   true,
-				Events:    "[]",
-				CreatedAt: time.Now().UTC(),
-				UpdatedAt: time.Now().UTC(),
-			})
-		}
+	for i := range channels {
+		channels[i] = maskNotificationChannel(channels[i])
 	}
-	for i := range channels { channels[i] = maskNotificationChannel(channels[i]) }
 	writeJSON(w, http.StatusOK, channels)
 }
 
@@ -403,7 +431,13 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) deleteNotificationChannel(w http.ResponseWriter, r *http.Request, id string) {
-	if err := s.service.Store().DeleteNotificationChannel(r.Context(), id); err != nil {
+	ctx := r.Context()
+	if id == "env-telegram" {
+		_ = s.service.Store().SetSetting(ctx, "env_telegram_deleted", "true")
+	} else if id == "env-webhook" {
+		_ = s.service.Store().SetSetting(ctx, "env_webhook_deleted", "true")
+	}
+	if err := s.service.Store().DeleteNotificationChannel(ctx, id); err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "failed to delete channel")
 		return
 	}
@@ -1067,7 +1101,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	// Keep every resource sample for the selected window so traffic deltas
 	// cover the full 24h/7d/30d range rather than only the latest page.
 	historyLimit := limit
-	if historyLimit < 1000 { historyLimit = 1000 }
+	if r.URL.Query().Get("limit") == "" && historyLimit < 1000 {
+		historyLimit = 1000
+	}
 	historyMap, err := s.service.Store().GetResourceHistoryMultiNode(r.Context(), nodeIDs, from, to, historyLimit)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
@@ -1246,16 +1282,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 // authenticateUser resolves and validates the caller admin user, checking disabled status.
 func (s *Server) authenticateUser(w http.ResponseWriter, r *http.Request) (*db.AdminUser, bool) {
 	user, hasUser := UserFromContext(r.Context())
+	var tokRecord *db.APIToken
 	if !hasUser {
 		rawToken := auth.ExtractAPIToken(r)
 		if rawToken != "" {
-			_, caller, err := s.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+			tok, caller, err := s.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
 			if err != nil {
 				writeAuthenticationError(w, err)
 				return nil, false
 			}
 			user = *caller
 			hasUser = true
+			tokRecord = tok
 		} else {
 			var err error
 			user, err = s.service.CurrentUser(r, time.Now().UTC())
@@ -1264,10 +1302,19 @@ func (s *Server) authenticateUser(w http.ResponseWriter, r *http.Request) (*db.A
 				return nil, false
 			}
 		}
+	} else {
+		if t, ok := TokenFromContext(r.Context()); ok {
+			tokRecord = &t
+		}
 	}
 
 	if user.Disabled {
 		writeJSONError(w, http.StatusForbidden, "user account is disabled")
+		return nil, false
+	}
+
+	if isWriteMethod(r.Method) && tokRecord != nil && !tokenAllowsWrite(tokRecord.Scopes) {
+		writeJSONError(w, http.StatusForbidden, "api token lacks write scope")
 		return nil, false
 	}
 

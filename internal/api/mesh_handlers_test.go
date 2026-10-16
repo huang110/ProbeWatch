@@ -40,15 +40,15 @@ func TestMeshMatrixHandler(t *testing.T) {
 	nodeSFO := publicStatusRegisterNode(t, handler, store, "98765432-1234-4321-8765-123456789abc", "SFO-SiliconValley")
 
 	// Set IP / resource latest for each node
-	sgSnapshot := protocol.ResourceSnapshot{IPv4: "10.0.1.1", Hostname: "sg-node-01"}
+	sgSnapshot := protocol.ResourceSnapshot{IPv4: "198.51.100.1", Hostname: "sg-node-01"}
 	payloadSG, _ := json.Marshal(sgSnapshot)
 	_ = store.UpsertResourceLatest(ctx, nodeSG.ID, now, payloadSG)
 
-	tyoSnapshot := protocol.ResourceSnapshot{IPv4: "10.0.2.1", Hostname: "tyo-node-01"}
+	tyoSnapshot := protocol.ResourceSnapshot{IPv4: "198.51.100.2", Hostname: "tyo-node-01"}
 	payloadTYO, _ := json.Marshal(tyoSnapshot)
 	_ = store.UpsertResourceLatest(ctx, nodeTYO.ID, now, payloadTYO)
 
-	sfoSnapshot := protocol.ResourceSnapshot{IPv4: "10.0.3.1", Hostname: "sfo-node-01"}
+	sfoSnapshot := protocol.ResourceSnapshot{IPv4: "198.51.100.3", Hostname: "sfo-node-01"}
 	payloadSFO, _ := json.Marshal(sfoSnapshot)
 	_ = store.UpsertResourceLatest(ctx, nodeSFO.ID, now, payloadSFO)
 
@@ -57,7 +57,7 @@ func TestMeshMatrixHandler(t *testing.T) {
 		ID:      "tgt-to-tyo",
 		Name:    "TYO Target",
 		Kind:    db.TargetKindTCP,
-		Host:    "10.0.2.1",
+		Host:    "198.51.100.2",
 		Enabled: true,
 		Payload: []byte(`{"port":80}`),
 	}, now)
@@ -69,7 +69,7 @@ func TestMeshMatrixHandler(t *testing.T) {
 		ID:      "tgt-to-sfo",
 		Name:    "SFO Target",
 		Kind:    db.TargetKindTCP,
-		Host:    "10.0.3.1",
+		Host:    "198.51.100.3",
 		Enabled: true,
 		Payload: []byte(`{"port":80}`),
 	}, now)
@@ -79,7 +79,7 @@ func TestMeshMatrixHandler(t *testing.T) {
 
 	// 1. SG -> TYO probe: 65ms (good)
 	resSGtoTYO := protocol.NetworkResult{
-		Host:      "10.0.2.1",
+		Host:      "198.51.100.2",
 		Port:      80,
 		Status:    "up",
 		LatencyMS: 65,
@@ -90,7 +90,7 @@ func TestMeshMatrixHandler(t *testing.T) {
 
 	// 2. TYO -> SFO probe: 105ms (fair)
 	resTYOtoSFO := protocol.NetworkResult{
-		Host:      "10.0.3.1",
+		Host:      "198.51.100.3",
 		Port:      80,
 		Status:    "up",
 		LatencyMS: 105,
@@ -101,7 +101,7 @@ func TestMeshMatrixHandler(t *testing.T) {
 
 	// 3. SG -> SFO direct probe: 280ms (high/suboptimal!)
 	resSGtoSFO := protocol.NetworkResult{
-		Host:      "10.0.3.1",
+		Host:      "198.51.100.3",
 		Port:      80,
 		Status:    "up",
 		LatencyMS: 280,
@@ -338,5 +338,61 @@ func TestTargetScopingWithNodeTagsAndIDs(t *testing.T) {
 	taskIDs2 := map[string]bool{conf2.Tasks[0].ID: true, conf2.Tasks[1].ID: true}
 	if !taskIDs2["tgt-global"] || !taskIDs2["tgt-us-node"] {
 		t.Errorf("Node 2 expected tgt-global and tgt-us-node, got %v", conf2.Tasks)
+	}
+}
+
+func TestMatchesTargetNodeNameAndMeshHelpers(t *testing.T) {
+	// 1. Target node name matching tests
+	if matchesTargetNodeName("香港三网回程", "香港") {
+		t.Errorf("expected false for substring match '香港三网回程' vs node '香港'")
+	}
+	if !matchesTargetNodeName("香港", "香港") {
+		t.Errorf("expected true for exact match '香港'")
+	}
+	if !matchesTargetNodeName("to-香港", "香港") {
+		t.Errorf("expected true for 'to-香港'")
+	}
+	if !matchesTargetNodeName("mesh-香港-tcp", "香港") {
+		t.Errorf("expected true for 'mesh-香港-tcp'")
+	}
+	if !matchesTargetNodeName("香港 - 联通", "香港") {
+		t.Errorf("expected true for '香港 - 联通'")
+	}
+	if !matchesTargetNodeName("node-01 -> 香港", "香港") {
+		t.Errorf("expected true for 'node-01 -> 香港'")
+	}
+
+	// 2. Generic hostname tests
+	if !isGenericHostname("debian") {
+		t.Errorf("expected true for 'debian'")
+	}
+	if !isGenericHostname("localhost") {
+		t.Errorf("expected true for 'localhost'")
+	}
+	if !isGenericHostname("ubuntu") {
+		t.Errorf("expected true for 'ubuntu'")
+	}
+	if isGenericHostname("hk-node-01") {
+		t.Errorf("expected false for 'hk-node-01'")
+	}
+
+	// 3. Public mesh IP tests
+	if isPublicMeshIP("10.0.0.1") {
+		t.Errorf("expected false for private 10.0.0.1")
+	}
+	if isPublicMeshIP("192.168.1.1") {
+		t.Errorf("expected false for private 192.168.1.1")
+	}
+	if isPublicMeshIP("100.64.0.1") {
+		t.Errorf("expected false for CGNAT 100.64.0.1")
+	}
+	if isPublicMeshIP("127.0.0.1") {
+		t.Errorf("expected false for loopback 127.0.0.1")
+	}
+	if !isPublicMeshIP("198.51.100.1") {
+		t.Errorf("expected true for public 198.51.100.1")
+	}
+	if !isPublicMeshIP("2606:4700:4700::1111") {
+		t.Errorf("expected true for public IPv6")
 	}
 }

@@ -1800,22 +1800,47 @@ func (s *Store) PersistAgentReport(ctx context.Context, input AgentReportInput) 
 	if err := insertRequestReplayTx(ctx, tx, input.NodeID, input.RequestID, input.ReplayExpiresAt, input.Now); err != nil {
 		return err
 	}
-	if err := upsertResourceLatestTx(ctx, tx, input.NodeID, input.ReportedAt, input.ResourcePayload); err != nil {
-		return err
+
+	var existingLatestNano int64
+	hasExisting := false
+	if err := tx.QueryRowContext(ctx, `SELECT reported_at FROM resource_latest WHERE node_id = ?`, input.NodeID).Scan(&existingLatestNano); err == nil {
+		hasExisting = true
 	}
-	for _, result := range input.Results {
-		if err := evaluateMTRPathChangeAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
-			return err
-		}
-		if err := upsertAgentResultTx(ctx, tx, input.NodeID, result); err != nil {
-			return err
-		}
-		if err := evaluateResultAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
-			return err
-		}
+
+	isHistorical := input.Now.Sub(input.ReportedAt) > 2*time.Minute
+	if hasExisting && unixNano(input.ReportedAt) <= existingLatestNano {
+		isHistorical = true
 	}
-	if err := s.evaluateResourceAlertTx(ctx, tx, input.NodeID, input.ResourcePayload, input.Now); err != nil {
-		return err
+
+	if isHistorical {
+		// Only append to history tables. Do not overwrite resource_latest, latest result tables, or trigger live alerts.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO resource_history (node_id, payload, reported_at, recorded_at) VALUES (?, ?, ?, ?)`,
+			input.NodeID, input.ResourcePayload, unixNano(input.ReportedAt), unixNano(input.Now)); err != nil {
+			return fmt.Errorf("insert resource history: %w", err)
+		}
+		for _, result := range input.Results {
+			if err := insertResultHistoryOnlyTx(ctx, tx, input.NodeID, result); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := upsertResourceLatestTx(ctx, tx, input.NodeID, input.ReportedAt, input.ResourcePayload); err != nil {
+			return err
+		}
+		for _, result := range input.Results {
+			if err := evaluateMTRPathChangeAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
+				return err
+			}
+			if err := upsertAgentResultTx(ctx, tx, input.NodeID, result); err != nil {
+				return err
+			}
+			if err := evaluateResultAlertTx(ctx, tx, input.NodeID, result, input.Now); err != nil {
+				return err
+			}
+		}
+		if err := s.evaluateResourceAlertTx(ctx, tx, input.NodeID, input.ResourcePayload, input.Now); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1839,14 +1864,39 @@ func (s *Store) PersistAgentResult(ctx context.Context, nodeID, requestID string
 	if err := insertRequestReplayTx(ctx, tx, nodeID, requestID, replayExpiresAt, now); err != nil {
 		return err
 	}
-	if err := evaluateMTRPathChangeAlertTx(ctx, tx, nodeID, result, now); err != nil {
-		return err
+
+	isHistorical := now.Sub(result.CheckedAt) > 2*time.Minute
+	var existingLatestNano int64
+	switch result.Kind {
+	case TargetKindSynthetic, TargetKindGRPC, TargetKindWebSocket, TargetKindDoH:
+		_ = tx.QueryRowContext(ctx, `SELECT checked_at FROM synthetic_results_latest WHERE node_id = ? AND target_id = ?`, nodeID, result.TargetID).Scan(&existingLatestNano)
+	case TargetKindSpeedtest:
+		_ = tx.QueryRowContext(ctx, `SELECT tested_at FROM speedtest_results_latest WHERE node_id = ? AND task_id = ?`, nodeID, result.TargetID).Scan(&existingLatestNano)
+	case TargetKindTCP, TargetKindHTTP, TargetKindHTTPS, TargetKindDNS:
+		_ = tx.QueryRowContext(ctx, `SELECT checked_at FROM network_results_latest WHERE node_id = ? AND target_id = ?`, nodeID, result.TargetID).Scan(&existingLatestNano)
+	case TargetKindMTR:
+		_ = tx.QueryRowContext(ctx, `SELECT checked_at FROM mtr_results_latest WHERE node_id = ? AND target_id = ?`, nodeID, result.TargetID).Scan(&existingLatestNano)
+	case TargetKindMediaHTTP:
+		_ = tx.QueryRowContext(ctx, `SELECT checked_at FROM media_results_latest WHERE node_id = ? AND detector_id = ?`, nodeID, result.TargetID).Scan(&existingLatestNano)
 	}
-	if err := upsertAgentResultTx(ctx, tx, nodeID, result); err != nil {
-		return err
+	if existingLatestNano > 0 && unixNano(result.CheckedAt) <= existingLatestNano {
+		isHistorical = true
 	}
-	if err := evaluateResultAlertTx(ctx, tx, nodeID, result, now); err != nil {
-		return err
+
+	if isHistorical {
+		if err := insertResultHistoryOnlyTx(ctx, tx, nodeID, result); err != nil {
+			return err
+		}
+	} else {
+		if err := evaluateMTRPathChangeAlertTx(ctx, tx, nodeID, result, now); err != nil {
+			return err
+		}
+		if err := upsertAgentResultTx(ctx, tx, nodeID, result); err != nil {
+			return err
+		}
+		if err := evaluateResultAlertTx(ctx, tx, nodeID, result, now); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -2450,6 +2500,64 @@ func upsertLatestResultTx(ctx context.Context, tx *sql.Tx, query, nodeID, target
 		return fmt.Errorf("upsert latest result: %w", err)
 	}
 	return nil
+}
+
+func insertResultHistoryOnlyTx(ctx context.Context, tx *sql.Tx, nodeID string, result AgentResultInput) error {
+	switch result.Kind {
+	case TargetKindSynthetic, TargetKindGRPC, TargetKindWebSocket, TargetKindDoH:
+		var syn struct {
+			Protocol        string `json:"protocol"`
+			StatusCode      int    `json:"status_code"`
+			Passed          bool   `json:"passed"`
+			FailedAssertion string `json:"failed_assertion"`
+			Timing          struct {
+				DNSLookupMS     int64 `json:"dns_lookup_ms"`
+				TCPConnectMS    int64 `json:"tcp_connect_ms"`
+				TLSHandshakeMS  int64 `json:"tls_handshake_ms"`
+				TTFBMS          int64 `json:"ttfb_ms"`
+				TotalDurationMS int64 `json:"total_duration_ms"`
+			} `json:"timing"`
+		}
+		_ = json.Unmarshal(result.Payload, &syn)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO synthetic_results_history (node_id, target_id, payload, protocol, status_code, passed, failed_assertion, dns_ms, connect_ms, tls_ms, ttfb_ms, total_ms, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, result.TargetID, result.Payload, syn.Protocol, syn.StatusCode, boolInt(syn.Passed), syn.FailedAssertion, syn.Timing.DNSLookupMS, syn.Timing.TCPConnectMS, syn.Timing.TLSHandshakeMS, syn.Timing.TTFBMS, syn.Timing.TotalDurationMS, unixNano(result.CheckedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert synthetic result history: %w", err)
+		}
+		return nil
+
+	case TargetKindSpeedtest:
+		var sRes struct {
+			DownloadSpeedMbps float64 `json:"download_speed_mbps"`
+			UploadSpeedMbps   float64 `json:"upload_speed_mbps"`
+			LatencyMS         int64   `json:"latency_ms"`
+			JitterMS          int64   `json:"jitter_ms"`
+		}
+		_ = json.Unmarshal(result.Payload, &sRes)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO speedtest_results_history (node_id, task_id, payload, download_speed_mbps, upload_speed_mbps, latency_ms, jitter_ms, tested_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, result.TargetID, result.Payload, sRes.DownloadSpeedMbps, sRes.UploadSpeedMbps, sRes.LatencyMS, sRes.JitterMS, unixNano(result.CheckedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert speedtest result history: %w", err)
+		}
+		return nil
+
+	case TargetKindTCP, TargetKindHTTP, TargetKindHTTPS, TargetKindDNS:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO network_results_history (node_id, target_id, payload, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?)`, nodeID, result.TargetID, result.Payload, unixNano(result.CheckedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert network result history: %w", err)
+		}
+		return nil
+
+	case TargetKindMTR:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO mtr_results_history (node_id, target_id, payload, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?)`, nodeID, result.TargetID, result.Payload, unixNano(result.CheckedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert mtr result history: %w", err)
+		}
+		return nil
+
+	case TargetKindMediaHTTP:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO media_results_history (node_id, detector_id, payload, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?)`, nodeID, result.TargetID, result.Payload, unixNano(result.CheckedAt), unixNano(time.Now().UTC())); err != nil {
+			return fmt.Errorf("insert media result history: %w", err)
+		}
+		return nil
+
+	default:
+		return ErrTargetKindMismatch
+	}
 }
 
 func (s *Store) AuthenticateNodeToken(ctx context.Context, plaintext string, now time.Time) (Node, error) {

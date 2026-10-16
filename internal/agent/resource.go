@@ -358,7 +358,7 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 		}
 	}
 	if result.primaryIPv4 == "" {
-		for _, stat := range result.interfaces { if stat.IPv4 != "" && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
+		for _, stat := range result.interfaces { if stat.IPv4 != "" && isBridgeInterface(stat.Name) && isPublicIP(stat.IPv4) { result.primaryIPv4 = stat.IPv4; break } }
 	}
 	if result.primaryIPv4 == "" {
 		for _, stat := range result.interfaces { if stat.IPv4 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break } }
@@ -366,8 +366,20 @@ func parseNetworkFullCounters(data string, ifaceIPs map[string]ifaceIPs) (networ
 	if result.primaryIPv4 == "" {
 		for _, stat := range result.interfaces { if stat.IPv4 != "" && isBridgeInterface(stat.Name) { result.primaryIPv4 = stat.IPv4; break } }
 	}
+	if result.primaryIPv4 == "" {
+		for _, stat := range result.interfaces { if stat.IPv4 != "" { result.primaryIPv4 = stat.IPv4; break } }
+	}
 	if result.primaryIPv6 == "" {
-		for _, stat := range result.interfaces { if stat.IPv6 != "" && isPublicIP(stat.IPv6) { result.primaryIPv6 = stat.IPv6; break } }
+		for _, stat := range result.interfaces { if stat.IPv6 != "" && isBridgeInterface(stat.Name) && isPublicIP(stat.IPv6) { result.primaryIPv6 = stat.IPv6; break } }
+	}
+	if result.primaryIPv6 == "" {
+		for _, stat := range result.interfaces { if stat.IPv6 != "" && !isVirtualInterface(stat.Name) { result.primaryIPv6 = stat.IPv6; break } }
+	}
+	if result.primaryIPv6 == "" {
+		for _, stat := range result.interfaces { if stat.IPv6 != "" && isBridgeInterface(stat.Name) { result.primaryIPv6 = stat.IPv6; break } }
+	}
+	if result.primaryIPv6 == "" {
+		for _, stat := range result.interfaces { if stat.IPv6 != "" { result.primaryIPv6 = stat.IPv6; break } }
 	}
 	if result.rx == 0 && result.tx == 0 { result.rx, result.tx = bridgeRx, bridgeTx }
 	if !found {

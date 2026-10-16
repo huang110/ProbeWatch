@@ -64,7 +64,11 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
-	if err := validateAgentPayloadTimestamp(request.ReportedAt, now, maxOutboxAgeForReports(s.agentClockSkew())); err != nil {
+	allowedPastSkew := s.agentClockSkew()
+	if r.Header.Get("X-Outbox-Replay") == "true" {
+		allowedPastSkew = maxOutboxAgeForReports(s.agentClockSkew())
+	}
+	if err := validateAgentPayloadTimestampWithPastSkew(request.ReportedAt, now, allowedPastSkew, s.agentClockSkew()); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
@@ -74,12 +78,12 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	validResults := make([]protocol.CheckResult, 0, len(request.Results))
 	for _, result := range request.Results {
-		if err := checkResultTimestamp(result, now, maxOutboxAgeForReports(s.agentClockSkew())); err != nil {
+		if err := checkResultTimestampWithPastSkew(result, now, allowedPastSkew, s.agentClockSkew()); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid report")
 			return
 		}
 		if err := s.validateTargetBinding(r.Context(), db.TargetKind(result.Kind), result.ID); err != nil {
-			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) || errors.Is(err, db.ErrTargetKindMismatch) { continue }
+			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) { continue }
 			writeTargetBindingError(w, err); return
 		}
 		validResults = append(validResults, result)
@@ -495,10 +499,14 @@ func agentResultInput(result protocol.CheckResult, now time.Time) (db.AgentResul
 }
 
 func validateResultTimestamp(unixSeconds int64, now time.Time, skew time.Duration) error {
+	return validateResultTimestampWithPastSkew(unixSeconds, now, skew, skew)
+}
+
+func validateResultTimestampWithPastSkew(unixSeconds int64, now time.Time, pastSkew, futureSkew time.Duration) error {
 	if unixSeconds == 0 {
 		return nil
 	}
-	return validateAgentPayloadTimestamp(unixSeconds, now, skew)
+	return validateAgentPayloadTimestampWithPastSkew(unixSeconds, now, pastSkew, futureSkew)
 }
 
 func maxOutboxAgeForReports(skew time.Duration) time.Duration {
@@ -507,17 +515,21 @@ func maxOutboxAgeForReports(skew time.Duration) time.Duration {
 }
 
 func checkResultTimestamp(result protocol.CheckResult, now time.Time, skew time.Duration) error {
+	return checkResultTimestampWithPastSkew(result, now, skew, skew)
+}
+
+func checkResultTimestampWithPastSkew(result protocol.CheckResult, now time.Time, pastSkew, futureSkew time.Duration) error {
 	switch {
 	case result.Network != nil:
-		return validateResultTimestamp(result.Network.CheckedAt, now, skew)
+		return validateResultTimestampWithPastSkew(result.Network.CheckedAt, now, pastSkew, futureSkew)
 	case result.MTR != nil:
-		return validateResultTimestamp(result.MTR.CheckedAt, now, skew)
+		return validateResultTimestampWithPastSkew(result.MTR.CheckedAt, now, pastSkew, futureSkew)
 	case result.Media != nil:
-		return validateResultTimestamp(result.Media.CheckedAt, now, skew)
+		return validateResultTimestampWithPastSkew(result.Media.CheckedAt, now, pastSkew, futureSkew)
 	case result.Speedtest != nil:
-		return validateResultTimestamp(result.Speedtest.TestedAt, now, skew)
+		return validateResultTimestampWithPastSkew(result.Speedtest.TestedAt, now, pastSkew, futureSkew)
 	case result.Synthetic != nil:
-		return validateResultTimestamp(result.Synthetic.CheckedAt, now, skew)
+		return validateResultTimestampWithPastSkew(result.Synthetic.CheckedAt, now, pastSkew, futureSkew)
 	default:
 		return errors.New("invalid check result shape")
 	}

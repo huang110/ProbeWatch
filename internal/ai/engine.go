@@ -349,16 +349,35 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 						if billingInfo.AutoRenew {
 							sev = SeverityInfo
 						}
+
+						var title, summary, rootCause, rec string
+						if daysLeft < 0 {
+							title = fmt.Sprintf("服务器已逾期 (已逾期 %d 天) - %s", -daysLeft, node.Name)
+							summary = fmt.Sprintf("该节点已于 %s 到期（续费金额: %.2f %s）。", billingInfo.DueDate, billingInfo.Price, billingInfo.Currency)
+							rootCause = "服务器账期已逾期。"
+							rec = "服务器已过到期日，如需保留请尽快安排续费或及时备份数据防止服务商回收资源。"
+						} else if daysLeft == 0 {
+							title = fmt.Sprintf("服务器今日到期 - %s", node.Name)
+							summary = fmt.Sprintf("该节点于今日 (%s) 到期（续费金额: %.2f %s）。", billingInfo.DueDate, billingInfo.Price, billingInfo.Currency)
+							rootCause = "服务器账期今日截止。"
+							rec = "如需继续使用请于今日内完成续费，若已放弃请提前备份数据并解绑 DNS 解析。"
+						} else {
+							title = fmt.Sprintf("服务器即将到期 (剩余 %d 天) - %s", daysLeft, node.Name)
+							summary = fmt.Sprintf("该节点将于 %s 到期（续费金额: %.2f %s）。", billingInfo.DueDate, billingInfo.Price, billingInfo.Currency)
+							rootCause = "服务器账期即将截止。"
+							rec = "如需继续使用请及时安排续费，若已放弃请提前备份数据并解绑 DNS 解析。"
+						}
+
 						findings = append(findings, Finding{
 							ID:             fmt.Sprintf("expiry-%s", node.ID),
 							Category:       CategoryCost,
 							Severity:       sev,
-							Title:          fmt.Sprintf("服务器即将到期 (剩余 %d 天) - %s", daysLeft, node.Name),
+							Title:          title,
 							NodeID:         node.ID,
 							NodeName:       node.Name,
-							Summary:        fmt.Sprintf("该节点将于 %s 到期（续费金额: %.2f %s）。", billingInfo.DueDate, billingInfo.Price, billingInfo.Currency),
-							RootCause:      "服务器账期即将截止。",
-							Recommendation: "如需继续使用请及时安排续费，若已放弃请提前备份数据并解绑 DNS 解析。",
+							Summary:        summary,
+							RootCause:      rootCause,
+							Recommendation: rec,
 						})
 						rep.CostAudit.ExpiringNodes = append(rep.CostAudit.ExpiringNodes, ExpiringNodeAudit{
 							NodeID:    node.ID,
@@ -599,8 +618,14 @@ func (s *AIService) generateRuleBasedAnswer(prompt string, diagnosis *DiagnosisR
 		if len(diagnosis.CostAudit.ExpiringNodes) > 0 {
 			sb.WriteString("#### 📅 近期即将到期的服务器：\n")
 			for _, exp := range diagnosis.CostAudit.ExpiringNodes {
-				sb.WriteString(fmt.Sprintf("- **%s**: 于 %s 到期（剩余 **%d 天**，续费价格 %.2f %s）。\n",
-					exp.NodeName, exp.DueDate, exp.DaysLeft, exp.Price, exp.Currency))
+				daysText := fmt.Sprintf("剩余 **%d 天**", exp.DaysLeft)
+				if exp.DaysLeft < 0 {
+					daysText = fmt.Sprintf("已逾期 **%d 天**", -exp.DaysLeft)
+				} else if exp.DaysLeft == 0 {
+					daysText = "**今日到期**"
+				}
+				sb.WriteString(fmt.Sprintf("- **%s**: 于 %s 到期（%s，续费价格 %.2f %s）。\n",
+					exp.NodeName, exp.DueDate, daysText, exp.Price, exp.Currency))
 			}
 			sb.WriteString("\n")
 		}
