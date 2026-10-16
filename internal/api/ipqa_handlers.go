@@ -21,7 +21,55 @@ var (
 	ipqaLastNotify   = make(map[string]time.Time)
 	ipqaNotifiedKeys = make(map[string]struct{})
 	ipqaLastArchive  = make(map[string]ipqaArchiveStamp)
+	ipqaPendingSync  = make(map[string]bool)
 )
+
+func checkAndClearNodeIPQASync(nodeID, nodeUUID string) bool {
+	ipqaCooldownMu.Lock()
+	defer ipqaCooldownMu.Unlock()
+	syncNeeded := ipqaPendingSync[nodeID] || ipqaPendingSync[nodeUUID]
+	delete(ipqaPendingSync, nodeID)
+	delete(ipqaPendingSync, nodeUUID)
+	return syncNeeded
+}
+
+// CleanupNodeIPQACache prunes all in-memory tracking maps for a deleted or pruned node.
+func CleanupNodeIPQACache(nodeID, nodeUUID string) {
+	ipqaCooldownMu.Lock()
+	defer ipqaCooldownMu.Unlock()
+	for _, key := range []string{nodeID, nodeUUID} {
+		if key == "" {
+			continue
+		}
+		delete(ipqaLastSync, key)
+		delete(ipqaLastNotify, key)
+		delete(ipqaLastArchive, key)
+		delete(ipqaPendingSync, key)
+	}
+}
+
+func pruneIPQACaches(now time.Time) {
+	cutoff := now.Add(-24 * time.Hour)
+	for k, t := range ipqaLastSync {
+		if t.Before(cutoff) {
+			delete(ipqaLastSync, k)
+		}
+	}
+	for k, t := range ipqaLastNotify {
+		if t.Before(cutoff) {
+			delete(ipqaLastNotify, k)
+		}
+	}
+	archiveCutoff := now.Add(-7 * 24 * time.Hour).Unix()
+	for k, stamp := range ipqaLastArchive {
+		if stamp.checkedAt > 0 && stamp.checkedAt < archiveCutoff {
+			delete(ipqaLastArchive, k)
+		}
+	}
+	if len(ipqaNotifiedKeys) > 1000 {
+		ipqaNotifiedKeys = make(map[string]struct{})
+	}
+}
 
 type ipqaArchiveStamp struct { date string; checkedAt int64 }
 
@@ -179,16 +227,25 @@ func (s *Server) postNodeIPQASync(w http.ResponseWriter, r *http.Request, uuid s
 	user, ok := s.authenticateUser(w, r)
 	if !ok { return }
 
-	// Cooldown check to prevent sync abuse
+	// Cooldown check to prevent sync abuse and queue sync to connected agent
 	ipqaCooldownMu.Lock()
-	lastSync, exists := ipqaLastSync[node.UUID]
 	now := time.Now()
+	if len(ipqaLastSync) > 500 || len(ipqaLastNotify) > 500 {
+		pruneIPQACaches(now)
+	}
+	lastSync, exists := ipqaLastSync[node.ID]
+	if !exists {
+		lastSync, exists = ipqaLastSync[node.UUID]
+	}
 	if exists && now.Sub(lastSync) < ipqaSyncCooldown {
 		ipqaCooldownMu.Unlock()
 		writeJSONError(w, http.StatusTooManyRequests, "sync cooldown active, please wait a few seconds")
 		return
 	}
+	ipqaLastSync[node.ID] = now
 	ipqaLastSync[node.UUID] = now
+	ipqaPendingSync[node.ID] = true
+	ipqaPendingSync[node.UUID] = true
 	ipqaCooldownMu.Unlock()
 
 	// Record security audit log

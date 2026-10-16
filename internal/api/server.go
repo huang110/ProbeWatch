@@ -585,3 +585,25 @@ func (s *Server) installScriptHandler(w http.ResponseWriter, r *http.Request) {
 	script := bytes.ReplaceAll(deploy.InstallScript, []byte("\r\n"), []byte("\n"))
 	_, _ = w.Write(script)
 }
+
+func (s *Server) resolveBaseURL(r *http.Request) string {
+	baseURL := strings.TrimRight(s.cfg.PublicBaseURL, "/")
+	if baseURL != "" {
+		return baseURL
+	}
+	if r == nil {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	if host != "" {
+		return fmt.Sprintf("%s://%s", scheme, host)
+	}
+	return ""
+}

@@ -34,6 +34,12 @@ var billingCurrencyRatesCNY = map[string]float64{
 	"CAD": 5.20, "C$": 5.20, "CA$": 5.20,
 	"HKD": 0.92, "HK$": 0.92,
 	"JPY": 0.048, "JP¥": 0.048, "円": 0.048,
+	"SGD": 5.40, "S$": 5.40,
+	"TWD": 0.22, "NT$": 0.22,
+	"AUD": 4.70, "A$": 4.70,
+	"RUB": 0.078, "₽": 0.078,
+	"KRW": 0.0052, "₩": 0.0052,
+	"MYR": 1.65, "RM": 1.65,
 }
 
 func billingPriceToCNY(amount float64, currency string) float64 {
@@ -395,8 +401,13 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 
 			// Idle VPS Detection:
 			// If CPU is consistently low (< 2.5%) and monthly traffic is negligible (< 1GB)
+			// Do not flag nodes that have just reset their billing cycle within the last 7 days.
+			daysSinceReset := 999.0
+			if !billingInfo.PeriodStart.IsZero() {
+				daysSinceReset = now.Sub(billingInfo.PeriodStart).Hours() / 24.0
+			}
 			trafficGB := float64(billingInfo.CycleUsedBytes) / (1024 * 1024 * 1024)
-			if isOnline && snap.CPUPercent < 2.5 && trafficGB < 1.0 && monthlyCost > 0 {
+			if isOnline && snap.CPUPercent < 2.5 && trafficGB < 1.0 && monthlyCost > 0 && daysSinceReset >= 7.0 {
 				rep.Summary.IdleNodes++
 				potentialSavings += monthlyCost
 				findings = append(findings, Finding{

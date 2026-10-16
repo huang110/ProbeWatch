@@ -133,6 +133,8 @@ func (m *mockIPQACollector) Get() *protocol.IPQAInfo {
 	return m.info
 }
 
+func (m *mockIPQACollector) Invalidate() {}
+
 func TestCollectResourceWithSockets(t *testing.T) {
 	mock := &mockSocketCollector{
 		stats: &protocol.SocketStats{
@@ -220,5 +222,41 @@ func TestParseProcStat(t *testing.T) {
 	}
 	if _, err := parseProcStat("cpu 1 2 3 10 0 0 0 0"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIsVirtualInterface(t *testing.T) {
+	tests := []struct {
+		name      string
+		isVirtual bool
+	}{
+		{"eth0", false},
+		{"ens3", false},
+		{"eno1", false},
+		{"wlan0", false},
+		{"docker0", true},
+		{"veth1234", true},
+		{"br-lan", true},
+		{"vmbr0", true},
+		{"wg0", true},
+		{"tailscale0", true},
+		{"singbox_tun", true},
+		{"clash0", true},
+		{"Meta", true},
+		{"mihomo", true},
+		{"nekoray", true},
+		{"hy0", true},
+		{"hysteria", true},
+		{"xray0", true},
+		{"v2ray0", true},
+		{"tun0", true},
+		{"warp0", true},
+	}
+
+	for _, tc := range tests {
+		got := isVirtualInterface(tc.name)
+		if got != tc.isVirtual {
+			t.Errorf("isVirtualInterface(%q) = %v, want %v", tc.name, got, tc.isVirtual)
+		}
 	}
 }

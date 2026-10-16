@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -67,11 +68,34 @@ func NewIPQualityCollector() *DefaultIPQualityCollector {
 		}
 	}
 
+	dialer := &net.Dialer{
+		Timeout:   3 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// Prefer tcp4 for outbound IP quality check so dual-stack nodes report IPv4 reputation
+			conn, err := dialer.DialContext(ctx, "tcp4", addr)
+			if err == nil {
+				return conn, nil
+			}
+			// Fallback to default network (e.g. tcp6) if node is IPv6-only
+			return dialer.DialContext(ctx, network, addr)
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	return &DefaultIPQualityCollector{
 		endpoint: endpoint,
 		cacheTTL: ttl,
 		client: &http.Client{
-			Timeout: maxIPQualityHTTPTimeout,
+			Transport: transport,
+			Timeout:   maxIPQualityHTTPTimeout,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 				return fmt.Errorf("ip quality redirects disallowed")
 			},

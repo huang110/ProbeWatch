@@ -789,7 +789,7 @@ func (s *Server) createRegistrationToken(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
-	endpoint := strings.TrimRight(s.cfg.PublicBaseURL, "/") + "/api/agent/v1"
+	endpoint := s.resolveBaseURL(r) + "/api/agent/v1"
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(registrationTokenResponse{RegistrationToken: registration.Token, Endpoint: endpoint, ExpiresAt: registration.ExpiresAt})
 }

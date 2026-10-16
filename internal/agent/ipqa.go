@@ -40,6 +40,7 @@ var (
 // IPQACollector collects local IP-Quality-Archive telemetry without blocking.
 type IPQACollector interface {
 	Get() *protocol.IPQAInfo
+	Invalidate()
 }
 
 // DefaultIPQACollector reads IPQA files locally and thread-safely.
@@ -243,6 +244,16 @@ func (c *DefaultIPQACollector) Get() *protocol.IPQAInfo {
 	}
 }
 
+// Invalidate clears the lastFetch timestamp so that the next Get() triggers an immediate disk refresh.
+func (c *DefaultIPQACollector) Invalidate() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.lastFetch = time.Time{}
+	c.mu.Unlock()
+}
+
 // collect synchronously performs safe local file reading with timeout bounds.
 func (c *DefaultIPQACollector) collect() (*protocol.IPQAInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ipqaReadTimeout)
@@ -366,36 +377,28 @@ type alertsSummary struct {
 	HighestSeverity string
 }
 
-// parseAlertsLogFile parses alerts.log within bounds.
+// parseAlertsLogFile parses alerts.log within bounds using tail reading.
 func parseAlertsLogFile(filePath string, ignoreInitial bool, maxBytes int64) (alertsSummary, error) {
 	summary := alertsSummary{HighestSeverity: "NONE"}
-	f, err := os.Open(filePath)
-	if err != nil {
-		return summary, err
+	// Read newest log entries from the tail of the file to capture today's fresh alerts
+	lines := readLogTail(filePath, maxIPQALogLines)
+	if len(lines) == 0 {
+		return summary, nil
 	}
-	defer f.Close()
-
-	limited := io.LimitReader(f, maxBytes)
-	scanner := bufio.NewScanner(limited)
 
 	nowBJ := time.Now().In(beijingLocation)
 	todayStr := nowBJ.Format("2006-01-02")
 
-	lineCount := 0
-	for scanner.Scan() {
-		lineCount++
-		if lineCount > maxIPQALogLines {
-			break
-		}
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	for _, lineStr := range lines {
+		lineStr = strings.TrimSpace(lineStr)
+		if lineStr == "" {
 			continue
 		}
-		if len(line) > maxIPQALineBytes {
-			line = line[:maxIPQALineBytes]
+		if len(lineStr) > maxIPQALineBytes {
+			lineStr = lineStr[:maxIPQALineBytes]
 		}
 
-		parsed := parseAlertLine(string(line))
+		parsed := parseAlertLine(lineStr)
 		if parsed == nil {
 			continue
 		}
@@ -426,10 +429,6 @@ func parseAlertsLogFile(filePath string, ignoreInitial bool, maxBytes int64) (al
 				summary.HighestSeverity = "INFO"
 			}
 		}
-	}
-
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		return summary, err
 	}
 	return summary, nil
 }
@@ -724,10 +723,12 @@ func normalizeArchive(raw *rawIPQAArchive) (*protocol.IPQAFamilyInfo, []string) 
 			switch {
 			case strings.Contains(rawLower, "不可用") || strings.Contains(rawLower, "失败") || strings.Contains(rawLower, "屏蔽") || strings.Contains(rawLower, "blocked") || strings.Contains(rawLower, "ban"):
 				item.Status = "blocked"
-			case strings.Contains(rawLower, "未解锁") || strings.Contains(rawLower, "不支持") || strings.Contains(rawLower, "unavailable") || strings.Contains(rawLower, "no") || strings.Contains(rawLower, "false"):
+			case strings.Contains(rawLower, "未解锁") || strings.Contains(rawLower, "不支持") || strings.Contains(rawLower, "unavailable"):
 				item.Status = "unavailable"
 			case strings.Contains(rawLower, "解锁") || strings.Contains(rawLower, "available") || strings.Contains(rawLower, "yes") || strings.Contains(rawLower, "true") || strings.Contains(rawLower, "原生") || strings.Contains(rawLower, "自制") || strings.Contains(rawLower, "仅"):
 				item.Status = "available"
+			case rawLower == "no" || rawLower == "false" || isIsolatedNegative(rawLower):
+				item.Status = "unavailable"
 			default:
 				item.Status = "unknown"
 			}
@@ -855,4 +856,16 @@ func parseBool(str string) bool {
 	default:
 		return false
 	}
+}
+
+func isIsolatedNegative(s string) bool {
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == ',' || r == ';' || r == ':' || r == '(' || r == ')' || r == '[' || r == ']'
+	})
+	for _, f := range fields {
+		if f == "no" || f == "false" {
+			return true
+		}
+	}
+	return false
 }

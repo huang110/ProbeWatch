@@ -32,6 +32,10 @@ type EventCollector struct {
 	lastAuthJournalScan int64
 	cachedSystemdEvents []protocol.SystemEvent
 	systemdRunner       func(ctx context.Context) (io.Reader, error)
+
+	lastKernelScan    int64
+	kernelInitialized bool
+	kernelRunner      func(ctx context.Context) (io.Reader, error)
 }
 
 var defaultCollector = &EventCollector{
@@ -107,42 +111,59 @@ func stripTimestampPrefix(line string) string {
 }
 
 func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []protocol.SystemEvent {
+	if c.lastKernelScan > 0 && (nowSec-c.lastKernelScan) < 60 {
+		return nil
+	}
+	c.lastKernelScan = nowSec
+	firstRun := !c.kernelInitialized
+	c.kernelInitialized = true
+
 	var events []protocol.SystemEvent
-
-	// Try reading dmesg with timeout and limit output to 128KB to prevent memory exhaustion
-	cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(cmdCtx, "dmesg", "-T")
 	var lines []string
-	if stdout, err := cmd.StdoutPipe(); err == nil && cmd.Start() == nil {
-		scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-			if len(lines) > 400 {
+
+	if c.kernelRunner != nil {
+		r, err := c.kernelRunner(ctx)
+		if err == nil && r != nil {
+			scanner := bufio.NewScanner(io.LimitReader(r, 128*1024))
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+			}
+		}
+	} else {
+		// Try reading dmesg with timeout and limit output to 128KB to prevent memory exhaustion
+		cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(cmdCtx, "dmesg", "-T")
+		if stdout, err := cmd.StdoutPipe(); err == nil && cmd.Start() == nil {
+			scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
+			for scanner.Scan() {
+				lines = append(lines, scanner.Text())
+				if len(lines) > 400 {
+					lines = lines[len(lines)-200:]
+				}
+			}
+			_ = cmd.Wait()
+			if len(lines) > 200 {
 				lines = lines[len(lines)-200:]
 			}
 		}
-		_ = cmd.Wait()
-		if len(lines) > 200 {
-			lines = lines[len(lines)-200:]
-		}
-	}
-	if len(lines) == 0 {
-		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 3*time.Second)
-		fallback := exec.CommandContext(fallbackCtx, "dmesg")
-		if stdout, err := fallback.StdoutPipe(); err == nil && fallback.Start() == nil {
-			scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
-			for scanner.Scan() { lines = append(lines, scanner.Text()); if len(lines) > 200 { lines = lines[len(lines)-200:] } }
-			_ = fallback.Wait()
-		}
-		fallbackCancel()
-	}
-	if len(lines) == 0 {
-		// Fallback: check /var/log/kern.log or /var/log/messages
-		lines = readLogTail("/var/log/kern.log", 150)
 		if len(lines) == 0 {
-			lines = readLogTail("/var/log/messages", 150)
+			fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 3*time.Second)
+			fallback := exec.CommandContext(fallbackCtx, "dmesg")
+			if stdout, err := fallback.StdoutPipe(); err == nil && fallback.Start() == nil {
+				scanner := bufio.NewScanner(io.LimitReader(stdout, 128*1024))
+				for scanner.Scan() { lines = append(lines, scanner.Text()); if len(lines) > 200 { lines = lines[len(lines)-200:] } }
+				_ = fallback.Wait()
+			}
+			fallbackCancel()
+		}
+		if len(lines) == 0 {
+			// Fallback: check /var/log/kern.log or /var/log/messages
+			lines = readLogTail("/var/log/kern.log", 150)
+			if len(lines) == 0 {
+				lines = readLogTail("/var/log/messages", 150)
+			}
 		}
 	}
 
@@ -164,7 +185,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 			}
 
 			sig := eventSig("oom", title+cleanLine, "kernel")
-			if c.isNewEvent(sig, nowSec) {
+			if c.isNewEvent(sig, nowSec) && !firstRun {
 				events = append(events, protocol.SystemEvent{
 					ID:         "evt-" + sig[:12],
 					Category:   "oom",
@@ -188,7 +209,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 			}
 
 			sig := eventSig("kernel", title+cleanLine, "kernel")
-			if c.isNewEvent(sig, nowSec) {
+			if c.isNewEvent(sig, nowSec) && !firstRun {
 				events = append(events, protocol.SystemEvent{
 					ID:         "evt-" + sig[:12],
 					Category:   "kernel",

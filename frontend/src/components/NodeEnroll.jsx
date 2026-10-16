@@ -44,7 +44,10 @@ export function NodeEnroll() {
       const json = await response.json()
       const source = json && typeof json === 'object' && !Array.isArray(json) ? json : {}
       const token = safeText(source.registration_token)
-      const endpoint = safeText(source.endpoint)
+      let endpoint = safeText(source.endpoint)
+      if (endpoint && !endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+        endpoint = `${window.location.origin}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+      }
       const expiresAt = new Date(source.expires_at).getTime()
       if (!token || !endpoint || !Number.isFinite(expiresAt)) throw new Error('invalid')
       setEnrollment({ token, endpoint, nodeUuid: crypto.randomUUID(), expiresAt })

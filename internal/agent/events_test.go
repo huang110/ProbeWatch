@@ -363,3 +363,47 @@ func TestScanSystemdFailuresConcurrencyRace(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestScanKernelEventsBootHistoryAndCooldown(t *testing.T) {
+	ctx := context.Background()
+
+	var outputToReturn string
+	collector := &EventCollector{
+		seenSignatures: make(map[string]int64),
+		kernelRunner: func(ctx context.Context) (io.Reader, error) {
+			return strings.NewReader(outputToReturn), nil
+		},
+	}
+
+	// 1. First run on agent boot: historical boot logs must be learned as baseline and NOT reported as new alerts
+	outputToReturn = "[    1.234567] Out of memory: Killed process 1234 (mysqld)\n"
+	t0 := int64(1000)
+	eventsT0 := collector.scanKernelEvents(ctx, t0)
+	if len(eventsT0) != 0 {
+		t.Fatalf("expected 0 events on first run (boot history baseline suppression), got %d", len(eventsT0))
+	}
+
+	// 2. Cooldown window (< 60s): must return nil
+	for _, offset := range []int64{10, 20, 30, 40, 50} {
+		hits := collector.scanKernelEvents(ctx, t0+offset)
+		if len(hits) != 0 {
+			t.Fatalf("expected 0 events during 60s cooldown window at +%ds, got %d", offset, len(hits))
+		}
+	}
+
+	// 3. At 60s: re-scan occurs. The old OOM is still in dmesg, but already seen so 0 events
+	eventsT60 := collector.scanKernelEvents(ctx, t0+60)
+	if len(eventsT60) != 0 {
+		t.Fatalf("expected 0 events at t60 for existing baseline event, got %d", len(eventsT60))
+	}
+
+	// 4. At 120s: a brand new OOM killer event occurs!
+	outputToReturn += "[   65.432100] Out of memory: Killed process 5678 (redis-server)\n"
+	eventsT120 := collector.scanKernelEvents(ctx, t0+120)
+	if len(eventsT120) != 1 {
+		t.Fatalf("expected 1 event for new OOM killer, got %d", len(eventsT120))
+	}
+	if !strings.Contains(eventsT120[0].Title, "5678") || !strings.Contains(eventsT120[0].Title, "redis-server") {
+		t.Fatalf("unexpected title for new event: %s", eventsT120[0].Title)
+	}
+}

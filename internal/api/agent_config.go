@@ -15,6 +15,22 @@ import (
 // probing (fail-closed) while continuing to report resources.
 const agentConfigMaxAgeSeconds = 1800
 
+var (
+	configVersionMu   sync.Mutex
+	lastConfigVersion int64
+)
+
+func getNextConfigVersion() int64 {
+	configVersionMu.Lock()
+	defer configVersionMu.Unlock()
+	now := time.Now().UTC().Unix()
+	if now <= lastConfigVersion {
+		now = lastConfigVersion + 1
+	}
+	lastConfigVersion = now
+	return now
+}
+
 type agentTargetPayload struct {
 	Host            string                `json:"host,omitempty"`
 	Port            int                   `json:"port,omitempty"`
@@ -101,10 +117,13 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	syncIPQA := checkAndClearNodeIPQASync(node.ID, node.UUID)
+
 	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{
 		Tasks:               tasks,
-		ConfigVersion:       time.Now().UTC().Unix(),
+		ConfigVersion:       getNextConfigVersion(),
 		ConfigMaxAgeSeconds: agentConfigMaxAgeSeconds,
+		SyncIPQA:            syncIPQA,
 	})
 }
 

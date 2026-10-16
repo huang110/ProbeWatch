@@ -296,7 +296,10 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
       if (!res.ok) throw new Error('token_failed')
       const json = await res.json()
       const token = safeText(json.registration_token)
-      const endpoint = safeText(json.endpoint) || window.location.host
+      let endpoint = safeText(json.endpoint)
+      if (!endpoint || (!endpoint.startsWith('http://') && !endpoint.startsWith('https://'))) {
+        endpoint = `${window.location.origin}${endpoint && endpoint.startsWith('/') ? endpoint : '/api/agent/v1'}`
+      }
       setInstallEnrollment({ token, endpoint, uuid: node.uuid || crypto.randomUUID() })
     } catch {
       setCopyToast('获取一次性部署 Token 失败，请稍后重试')

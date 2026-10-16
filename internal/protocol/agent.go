@@ -509,6 +509,7 @@ type AgentConfigResponse struct {
 	Tasks               []CheckTask `json:"tasks"`
 	ConfigVersion       int64       `json:"config_version,omitempty"`
 	ConfigMaxAgeSeconds int         `json:"config_max_age_seconds,omitempty"`
+	SyncIPQA            bool        `json:"sync_ipqa,omitempty"`
 }
 
 // Validate checks the decoded configuration before an agent accepts any task.

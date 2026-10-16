@@ -153,7 +153,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Keep resource and probe freshness aligned with the live console.
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	workloadTicker := time.NewTicker(10 * time.Second)
+	workloadTicker := time.NewTicker(30 * time.Second)
 	defer workloadTicker.Stop()
 	eventsTicker := time.NewTicker(10 * time.Second)
 	defer eventsTicker.Stop()
@@ -276,7 +276,17 @@ func (r *Runner) refresh(ctx context.Context) error {
 		return fmt.Errorf("configuration version regressed from %d to legacy", r.lastConfigVersion)
 	}
 	if response.ConfigVersion > 0 && r.lastConfigVersion > 0 && response.ConfigVersion < r.lastConfigVersion {
-		return fmt.Errorf("configuration version regressed from %d to %d", r.lastConfigVersion, response.ConfigVersion)
+		// Tolerate minor backward clock skew (e.g. NTP sync adjustment <= 900s) without fail-closed halt
+		if (r.lastConfigVersion - response.ConfigVersion) <= 900 {
+			response.ConfigVersion = r.lastConfigVersion
+		} else {
+			return fmt.Errorf("configuration version regressed from %d to %d", r.lastConfigVersion, response.ConfigVersion)
+		}
+	}
+	if response.SyncIPQA {
+		if inv, ok := r.ipqa.(interface{ Invalidate() }); ok {
+			inv.Invalidate()
+		}
 	}
 	updated := append([]protocol.CheckTask(nil), response.Tasks...)
 	valid := make(map[string]struct{}, len(updated))

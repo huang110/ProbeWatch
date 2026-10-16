@@ -267,9 +267,22 @@ type networkFullStats struct {
 }
 
 func isVirtualInterface(name string) bool {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{"veth", "docker", "podman", "br-", "vmbr", "fwbr", "fwpr", "fwln", "vnet", "macvtap", "ipvtap", "ovs-", "virbr", "lxc", "lxd", "tun", "tap", "utun", "wg", "ppp", "tailscale", "zt", "warp", "cloudflare", "sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel", "cni", "cali", "dummy"} {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{
+		"veth", "docker", "podman", "br-", "vmbr", "fwbr", "fwpr", "fwln",
+		"vnet", "macvtap", "ipvtap", "ovs-", "virbr", "lxc", "lxd",
+		"tun", "tap", "utun", "wg", "ppp", "tailscale", "zt", "warp", "cloudflare",
+		"sit", "he-ipv6", "gre", "ipip", "ip6tnl", "vxlan", "ifb", "flannel",
+		"cni", "cali", "dummy", "meta", "clash", "sing", "mihomo", "nekoray",
+		"v2ray", "xray", "hy", "hysteria",
+	} {
 		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	if runtime.GOOS == "linux" && trimmed != "" {
+		if _, err := os.Stat("/sys/class/net/" + trimmed + "/tun_flags"); err == nil {
 			return true
 		}
 	}

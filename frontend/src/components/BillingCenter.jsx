@@ -21,7 +21,7 @@ import {
 import { safeText } from '../lib/format.js'
 import { BillingModal } from './BillingModal.jsx'
 
-const CURRENCY_OPTIONS = ['CNY', 'USD', 'EUR', 'GBP', 'CAD', 'HKD', 'JPY']
+const CURRENCY_OPTIONS = ['CNY', 'USD', 'EUR', 'GBP', 'CAD', 'HKD', 'JPY', 'SGD', 'TWD', 'AUD', 'RUB', 'KRW', 'MYR']
 
 export function BillingCenter({ nodes = [] }) {
   const [currency, setCurrency] = useState('CNY')
@@ -75,7 +75,7 @@ export function BillingCenter({ nodes = [] }) {
       const displayName = customMeta.customName || node.name || '未命名小鸡'
       const displayFlag = customMeta.customFlag && customMeta.customFlag !== '自动识别' ? customMeta.customFlag : (node.flag || '🌐')
       const group = customMeta.group || ''
-      const region = node.region || '大陆优化'
+      const region = node.region || customMeta.region || node.country || '未分类'
       return { node, key, billing, calc, customMeta, displayName, displayFlag, group, region }
     })
   }, [nodes, refreshTrigger])
@@ -504,6 +504,10 @@ export function BillingCenter({ nodes = [] }) {
                           ? '季付'
                           : billing.cycle === 'semiannual'
                           ? '半年付'
+                          : billing.cycle === 'biennial'
+                          ? '两年付'
+                          : billing.cycle === 'triennial'
+                          ? '三年付'
                           : billing.cycle === 'free'
                           ? '免费'
                           : `${billing.cycle}`

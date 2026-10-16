@@ -79,7 +79,10 @@ export function AddServerModal({ onClose, onInstalled }) {
       }
       const json = await res.json()
       const token = safeText(json?.registration_token)
-      const endpoint = safeText(json?.endpoint) || `${window.location.origin}/api/agent/v1`
+      let endpoint = safeText(json?.endpoint)
+      if (!endpoint || (!endpoint.startsWith('http://') && !endpoint.startsWith('https://'))) {
+        endpoint = `${window.location.origin}${endpoint && endpoint.startsWith('/') ? endpoint : '/api/agent/v1'}`
+      }
       const expiresAt = new Date(json?.expires_at).getTime()
       if (!token) throw new Error('invalid')
 

@@ -9,6 +9,12 @@ export const CURRENCY_RATES = {
   CAD: { symbol: 'C$', name: '加元', rate: 5.20 },
   HKD: { symbol: 'HK$', name: '港币', rate: 0.92 },
   JPY: { symbol: '円', name: '日元', rate: 0.048 },
+  SGD: { symbol: 'S$', name: '新加坡元', rate: 5.40 },
+  TWD: { symbol: 'NT$', name: '新台币', rate: 0.22 },
+  AUD: { symbol: 'A$', name: '澳元', rate: 4.70 },
+  RUB: { symbol: '₽', name: '俄罗斯卢布', rate: 0.078 },
+  KRW: { symbol: '₩', name: '韩元', rate: 0.0052 },
+  MYR: { symbol: 'RM', name: '马来西亚林吉特', rate: 1.65 },
 }
 
 export const resolveCurrency = (curr) => {

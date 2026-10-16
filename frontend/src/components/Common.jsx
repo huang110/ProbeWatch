@@ -49,14 +49,14 @@ export function ProgressBar({ value, tone = 'dynamic', height = 4 }) {
 }
 
 export function UptimeBars({ count = 28, uptimePercent = 100 }) {
+  const safePercent = Number.isFinite(uptimePercent) ? Math.max(0, Math.min(100, uptimePercent)) : 100
+  const healthyCount = Math.min(count, Math.round((safePercent / 100) * count))
   const bars = Array.from({ length: count }, (_, i) => {
-    // Make mostly healthy bars with the very occasional variation if uptime < 100
-    const isHealthy = uptimePercent >= 99 || (i % 9 !== 0)
-    return isHealthy ? 'healthy' : 'warn'
+    return i < healthyCount ? 'healthy' : 'warn'
   })
 
   return (
-    <div className="uptime-bars" title={`SLA 可用率 ${uptimePercent}%`}>
+    <div className="uptime-bars" title={`SLA 可用率 ${safePercent.toFixed(1)}%`}>
       {bars.map((state, i) => (
         <span key={i} className={`uptime-bar uptime-${state}`} />
       ))}

@@ -40,7 +40,7 @@ func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, status, message)
 		return
 	}
-	response := protocol.RegisterResponse{NodeUUID: registered.Node.UUID, NodeToken: registered.Token, Endpoint: strings.TrimRight(s.cfg.PublicBaseURL, "/") + "/api/agent/v1"}
+	response := protocol.RegisterResponse{NodeUUID: registered.Node.UUID, NodeToken: registered.Token, Endpoint: s.resolveBaseURL(r) + "/api/agent/v1"}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)
 }

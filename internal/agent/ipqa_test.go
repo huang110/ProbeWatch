@@ -600,3 +600,124 @@ func TestIPQACollector_V2026ArchiveAndSanitization(t *testing.T) {
 		}
 	}
 }
+
+func TestIPQACollector_TailAlertsLogLargeLineCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir := filepath.Join(tmpDir, "data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	todayBJ := time.Now().In(beijingLocation).Format("2006-01-02")
+	var sb strings.Builder
+	// Write 550 ancient lines
+	for i := 1; i <= 550; i++ {
+		sb.WriteString(fmt.Sprintf("2020-01-01 01:00:00|CRITICAL|ancient historical alert %d|v4\n", i))
+	}
+	// Append 10 fresh today lines
+	for i := 1; i <= 10; i++ {
+		sb.WriteString(fmt.Sprintf("%s 12:00:00|CRITICAL|today fresh alert %d|v4\n", todayBJ, i))
+	}
+
+	logPath := filepath.Join(dataDir, "alerts.log")
+	if err := os.WriteFile(logPath, []byte(sb.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &DefaultIPQACollector{
+		enabled:              true,
+		baseDir:              tmpDir,
+		maxLogBytes:          10 * 1024 * 1024,
+		ignoreInitialArchive: true,
+	}
+
+	info, err := c.collect()
+	if err != nil {
+		t.Fatalf("unexpected collect error: %v", err)
+	}
+
+	// Tail reading must capture the 10 fresh alerts from the tail of the 560-line log file
+	if info.AlertCount != 10 {
+		t.Fatalf("expected AlertCount = 10 from tail reading, got %d", info.AlertCount)
+	}
+	if info.CriticalCount != 10 {
+		t.Fatalf("expected CriticalCount = 10, got %d", info.CriticalCount)
+	}
+	if info.HighestSeverity != "CRITICAL" {
+		t.Fatalf("expected HighestSeverity = CRITICAL, got %s", info.HighestSeverity)
+	}
+}
+
+func TestIPQACollector_NorwayMediaUnlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	v4Dir := filepath.Join(tmpDir, "data", "v4")
+	if err := os.MkdirAll(v4Dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := map[string]any{
+		"Head": map[string]any{
+			"Time": "2026-10-16 10:00:00 CST",
+		},
+		"Media": map[string]any{
+			"Netflix": map[string]any{
+				"Status": "解锁 (Region: NO)",
+				"Region": "NO",
+			},
+			"DisneyPlus": map[string]any{
+				"Status": "Yes (NO)",
+				"Region": "NO",
+			},
+			"AmazonPrime": map[string]any{
+				"Status": "仅自制 (Region: NO)",
+				"Region": "NO",
+			},
+			"Hulu": map[string]any{
+				"Status": "No",
+			},
+			"HBO": map[string]any{
+				"Status": "Blocked",
+			},
+		},
+	}
+
+	b, _ := json.Marshal(archive)
+	if err := os.WriteFile(filepath.Join(v4Dir, "2026-10-16_100000.json"), b, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &DefaultIPQACollector{
+		enabled: true,
+		baseDir: tmpDir,
+	}
+
+	info, err := c.collect()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info == nil || len(info.Media) != 5 {
+		t.Fatalf("expected 5 media items, got %+v", info)
+	}
+
+	mediaMap := make(map[string]protocol.IPQAMediaItem)
+	for _, m := range info.Media {
+		mediaMap[m.Name] = m
+	}
+
+	// Norway unlocks must be 'available', NOT 'unavailable'
+	if nf := mediaMap["Netflix"]; nf.Status != "available" || nf.Region != "NO" {
+		t.Fatalf("expected Netflix to be available with region NO, got %+v", nf)
+	}
+	if dp := mediaMap["DisneyPlus"]; dp.Status != "available" {
+		t.Fatalf("expected DisneyPlus to be available, got %+v", dp)
+	}
+	if ap := mediaMap["AmazonPrime"]; ap.Status != "available" {
+		t.Fatalf("expected AmazonPrime to be available, got %+v", ap)
+	}
+	if hulu := mediaMap["Hulu"]; hulu.Status != "unavailable" {
+		t.Fatalf("expected Hulu to be unavailable, got %+v", hulu)
+	}
+	if hbo := mediaMap["HBO"]; hbo.Status != "blocked" {
+		t.Fatalf("expected HBO to be blocked, got %+v", hbo)
+	}
+}
