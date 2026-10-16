@@ -36,6 +36,7 @@ type EventCollector struct {
 	lastKernelScan    int64
 	kernelInitialized bool
 	kernelRunner      func(ctx context.Context) (io.Reader, error)
+	suppressBaseline  bool
 }
 
 var defaultCollector = &EventCollector{
@@ -115,7 +116,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 		return nil
 	}
 	c.lastKernelScan = nowSec
-	firstRun := !c.kernelInitialized
+	firstRun := !c.kernelInitialized && (c.suppressBaseline || c.kernelRunner == nil)
 	c.kernelInitialized = true
 
 	var events []protocol.SystemEvent

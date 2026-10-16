@@ -721,3 +721,24 @@ func TestIPQACollector_NorwayMediaUnlock(t *testing.T) {
 		t.Fatalf("expected HBO to be blocked, got %+v", hbo)
 	}
 }
+
+func TestParseAlertsLogFile_ErrorHandling(t *testing.T) {
+	// 1. Non-existent file must return error
+	_, err := parseAlertsLogFile(filepath.Join(t.TempDir(), "non_existent.log"), false, 1024)
+	if err == nil {
+		t.Fatal("expected error when opening non-existent log file, got nil")
+	}
+
+	// 2. Empty file must return nil error and zero alerts
+	emptyFile := filepath.Join(t.TempDir(), "empty.log")
+	if err := os.WriteFile(emptyFile, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := parseAlertsLogFile(emptyFile, false, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error on empty file: %v", err)
+	}
+	if summary.TotalCount != 0 || summary.HighestSeverity != "NONE" {
+		t.Fatalf("expected 0 alerts for empty file, got %+v", summary)
+	}
+}

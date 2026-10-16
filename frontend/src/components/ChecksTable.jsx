@@ -66,31 +66,32 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   const [selectedTargetId, setSelectedTargetId] = useState('all')
   const [hoveredPoint, setHoveredPoint] = useState(null)
 
-  const targets = safeArray(rows).filter((r) => r && r.name)
+  const targets = useMemo(() => safeArray(rows).filter((r) => r && r.name), [rows])
 
-  const targetList = targets.map((t, idx) => ({
-    id: t.targetId || t.target_id || t.key || String(idx),
-    name: cleanTargetLabel(t.name || t.target_id, '探测目标'),
-    kind: (t.kind || 'TCP').toUpperCase(),
-    latency: t.latency,
-    color: TARGET_COLORS[idx % TARGET_COLORS.length],
-  }))
+  const targetList = useMemo(() => {
+    return targets.map((t, idx) => ({
+      id: t.targetId || t.target_id || t.key || String(idx),
+      name: cleanTargetLabel(t.name || t.target_id, '探测目标'),
+      kind: (t.kind || 'TCP').toUpperCase(),
+      latency: t.latency,
+      color: TARGET_COLORS[idx % TARGET_COLORS.length],
+    }))
+  }, [targets])
 
   const baselineY = 88
   const topY = 16
   const midY = (topY + baselineY) / 2
   const plotHeight = baselineY - topY
 
-  const allowedIds = new Set(targetList.map((t) => t.id))
-  const rawHistory = Array.isArray(networkHistory)
-    ? (allowedIds.size > 0 ? networkHistory.filter((item) => allowedIds.has(item.target_id)) : networkHistory)
-    : []
-
-  const isTimeMode = rawHistory.length > 0
+  const rawHistory = useMemo(() => {
+    if (!Array.isArray(networkHistory)) return []
+    const allowedIds = new Set(targetList.map((t) => t.id))
+    return allowedIds.size > 0 ? networkHistory.filter((item) => allowedIds.has(item.target_id)) : networkHistory
+  }, [networkHistory, targetList])
 
   // 1. Group history points by target
   const targetSeries = useMemo(() => {
-    if (!isTimeMode) return []
+    if (!rawHistory.length) return []
     return targetList.map((target) => {
       const items = rawHistory
         .filter((item) => item.target_id === target.id)
@@ -109,19 +110,24 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         validLatencies,
       }
     })
-  }, [rawHistory, targetList, isTimeMode])
+  }, [rawHistory, targetList])
 
   const effectiveTargetId = (selectedTargetId === 'all' || targetList.some((t) => t.id === selectedTargetId)) ? selectedTargetId : 'all'
 
   // Filter series to display
   const displayedSeries = useMemo(() => {
-    if (!isTimeMode) return []
+    if (!rawHistory.length) return []
     if (effectiveTargetId === 'all') {
       const withItems = targetSeries.filter((s) => s.items.length > 0)
       return withItems.length > 0 ? withItems : targetSeries
     }
     return targetSeries.filter((s) => s.target.id === effectiveTargetId)
-  }, [targetSeries, effectiveTargetId, isTimeMode])
+  }, [targetSeries, effectiveTargetId, rawHistory])
+
+  // Time mode only active if the currently displayed series has at least one historical item
+  const isTimeMode = useMemo(() => {
+    return displayedSeries.some((s) => s.items.length > 0)
+  }, [displayedSeries])
 
   // Global or filtered max latency
   const maxLat = useMemo(() => {
@@ -188,10 +194,14 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   // Fallback points when no time series history
   const fallbackPoints = useMemo(() => {
     if (isTimeMode) return []
-    const count = targets.length
+    const filteredTargets = (effectiveTargetId === 'all')
+      ? targets
+      : targets.filter((r) => (r.targetId || r.target_id || r.key || '') === effectiveTargetId)
+    const activeTargets = filteredTargets.length > 0 ? filteredTargets : targets
+    const count = activeTargets.length
     const slot = 100 / Math.max(count, 1)
 
-    return targets.map((r, i) => {
+    return activeTargets.map((r, i) => {
       const x = i * slot + slot / 2
       const hasLat = r.latency !== null && r.latency >= 0 && Number.isFinite(r.latency)
       const lat = hasLat ? r.latency : 0
@@ -211,7 +221,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         index: i,
       }
     })
-  }, [isTimeMode, targets, maxLat, baselineY, plotHeight])
+  }, [isTimeMode, targets, effectiveTargetId, maxLat, baselineY, plotHeight])
 
   const fallbackSpline = useMemo(() => {
     if (isTimeMode || !fallbackPoints.length) return { line: '', area: '' }
@@ -477,11 +487,14 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         </div>
       ) : (
         <div className="checks-time-axis nezha-time-axis mono">
-          {targets.map((t, idx) => (
+          {(effectiveTargetId === 'all'
+            ? targets
+            : targets.filter((r) => (r.targetId || r.target_id || r.key || '') === effectiveTargetId)
+          ).map((t, idx, arr) => (
             <span
               key={`x-${idx}`}
               className={`axis-target-name ${active?.targetName === t.name ? 'axis-active' : ''}`}
-              style={{ width: `${100 / Math.max(targets.length, 1)}%`, textAlign: 'center' }}
+              style={{ width: `${100 / Math.max(arr.length, 1)}%`, textAlign: 'center' }}
             >
               {t.name}
             </span>

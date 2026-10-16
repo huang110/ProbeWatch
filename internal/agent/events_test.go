@@ -369,7 +369,8 @@ func TestScanKernelEventsBootHistoryAndCooldown(t *testing.T) {
 
 	var outputToReturn string
 	collector := &EventCollector{
-		seenSignatures: make(map[string]int64),
+		seenSignatures:   make(map[string]int64),
+		suppressBaseline: true,
 		kernelRunner: func(ctx context.Context) (io.Reader, error) {
 			return strings.NewReader(outputToReturn), nil
 		},
@@ -405,5 +406,25 @@ func TestScanKernelEventsBootHistoryAndCooldown(t *testing.T) {
 	}
 	if !strings.Contains(eventsT120[0].Title, "5678") || !strings.Contains(eventsT120[0].Title, "redis-server") {
 		t.Fatalf("unexpected title for new event: %s", eventsT120[0].Title)
+	}
+}
+
+func TestScanKernelEventsDirectParsingWithoutSuppression(t *testing.T) {
+	ctx := context.Background()
+
+	// In unit test scenarios without suppressBaseline, kernelRunner events must be returned on the first call
+	collector := &EventCollector{
+		seenSignatures: make(map[string]int64),
+		kernelRunner: func(ctx context.Context) (io.Reader, error) {
+			return strings.NewReader("[ 12.345678] Kernel panic - not syncing: Fatal exception\n"), nil
+		},
+	}
+
+	events := collector.scanKernelEvents(ctx, 1000)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 kernel panic event on first run without baseline suppression, got %d", len(events))
+	}
+	if events[0].Category != "kernel" || events[0].Severity != "critical" {
+		t.Fatalf("unexpected parsed event: %+v", events[0])
 	}
 }

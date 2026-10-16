@@ -378,8 +378,22 @@ type alertsSummary struct {
 // parseAlertsLogFile parses alerts.log within bounds using tail reading.
 func parseAlertsLogFile(filePath string, ignoreInitial bool, maxBytes int64) (alertsSummary, error) {
 	summary := alertsSummary{HighestSeverity: "NONE"}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return summary, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return summary, err
+	}
+	if fi.Size() == 0 {
+		return summary, nil
+	}
+
 	// Read newest log entries from the tail of the file to capture today's fresh alerts
-	lines := readLogTail(filePath, maxIPQALogLines)
+	lines := readLogTailChunk(f, fi.Size(), tailChunkSize, maxIPQALogLines)
 	if len(lines) == 0 {
 		return summary, nil
 	}
