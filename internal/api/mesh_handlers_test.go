@@ -295,7 +295,7 @@ func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
 
 	// 2. Reject update with empty name or type
 	badBody := `{"name":"","type":"telegram","config":"{}"}`
-	recBad, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, badBody)
+	recBad, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, badBody)
 	if recBad.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 on empty name, got %d", recBad.Code)
 	}
