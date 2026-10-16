@@ -246,6 +246,76 @@ func TestPatchNode(t *testing.T) {
 	if nodeSummary2.Tags != "jp,tokyo" {
 		t.Errorf("expected tags jp,tokyo, got %s", nodeSummary2.Tags)
 	}
+
+	// 3. Reject invalid name
+	patchBodyInvalid := `{"name":""}`
+	rec3, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPatch, session, csrf, "/api/nodes/"+node.ID, patchBodyInvalid)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on empty name, got %d", rec3.Code)
+	}
+
+	// 4. Reject unauthenticated request
+	reqUnauth := httptest.NewRequest(http.MethodPatch, "/api/nodes/"+node.ID, strings.NewReader(`{"name":"NewName"}`))
+	recUnauth := httptest.NewRecorder()
+	handler.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized && recUnauth.Code != http.StatusForbidden {
+		t.Fatalf("expected 401/403 for unauthenticated patch, got %d", recUnauth.Code)
+	}
+}
+
+func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	session, csrf := task4AdminSession(t, service, store)
+	ctx := context.Background()
+
+	// 1. Create a channel
+	createBody := `{"name":"Telegram Alert","type":"telegram","config":"{\"bot_token\":\"12345:abc\",\"chat_id\":\"98765\"}","enabled":true,"events":["offline"]}`
+	recCreate, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/channels", createBody)
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create channel, got %d: %s", recCreate.Code, recCreate.Body.String())
+	}
+	var created db.NotificationChannel
+	if err := json.Unmarshal(recCreate.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created channel: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("expected non-empty channel ID")
+	}
+
+	origCh, err := store.GetNotificationChannel(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to retrieve channel from store: %v", err)
+	}
+	origCreatedAt := origCh.CreatedAt
+
+	// 2. Reject update with empty name or type
+	badBody := `{"name":"","type":"telegram","config":"{}"}`
+	recBad, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, badBody)
+	if recBad.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on empty name, got %d", recBad.Code)
+	}
+
+	// 3. Update channel and verify CreatedAt is preserved
+	updateBody := `{"name":"Updated Channel","type":"telegram","config":"{\"bot_token\":\"******\",\"chat_id\":\"98765\"}","enabled":true,"events":["system"]}`
+	recUp, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, updateBody)
+	if recUp.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update channel, got %d: %s", recUp.Code, recUp.Body.String())
+	}
+
+	updatedCh, err := store.GetNotificationChannel(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to retrieve updated channel: %v", err)
+	}
+	if updatedCh.Name != "Updated Channel" {
+		t.Errorf("expected name 'Updated Channel', got %s", updatedCh.Name)
+	}
+	if !updatedCh.CreatedAt.Equal(origCreatedAt) {
+		t.Errorf("expected CreatedAt %v to be preserved, got %v", origCreatedAt, updatedCh.CreatedAt)
+	}
 }
 
 func TestTargetScopingWithNodeTagsAndIDs(t *testing.T) {
