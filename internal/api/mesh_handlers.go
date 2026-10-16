@@ -89,8 +89,8 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, hasUser := UserFromContext(ctx)
 	if !hasUser && !strings.HasPrefix(r.URL.Path, "/api/public/") {
-		if authUser, ok := s.authenticateUser(w, r); ok {
-			user = authUser
+		if authUser, ok := s.authenticateUser(w, r); ok && authUser != nil {
+			user = *authUser
 			hasUser = true
 		} else {
 			return

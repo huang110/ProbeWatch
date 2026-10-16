@@ -684,14 +684,10 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.service.Store().ListNodes(r.Context())
 	nodeNames := make(map[string]string, len(nodes))
 	for _, n := range nodes {
-		name := n.Name
-		if name == "" {
-			name = n.Hostname
-		}
-		if name != "" {
-			nodeNames[n.ID] = name
+		if n.Name != "" {
+			nodeNames[n.ID] = n.Name
 			if n.UUID != "" {
-				nodeNames[n.UUID] = name
+				nodeNames[n.UUID] = n.Name
 			}
 		}
 	}
