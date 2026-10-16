@@ -1388,11 +1388,15 @@ func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID
 	}
 	kinds := []db.TargetKind{db.TargetKindTCP}
 	if resource == "network" { kinds = []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} } else if resource == "mtr" { kinds = []db.TargetKind{db.TargetKindMTR} } else if resource == "media" { kinds = []db.TargetKind{db.TargetKindMediaHTTP} }
-	out := make([]historyResultResponse, 0)
+	seen := make(map[string]struct{})
+	out := make([]historyResultResponse, 0, limit)
 	for _, kind := range kinds {
 		records, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
 		if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable"); return }
 		for _, record := range records {
+		key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+		if _, exists := seen[key]; exists { continue }
+		seen[key] = struct{}{}
 		item := historyResultResponse{CheckedAt: record.CheckedAt, Result: json.RawMessage(record.Payload)}
 		if resource == "media" {
 			item.DetectorID = record.TargetID
@@ -1402,6 +1406,8 @@ func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID
 		out = append(out, item)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CheckedAt.After(out[j].CheckedAt) })
+	if len(out) > limit { out = out[:limit] }
 	writeJSON(w, http.StatusOK, out)
 }
 

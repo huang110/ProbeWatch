@@ -65,7 +65,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   const isTimeMode = Array.isArray(networkHistory) && networkHistory.length > 0
   const targets = safeArray(rows).filter((r) => r && r.name)
 
-  if (!isTimeMode && !targets.length) return null
+  if (!targets.length) return null
 
   const baselineY = 88
   const topY = 16
@@ -79,9 +79,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
 
   if (isTimeMode) {
     const allowedIds = new Set(targets.map((t) => t.targetId).filter(Boolean))
-    const historyForTargets = allowedIds.size > 0
-      ? networkHistory.filter((item) => allowedIds.has(item.target_id))
-      : networkHistory
+    const historyForTargets = networkHistory.filter((item) => allowedIds.has(item.target_id))
     // 按照检测采样时间正序排列（从早到晚）
     const sortedHistory = [...historyForTargets].sort(
       (a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0)
