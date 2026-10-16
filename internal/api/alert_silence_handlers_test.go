@@ -56,7 +56,23 @@ func TestAlertSilencesAndFlappingAPI(t *testing.T) {
 		t.Fatalf("unexpected created silence: %+v", created)
 	}
 
-	// 4. GET /api/alerts/silences -> 200, count = 1
+	// 3b. POST /api/alerts/silences with node UUID filter -> normalized to node.ID
+	nodeTest := publicStatusRegisterNode(t, handler, store, "550e8400-e29b-41d4-a716-446655440099", "Node-Test-UUID")
+	silenceUUIDPayload := `{"id":"silence-maint-uuid","name":"Node Maintenance","node_filter":"550e8400-e29b-41d4-a716-446655440099","category":"node","starts_at":` +
+		jsonNum(now.Unix()) + `,"ends_at":` + jsonNum(now.Add(time.Hour).Unix()) + `,"reason":"Hardware upgrade"}`
+	postResUUID, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/silences", silenceUUIDPayload)
+	if postResUUID.Code != http.StatusCreated {
+		t.Fatalf("create silence with UUID code = %d, body = %s", postResUUID.Code, postResUUID.Body.String())
+	}
+	var createdUUID db.AlertSilence
+	if err := json.Unmarshal(postResUUID.Body.Bytes(), &createdUUID); err != nil {
+		t.Fatalf("unmarshal created silence UUID: %v", err)
+	}
+	if createdUUID.NodeFilter != nodeTest.ID {
+		t.Fatalf("expected node_filter to be normalized to node.ID (%s), got: %s", nodeTest.ID, createdUUID.NodeFilter)
+	}
+
+	// 4. GET /api/alerts/silences -> 200, count = 2
 	getReq2 := httptest.NewRequest(http.MethodGet, "/api/alerts/silences", nil)
 	getReq2.AddCookie(task4SessionCookie(session))
 	getRec2 := httptest.NewRecorder()
@@ -66,8 +82,8 @@ func TestAlertSilencesAndFlappingAPI(t *testing.T) {
 	}
 	var silences2 []db.AlertSilence
 	_ = json.Unmarshal(getRec2.Body.Bytes(), &silences2)
-	if len(silences2) != 1 {
-		t.Fatalf("expected 1 silence, got %d", len(silences2))
+	if len(silences2) != 2 {
+		t.Fatalf("expected 2 silences, got %d", len(silences2))
 	}
 
 	// 5. GET /api/alerts/flapping -> 200, array
@@ -79,10 +95,14 @@ func TestAlertSilencesAndFlappingAPI(t *testing.T) {
 		t.Fatalf("list flapping code = %d", flapRec.Code)
 	}
 
-	// 6. DELETE /api/alerts/silences/silence-maint-1 with CSRF -> 200
-	delRes, _ := task4AdminWriteWithCSRF(t, handler, http.MethodDelete, session, csrf, "/api/alerts/silences/silence-maint-1", "")
+	// 6. DELETE silences with CSRF -> 200
+	delRes, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodDelete, session, csrf, "/api/alerts/silences/silence-maint-1", "")
 	if delRes.Code != http.StatusOK {
-		t.Fatalf("delete silence code = %d, body = %s", delRes.Code, delRes.Body.String())
+		t.Fatalf("delete silence 1 code = %d, body = %s", delRes.Code, delRes.Body.String())
+	}
+	delRes2, _ := task4AdminWriteWithCSRF(t, handler, http.MethodDelete, session, csrf, "/api/alerts/silences/silence-maint-uuid", "")
+	if delRes2.Code != http.StatusOK {
+		t.Fatalf("delete silence 2 code = %d, body = %s", delRes2.Code, delRes2.Body.String())
 	}
 
 	// 7. Verify deleted
