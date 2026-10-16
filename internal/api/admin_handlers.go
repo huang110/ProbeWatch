@@ -454,7 +454,7 @@ func (s *Server) testNotificationDirect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.ChannelID != "" {
-		ch, err := s.service.Store().GetNotificationChannel(r.Context(), req.ChannelID)
+		ch, err := s.resolveNotificationChannel(r.Context(), req.ChannelID)
 		if err != nil {
 			writeJSONError(w, http.StatusNotFound, "channel not found")
 			return
@@ -1386,14 +1386,13 @@ func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	kind := map[string]db.TargetKind{"network": db.TargetKindTCP, "mtr": db.TargetKindMTR, "media": db.TargetKindMediaHTTP}[resource]
-	records, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
-		return
-	}
-	out := make([]historyResultResponse, 0, len(records))
-	for _, record := range records {
+	kinds := []db.TargetKind{db.TargetKindTCP}
+	if resource == "network" { kinds = []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} } else if resource == "mtr" { kinds = []db.TargetKind{db.TargetKindMTR} } else if resource == "media" { kinds = []db.TargetKind{db.TargetKindMediaHTTP} }
+	out := make([]historyResultResponse, 0)
+	for _, kind := range kinds {
+		records, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
+		if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable"); return }
+		for _, record := range records {
 		item := historyResultResponse{CheckedAt: record.CheckedAt, Result: json.RawMessage(record.Payload)}
 		if resource == "media" {
 			item.DetectorID = record.TargetID
@@ -1401,6 +1400,7 @@ func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID
 			item.TargetID = record.TargetID
 		}
 		out = append(out, item)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

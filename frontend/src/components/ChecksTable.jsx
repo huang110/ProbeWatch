@@ -78,8 +78,12 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   let maxLat = 10
 
   if (isTimeMode) {
+    const allowedIds = new Set(targets.map((t) => t.targetId).filter(Boolean))
+    const historyForTargets = allowedIds.size > 0
+      ? networkHistory.filter((item) => allowedIds.has(item.target_id))
+      : networkHistory
     // 按照检测采样时间正序排列（从早到晚）
-    const sortedHistory = [...networkHistory].sort(
+    const sortedHistory = [...historyForTargets].sort(
       (a, b) => new Date(a.checked_at || 0) - new Date(b.checked_at || 0)
     )
 
@@ -333,6 +337,7 @@ export function ChecksSummaryPanel({ rows, loading = false, networkHistory = [] 
       const source = safeObject(row)
       return {
         key: `${safeText(source.target_id)}-${index}`,
+        targetId: safeText(source.target_id),
         name: cleanTargetLabel(source.name || source.target_id, '—'),
         kind: safeText(source.kind) || '—',
         total: numeric(source.total),

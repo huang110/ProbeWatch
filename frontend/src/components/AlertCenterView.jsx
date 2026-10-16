@@ -1199,7 +1199,7 @@ export function AlertCenterView({
                             <span className="badge badge-mint font-bold">在线</span>
                           )}
                         </td>
-                        <td className="mono">{offlineGracePeriod} 秒</td>
+                        <td className="mono">{offlineGracePeriod || 180} 秒</td>
                         <td className="mono text-muted">{node.lastNotified}</td>
                         <td style={{ textAlign: 'right' }}>
                           <button
