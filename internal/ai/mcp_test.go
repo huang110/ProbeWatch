@@ -115,7 +115,11 @@ func TestMCPServerAndTools(t *testing.T) {
 	}
 
 	// 4b. Test MCP Tool Call with zero total bytes (no division by zero or NaN)
-	regNodeZero, err := store.RegisterNode(ctx, regToken.Token, db.NodeInput{
+	regTokenZero, err := store.CreateRegistrationToken(ctx, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regNodeZero, err := store.RegisterNode(ctx, regTokenZero.Token, db.NodeInput{
 		UUID: "550e8400-e29b-41d4-a716-446655440002",
 		Name: "zero-byte-node",
 	}, now)
