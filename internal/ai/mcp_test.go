@@ -99,6 +99,52 @@ func TestMCPServerAndTools(t *testing.T) {
 		t.Fatalf("mcp call probewatch_get_node_metrics failed: %v", err)
 	}
 
+	// 4a. Test MCP Tool Call with nonexistent node: should return error instead of fallback
+	callNonexistentReq := []byte(`{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"probewatch_get_node_metrics","arguments":{"name":"nonexistent-node-999"}}}`)
+	callNonexistentResp, err := service.HandleMCPJSONRPC(ctx, callNonexistentReq)
+	if err != nil {
+		t.Fatalf("unexpected jsonrpc error: %v", err)
+	}
+	if callNonexistentResp.Error == nil {
+		t.Fatalf("expected error for nonexistent node query, got success")
+	}
+
+	// 4b. Test MCP Tool Call with zero total bytes (no division by zero or NaN)
+	regNodeZero, err := store.RegisterNode(ctx, regToken.Token, db.NodeInput{
+		UUID: "550e8400-e29b-41d4-a716-446655440002",
+		Name: "zero-byte-node",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zeroSnap := protocol.ResourceSnapshot{
+		Hostname:             "zero-byte-node",
+		MemoryTotalBytes:     0,
+		MemoryUsedBytes:      0,
+		FilesystemTotalBytes: 0,
+		FilesystemUsedBytes:  0,
+	}
+	zeroSnapBytes, _ := json.Marshal(zeroSnap)
+	_ = store.UpsertResourceLatest(ctx, regNodeZero.Node.ID, now, zeroSnapBytes)
+
+	callZeroReq := []byte(`{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"probewatch_get_node_metrics","arguments":{"name":"zero-byte-node"}}}`)
+	callZeroResp, err := service.HandleMCPJSONRPC(ctx, callZeroReq)
+	if err != nil || callZeroResp.Error != nil {
+		t.Fatalf("mcp call zero-byte node failed: %v, resp: %+v", err, callZeroResp)
+	}
+	zeroResult, ok := callZeroResp.Result.(*MCPCallResult)
+	if !ok || len(zeroResult.Content) == 0 {
+		t.Fatalf("expected non-empty content for zero-byte node")
+	}
+	var zeroData map[string]any
+	if err := json.Unmarshal([]byte(zeroResult.Content[0].Text), &zeroData); err != nil {
+		t.Fatalf("failed to unmarshal zero-byte node result: %v", err)
+	}
+	memMap, _ := zeroData["memory"].(map[string]any)
+	if memMap["used_pct"] != "0.0%" {
+		t.Fatalf("expected 0.0%% for zero-byte memory, got: %v", memMap["used_pct"])
+	}
+
 	// 5. Test MCP Token Generation and Validation
 	token, err := service.GetOrGenerateMCPToken(ctx)
 	if err != nil || token == "" {

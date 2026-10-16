@@ -76,10 +76,30 @@ func (s *Server) createAlertSilence(w http.ResponseWriter, r *http.Request) {
 	actor := "admin"
 	if user, ok := s.authenticateUser(w, r); ok { actor = user.ID } else { return }
 
+	nodeFilter := strings.TrimSpace(req.NodeFilter)
+	if nodeFilter != "" && nodeFilter != "*" {
+		if nodes, err := s.service.Store().ListNodes(r.Context()); err == nil {
+			parts := strings.Split(nodeFilter, ",")
+			var resolvedParts []string
+			for _, p := range parts {
+				clean := strings.TrimSpace(p)
+				resolved := clean
+				for _, n := range nodes {
+					if strings.EqualFold(n.UUID, clean) {
+						resolved = n.ID
+						break
+					}
+				}
+				resolvedParts = append(resolvedParts, resolved)
+			}
+			nodeFilter = strings.Join(resolvedParts, ",")
+		}
+	}
+
 	silence := db.AlertSilence{
 		ID:          id,
 		Name:        name,
-		NodeFilter:  strings.TrimSpace(req.NodeFilter),
+		NodeFilter:  nodeFilter,
 		Category:    strings.TrimSpace(req.Category),
 		RuleID:      strings.TrimSpace(req.RuleID),
 		Fingerprint: strings.TrimSpace(req.Fingerprint),

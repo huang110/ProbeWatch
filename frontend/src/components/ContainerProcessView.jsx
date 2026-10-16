@@ -353,8 +353,9 @@ export function ContainerProcessView({ initialNodeId = '' }) {
             setActiveTab('processes')
             if (!selectedNode && nodes.length > 0) {
               const firstOnline = nodes.find((n) => n.status === 'online') || nodes[0]
-              if (firstOnline && firstOnline.id) {
-                setSelectedNode(firstOnline.id)
+              const targetId = firstOnline?.uuid || firstOnline?.id
+              if (targetId) {
+                setSelectedNode(targetId)
               }
             }
           }}
@@ -621,7 +622,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
               <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 {nodes.map((n) => (
                   <button
-                    key={n.id}
+                    key={n.uuid || n.id}
                     type="button"
                     className="button button-small"
                     style={{
@@ -630,7 +631,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
                       color: 'var(--text-1, #fff)',
                       cursor: 'pointer',
                     }}
-                    onClick={() => setSelectedNode(n.id)}
+                    onClick={() => setSelectedNode(n.uuid || n.id)}
                   >
                     <HardDrives size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
                     {n.name || n.hostname || n.id}

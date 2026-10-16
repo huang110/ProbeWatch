@@ -2232,11 +2232,14 @@ export function AlertCenterView({
                         onChange={(e) => setSnoozeNodeFilter(e.target.value)}
                       >
                         <option value="*">🌐 所有节点 (All Fleet)</option>
-                        {displayNodes.map((n) => (
-                          <option key={n.id} value={n.id}>
-                            {n.name} ({n.id})
-                          </option>
-                        ))}
+                        {displayNodes.map((n) => {
+                          const targetVal = n.node?.id || n.id
+                          return (
+                            <option key={n.id} value={targetVal}>
+                              {n.name} ({targetVal})
+                            </option>
+                          )
+                        })}
                       </select>
                     </div>
                     <div className="field">
@@ -2247,12 +2250,14 @@ export function AlertCenterView({
                         onChange={(e) => setSnoozeCategory(e.target.value)}
                       >
                         <option value="*">🔔 全类别 (All Categories)</option>
-                        <option value="offline">节点离线 (offline)</option>
-                        <option value="system">系统负载 (system)</option>
-                        <option value="synthetic">网络拨测 (synthetic)</option>
-                        <option value="traffic">流量超标 (traffic)</option>
-                        <option value="ipqa">IP 质量变动 (ipqa)</option>
-                        <option value="billing">账单到期 (billing)</option>
+                        <option value="node">节点离线 / 状态 (node)</option>
+                        <option value="resource">系统负载资源 (resource)</option>
+                        <option value="network">网络丢包与延迟 (network)</option>
+                        <option value="mtr">MTR 路由跳点 (mtr)</option>
+                        <option value="media">流媒体解锁状态 (media)</option>
+                        <option value="ipqa">IP 质量与风控 (ipqa)</option>
+                        <option value="traffic">流量超标告警 (traffic)</option>
+                        <option value="billing">账单与到期 (billing)</option>
                       </select>
                     </div>
                   </div>

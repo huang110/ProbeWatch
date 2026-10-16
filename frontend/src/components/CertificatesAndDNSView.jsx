@@ -158,7 +158,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
       </div>
 
       {error && (
-        <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '8px', color: '#b91c1c', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: '#ef4444', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <WarningCircle size={20} />
           <span>{error}</span>
         </div>
@@ -303,7 +303,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                           <span>有效期倒计时</span>
                           <span>{formatDate(cert.not_after)} 到期</span>
                         </div>
-                        <div style={{ width: '100%', height: '6px', background: 'var(--bg-muted, #f1f5f9)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ width: '100%', height: '6px', background: 'var(--surface-2, rgba(255, 255, 255, 0.08))', borderRadius: '3px', overflow: 'hidden' }}>
                           <div
                             style={{
                               width: `${progressPct}%`,
@@ -441,7 +441,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '16px', fontWeight: 600 }}>{item.target_name || item.host}</span>
                       <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-muted)' }}>{item.host}</span>
-                      <span style={{ fontSize: '11px', background: 'var(--bg-muted, #f1f5f9)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11px', background: 'var(--surface-2, rgba(255, 255, 255, 0.08))', border: '1px solid var(--border-color, rgba(255, 255, 255, 0.12))', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
                         {item.dns_type || 'A'}
                       </span>
                     </div>

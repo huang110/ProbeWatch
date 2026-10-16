@@ -147,8 +147,8 @@ export function BillingCenter({ nodes = [] }) {
     return portfolio.filter((item) => {
       if (regionFilter !== 'all' && item.region !== regionFilter) return false
       if (groupFilter !== 'all' && item.group !== groupFilter) return false
-      if (dueFilter === 'expiring30' && (item.calc.daysRemaining > 30 || item.calc.isExpired)) return false
-      if (dueFilter === 'expiring60' && (item.calc.daysRemaining > 60 || item.calc.isExpired)) return false
+      if (dueFilter === 'expiring30' && (item.calc.daysRemaining === null || item.calc.daysRemaining > 30 || item.calc.isExpired || item.billing?.cycle === 'free')) return false
+      if (dueFilter === 'expiring60' && (item.calc.daysRemaining === null || item.calc.daysRemaining > 60 || item.calc.isExpired || item.billing?.cycle === 'free')) return false
       if (dueFilter === 'expired' && !item.calc.isExpired) return false
       if (searchTerm) {
         const query = searchTerm.toLowerCase().trim()

@@ -244,9 +244,20 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 			}
 		}
 
-		if targetNodeID == "" && len(nodes) > 0 {
-			targetNodeID = nodes[0].ID
-			targetNodeName = nodes[0].Name
+		if targetNodeID == "" {
+			if args.NodeID != "" || args.Name != "" {
+				query := args.NodeID
+				if query == "" {
+					query = args.Name
+				}
+				return nil, fmt.Errorf("node not found: %s", query)
+			}
+			if len(nodes) > 0 {
+				targetNodeID = nodes[0].ID
+				targetNodeName = nodes[0].Name
+			} else {
+				return nil, fmt.Errorf("no nodes available")
+			}
 		}
 
 		reportedAt, payload, err := s.store.GetResourceLatest(ctx, targetNodeID)
@@ -258,6 +269,15 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 		_ = json.Unmarshal(payload, &snap)
 
 		billing, _ := s.store.GetNodeCycleTraffic(ctx, targetNodeID, time.Now().UTC())
+
+		memPct := "0.0%"
+		if snap.MemoryTotalBytes > 0 {
+			memPct = fmt.Sprintf("%.1f%%", float64(snap.MemoryUsedBytes)/float64(snap.MemoryTotalBytes)*100)
+		}
+		diskPct := "0.0%"
+		if snap.FilesystemTotalBytes > 0 {
+			diskPct = fmt.Sprintf("%.1f%%", float64(snap.FilesystemUsedBytes)/float64(snap.FilesystemTotalBytes)*100)
+		}
 
 		data := map[string]any{
 			"node_id":     targetNodeID,
@@ -276,12 +296,12 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 			"memory": map[string]any{
 				"total_mb": snap.MemoryTotalBytes / (1024 * 1024),
 				"used_mb":  snap.MemoryUsedBytes / (1024 * 1024),
-				"used_pct": fmt.Sprintf("%.1f%%", float64(snap.MemoryUsedBytes)/float64(snap.MemoryTotalBytes)*100),
+				"used_pct": memPct,
 			},
 			"disk": map[string]any{
 				"total_gb": snap.FilesystemTotalBytes / (1024 * 1024 * 1024),
 				"used_gb":  snap.FilesystemUsedBytes / (1024 * 1024 * 1024),
-				"used_pct": fmt.Sprintf("%.1f%%", float64(snap.FilesystemUsedBytes)/float64(snap.FilesystemTotalBytes)*100),
+				"used_pct": diskPct,
 			},
 			"billing": map[string]any{
 				"cycle_used_gb": float64(billing.CycleUsedBytes) / (1024 * 1024 * 1024),
