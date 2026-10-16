@@ -63,7 +63,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
 
   // Filtered certificates
   const filteredCerts = (certData.certificates || []).filter((cert) => {
-    if (certFilter === 'expiring' && !cert.expiring_soon && cert.days_left > 14) return false
+    if (certFilter === 'expiring' && (cert.is_expired || cert.days_left <= 0 || (!cert.expiring_soon && cert.days_left > 14))) return false
     if (certFilter === 'expired' && !cert.is_expired && cert.days_left > 0) return false
     if (certFilter === 'valid' && (cert.is_expired || cert.expiring_soon || cert.days_left <= 14)) return false
     if (certSearch) {
@@ -479,7 +479,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                       </thead>
                       <tbody>
                         {(item.nodes || []).map((node) => (
-                          <tr key={node.node_id} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
+                          <tr key={node.node_id} style={{ borderBottom: '1px solid var(--border-color, rgba(255, 255, 255, 0.08))' }}>
                             <td style={{ padding: '10px 12px', fontWeight: 500 }}>{node.node_name || node.node_id}</td>
                             <td style={{ padding: '10px 12px' }}>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -491,8 +491,9 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                                       fontSize: '12px',
                                       padding: '2px 6px',
                                       borderRadius: '4px',
-                                      background: 'var(--bg-muted, #f1f5f9)',
-                                      border: '1px solid var(--border-color, #e2e8f0)',
+                                      background: 'var(--surface-2, rgba(255, 255, 255, 0.06))',
+                                      border: '1px solid var(--border-color, rgba(255, 255, 255, 0.12))',
+                                      color: 'var(--text-1, inherit)',
                                     }}
                                   >
                                     {ip}
@@ -605,7 +606,7 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
 
               <div>
                 <div style={{ color: 'var(--text-muted)', marginBottom: '6px' }}>使用者备选名称 (Subject Alternative Names, SANs)</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '120px', overflowY: 'auto', padding: '8px', background: 'var(--bg-muted, #f1f5f9)', borderRadius: '6px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '120px', overflowY: 'auto', padding: '8px', background: 'var(--surface-2, rgba(255, 255, 255, 0.04))', borderRadius: '6px' }}>
                   {(selectedCert.dns_names || [selectedCert.host]).map((san) => (
                     <span
                       key={san}
@@ -614,8 +615,9 @@ export function CertificatesAndDNSView({ initialTab = 'certificates' }) {
                         fontSize: '12px',
                         padding: '2px 8px',
                         borderRadius: '4px',
-                        background: '#ffffff',
-                        border: '1px solid var(--border-color, #e2e8f0)',
+                        background: 'var(--surface-1, rgba(255, 255, 255, 0.08))',
+                        border: '1px solid var(--border-color, rgba(255, 255, 255, 0.12))',
+                        color: 'var(--text-1, inherit)',
                       }}
                     >
                       {san}

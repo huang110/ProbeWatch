@@ -111,15 +111,17 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
     })
   }, [rawHistory, targetList, isTimeMode])
 
+  const effectiveTargetId = (selectedTargetId === 'all' || targetList.some((t) => t.id === selectedTargetId)) ? selectedTargetId : 'all'
+
   // Filter series to display
   const displayedSeries = useMemo(() => {
     if (!isTimeMode) return []
-    if (selectedTargetId === 'all') {
+    if (effectiveTargetId === 'all') {
       const withItems = targetSeries.filter((s) => s.items.length > 0)
       return withItems.length > 0 ? withItems : targetSeries
     }
-    return targetSeries.filter((s) => s.target.id === selectedTargetId)
-  }, [targetSeries, selectedTargetId, isTimeMode])
+    return targetSeries.filter((s) => s.target.id === effectiveTargetId)
+  }, [targetSeries, effectiveTargetId, isTimeMode])
 
   // Global or filtered max latency
   const maxLat = useMemo(() => {
@@ -245,12 +247,15 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
 
   const handleCanvasMouseMove = (e) => {
     const rect = e.currentTarget.getBoundingClientRect()
-    if (!rect.width || !allRenderedPoints.length) return
+    if (!rect.width || !rect.height || !allRenderedPoints.length) return
     const mousePercent = ((e.clientX - rect.left) / rect.width) * 100
+    const mouseYPercent = ((e.clientY - rect.top) / rect.height) * 100
     let closest = null
     let minDist = Infinity
     for (const p of allRenderedPoints) {
-      const dist = Math.abs(p.x - mousePercent)
+      const dx = p.x - mousePercent
+      const dy = (p.y - mouseYPercent) * 0.35
+      const dist = Math.hypot(dx, dy)
       if (dist < minDist) {
         minDist = dist
         closest = p
@@ -260,7 +265,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   }
 
   const active = hoveredPoint
-  const isSingleTarget = selectedTargetId !== 'all' || renderedSeries.length === 1
+  const isSingleTarget = effectiveTargetId !== 'all' || renderedSeries.length === 1
   const singleSeries = isSingleTarget && renderedSeries.length === 1 ? renderedSeries[0] : null
 
   return (
@@ -270,7 +275,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         <div className="checks-target-capsules">
           <button
             type="button"
-            className={`target-capsule-btn ${selectedTargetId === 'all' ? 'active' : ''}`}
+            className={`target-capsule-btn ${effectiveTargetId === 'all' ? 'active' : ''}`}
             onClick={() => {
               setSelectedTargetId('all')
               setHoveredPoint(null)
@@ -282,14 +287,14 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
             <button
               key={t.id}
               type="button"
-              className={`target-capsule-btn ${selectedTargetId === t.id ? 'active' : ''}`}
+              className={`target-capsule-btn ${effectiveTargetId === t.id ? 'active' : ''}`}
               onClick={() => {
                 setSelectedTargetId(t.id)
                 setHoveredPoint(null)
               }}
               style={{
-                borderColor: selectedTargetId === t.id ? t.color : undefined,
-                color: selectedTargetId === t.id ? t.color : undefined,
+                borderColor: effectiveTargetId === t.id ? t.color : undefined,
+                color: effectiveTargetId === t.id ? t.color : undefined,
               }}
             >
               <span className="capsule-dot" style={{ backgroundColor: t.color }} />

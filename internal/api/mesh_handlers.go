@@ -88,6 +88,14 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, hasUser := UserFromContext(ctx)
+	if !hasUser && !strings.HasPrefix(r.URL.Path, "/api/public/") {
+		if authUser, ok := s.authenticateUser(w, r); ok {
+			user = authUser
+			hasUser = true
+		} else {
+			return
+		}
+	}
 	meshNodes := make([]MeshNodeInfo, 0, len(nodes))
 	nodeMap := make(map[string]MeshNodeInfo)
 
@@ -466,6 +474,18 @@ func (s *Server) patchNode(w http.ResponseWriter, r *http.Request, idOrUUID stri
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+	if !user.CanWrite() {
+		writeJSONError(w, http.StatusForbidden, "write permission required")
+		return
+	}
+	if user.Role != "admin" && user.Role != "operator" && user.Role != "" {
+		writeJSONError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
 	ctx := r.Context()
 	var node db.Node
 	var err error
@@ -483,16 +503,9 @@ func (s *Server) patchNode(w http.ResponseWriter, r *http.Request, idOrUUID stri
 		return
 	}
 
-	user, hasUser := UserFromContext(ctx)
-	if hasUser {
-		if !user.CanAccessNode(node.UUID) {
-			writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
-			return
-		}
-		if user.Role != "admin" && user.Role != "operator" && user.Role != "" {
-			writeJSONError(w, http.StatusForbidden, "insufficient permissions")
-			return
-		}
+	if !user.CanAccessNode(node.UUID) {
+		writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+		return
 	}
 
 	var req patchNodeRequest

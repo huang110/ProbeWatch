@@ -24,6 +24,7 @@ import (
 type alertResponse struct {
 	ID              string     `json:"id"`
 	NodeID          string     `json:"node_id"`
+	NodeName        string     `json:"node_name,omitempty"`
 	Category        string     `json:"category"`
 	TargetID        string     `json:"target_id"`
 	Reason          string     `json:"reason"`
@@ -400,6 +401,10 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		writeRequestError(w, err)
 		return
 	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Type) == "" {
+		writeJSONError(w, http.StatusBadRequest, "name and type are required")
+		return
+	}
 	existing, _ := s.resolveNotificationChannel(r.Context(), id)
 	config := req.Config
 	var incomingCfg, existingCfg map[string]any
@@ -414,6 +419,10 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		}
 		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
 	}
+	createdAt := existing.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
 	ch := db.NotificationChannel{
 		ID:        id,
 		Name:      strings.TrimSpace(req.Name),
@@ -421,6 +430,7 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 		Config:    config,
 		Enabled:   req.Enabled,
 		Events:    req.Events,
+		CreatedAt: createdAt,
 		UpdatedAt: time.Now().UTC(),
 	}
 	if err := s.service.Store().UpsertNotificationChannel(r.Context(), ch); err != nil {
@@ -671,9 +681,27 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}
+	nodes, _ := s.service.Store().ListNodes(r.Context())
+	nodeNames := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		name := n.Name
+		if name == "" {
+			name = n.Hostname
+		}
+		if name != "" {
+			nodeNames[n.ID] = name
+			if n.UUID != "" {
+				nodeNames[n.UUID] = name
+			}
+		}
+	}
 	out := make([]alertResponse, 0, len(alerts))
 	for _, a := range alerts {
-		out = append(out, alertResponseFrom(a))
+		resp := alertResponseFrom(a)
+		if name, ok := nodeNames[a.NodeID]; ok {
+			resp.NodeName = name
+		}
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -171,9 +171,18 @@ export function ContainerProcessView({ initialNodeId = '' }) {
   // Active containers list depending on fleet or single node
   const activeContainersList = useMemo(() => {
     if (!selectedNode) {
-      // In fleet mode, show Top CPU containers or all available
-      const combined = [...(overview.top_cpu_containers || [])]
-      return combined
+      // In fleet mode, merge and deduplicate top_cpu_containers and top_memory_containers
+      const map = new Map()
+      const cpuList = overview.top_cpu_containers || []
+      const memList = overview.top_memory_containers || []
+      for (const c of [...cpuList, ...memList]) {
+        if (!c) continue
+        const key = `${c.node_id || ''}-${c.container_id || c.name || ''}`
+        if (!map.has(key)) {
+          map.set(key, c)
+        }
+      }
+      return Array.from(map.values())
     }
     return nodeContainersData.containers || []
   }, [selectedNode, overview, nodeContainersData])
@@ -340,7 +349,15 @@ export function ContainerProcessView({ initialNodeId = '' }) {
           Docker 容器微服务
         </button>
         <button
-          onClick={() => setActiveTab('processes')}
+          onClick={() => {
+            setActiveTab('processes')
+            if (!selectedNode && nodes.length > 0) {
+              const firstOnline = nodes.find((n) => n.status === 'online') || nodes[0]
+              if (firstOnline && firstOnline.id) {
+                setSelectedNode(firstOnline.id)
+              }
+            }
+          }}
           style={{
             padding: '10px 16px',
             background: 'none',
@@ -464,7 +481,7 @@ export function ContainerProcessView({ initialNodeId = '' }) {
 
               return (
                 <div
-                  key={c.container_id}
+                  key={`${c.node_id || selectedNode || 'fleet'}-${c.container_id || c.name}`}
                   className="panel"
                   style={{
                     padding: '18px',
@@ -598,8 +615,29 @@ export function ContainerProcessView({ initialNodeId = '' }) {
               请在右上角选择具体服务器节点以查看宿主机 Top 进程
             </div>
             <div style={{ fontSize: '13px', marginTop: '6px' }}>
-              宿主机进程数据属于单机实时快照，不支持全舰队聚合展示。
+              宿主机进程数据属于单机实时快照，不支持全机群聚合展示。请选择具体节点查看：
             </div>
+            {nodes.length > 0 && (
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {nodes.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="button button-small"
+                    style={{
+                      background: 'var(--surface-2, rgba(255, 255, 255, 0.08))',
+                      border: '1px solid var(--border-color, rgba(255, 255, 255, 0.12))',
+                      color: 'var(--text-1, #fff)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setSelectedNode(n.id)}
+                  >
+                    <HardDrives size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                    {n.name || n.hostname || n.id}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div className="panel" style={{ overflowX: 'auto', border: '1px solid rgba(255, 255, 255, 0.08)' }}>

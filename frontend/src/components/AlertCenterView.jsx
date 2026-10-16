@@ -131,7 +131,19 @@ export function AlertCenterView({
   const [snoozeDurationPreset, setSnoozeDurationPreset] = useState(60) // minutes
   const [snoozeScope, setSnoozeScope] = useState('fingerprint') // 'fingerprint' | 'node' | 'category'
   const [snoozeReason, setSnoozeReason] = useState('')
+  const [snoozeNodeFilter, setSnoozeNodeFilter] = useState('*')
+  const [snoozeCategory, setSnoozeCategory] = useState('*')
   const [savingSnooze, setSavingSnooze] = useState(false)
+
+  const nodesMap = useMemo(() => {
+    const map = {}
+    for (const n of (nodes || [])) {
+      const name = n.name || n.hostname || n.alias || n.id
+      if (n.id) map[n.id] = name
+      if (n.uuid) map[n.uuid] = name
+    }
+    return map
+  }, [nodes])
 
   const filteredLoadRules = useMemo(() => {
     return loadRules.filter((r) => {
@@ -335,7 +347,9 @@ export function AlertCenterView({
   const handleOpenSnooze = (alert) => {
     setSnoozeTarget(alert)
     setSnoozeDurationPreset(60)
-    setSnoozeScope('fingerprint')
+    setSnoozeScope(alert ? 'fingerprint' : 'node')
+    setSnoozeNodeFilter('*')
+    setSnoozeCategory('*')
     const initialReason = alert ? `排查故障: ${alert.reason || alert.message || alert.title || alert.type || '未命名告警'}` : '例行维护静默'
     setSnoozeReason(initialReason)
     setShowSnoozeModal(true)
@@ -348,14 +362,39 @@ export function AlertCenterView({
       const now = Math.floor(Date.now() / 1000)
       const durationSec = (parseInt(snoozeDurationPreset, 10) || 60) * 60
       const endsAt = now + durationSec
+      const targetNodeId = snoozeTarget ? (snoozeTarget.node_id || snoozeTarget.nodeId || '') : ''
+      const targetCategory = snoozeTarget ? (snoozeTarget.category || '') : ''
+      const targetFingerprint = snoozeTarget ? (snoozeTarget.fingerprint || '') : ''
+      let finalNodeFilter = '*'
+      let finalCategory = '*'
+      let finalFingerprint = ''
+
+      if (snoozeTarget) {
+        if (snoozeScope === 'node') {
+          finalNodeFilter = targetNodeId || '*'
+        } else if (snoozeScope === 'category') {
+          finalCategory = targetCategory || '*'
+        } else if (snoozeScope === 'fingerprint') {
+          if (targetFingerprint) {
+            finalFingerprint = targetFingerprint
+          } else {
+            finalNodeFilter = targetNodeId || '*'
+            finalCategory = targetCategory || '*'
+          }
+        }
+      } else {
+        finalNodeFilter = snoozeNodeFilter.trim() || '*'
+        finalCategory = snoozeCategory.trim() || '*'
+      }
+
       const payload = {
         name: snoozeReason.trim() || '快速静默',
         reason: snoozeReason.trim() || '例行排查维护',
         starts_at: now,
         ends_at: endsAt,
-        node_filter: snoozeScope === 'node' && snoozeTarget ? (snoozeTarget.node_id || '*') : (snoozeScope === 'fingerprint' && snoozeTarget && !snoozeTarget.fingerprint ? (snoozeTarget.node_id || '*') : '*'),
-        category: snoozeScope === 'category' && snoozeTarget ? (snoozeTarget.category || '*') : (snoozeScope === 'fingerprint' && snoozeTarget && !snoozeTarget.fingerprint ? (snoozeTarget.category || '*') : '*'),
-        fingerprint: snoozeScope === 'fingerprint' && snoozeTarget ? (snoozeTarget.fingerprint || '') : '',
+        node_filter: finalNodeFilter,
+        category: finalCategory,
+        fingerprint: finalFingerprint,
       }
       await createAlertSilence(payload)
       showToast('已开启告警静默')
@@ -1499,7 +1538,7 @@ export function AlertCenterView({
                               {alert.severity}
                             </span>
                           </td>
-                          <td className="font-semibold">{alert.node_name || alert.node_id}</td>
+                          <td className="font-semibold">{alert.node_name || alert.nodeName || nodesMap[alert.node_id || alert.nodeId] || alert.node_id || alert.nodeId || '—'}</td>
                           <td className="mono">{alert.category || alert.type || '—'}</td>
                           <td>{alert.reason || alert.message || alert.title || '—'}</td>
                           <td className="mono text-muted">{formatAlertTime(alert.lastSeen || alert.last_seen_at || alert.created_at)}</td>
@@ -1644,12 +1683,16 @@ export function AlertCenterView({
                               )}
                             </td>
                             <td className="mono text-muted">
-                              {s.node_filter === '*' ? <span className="badge badge-subtle">所有节点</span> : s.node_filter}
+                              {!s.node_filter || s.node_filter === '*' ? (
+                                <span className="badge badge-subtle">所有节点</span>
+                              ) : (
+                                nodesMap[s.node_filter] || s.node_filter
+                              )}
                             </td>
                             <td className="mono text-xs">
                               {s.fingerprint ? (
                                 <span className="badge badge-subtle">{s.fingerprint.slice(0, 16)}...</span>
-                              ) : s.category !== '*' ? (
+                              ) : (s.category && s.category !== '*') ? (
                                 <span className="badge badge-subtle">{s.category}</span>
                               ) : (
                                 <span className="badge badge-subtle">全类别</span>
@@ -2143,7 +2186,7 @@ export function AlertCenterView({
                   </div>
                 </div>
 
-                {snoozeTarget && (
+                {snoozeTarget ? (
                   <div className="field">
                     <label className="field-label">静默生效范围</label>
                     <div className="space-y-1.5 text-xs">
@@ -2165,7 +2208,7 @@ export function AlertCenterView({
                           checked={snoozeScope === 'node'}
                           onChange={() => setSnoozeScope('node')}
                         />
-                        <span>静默当前服务器的所有告警 (节点: <span className="mono font-semibold">{snoozeTarget.node_name || snoozeTarget.node_id}</span>)</span>
+                        <span>静默当前服务器的所有告警 (节点: <span className="mono font-semibold">{snoozeTarget.node_name || snoozeTarget.nodeName || nodesMap[snoozeTarget.node_id || snoozeTarget.nodeId] || snoozeTarget.node_id || snoozeTarget.nodeId}</span>)</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer p-2.5 rounded border border-[var(--border)] bg-[var(--surface-subtle)]">
                         <input
@@ -2177,6 +2220,40 @@ export function AlertCenterView({
                         />
                         <span>静默该类别所有告警 (类别: <span className="mono font-semibold">{snoozeTarget.category || '全部'}</span>)</span>
                       </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="field">
+                      <label className="field-label">目标节点范围</label>
+                      <select
+                        className="field-input"
+                        value={snoozeNodeFilter}
+                        onChange={(e) => setSnoozeNodeFilter(e.target.value)}
+                      >
+                        <option value="*">🌐 所有节点 (All Fleet)</option>
+                        {displayNodes.map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.name} ({n.id})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">告警类别范围</label>
+                      <select
+                        className="field-input"
+                        value={snoozeCategory}
+                        onChange={(e) => setSnoozeCategory(e.target.value)}
+                      >
+                        <option value="*">🔔 全类别 (All Categories)</option>
+                        <option value="offline">节点离线 (offline)</option>
+                        <option value="system">系统负载 (system)</option>
+                        <option value="synthetic">网络拨测 (synthetic)</option>
+                        <option value="traffic">流量超标 (traffic)</option>
+                        <option value="ipqa">IP 质量变动 (ipqa)</option>
+                        <option value="billing">账单到期 (billing)</option>
+                      </select>
                     </div>
                   </div>
                 )}
