@@ -341,12 +341,12 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
               <span>服务器节点</span>
             </div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-              <span>{report.summary?.onlineNodes || 0}</span>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted, #888)', fontWeight: 'normal' }}>/ {report.summary?.totalNodes || 0} 在线</span>
+              <span>{report.summary?.online_nodes ?? report.summary?.onlineNodes ?? 0}</span>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted, #888)', fontWeight: 'normal' }}>/ {report.summary?.total_nodes ?? report.summary?.totalNodes ?? 0} 在线</span>
             </div>
             <div style={{ fontSize: '11px', marginTop: '4px' }}>
-              {report.summary?.offlineNodes > 0 ? (
-                <span className="text-rose-500 font-bold">⚠️ {report.summary.offlineNodes} 台机器离线超时</span>
+              {(report.summary?.offline_nodes ?? report.summary?.offlineNodes ?? 0) > 0 ? (
+                <span className="text-rose-500 font-bold">⚠️ {report.summary?.offline_nodes ?? report.summary?.offlineNodes} 台机器离线超时</span>
               ) : (
                 <span className="text-emerald-500">所有节点正常上报</span>
               )}
@@ -368,11 +368,11 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
               <span>网络与告警</span>
             </div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-              <span>{report.summary?.networkIssues || 0}</span>
+              <span>{report.summary?.network_issues ?? report.summary?.networkIssues ?? 0}</span>
               <span style={{ fontSize: '13px', color: 'var(--text-muted, #888)', fontWeight: 'normal' }}>链路异常</span>
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted, #888)', marginTop: '4px' }}>
-              当前开放告警: <strong style={{ color: report.summary?.activeAlerts > 0 ? '#f43f5e' : 'inherit' }}>{report.summary?.activeAlerts || 0}</strong> 项
+              当前开放告警: <strong style={{ color: (report.summary?.active_alerts ?? report.summary?.activeAlerts ?? 0) > 0 ? '#f43f5e' : 'inherit' }}>{report.summary?.active_alerts ?? report.summary?.activeAlerts ?? 0}</strong> 项
             </div>
           </div>
 

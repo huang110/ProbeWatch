@@ -336,7 +336,7 @@ export function AlertCenterView({
     setSnoozeTarget(alert)
     setSnoozeDurationPreset(60)
     setSnoozeScope('fingerprint')
-    const initialReason = alert ? `排查故障: ${alert.message || alert.title || alert.type || '未命名告警'}` : '例行维护静默'
+    const initialReason = alert ? `排查故障: ${alert.reason || alert.message || alert.title || alert.type || '未命名告警'}` : '例行维护静默'
     setSnoozeReason(initialReason)
     setShowSnoozeModal(true)
   }
@@ -1501,7 +1501,7 @@ export function AlertCenterView({
                           </td>
                           <td className="font-semibold">{alert.node_name || alert.node_id}</td>
                           <td className="mono">{alert.category || alert.type || '—'}</td>
-                          <td>{alert.message || alert.title}</td>
+                          <td>{alert.reason || alert.message || alert.title || '—'}</td>
                           <td className="mono text-muted">{formatAlertTime(alert.lastSeen || alert.last_seen_at || alert.created_at)}</td>
                           <td>
                             <span className={`badge badge-${alert.status === 'open' ? 'rose' : 'mint'}`}>

@@ -67,7 +67,6 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
   const [hoveredPoint, setHoveredPoint] = useState(null)
 
   const targets = safeArray(rows).filter((r) => r && r.name)
-  if (!targets.length) return null
 
   const targetList = targets.map((t, idx) => ({
     id: t.targetId || t.target_id || t.key || String(idx),
@@ -231,6 +230,18 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
     }
     return fallbackPoints
   }, [isTimeMode, renderedSeries, fallbackPoints])
+
+  // Selected or longest series points for timeline X-axis labels
+  const timelinePoints = useMemo(() => {
+    if (!isTimeMode) return []
+    if (renderedSeries.length > 0) {
+      const longest = [...renderedSeries].sort((a, b) => b.points.length - a.points.length)[0]
+      if (longest && longest.points.length > 0) return longest.points
+    }
+    return allRenderedPoints
+  }, [isTimeMode, renderedSeries, allRenderedPoints])
+
+  if (!targets.length) return null
 
   const handleCanvasMouseMove = (e) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -453,11 +464,11 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
       {/* X 轴刻度指示 */}
       {isTimeMode ? (
         <div className="checks-time-axis nezha-time-axis mono" aria-hidden="true">
-          <span>{formatTimeOfDay(allRenderedPoints[0]?.time)}</span>
-          {allRenderedPoints.length > 2 && (
-            <span>{formatTimeOfDay(allRenderedPoints[Math.floor(allRenderedPoints.length / 2)]?.time)}</span>
+          <span>{formatTimeOfDay(timelinePoints[0]?.time)}</span>
+          {timelinePoints.length > 2 && (
+            <span>{formatTimeOfDay(timelinePoints[Math.floor(timelinePoints.length / 2)]?.time)}</span>
           )}
-          <span>{formatTimeOfDay(allRenderedPoints[allRenderedPoints.length - 1]?.time)}</span>
+          <span>{formatTimeOfDay(timelinePoints[timelinePoints.length - 1]?.time)}</span>
         </div>
       ) : (
         <div className="checks-time-axis nezha-time-axis mono">

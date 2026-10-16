@@ -96,6 +96,16 @@ func eventSig(category, title, source string) string {
 	return hex.EncodeToString(h.Sum(nil))[:24]
 }
 
+func stripTimestampPrefix(line string) string {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "[") {
+		if idx := strings.Index(line, "]"); idx != -1 && idx < 40 {
+			return strings.TrimSpace(line[idx+1:])
+		}
+	}
+	return line
+}
+
 func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []protocol.SystemEvent {
 	var events []protocol.SystemEvent
 
@@ -141,6 +151,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 		if line == "" {
 			continue
 		}
+		cleanLine := stripTimestampPrefix(line)
 
 		// Check for OOM
 		if oomRegex.MatchString(line) {
@@ -152,7 +163,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 				title = fmt.Sprintf("OOM Killer: killed process %s (%s)", matches[3], matches[4])
 			}
 
-			sig := eventSig("oom", title+line, "kernel")
+			sig := eventSig("oom", title+cleanLine, "kernel")
 			if c.isNewEvent(sig, nowSec) {
 				events = append(events, protocol.SystemEvent{
 					ID:         "evt-" + sig[:12],
@@ -176,7 +187,7 @@ func (c *EventCollector) scanKernelEvents(ctx context.Context, nowSec int64) []p
 				title = "Kernel BUG assertion failure"
 			}
 
-			sig := eventSig("kernel", title+line, "kernel")
+			sig := eventSig("kernel", title+cleanLine, "kernel")
 			if c.isNewEvent(sig, nowSec) {
 				events = append(events, protocol.SystemEvent{
 					ID:         "evt-" + sig[:12],

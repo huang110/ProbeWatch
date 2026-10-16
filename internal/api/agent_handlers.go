@@ -64,8 +64,9 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid report")
 		return
 	}
+	isReplay := r.Header.Get("X-Outbox-Replay") == "true"
 	allowedPastSkew := s.agentClockSkew()
-	if r.Header.Get("X-Outbox-Replay") == "true" {
+	if isReplay {
 		allowedPastSkew = maxOutboxAgeForReports(s.agentClockSkew())
 	}
 	if err := validateAgentPayloadTimestampWithPastSkew(request.ReportedAt, now, allowedPastSkew, s.agentClockSkew()); err != nil {
@@ -110,6 +111,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		ReportedAt:      time.Unix(request.ReportedAt, 0).UTC(),
 		ResourcePayload: resourcePayload,
 		Results:         results,
+		IsReplay:        isReplay,
 	}); err != nil {
 		if errors.Is(err, db.ErrReplay) {
 			writeAgentRequestError(w, err)
@@ -118,7 +120,7 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusServiceUnavailable, "report unavailable")
 		return
 	}
-	if request.Resource.IPQA != nil && now.Sub(time.Unix(request.ReportedAt, 0).UTC()) <= 2*time.Minute {
+	if request.Resource.IPQA != nil && !isReplay && now.Sub(time.Unix(request.ReportedAt, 0).UTC()) <= 2*time.Minute {
 		s.handleIPQAReport(r.Context(), node, request.Resource.IPQA, now)
 	}
 	if requestID != "" {
@@ -150,7 +152,8 @@ func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid network result")
 		return
 	}
-	if err := s.validateNetworkTargetBinding(r.Context(), request.TargetID); err != nil {
+	targetKind, err := s.validateNetworkTargetBinding(r.Context(), request.TargetID)
+	if err != nil {
 		writeTargetBindingError(w, err)
 		return
 	}
@@ -159,7 +162,7 @@ func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid network result")
 		return
 	}
-	if err := s.service.Store().PersistAgentResult(r.Context(), node.ID, requestID, now.Add(2*s.agentClockSkew()), now, db.AgentResultInput{Kind: db.TargetKindTCP, TargetID: request.TargetID, CheckedAt: checkedAt(request.Result.CheckedAt, now), Payload: payload}); err != nil {
+	if err := s.service.Store().PersistAgentResult(r.Context(), node.ID, requestID, now.Add(2*s.agentClockSkew()), now, db.AgentResultInput{Kind: targetKind, TargetID: request.TargetID, CheckedAt: checkedAt(request.Result.CheckedAt, now), Payload: payload}); err != nil {
 		if errors.Is(err, db.ErrReplay) {
 			writeAgentRequestError(w, err)
 			return
@@ -429,25 +432,25 @@ func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, 
 }
 
 
-func (s *Server) validateNetworkTargetBinding(ctx context.Context, id string) error {
+func (s *Server) validateNetworkTargetBinding(ctx context.Context, id string) (db.TargetKind, error) {
 	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} {
 		if target, err := s.service.Store().GetTarget(ctx, kind, id); err == nil {
 			if !target.Enabled {
-				return db.ErrTargetDisabled
+				return "", db.ErrTargetDisabled
 			}
-			return nil
+			return kind, nil
 		} else if !errors.Is(err, db.ErrTargetNotFound) && !errors.Is(err, db.ErrTargetKindMismatch) {
-			return err
+			return "", err
 		}
 	}
 	for _, kind := range []db.TargetKind{db.TargetKindMTR, db.TargetKindMediaHTTP} {
 		if _, err := s.service.Store().GetTarget(ctx, kind, id); err == nil {
-			return db.ErrTargetKindMismatch
+			return "", db.ErrTargetKindMismatch
 		} else if !errors.Is(err, db.ErrTargetNotFound) && !errors.Is(err, db.ErrTargetKindMismatch) {
-			return err
+			return "", err
 		}
 	}
-	return db.ErrTargetNotFound
+	return "", db.ErrTargetNotFound
 }
 
 func writeTargetBindingError(w http.ResponseWriter, err error) {

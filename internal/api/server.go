@@ -79,7 +79,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 	if err != nil || len(trustedNets) == 0 {
 		trustedNets, _ = config.ParseTrustedProxyCIDRs(nil)
 	}
-	return &Server{
+	srv := &Server{
 		cfg:                 cfg,
 		service:             service,
 		aiService:           aiSvc,
@@ -104,6 +104,8 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 			},
 		},
 	}
+	srv.seedEnvNotificationChannels(context.Background())
+	return srv
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

@@ -205,6 +205,7 @@ type AgentReportInput struct {
 	ReportedAt      time.Time
 	ResourcePayload []byte
 	Results         []AgentResultInput
+	IsReplay        bool
 }
 
 type AdminUser struct {
@@ -1807,7 +1808,7 @@ func (s *Store) PersistAgentReport(ctx context.Context, input AgentReportInput) 
 		hasExisting = true
 	}
 
-	isHistorical := input.Now.Sub(input.ReportedAt) > 2*time.Minute
+	isHistorical := input.IsReplay || input.Now.Sub(input.ReportedAt) > 2*time.Minute
 	if hasExisting && unixNano(input.ReportedAt) <= existingLatestNano {
 		isHistorical = true
 	}

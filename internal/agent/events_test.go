@@ -27,6 +27,23 @@ func TestEventSignature(t *testing.T) {
 	}
 }
 
+func TestStripTimestampPrefixDeduplication(t *testing.T) {
+	line1 := "[Thu Oct 15 21:00:00 2026] Out of memory: Killed process 1234 (mysqld)"
+	line2 := "[Thu Oct 15 21:00:01 2026] Out of memory: Killed process 1234 (mysqld)"
+	clean1 := stripTimestampPrefix(line1)
+	clean2 := stripTimestampPrefix(line2)
+
+	if clean1 != clean2 {
+		t.Fatalf("cleaned lines should be identical: %q vs %q", clean1, clean2)
+	}
+
+	sig1 := eventSig("oom", "Kernel OOM Killer invoked"+clean1, "kernel")
+	sig2 := eventSig("oom", "Kernel OOM Killer invoked"+clean2, "kernel")
+	if sig1 != sig2 {
+		t.Fatalf("signatures with jittered timestamps must be identical: %s vs %s", sig1, sig2)
+	}
+}
+
 func TestEventCollectorDeduplication(t *testing.T) {
 	collector := &EventCollector{
 		seenSignatures: make(map[string]int64),
