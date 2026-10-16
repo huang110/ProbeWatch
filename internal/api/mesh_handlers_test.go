@@ -300,6 +300,8 @@ func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
 		t.Fatalf("expected 400 on empty name, got %d", recBad.Code)
 	}
 
+	csrf = task4CSRF(t, handler, session)
+
 	// 3. Update channel and verify CreatedAt is preserved
 	updateBody := `{"name":"Updated Channel","type":"telegram","config":"{\"bot_token\":\"******\",\"chat_id\":\"98765\"}","enabled":true,"events":"[\"system\"]"}`
 	recUp, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, updateBody)
