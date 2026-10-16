@@ -234,7 +234,7 @@ func TestPatchNode(t *testing.T) {
 
 	// 2. Update tags with array
 	patchBody2 := `{"tags":["jp", "tokyo"]}`
-	rec2, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPatch, session, csrf, "/api/nodes/"+node.ID, patchBody2)
+	rec2, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPatch, session, csrf, "/api/nodes/"+node.ID, patchBody2)
 
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("expected 200 on PATCH with array tags, got %d: %s", rec2.Code, rec2.Body.String())
@@ -274,7 +274,7 @@ func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Create a channel
-	createBody := `{"name":"Telegram Alert","type":"telegram","config":"{\"bot_token\":\"12345:abc\",\"chat_id\":\"98765\"}","enabled":true,"events":["offline"]}`
+	createBody := `{"name":"Telegram Alert","type":"telegram","config":"{\"bot_token\":\"12345:abc\",\"chat_id\":\"98765\"}","enabled":true,"events":"[\"offline\"]"}`
 	recCreate, csrf := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/alerts/channels", createBody)
 	if recCreate.Code != http.StatusCreated {
 		t.Fatalf("expected 201 on create channel, got %d: %s", recCreate.Code, recCreate.Body.String())
@@ -301,7 +301,7 @@ func TestNotificationChannelValidationAndCreatedAt(t *testing.T) {
 	}
 
 	// 3. Update channel and verify CreatedAt is preserved
-	updateBody := `{"name":"Updated Channel","type":"telegram","config":"{\"bot_token\":\"******\",\"chat_id\":\"98765\"}","enabled":true,"events":["system"]}`
+	updateBody := `{"name":"Updated Channel","type":"telegram","config":"{\"bot_token\":\"******\",\"chat_id\":\"98765\"}","enabled":true,"events":"[\"system\"]"}`
 	recUp, _ := task4AdminWriteWithCSRF(t, handler, http.MethodPut, session, csrf, "/api/alerts/channels/"+created.ID, updateBody)
 	if recUp.Code != http.StatusOK {
 		t.Fatalf("expected 200 on update channel, got %d: %s", recUp.Code, recUp.Body.String())
