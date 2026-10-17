@@ -126,6 +126,9 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 	if requestID != "" {
 		s.agentReplayCache.Add(node.ID, requestID, now.Add(2*s.agentClockSkew()))
 	}
+	if checkAndClearNodeIPQASync(node.ID, node.UUID) {
+		w.Header().Set("X-Probe-Sync-IPQA", "true")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

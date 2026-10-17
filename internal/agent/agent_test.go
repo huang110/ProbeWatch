@@ -618,3 +618,46 @@ func TestReportRunsSyntheticTask(t *testing.T) {
 		t.Fatalf("unexpected synthetic result: %#v", res)
 	}
 }
+
+type fakeInvalidatingIPQA struct {
+	invalidated bool
+	getCalls    int
+}
+
+func (f *fakeInvalidatingIPQA) Get() *protocol.IPQAInfo {
+	f.getCalls++
+	return &protocol.IPQAInfo{Enabled: true}
+}
+
+func (f *fakeInvalidatingIPQA) Invalidate() {
+	f.invalidated = true
+}
+
+func TestRunner_SyncIPQAHeaderTriggersInvalidateAndGet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Probe-Sync-IPQA", "true")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	runner, err := New(config.Config{
+		AgentEndpoint:  server.URL,
+		AgentNodeUUID:  "6f1d2c66-1a10-4a3e-9a55-0d3ea1a2b7f1",
+		AgentNodeToken: "node-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeInvalidatingIPQA{}
+	runner.ipqa = fake
+
+	if err := runner.sendReport(context.Background(), "req-ipqa-sync", []byte(`{}`)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fake.invalidated {
+		t.Fatal("expected fake IPQA to be invalidated")
+	}
+	if fake.getCalls != 1 {
+		t.Fatalf("expected 1 Get call on fake IPQA, got %d", fake.getCalls)
+	}
+}

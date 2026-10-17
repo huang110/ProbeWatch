@@ -284,8 +284,11 @@ func (r *Runner) refresh(ctx context.Context) error {
 		}
 	}
 	if response.SyncIPQA {
-		if inv, ok := r.ipqa.(interface{ Invalidate() }); ok {
-			inv.Invalidate()
+		if r.ipqa != nil {
+			if inv, ok := r.ipqa.(interface{ Invalidate() }); ok {
+				inv.Invalidate()
+				_ = r.ipqa.Get()
+			}
 		}
 	}
 	updated := append([]protocol.CheckTask(nil), response.Tasks...)
@@ -552,6 +555,14 @@ func (r *Runner) doJSONWithRequestAndReplay(ctx context.Context, method, path, r
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("control plane returned HTTP %d", response.StatusCode)
 	}
+	if response.Header.Get("X-Probe-Sync-IPQA") == "true" {
+		if r.ipqa != nil {
+			if inv, ok := r.ipqa.(interface{ Invalidate() }); ok {
+				inv.Invalidate()
+				_ = r.ipqa.Get()
+			}
+		}
+	}
 	return nil
 }
 
@@ -587,6 +598,14 @@ func (r *Runner) doJSON(ctx context.Context, method, path string, body any, dest
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("control plane returned HTTP %d", response.StatusCode)
+	}
+	if response.Header.Get("X-Probe-Sync-IPQA") == "true" {
+		if r.ipqa != nil {
+			if inv, ok := r.ipqa.(interface{ Invalidate() }); ok {
+				inv.Invalidate()
+				_ = r.ipqa.Get()
+			}
+		}
 	}
 	if destination != nil {
 		limited := io.LimitReader(response.Body, maxConfigResponseBytes+1)

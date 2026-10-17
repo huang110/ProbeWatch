@@ -522,3 +522,83 @@ func TestIPQANotificationCooldownUnifiedKey(t *testing.T) {
 		}
 	})
 }
+
+func TestNodeIPQASync_HeaderPropagation(t *testing.T) {
+	service, store := newTask4Auth(t)
+	srv := NewServer(task4Config(), service)
+	ctx := context.Background()
+
+	// 1. Register test node
+	regToken, err := store.CreateRegistrationToken(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := task4Register(t, srv.Handler(), protocol.RegisterRequest{
+		NodeUUID:          "a10ae432-2c08-4eef-9133-18289643549a",
+		Name:              "Sync Propagation Node",
+		RegistrationToken: regToken.Token,
+	})
+	node := mustNode(t, store, registered.NodeUUID)
+
+	session, csrfToken := task4AdminSession(t, service, store)
+
+	// 2. Initial report from node before sync -> should NOT have X-Probe-Sync-IPQA
+	report1 := protocol.ReportRequest{
+		NodeUUID:   node.UUID,
+		ReportedAt: time.Now().Unix(),
+		Resource: protocol.ResourceSnapshot{
+			Hostname: "sync-node",
+		},
+	}
+	res1 := task4AgentPost(t, srv.Handler(), "/api/agent/v1/report", registered.NodeToken, node.UUID, "rep-init", report1)
+	if res1.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", res1.Code)
+	}
+	if res1.Header().Get("X-Probe-Sync-IPQA") != "" {
+		t.Fatalf("expected empty X-Probe-Sync-IPQA before sync, got %q", res1.Header().Get("X-Probe-Sync-IPQA"))
+	}
+
+	// 3. Admin requests manual sync
+	reqSync := httptest.NewRequest(http.MethodPost, "/api/nodes/"+node.UUID+"/ipqa/sync", bytes.NewBufferString(`{}`))
+	reqSync.AddCookie(task4SessionCookie(session))
+	reqSync.Header.Set("X-CSRF-Token", csrfToken)
+	reqSync.Header.Set("Content-Type", "application/json")
+	reqSync.Header.Set("Origin", "http://127.0.0.1:8080")
+	recSync := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recSync, reqSync)
+	if recSync.Code != http.StatusOK {
+		t.Fatalf("expected 200 for sync, got %d (body: %s)", recSync.Code, recSync.Body.String())
+	}
+
+	// 4. Next report from node -> MUST have X-Probe-Sync-IPQA = true
+	report2 := protocol.ReportRequest{
+		NodeUUID:   node.UUID,
+		ReportedAt: time.Now().Unix(),
+		Resource: protocol.ResourceSnapshot{
+			Hostname: "sync-node",
+		},
+	}
+	res2 := task4AgentPost(t, srv.Handler(), "/api/agent/v1/report", registered.NodeToken, node.UUID, "rep-sync", report2)
+	if res2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", res2.Code)
+	}
+	if res2.Header().Get("X-Probe-Sync-IPQA") != "true" {
+		t.Fatalf("expected X-Probe-Sync-IPQA=true on first report after sync, got %q", res2.Header().Get("X-Probe-Sync-IPQA"))
+	}
+
+	// 5. Subsequent report -> MUST be cleared
+	report3 := protocol.ReportRequest{
+		NodeUUID:   node.UUID,
+		ReportedAt: time.Now().Unix(),
+		Resource: protocol.ResourceSnapshot{
+			Hostname: "sync-node",
+		},
+	}
+	res3 := task4AgentPost(t, srv.Handler(), "/api/agent/v1/report", registered.NodeToken, node.UUID, "rep-after", report3)
+	if res3.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", res3.Code)
+	}
+	if res3.Header().Get("X-Probe-Sync-IPQA") != "" {
+		t.Fatalf("expected empty X-Probe-Sync-IPQA on subsequent report, got %q", res3.Header().Get("X-Probe-Sync-IPQA"))
+	}
+}

@@ -75,6 +75,8 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
       kind: (t.kind || 'TCP').toUpperCase(),
       latency: t.latency,
       color: TARGET_COLORS[idx % TARGET_COLORS.length],
+      raw: t,
+      originalIndex: idx,
     }))
   }, [targets])
 
@@ -191,17 +193,28 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
     })
   }, [displayedSeries, isTimeMode, maxLat, baselineY, plotHeight])
 
+  const fallbackTargets = useMemo(() => {
+    if (effectiveTargetId === 'all') return targetList
+    const filtered = targetList.filter((t) => t.id === effectiveTargetId)
+    return filtered.length > 0 ? filtered : targetList
+  }, [targetList, effectiveTargetId])
+
+  const fallbackStrokeColor = useMemo(() => {
+    if (effectiveTargetId !== 'all') {
+      const match = targetList.find((t) => t.id === effectiveTargetId)
+      if (match?.color) return match.color
+    }
+    return '#6366f1'
+  }, [effectiveTargetId, targetList])
+
   // Fallback points when no time series history
   const fallbackPoints = useMemo(() => {
     if (isTimeMode) return []
-    const filteredTargets = (effectiveTargetId === 'all')
-      ? targets
-      : targets.filter((r) => (r.targetId || r.target_id || r.key || '') === effectiveTargetId)
-    const activeTargets = filteredTargets.length > 0 ? filteredTargets : targets
-    const count = activeTargets.length
+    const count = fallbackTargets.length
     const slot = 100 / Math.max(count, 1)
 
-    return activeTargets.map((r, i) => {
+    return fallbackTargets.map((t, i) => {
+      const r = t.raw || {}
       const x = i * slot + slot / 2
       const hasLat = r.latency !== null && r.latency >= 0 && Number.isFinite(r.latency)
       const lat = hasLat ? r.latency : 0
@@ -212,16 +225,16 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         hasLat,
         latency: r.latency,
         target: r,
-        targetName: r.name,
-        targetKind: (r.kind || 'TCP').toUpperCase(),
-        targetColor: TARGET_COLORS[i % TARGET_COLORS.length],
+        targetName: t.name,
+        targetKind: t.kind,
+        targetColor: t.color,
         isOk: r.lossRate === 0 || r.lossRate === null,
         time: r.lastChecked,
         slot,
         index: i,
       }
     })
-  }, [isTimeMode, targets, effectiveTargetId, maxLat, baselineY, plotHeight])
+  }, [isTimeMode, fallbackTargets, maxLat, baselineY, plotHeight])
 
   const fallbackSpline = useMemo(() => {
     if (isTimeMode || !fallbackPoints.length) return { line: '', area: '' }
@@ -373,8 +386,8 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         >
           <defs>
             <linearGradient id="nezha-checks-lat-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
+              <stop offset="0%" stopColor={fallbackStrokeColor} stopOpacity="0.12" />
+              <stop offset="100%" stopColor={fallbackStrokeColor} stopOpacity="0.0" />
             </linearGradient>
             {renderedSeries.map((s, idx) => (
               <linearGradient key={`grad-${s.target.id}`} id={`nezha-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
@@ -425,7 +438,7 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
                   className="nezha-line-stroke nezha-line-tx"
                   d={fallbackSpline.line}
                   fill="none"
-                  stroke="#6366f1"
+                  stroke={fallbackStrokeColor}
                   strokeWidth="1.0"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -487,12 +500,9 @@ export function ChecksLatencyLines({ rows, networkHistory = [] }) {
         </div>
       ) : (
         <div className="checks-time-axis nezha-time-axis mono">
-          {(effectiveTargetId === 'all'
-            ? targets
-            : targets.filter((r) => (r.targetId || r.target_id || r.key || '') === effectiveTargetId)
-          ).map((t, idx, arr) => (
+          {fallbackTargets.map((t, idx, arr) => (
             <span
-              key={`x-${idx}`}
+              key={`x-${t.id || idx}`}
               className={`axis-target-name ${active?.targetName === t.name ? 'axis-active' : ''}`}
               style={{ width: `${100 / Math.max(arr.length, 1)}%`, textAlign: 'center' }}
             >

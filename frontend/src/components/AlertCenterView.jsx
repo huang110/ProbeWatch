@@ -1407,7 +1407,14 @@ export function AlertCenterView({
                               {rule.node_filter === '*' ? (
                                 <span className="badge badge-subtle">所有探针节点</span>
                               ) : (
-                                <span className="mono">{rule.node_filter}</span>
+                                <span className="mono">
+                                  {rule.node_filter
+                                    ? rule.node_filter
+                                        .split(',')
+                                        .map((id) => nodesMap[id.trim()] || id.trim())
+                                        .join(', ')
+                                    : '—'}
+                                </span>
                               )}
                             </td>
                             <td>
@@ -1614,7 +1621,7 @@ export function AlertCenterView({
                       <tbody>
                         {flappingAlerts.map((f) => (
                           <tr key={f.key}>
-                            <td className="font-semibold mono">{f.node_id}</td>
+                            <td className="font-semibold mono">{nodesMap[f.node_id] || f.node_id}</td>
                             <td className="mono text-muted">{f.fingerprint}</td>
                             <td>
                               <span className="badge badge-rose font-bold">{f.transitions} 次切换</span>
