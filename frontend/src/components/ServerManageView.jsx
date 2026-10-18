@@ -39,7 +39,7 @@ import {
 } from '../lib/billing.js'
 import { formatBytes, numeric, safeText, isVersionOutdated } from '../lib/format.js'
 import { fetchCsrfToken } from '../lib/api.js'
-import { escapeShell } from '../lib/shellEscape.js'
+import { quoteShell } from '../lib/shellEscape.js'
 
 export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, latestAgentVersion = '', onSelectNode }) {
   const [showEnroll, setShowEnroll] = useState(false)
@@ -311,14 +311,15 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
     if (!installEnrollment) return ''
     const { token, endpoint, uuid } = installEnrollment
     const remote = remoteManagement ? ' --enable-remote-control=true' : ''
-    const base = `https://${window.location.host}/install.sh`
-    const safeEndpoint = escapeShell(endpoint)
-    const safeToken = escapeShell(token)
-    const safeUuid = escapeShell(uuid)
-    if (installTab === 'windows') return `curl.exe -fsSL ${base} -o "$env:TEMP\\probewatch-install.sh"; bash "$env:TEMP\\probewatch-install.sh" --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
-    if (installTab === 'macos') return `curl -fsSL ${base} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    const base = `${window.location.origin}/install.sh`
+    const safeBase = quoteShell(base)
+    const safeEndpoint = quoteShell(endpoint)
+    const safeToken = quoteShell(token)
+    const safeUuid = quoteShell(uuid)
+    if (installTab === 'windows') return `curl.exe -fsSL ${safeBase} -o "$env:TEMP\\probewatch-install.sh"; bash "$env:TEMP\\probewatch-install.sh" --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    if (installTab === 'macos') return `curl -fsSL ${safeBase} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
     if (installTab === 'docker') return ''
-    return `curl -fsSL ${base} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    return `curl -fsSL ${safeBase} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
   }, [installEnrollment, installTab, remoteManagement])
 
   const copyInstallCommand = async () => {

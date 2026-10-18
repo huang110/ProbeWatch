@@ -139,7 +139,12 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
         setMcpConfig((prev) => ({
           ...prev,
           token: res.token,
-          endpoint: prev.endpoint.replace(/token=[^&]*/, `token=${res.token}`),
+          claude_config: prev.claude_config
+            ? { ...prev.claude_config, mcpServers: { ...prev.claude_config.mcpServers, probewatch: { ...prev.claude_config.mcpServers?.probewatch, headers: { Authorization: `Bearer ${res.token}` } } } }
+            : prev.claude_config,
+          cursor_config: prev.cursor_config
+            ? { ...prev.cursor_config, mcpServers: { ...prev.cursor_config.mcpServers, probewatch: { ...prev.cursor_config.mcpServers?.probewatch, headers: { Authorization: `Bearer ${res.token}` } } } }
+            : prev.cursor_config,
         }))
       }
     } catch (err) {

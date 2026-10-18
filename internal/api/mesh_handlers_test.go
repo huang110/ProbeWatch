@@ -118,6 +118,15 @@ func TestMeshMatrixHandler(t *testing.T) {
 	if recPublic.Code != http.StatusOK {
 		t.Fatalf("expected 200 for public mesh matrix, got %d: %s", recPublic.Code, recPublic.Body.String())
 	}
+	var publicResp MeshMatrixResponse
+	if err := json.Unmarshal(recPublic.Body.Bytes(), &publicResp); err != nil {
+		t.Fatalf("decode public mesh response: %v", err)
+	}
+	for _, node := range publicResp.Nodes {
+		if node.UUID != "" || node.IP != "" || node.Hostname != "" || len(node.Tags) != 0 {
+			t.Fatalf("public mesh response leaked node identity data: %+v", node)
+		}
+	}
 
 	// Test authenticated endpoint
 	reqAuth := httptest.NewRequest(http.MethodGet, "/api/mesh-matrix", nil)

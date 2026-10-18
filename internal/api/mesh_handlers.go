@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"net/http"
@@ -19,9 +20,9 @@ import (
 // MeshNodeInfo represents one node in the mesh matrix.
 type MeshNodeInfo struct {
 	ID             string     `json:"id"`
-	UUID           string     `json:"uuid"`
+	UUID           string     `json:"uuid,omitempty"`
 	Name           string     `json:"name"`
-	Tags           []string   `json:"tags"`
+	Tags           []string   `json:"tags,omitempty"`
 	Status         string     `json:"status"`
 	IP             string     `json:"ip,omitempty"`
 	Hostname       string     `json:"hostname,omitempty"`
@@ -30,14 +31,14 @@ type MeshNodeInfo struct {
 
 // MeshCell represents the pairwise latency and reachability from FromNode to ToNode.
 type MeshCell struct {
-	FromNodeID   string  `json:"from_node_id"`
-	ToNodeID     string  `json:"to_node_id"`
-	LatencyMS    float64 `json:"latency_ms"`
-	Status       string  `json:"status"` // self, excellent, good, fair, high, loss, unmeasured
-	LossRate     float64 `json:"loss_rate"`
-	Direct       bool    `json:"direct"`
-	CheckedAt    int64   `json:"checked_at,omitempty"`
-	TargetID     string  `json:"target_id,omitempty"`
+	FromNodeID string  `json:"from_node_id"`
+	ToNodeID   string  `json:"to_node_id"`
+	LatencyMS  float64 `json:"latency_ms"`
+	Status     string  `json:"status"` // self, excellent, good, fair, high, loss, unmeasured
+	LossRate   float64 `json:"loss_rate"`
+	Direct     bool    `json:"direct"`
+	CheckedAt  int64   `json:"checked_at,omitempty"`
+	TargetID   string  `json:"target_id,omitempty"`
 }
 
 // RelayRoute recommends an alternate 2-hop route when direct routing is suboptimal.
@@ -80,6 +81,11 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	isPublic := strings.HasPrefix(r.URL.Path, "/api/public/")
+	if isPublic && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	ctx := r.Context()
 	nodes, err := s.service.Store().ListNodes(ctx)
 	if err != nil {
@@ -110,6 +116,13 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 			Tags:   parseNodeTags(n.Tags),
 			Status: "offline",
 		}
+		if isPublic {
+			// Public dashboards need topology and health only. Do not publish
+			// node UUIDs, operator tags, hostnames, or source IP addresses.
+			info.UUID = ""
+			info.Tags = nil
+			info.Name = sanitizeNodeName(info.Name)
+		}
 		reportedAt, payload, err := s.service.Store().GetResourceLatest(ctx, n.ID)
 		if err == nil {
 			info.LastReportedAt = &reportedAt
@@ -119,7 +132,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 				info.Status = "attention"
 			}
 			var snapshot protocol.ResourceSnapshot
-			if json.Unmarshal(payload, &snapshot) == nil {
+			if json.Unmarshal(payload, &snapshot) == nil && !isPublic {
 				if isPublicMeshIP(snapshot.IPv4) {
 					info.IP = snapshot.IPv4
 				} else if snapshot.IPv6 != "" {
@@ -326,13 +339,39 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		RelayOptimizationsCount: len(relays),
 	}
 
-	writeJSON(w, http.StatusOK, MeshMatrixResponse{
+	response := MeshMatrixResponse{
 		Nodes:       meshNodes,
 		Matrix:      matrix,
 		Relays:      relays,
 		Stats:       stats,
 		GeneratedAt: time.Now().UTC().Unix(),
-	})
+	}
+	if isPublic {
+		// Replace internal identifiers in the guest response with opaque,
+		// request-local labels while keeping the matrix usable by the UI.
+		publicIDs := make(map[string]string, len(response.Nodes))
+		for i := range response.Nodes {
+			publicIDs[response.Nodes[i].ID] = fmt.Sprintf("node-%d", i+1)
+			response.Nodes[i].ID = fmt.Sprintf("node-%d", i+1)
+			response.Nodes[i].UUID = ""
+			response.Nodes[i].Tags = nil
+			response.Nodes[i].IP = ""
+			response.Nodes[i].Hostname = ""
+		}
+		for i := range response.Matrix {
+			for j := range response.Matrix[i] {
+				response.Matrix[i][j].FromNodeID = publicIDs[response.Matrix[i][j].FromNodeID]
+				response.Matrix[i][j].ToNodeID = publicIDs[response.Matrix[i][j].ToNodeID]
+				response.Matrix[i][j].TargetID = ""
+			}
+		}
+		for i := range response.Relays {
+			response.Relays[i].FromNodeID = publicIDs[response.Relays[i].FromNodeID]
+			response.Relays[i].ToNodeID = publicIDs[response.Relays[i].ToNodeID]
+			response.Relays[i].RelayNodeID = publicIDs[response.Relays[i].RelayNodeID]
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func isPublicMeshIP(raw string) bool {

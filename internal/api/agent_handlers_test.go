@@ -555,6 +555,13 @@ func newTask4Auth(t *testing.T) (*auth.Service, *db.Store) {
 	provider := newServerFakeGitHub(t, "alice", nil)
 	t.Cleanup(provider.Close)
 	service, store := newServerAuth(t, provider, []string{"alice"}, "")
+	// Restore tests can atomically swap the service's store. Close whichever
+	// store is active at test cleanup so Windows does not retain SQLite locks.
+	t.Cleanup(func() {
+		if active := service.Store(); active != nil {
+			_ = active.Close()
+		}
+	})
 	return service, store
 }
 

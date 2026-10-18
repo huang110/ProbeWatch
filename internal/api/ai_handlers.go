@@ -57,7 +57,9 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "failed to resolve node scope")
@@ -77,7 +79,9 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if fullAccess { allowedIDs = nil }
+	if fullAccess {
+		allowedIDs = nil
+	}
 	resp, err := s.aiService.Chat(r.Context(), strings.TrimSpace(req.Prompt), allowedIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to process chat: %v", err)})
@@ -95,43 +99,43 @@ func (s *Server) aiSettingsRoute(w http.ResponseWriter, r *http.Request) {
 
 	mw := NewMiddleware(s.service, s.cfg)
 	handler := func(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		settings, err := s.aiService.GetAISettings(r.Context())
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		// Mask API Key
-		if settings.HasAPIKey {
-			settings.APIKey = "••••••••••••••••"
-		}
-		writeJSON(w, http.StatusOK, settings)
-
-	case http.MethodPost:
-		NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var settings ai.AISettings
-			body, err := io.ReadAll(io.LimitReader(r.Body, 16*1024))
+		switch r.Method {
+		case http.MethodGet:
+			settings, err := s.aiService.GetAISettings(r.Context())
 			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body failed"})
-				return
-			}
-			if err := json.Unmarshal(body, &settings); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-				return
-			}
-
-			if err := s.aiService.SaveAISettings(r.Context(), settings); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
+			// Mask API Key
+			if settings.HasAPIKey {
+				settings.APIKey = "••••••••••••••••"
+			}
+			writeJSON(w, http.StatusOK, settings)
 
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})).ServeHTTP(w, r)
+		case http.MethodPost:
+			NewMiddleware(s.service, s.cfg).RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var settings ai.AISettings
+				body, err := io.ReadAll(io.LimitReader(r.Body, 16*1024))
+				if err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body failed"})
+					return
+				}
+				if err := json.Unmarshal(body, &settings); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+					return
+				}
 
-	default:
-		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
+				if err := s.aiService.SaveAISettings(r.Context(), settings); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+
+				writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			})).ServeHTTP(w, r)
+
+		default:
+			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 	}
 	mw.RequireRole(db.RoleAdmin)(http.HandlerFunc(handler)).ServeHTTP(w, r)
 }
@@ -146,7 +150,9 @@ func (s *Server) aiMCPTokenRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if !user.IsAdmin() && user.AllowedNodes != "*" {
 		writeJSONError(w, http.StatusForbidden, "administrator access required")
 		return
@@ -171,7 +177,9 @@ func (s *Server) mcpConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if !user.IsAdmin() && user.AllowedNodes != "*" {
 		writeJSONError(w, http.StatusForbidden, "administrator access required")
 		return
@@ -193,12 +201,14 @@ func (s *Server) mcpConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	mcpEndpoint := fmt.Sprintf("%s/mcp?token=%s", baseURL, token)
+	mcpEndpoint := fmt.Sprintf("%s/mcp", baseURL)
+	mcpHeaders := map[string]string{"Authorization": "Bearer " + token}
 
 	claudeConfig := map[string]any{
 		"mcpServers": map[string]any{
 			"probewatch": map[string]any{
-				"url": mcpEndpoint,
+				"url":     mcpEndpoint,
+				"headers": mcpHeaders,
 			},
 		},
 	}
@@ -206,8 +216,9 @@ func (s *Server) mcpConfig(w http.ResponseWriter, r *http.Request) {
 	cursorConfig := map[string]any{
 		"mcpServers": map[string]any{
 			"probewatch": map[string]any{
-				"type": "sse",
-				"url":  mcpEndpoint,
+				"type":    "sse",
+				"url":     mcpEndpoint,
+				"headers": mcpHeaders,
 			},
 		},
 	}

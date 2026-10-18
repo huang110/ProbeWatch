@@ -41,6 +41,7 @@ type Server struct {
 	agentIPLimiter      *rateLimiter
 	registrationLimiter *rateLimiter
 	publicLimiter       *rateLimiter
+	mcpLimiter          *rateLimiter
 	loginLimiter        *rateLimiter
 	totpLimiter         *rateLimiter
 	ipqaLimiter         *rateLimiter
@@ -89,6 +90,7 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		agentIPLimiter:      newRateLimiter(240, time.Minute, 10000),
 		registrationLimiter: newRateLimiter(10, time.Minute, 10000),
 		publicLimiter:       newRateLimiter(60, time.Minute, 10000),
+		mcpLimiter:          newRateLimiter(60, time.Minute, 10000),
 		loginLimiter:        newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:         newRateLimiter(6, time.Minute, 10000),
 		ipqaLimiter:         newRateLimiter(60, time.Minute, 5000),

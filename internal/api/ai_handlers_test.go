@@ -143,6 +143,9 @@ func TestMCPConfigAndProtocolEndpoint(t *testing.T) {
 	if mcpCfg.Token == "" || !strings.Contains(mcpCfg.Endpoint, "/mcp") {
 		t.Fatalf("invalid mcp config: %+v", mcpCfg)
 	}
+	if strings.Contains(mcpCfg.Endpoint, "token=") {
+		t.Fatalf("MCP endpoint must not embed the access token: %s", mcpCfg.Endpoint)
+	}
 
 	// 2. Test MCP Protocol Unauthenticated
 	unauthReq := httptest.NewRequest(http.MethodGet, "/mcp", nil)
@@ -152,18 +155,20 @@ func TestMCPConfigAndProtocolEndpoint(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized for /mcp without token, got %d", unauthW.Code)
 	}
 
-	// 3. Test MCP Protocol Authenticated GET with Token
-	authGetReq := httptest.NewRequest(http.MethodGet, "/mcp?token="+mcpCfg.Token, nil)
+	// 3. Test MCP Protocol Authenticated GET with Bearer token.
+	authGetReq := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	authGetReq.Header.Set("Authorization", "Bearer "+mcpCfg.Token)
 	authGetW := httptest.NewRecorder()
 	handler.ServeHTTP(authGetW, authGetReq)
 	if authGetW.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for /mcp?token, got %d: %s", authGetW.Code, authGetW.Body.String())
+		t.Fatalf("expected 200 OK for /mcp with bearer token, got %d: %s", authGetW.Code, authGetW.Body.String())
 	}
 
 	// 4. Test MCP Protocol JSON-RPC POST (initialize)
 	initJSON := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
-	initReq := httptest.NewRequest(http.MethodPost, "/mcp?token="+mcpCfg.Token, bytes.NewReader(initJSON))
+	initReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(initJSON))
 	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Authorization", "Bearer "+mcpCfg.Token)
 	initW := httptest.NewRecorder()
 	handler.ServeHTTP(initW, initReq)
 
@@ -177,5 +182,13 @@ func TestMCPConfigAndProtocolEndpoint(t *testing.T) {
 	}
 	if jsonRpcResp.Error != nil {
 		t.Fatalf("unexpected json-rpc error: %+v", jsonRpcResp.Error)
+	}
+
+	// Query-string credentials are rejected to avoid leaking tokens through logs.
+	legacyReq := httptest.NewRequest(http.MethodGet, "/mcp?token="+mcpCfg.Token, nil)
+	legacyW := httptest.NewRecorder()
+	handler.ServeHTTP(legacyW, legacyReq)
+	if legacyW.Code != http.StatusUnauthorized {
+		t.Fatalf("expected query-string MCP token to be rejected, got %d", legacyW.Code)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,36 @@ func TestDownloadAndApplyUpdateValidations(t *testing.T) {
 	}, dataDir)
 	if errMismatch == nil || !errors.Is(errMismatch, ErrChecksumMismatch) {
 		t.Fatalf("expected ErrChecksumMismatch, got %v", errMismatch)
+	}
+}
+
+func TestDownloadAndApplyUpdateRequiresChecksumAndTrustedOrigin(t *testing.T) {
+	tmpDir := t.TempDir()
+	dataDir := filepath.Join(tmpDir, "data")
+	_ = os.MkdirAll(dataDir, 0755)
+	payload := make([]byte, 1024*1024+10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	err := DownloadAndApplyUpdate(context.Background(), server.Client(), server.URL, "", &UpdateCheckResult{
+		UpdateAvailable:    true,
+		DownloadURL:        server.URL,
+		LatestAgentVersion: "9.9.9",
+	}, dataDir)
+	if !errors.Is(err, ErrChecksumRequired) {
+		t.Fatalf("expected missing checksum rejection, got %v", err)
+	}
+
+	err = DownloadAndApplyUpdate(context.Background(), server.Client(), server.URL, "", &UpdateCheckResult{
+		UpdateAvailable:    true,
+		DownloadURL:        "https://attacker.example/agent",
+		LatestAgentVersion: "9.9.9",
+		ChecksumSHA256:     strings.Repeat("0", 64),
+	}, dataDir)
+	if !errors.Is(err, ErrInvalidDownloadURL) {
+		t.Fatalf("expected untrusted URL rejection, got %v", err)
 	}
 }
 

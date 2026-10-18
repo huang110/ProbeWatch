@@ -81,6 +81,10 @@ func (s *Server) certificatesHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	ctx := r.Context()
 
 	// Load target names and hosts
@@ -193,6 +197,10 @@ func (s *Server) certificatesHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dnsMatrixHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 	ctx := r.Context()
@@ -886,4 +894,3 @@ func (s *Server) syntheticTestHandler(w http.ResponseWriter, r *http.Request) {
 	result := synMonitor.Run(r.Context(), task)
 	writeJSON(w, http.StatusOK, result)
 }
-

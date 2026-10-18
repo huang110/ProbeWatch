@@ -1,10 +1,14 @@
 /**
- * Shell string escaping helper for safe Bash/Ash script parameter generation
+ * Shell string escaping helpers for safe Bash/Ash command generation.
  */
 export const escapeShell = (val) => {
   if (val == null) return ''
-  // 1. 移除换行符与回车符，防止注入换行破坏 Shell 命令行语义
+  // Remove line breaks and escape characters that are special inside a
+  // double-quoted POSIX shell argument.
   const sanitized = String(val).replace(/[\r\n]+/g, ' ')
-  // 2. 转义反斜杠、双引号、美元符及反引号
   return sanitized.replace(/(["\\$`])/g, '\\$1')
 }
+
+// Quote the complete argument so spaces and shell metacharacters cannot turn
+// generated installer commands into multiple arguments or extra commands.
+export const quoteShell = (val) => `"${escapeShell(val)}"`

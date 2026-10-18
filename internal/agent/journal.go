@@ -88,6 +88,13 @@ func BuildJournalctlArgs(req protocol.LogQueryRequest) ([]string, error) {
 
 // QuerySystemLogs safely queries system logs on the local host using journalctl or syslog fallback.
 func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protocol.LogQueryResponse, error) {
+	// Validate request parameters on every platform before the OS-specific
+	// implementation. Otherwise Windows builds silently bypass the same input
+	// safety checks enforced by journalctl on Linux.
+	validatedArgs, err := BuildJournalctlArgs(req)
+	if err != nil {
+		return nil, err
+	}
 	if runtime.GOOS != "linux" {
 		return &protocol.LogQueryResponse{
 			NodeUUID:   req.NodeUUID,
@@ -105,10 +112,7 @@ func QuerySystemLogs(ctx context.Context, req protocol.LogQueryRequest) (*protoc
 		linesLimit = 1000
 	}
 
-	args, err := BuildJournalctlArgs(req)
-	if err != nil {
-		return nil, err
-	}
+	args := validatedArgs
 
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
@@ -164,13 +168,17 @@ func readFilteredLogTail(path string, maxLines int, grep string) []string {
 	defer file.Close()
 	isTruncated := false
 	if info, err := file.Stat(); err == nil && info.Size() > 256*1024 {
-		if _, err := file.Seek(-256*1024, io.SeekEnd); err == nil { isTruncated = true }
+		if _, err := file.Seek(-256*1024, io.SeekEnd); err == nil {
+			isTruncated = true
+		}
 	}
 
 	grepLower := strings.ToLower(strings.TrimSpace(grep))
 	var lines []string
 	scanner := bufio.NewScanner(file)
-	if isTruncated { _ = scanner.Scan() }
+	if isTruncated {
+		_ = scanner.Scan()
+	}
 	for scanner.Scan() {
 		text := scanner.Text()
 		if grepLower != "" && !strings.Contains(strings.ToLower(text), grepLower) {

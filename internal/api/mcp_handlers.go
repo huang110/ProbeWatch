@@ -12,6 +12,10 @@ import (
 )
 
 func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
+	if s.mcpLimiter != nil && !s.mcpLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	if s.aiService == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"jsonrpc": "2.0",
@@ -23,13 +27,17 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Authenticate Request: Query token, Authorization header, or Admin session cookie
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		authHeader := r.Header.Get("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token = strings.TrimPrefix(authHeader, "Bearer ")
-		}
+	// 1. Authenticate Request: Authorization header or Admin session cookie.
+	// Query-string tokens are deliberately rejected because URLs are copied to
+	// access logs, browser history, proxy logs, and referrer headers.
+	if r.URL.Query().Get("token") != "" {
+		writeJSONError(w, http.StatusUnauthorized, "query-string MCP tokens are not supported; use Authorization: Bearer")
+		return
+	}
+	token := ""
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 	}
 
 	authenticated := false
@@ -72,11 +80,7 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Accel-Buffering", "no")
 
 			flusher, ok := w.(http.Flusher)
-			endpointURL := "/mcp"
-			if token != "" {
-				endpointURL += "?token=" + token
-			}
-			_, _ = fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", endpointURL)
+			_, _ = fmt.Fprint(w, "event: endpoint\ndata: /mcp\n\n")
 			if ok {
 				flusher.Flush()
 			}

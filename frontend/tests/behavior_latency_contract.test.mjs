@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   isTargetGlobal,
@@ -26,6 +26,10 @@ import {
   buildVisitorCardViewModel,
   formatVisitorTimestamp,
 } from '../src/lib/api.js'
+
+const workspaceRoot = existsSync(resolve(process.cwd(), 'frontend/src'))
+  ? process.cwd()
+  : resolve(process.cwd(), '..')
 
 console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n')
 
@@ -325,7 +329,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 14: 375px & 320px responsive checks
 // -----------------------------------------------------------------------------
 {
-  const css = readFileSync(resolve(process.cwd(), 'frontend/src/styles.css'), 'utf8')
+  const css = readFileSync(resolve(workspaceRoot, 'frontend/src/styles.css'), 'utf8')
   assert.ok(css.includes('.table-scroll'), 'Scenario 14: styles.css must define .table-scroll')
   assert.ok(css.includes('overflow-x: auto'), 'Scenario 14: table-scroll must specify overflow-x: auto')
 
@@ -340,7 +344,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // -----------------------------------------------------------------------------
 {
   const monitoringViewCode = readFileSync(
-    resolve(process.cwd(), 'frontend/src/components/MonitoringView.jsx'),
+    resolve(workspaceRoot, 'frontend/src/components/MonitoringView.jsx'),
     'utf8'
   )
   assert.ok(monitoringViewCode.includes('readOnly = false'), 'Scenario 15: MonitoringView accepts readOnly prop')
@@ -371,7 +375,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // -----------------------------------------------------------------------------
 {
   const addServerCode = readFileSync(
-    resolve(process.cwd(), 'frontend/src/components/AddServerModal.jsx'),
+    resolve(workspaceRoot, 'frontend/src/components/AddServerModal.jsx'),
     'utf8'
   )
   assert.ok(
@@ -398,7 +402,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // -----------------------------------------------------------------------------
 {
   const serverManageCode = readFileSync(
-    resolve(process.cwd(), 'frontend/src/components/ServerManageView.jsx'),
+    resolve(workspaceRoot, 'frontend/src/components/ServerManageView.jsx'),
     'utf8'
   )
   assert.ok(
@@ -429,7 +433,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // -----------------------------------------------------------------------------
 {
   const nodeEnrollCode = readFileSync(
-    resolve(process.cwd(), 'frontend/src/components/NodeEnroll.jsx'),
+    resolve(workspaceRoot, 'frontend/src/components/NodeEnroll.jsx'),
     'utf8'
   )
   assert.ok(
@@ -462,7 +466,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
     return files
   }
 
-  const srcFiles = getAllFiles(resolve(process.cwd(), 'frontend/src'))
+  const srcFiles = getAllFiles(resolve(workspaceRoot, 'frontend/src'))
   assert.ok(srcFiles.length > 10, 'Scenario 20: frontend/src must contain source files')
 
   for (const file of srcFiles) {
@@ -475,8 +479,8 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 
   // Verify consistent warning exists across all Docker installation entries
   const expectedNotice = 'Docker 镜像尚未发布，请使用 Linux/OpenWrt 安装'
-  const addServerCode = readFileSync(resolve(process.cwd(), 'frontend/src/components/AddServerModal.jsx'), 'utf8')
-  const serverManageCode = readFileSync(resolve(process.cwd(), 'frontend/src/components/ServerManageView.jsx'), 'utf8')
+  const addServerCode = readFileSync(resolve(workspaceRoot, 'frontend/src/components/AddServerModal.jsx'), 'utf8')
+  const serverManageCode = readFileSync(resolve(workspaceRoot, 'frontend/src/components/ServerManageView.jsx'), 'utf8')
 
   assert.ok(addServerCode.includes(expectedNotice), 'Scenario 20: AddServerModal must match consistent notice')
   assert.ok(serverManageCode.includes(expectedNotice), 'Scenario 20: ServerManageView must match consistent notice')
@@ -779,7 +783,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 28 (TargetManage #1 & #2): Drawer closed by default, opens on "新建目标"
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes('const [drawerOpen, setDrawerOpen] = useState(false)'),
     'Scenario 28: Drawer must be closed by default (drawerOpen = false)'
@@ -1021,7 +1025,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 39 (TargetManage #14): media_http cannot be newly created or re-enabled
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes("const CREATE_TARGET_KINDS = ['http', 'https', 'tcp', 'dns', 'mtr']"),
     'Scenario 39: CREATE_TARGET_KINDS excludes media_http'
@@ -1048,7 +1052,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
     ['HTTP 健康检查', 'TCP 端口检查', 'DNS 解析检查'],
     'Scenario 40: Quick templates match required names'
   )
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes('openQuickTemplateDrawer') &&
       targetManageSrc.includes('applyTargetQuickTemplate(templateKey, emptyTargetForm())'),
@@ -1061,7 +1065,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 41 (TargetManage #16): readOnly mode hides create, edit, delete, and toggle buttons, plus CSRF retry & delete confirmation
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes('if (readOnly)') &&
       targetManageSrc.includes('confirmDeleteTarget') &&
@@ -1132,7 +1136,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 43 (Auto-ID #9 & #10): Drawer removes ID input, shows auto-ID hint, and masks internal ID in collapsed advanced section
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     !targetManageSrc.includes('<span className="field-label">ID *</span>') &&
       !targetManageSrc.includes("setField('id')") &&
@@ -1166,7 +1170,7 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 44 (Auto-ID #11 & #12): Target list, mobile cards, delete modal, search, and readOnly mode hide internal ID
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes('<th>名称</th>') &&
       !targetManageSrc.includes('<th>名称 / ID</th>') &&
@@ -1191,9 +1195,9 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 45 (Auto-ID #8): HTTP 409 conflict displays friendly Chinese error without stack trace
 // -----------------------------------------------------------------------------
 {
-  const targetManageSrc = readFileSync(resolve('frontend/src/components/TargetManage.jsx'), 'utf8')
-  const latencyModalSrc = readFileSync(resolve('frontend/src/components/NewLatencyTargetModal.jsx'), 'utf8')
-  const routeModalSrc = readFileSync(resolve('frontend/src/components/NewRouteMonitorModal.jsx'), 'utf8')
+  const targetManageSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/TargetManage.jsx'), 'utf8')
+  const latencyModalSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/NewLatencyTargetModal.jsx'), 'utf8')
+  const routeModalSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/NewRouteMonitorModal.jsx'), 'utf8')
   assert.ok(
     targetManageSrc.includes("if (response.status === 409) throw new Error('conflict')") &&
       targetManageSrc.includes("conflict: '目标标识生成冲突，请重试'"),
@@ -1211,8 +1215,8 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 46: GuestView compact 3-column MJJ responsive layout & centered shell
 // -----------------------------------------------------------------------------
 {
-  const stylesSrc = readFileSync(resolve('frontend/src/styles.css'), 'utf8')
-  const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
+  const stylesSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/styles.css'), 'utf8')
+  const guestSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/GuestView.jsx'), 'utf8')
 
   assert.ok(
     stylesSrc.includes('grid-template-columns: repeat(3, minmax(0, 1fr));') &&
@@ -1304,8 +1308,8 @@ console.log('=== Starting ProbeWatch Latency & Enrollment Behavioral Tests ===\n
 // Scenario 49: VisitorInfoCard restricted to GuestView, absent from App admin shell, zero localStorage
 // -----------------------------------------------------------------------------
 {
-  const guestSrc = readFileSync(resolve('frontend/src/components/GuestView.jsx'), 'utf8')
-  const appSrc = readFileSync(resolve('frontend/src/App.jsx'), 'utf8')
+  const guestSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/components/GuestView.jsx'), 'utf8')
+  const appSrc = readFileSync(resolve(workspaceRoot, 'frontend/src/App.jsx'), 'utf8')
 
   assert.ok(
     guestSrc.includes('export function VisitorInfoCard') &&

@@ -22,7 +22,7 @@ const formatCountdown = (ms) => {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-import { escapeShell } from '../lib/shellEscape.js'
+import { escapeShell, quoteShell } from '../lib/shellEscape.js'
 export { escapeShell }
 
 export function AddServerModal({ onClose, onInstalled }) {
@@ -130,11 +130,11 @@ export function AddServerModal({ onClose, onInstalled }) {
   const extraBashEnvs = buildEnvSnippet()
 
   const linuxScript = enrollment
-    ? `curl -sSL ${originUrl}/deploy/install.sh -o install.sh && PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh install.sh agent`
+    ? `curl -fsSL ${quoteShell(`${originUrl}/deploy/install.sh`)} -o install.sh && PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh install.sh agent`
     : ''
 
   const openwrtScript = enrollment
-    ? `wget -qO /tmp/install.sh ${originUrl}/deploy/install.sh && PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh /tmp/install.sh agent`
+    ? `wget -qO /tmp/install.sh ${quoteShell(`${originUrl}/deploy/install.sh`)} && PROBEWATCH_AGENT_ENDPOINT="${escapeShell(enrollment.endpoint)}" PROBEWATCH_AGENT_NODE_UUID="${escapeShell(enrollment.nodeUuid)}" PROBEWATCH_AGENT_REGISTRATION_TOKEN="${escapeShell(enrollment.token)}" PROBEWATCH_AGENT_ENABLE_TERMINAL="${terminalVal}"${extraBashEnvs} sh /tmp/install.sh agent`
     : ''
 
   const envScript = enrollment

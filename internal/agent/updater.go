@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,9 +20,11 @@ import (
 )
 
 var (
-	ErrNoUpdateAvailable = errors.New("already running latest agent version")
-	ErrChecksumMismatch  = errors.New("downloaded binary checksum mismatch")
-	ErrBinaryTooSmall    = errors.New("downloaded binary is abnormally small or incomplete")
+	ErrNoUpdateAvailable  = errors.New("already running latest agent version")
+	ErrChecksumMismatch   = errors.New("downloaded binary checksum mismatch")
+	ErrChecksumRequired   = errors.New("update metadata missing checksum")
+	ErrInvalidDownloadURL = errors.New("update download URL is not trusted")
+	ErrBinaryTooSmall     = errors.New("downloaded binary is abnormally small or incomplete")
 )
 
 // UpdateCheckResult holds version metadata from the server.
@@ -148,9 +151,9 @@ func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint
 		client = &http.Client{Timeout: 120 * time.Second}
 	}
 
-	downloadURL := result.DownloadURL
-	if !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://") {
-		downloadURL = strings.TrimRight(endpoint, "/") + "/" + strings.TrimLeft(downloadURL, "/")
+	downloadURL, err := trustedDownloadURL(endpoint, result.DownloadURL)
+	if err != nil {
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
@@ -212,13 +215,21 @@ func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint
 		return ErrBinaryTooSmall
 	}
 
-	// Verify checksum if provided
+	// A release without an integrity value must never replace the running
+	// executable. The control plane is responsible for publishing SHA-256.
 	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if expected := strings.TrimSpace(result.ChecksumSHA256); expected != "" {
-		if !strings.EqualFold(actualHash, expected) {
-			_ = os.Remove(stagingPath)
-			return fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expected, actualHash)
-		}
+	expected := strings.TrimSpace(result.ChecksumSHA256)
+	if expected == "" {
+		_ = os.Remove(stagingPath)
+		return ErrChecksumRequired
+	}
+	if !isSHA256Hex(expected) {
+		_ = os.Remove(stagingPath)
+		return fmt.Errorf("%w: invalid SHA-256 metadata", ErrChecksumRequired)
+	}
+	if !strings.EqualFold(actualHash, expected) {
+		_ = os.Remove(stagingPath)
+		return fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expected, actualHash)
 	}
 
 	// Backup existing executable if present
@@ -237,7 +248,11 @@ func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint
 	// Atomically move staging binary to execPath
 	if err := os.Rename(stagingPath, execPath); err != nil {
 		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
-			if copyErr := copyFile(stagingPath, execPath); copyErr == nil { _ = os.Remove(stagingPath); _ = os.Chmod(execPath, 0755); goto installed }
+			if copyErr := copyFile(stagingPath, execPath); copyErr == nil {
+				_ = os.Remove(stagingPath)
+				_ = os.Chmod(execPath, 0755)
+				goto installed
+			}
 		}
 		// Attempt rollback from .bak
 		_ = os.Rename(bakPath, execPath)
@@ -263,6 +278,37 @@ installed:
 	}
 
 	return nil
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+// trustedDownloadURL only permits relative URLs or an absolute URL on the
+// same origin as the control plane. This prevents a compromised/misconfigured
+// update response from sending the node token to an arbitrary host.
+func trustedDownloadURL(endpoint, raw string) (string, error) {
+	base, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || base.Scheme == "" || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
+		return "", ErrInvalidDownloadURL
+	}
+	ref, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", ErrInvalidDownloadURL
+	}
+	baseForResolve := *base
+	if ref.Scheme == "" && ref.Host == "" && !strings.HasPrefix(ref.Path, "/") && !strings.HasSuffix(baseForResolve.Path, "/") {
+		baseForResolve.Path += "/"
+	}
+	resolved := baseForResolve.ResolveReference(ref)
+	if resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) || resolved.User != nil {
+		return "", ErrInvalidDownloadURL
+	}
+	return resolved.String(), nil
 }
 
 // VerifyAndClearPendingUpgrade marks the upgrade as verified once healthy telemetry succeeds.

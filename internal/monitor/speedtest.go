@@ -54,6 +54,23 @@ type SpeedtestRunner struct {
 	Timeout      time.Duration
 }
 
+// calculateSpeedMbps converts a byte count and elapsed duration to Mbps.
+// Windows can report a zero-duration loop for very small local test payloads;
+// use a conservative floor so the result remains finite and protocol-valid.
+func calculateSpeedMbps(bytes int64, duration time.Duration) float64 {
+	if bytes <= 0 {
+		return 0
+	}
+	if duration < time.Millisecond {
+		duration = time.Millisecond
+	}
+	mbps := (float64(bytes) * 8.0 * float64(time.Second)) / (float64(duration.Nanoseconds()) * 1_000_000.0)
+	if mbps > 1000000 {
+		return 1000000
+	}
+	return math.Round(mbps*100) / 100
+}
+
 // Run executes a speedtest benchmark probe against the task's configured server.
 func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) protocol.SpeedtestResult {
 	started := time.Now()
@@ -193,10 +210,7 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 			_ = dlResp.Body.Close()
 			dlDuration := time.Since(dlStart)
 			result.BytesReceived = totalRead
-			if dlDuration.Seconds() > 0 && totalRead > 0 {
-				mbps := (float64(totalRead) * 8.0) / (dlDuration.Seconds() * 1_000_000.0)
-				result.DownloadSpeedMbps = math.Round(mbps*100) / 100
-			}
+			result.DownloadSpeedMbps = calculateSpeedMbps(totalRead, dlDuration)
 		} else if result.Error == "" {
 			result.Error = fmt.Sprintf("download failed: %v", dlErr)
 		}
@@ -233,16 +247,10 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 		if ulErr == nil {
 			_, _ = io.Copy(io.Discard, ulResp.Body)
 			_ = ulResp.Body.Close()
-			if ulDuration.Seconds() > 0 && countingBody.count > 0 {
-				mbps := (float64(countingBody.count) * 8.0) / (ulDuration.Seconds() * 1_000_000.0)
-				result.UploadSpeedMbps = math.Round(mbps*100) / 100
-			}
+			result.UploadSpeedMbps = calculateSpeedMbps(countingBody.count, ulDuration)
 		} else {
 			// If POST was rejected (e.g. 404 or 405 on a read-only endpoint) but some data sent
-			if countingBody.count > 0 && ulDuration.Seconds() > 0 {
-				mbps := (float64(countingBody.count) * 8.0) / (ulDuration.Seconds() * 1_000_000.0)
-				result.UploadSpeedMbps = math.Round(mbps*100) / 100
-			}
+			result.UploadSpeedMbps = calculateSpeedMbps(countingBody.count, ulDuration)
 		}
 	}
 
