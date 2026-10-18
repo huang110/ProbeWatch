@@ -127,6 +127,18 @@ func TestDownloadAndApplyUpdateRequiresChecksumAndTrustedOrigin(t *testing.T) {
 		t.Fatalf("expected missing checksum rejection, got %v", err)
 	}
 
+	for _, downloadURL := range []string{"", "   "} {
+		err = DownloadAndApplyUpdate(context.Background(), server.Client(), server.URL, "", &UpdateCheckResult{
+			UpdateAvailable:    true,
+			DownloadURL:        downloadURL,
+			LatestAgentVersion: "9.9.9",
+			ChecksumSHA256:     strings.Repeat("0", 64),
+		}, dataDir)
+		if !errors.Is(err, ErrInvalidDownloadURL) {
+			t.Fatalf("expected empty download URL rejection for %q, got %v", downloadURL, err)
+		}
+	}
+
 	err = DownloadAndApplyUpdate(context.Background(), server.Client(), server.URL, "", &UpdateCheckResult{
 		UpdateAvailable:    true,
 		DownloadURL:        "https://attacker.example/agent",

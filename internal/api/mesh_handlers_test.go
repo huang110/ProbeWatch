@@ -127,6 +127,13 @@ func TestMeshMatrixHandler(t *testing.T) {
 			t.Fatalf("public mesh response leaked node identity data: %+v", node)
 		}
 	}
+	publicIndices := make(map[string]int)
+	for i, node := range publicResp.Nodes {
+		publicIndices[node.Name] = i
+	}
+	if publicResp.Matrix[publicIndices["SG-Singapore"]][publicIndices["TYO-Tokyo"]].LatencyMS != 65 {
+		t.Fatalf("public mesh matrix lost direct probe result: %+v", publicResp.Matrix)
+	}
 
 	// Test authenticated endpoint
 	reqAuth := httptest.NewRequest(http.MethodGet, "/api/mesh-matrix", nil)

@@ -855,7 +855,7 @@ export function AICopilotView({ nodes = [], rates = {}, lossRates = {}, onNaviga
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted, #888)', display: 'block', marginBottom: '6px' }}>
-                  MCP 代理服务地址 (含安全访问 Token)
+                  MCP 代理服务地址 (SSE / JSON-RPC 端点)
                 </label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <input

@@ -292,6 +292,9 @@ func isSHA256Hex(value string) bool {
 // same origin as the control plane. This prevents a compromised/misconfigured
 // update response from sending the node token to an arbitrary host.
 func trustedDownloadURL(endpoint, raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", ErrInvalidDownloadURL
+	}
 	base, err := url.Parse(strings.TrimSpace(endpoint))
 	if err != nil || base.Scheme == "" || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
 		return "", ErrInvalidDownloadURL

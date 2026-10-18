@@ -116,13 +116,6 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 			Tags:   parseNodeTags(n.Tags),
 			Status: "offline",
 		}
-		if isPublic {
-			// Public dashboards need topology and health only. Do not publish
-			// node UUIDs, operator tags, hostnames, or source IP addresses.
-			info.UUID = ""
-			info.Tags = nil
-			info.Name = sanitizeNodeName(info.Name)
-		}
 		reportedAt, payload, err := s.service.Store().GetResourceLatest(ctx, n.ID)
 		if err == nil {
 			info.LastReportedAt = &reportedAt
@@ -132,7 +125,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 				info.Status = "attention"
 			}
 			var snapshot protocol.ResourceSnapshot
-			if json.Unmarshal(payload, &snapshot) == nil && !isPublic {
+			if json.Unmarshal(payload, &snapshot) == nil {
 				if isPublicMeshIP(snapshot.IPv4) {
 					info.IP = snapshot.IPv4
 				} else if snapshot.IPv6 != "" {
@@ -353,6 +346,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		for i := range response.Nodes {
 			publicIDs[response.Nodes[i].ID] = fmt.Sprintf("node-%d", i+1)
 			response.Nodes[i].ID = fmt.Sprintf("node-%d", i+1)
+			response.Nodes[i].Name = sanitizeNodeName(response.Nodes[i].Name)
 			response.Nodes[i].UUID = ""
 			response.Nodes[i].Tags = nil
 			response.Nodes[i].IP = ""
@@ -369,6 +363,9 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 			response.Relays[i].FromNodeID = publicIDs[response.Relays[i].FromNodeID]
 			response.Relays[i].ToNodeID = publicIDs[response.Relays[i].ToNodeID]
 			response.Relays[i].RelayNodeID = publicIDs[response.Relays[i].RelayNodeID]
+			response.Relays[i].FromNodeName = sanitizeNodeName(response.Relays[i].FromNodeName)
+			response.Relays[i].ToNodeName = sanitizeNodeName(response.Relays[i].ToNodeName)
+			response.Relays[i].RelayNodeName = sanitizeNodeName(response.Relays[i].RelayNodeName)
 		}
 	}
 	writeJSON(w, http.StatusOK, response)

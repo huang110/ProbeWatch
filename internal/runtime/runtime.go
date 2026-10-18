@@ -84,6 +84,14 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 	}()
 	serverInstance := api.NewServer(cfg, service)
 	serverInstance.SetNotifier(notifier)
+	// The backup scheduler starts its own loop. Stop it explicitly during
+	// control-plane shutdown so it cannot retain SQLite resources after the
+	// store cleanup runs (especially visible on Windows).
+	defer func() {
+		if scheduler := serverInstance.BackupScheduler(); scheduler != nil {
+			scheduler.Stop()
+		}
+	}()
 	if serverInstance.BackupScheduler() != nil {
 		background.Add(1)
 		go func() {
@@ -122,7 +130,7 @@ func runAuthCleanup(ctx context.Context, service *auth.Service) {
 		cleanupOne := func(resource string, fn func(context.Context, time.Time) (int64, error)) {
 			cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			if _, err := fn(cleanupCtx, time.Now().UTC()); err != nil {
+			if _, err := fn(cleanupCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 				slog.Error("auth cleanup failed", "resource", resource, "error_class", fmt.Sprintf("%T", err))
 			}
 		}
@@ -147,7 +155,7 @@ func runLifecycleCleanup(ctx context.Context, store *db.Store) {
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if _, err := store.CleanupLifecycle(cleanupCtx, time.Now().UTC()); err != nil {
+		if _, err := store.CleanupLifecycle(cleanupCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			slog.Error("lifecycle cleanup failed", "error_class", fmt.Sprintf("%T", err))
 		}
 	}
@@ -172,7 +180,7 @@ func runHistoryAggregation(ctx context.Context, store *db.Store) {
 		aggregateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		boundary := time.Now().UTC().Add(-db.DefaultAggregateRetentionWindow)
-		if _, err := store.AggregateHistory(aggregateCtx, boundary); err != nil {
+		if _, err := store.AggregateHistory(aggregateCtx, boundary); err != nil && ctx.Err() == nil {
 			slog.Error("history aggregation failed", "error_class", fmt.Sprintf("%T", err))
 		}
 	}
@@ -193,7 +201,7 @@ func runBillingCycleWatcher(ctx context.Context, store *db.Store) {
 	check := func() {
 		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if _, err := store.CheckAndAutoResetBillingCycles(checkCtx, time.Now().UTC()); err != nil {
+		if _, err := store.CheckAndAutoResetBillingCycles(checkCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {
 			slog.Error("billing cycle auto-reset check failed", "error_class", fmt.Sprintf("%T", err), "error", err)
 		}
 	}
