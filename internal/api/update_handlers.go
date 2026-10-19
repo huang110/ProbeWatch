@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -190,9 +191,10 @@ func (s *Server) findAgentBinaryPath(osName, archName string) string {
 		filepath.Join("/var/lib/probewatch/releases", fmt.Sprintf("probewatch-agent-%s-%s", osName, archName)),
 	}
 	// Generic install locations do not encode their target platform. They are
-	// safe fallbacks only for the server's native Linux/amd64 release; using
+	// safe fallbacks only for the server's native Linux architecture; using
 	// them for another target could serve an incompatible executable.
-	if osName == "linux" && archName == "amd64" {
+	isNativeLinux := osName == "linux" && runtime.GOOS == "linux" && archName == runtime.GOARCH
+	if isNativeLinux {
 		candidates = append(candidates,
 			filepath.Join("/opt/probewatch-agent", "probewatch-agent"),
 			filepath.Join("/opt/probewatch", "probewatch-agent"),
@@ -202,18 +204,19 @@ func (s *Server) findAgentBinaryPath(osName, archName string) string {
 		)
 	}
 
-	// On Linux the server can inspect the candidate's embedded version. This
+	// On Linux the server can inspect the candidate's embedded version when the
+	// target architecture matches the server's native architecture. This
 	// prevents an old staged artifact from being advertised while the running
 	// canonical binary is current (or the reverse). Other target platforms
 	// cannot be executed on the server, so they retain the deterministic path
 	// order above.
-	if osName == "linux" && archName == "amd64" {
+	if isNativeLinux {
 		for _, path := range candidates {
 			if isUsableAgentBinary(path) && agentBinaryMatchesVersion(path, version.AgentVersion) {
 				return path
 			}
 		}
-		// Never serve an unverified Linux/amd64 artifact. An old staged file
+		// Never serve an unverified native Linux artifact. An old staged file
 		// must not be advertised with the current release metadata.
 		return ""
 	}
