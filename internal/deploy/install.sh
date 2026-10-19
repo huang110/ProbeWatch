@@ -647,7 +647,8 @@ EOF
 
     systemctl daemon-reload
     if [ -f "$BIN_PATH" ]; then
-        systemctl enable --now probewatch-agent.service
+        systemctl enable probewatch-agent.service
+        systemctl restart probewatch-agent.service
         ok "ProbeWatch Agent 服务已成功启动并启用开机自启！"
         info "常用命令:"
         echo "  systemctl status probewatch-agent"
