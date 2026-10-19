@@ -510,7 +510,7 @@ export function MonitoringView({ nodes = [], readOnly = false, initialTab = 'lat
     if (!serverSearch) return nodes
     const q = serverSearch.toLowerCase().trim()
     return nodes.filter((n) => {
-      const meta = detectRegionAndFlag(n.name, n.hostname || n.resource?.hostname)
+      const meta = detectRegionAndFlag(n.name, n.hostname || n.resource?.hostname, n)
       return (
         (n.name || '').toLowerCase().includes(q) ||
         (n.ip || n.address || '').toLowerCase().includes(q) ||

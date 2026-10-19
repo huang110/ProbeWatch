@@ -413,28 +413,29 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
     const set = new Set()
     names.forEach((name) => {
       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+      const telemetry = telemetryByName.get(name) || {}
       if (custom.tags) {
         custom.tags.split(/[,，\s;]+/).forEach((t) => {
           const clean = t.trim().replace(/<[a-zA-Z]+>$/, '').trim()
           if (clean) set.add(clean)
         })
       }
-      const meta = detectRegionAndFlag(name, '')
-      const flag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+      const meta = detectRegionAndFlag(name, '', telemetry)
+      const flag = custom.customFlag && custom.customFlag !== '自动识别' && custom.customFlag !== '🌐' ? custom.customFlag : (meta.flag || '🌐')
       if (flag) set.add(flag)
     })
     return Array.from(set)
-  }, [names, allCustomMeta])
+  }, [names, allCustomMeta, telemetryByName])
 
   const filteredNames = useMemo(() => {
     return names.filter((name) => {
       const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
-      const meta = detectRegionAndFlag(name, '')
-      const flag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+      const telemetry = telemetryByName.get(name) || {}
+      const meta = detectRegionAndFlag(name, '', telemetry)
+      const flag = custom.customFlag && custom.customFlag !== '自动识别' && custom.customFlag !== '🌐' ? custom.customFlag : (meta.flag || '🌐')
       const displayName = custom.customName || name
       const os = custom.os || 'Debian Linux'
       const tags = custom.tags || ''
-      const telemetry = telemetryByName.get(name) || {}
 
       if (selectedTag !== 'all') {
         const matchesTag = tags.includes(selectedTag) || flag === selectedTag
@@ -802,13 +803,12 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
             ) : viewMode === 'grid' ? (
               <div className={`guest-node-grid ${filteredNames.length === 1 ? 'single-node-grid' : filteredNames.length === 2 ? 'two-node-grid' : ''}`}>
                 {filteredNames.map((name, index) => {
-                  const meta = detectRegionAndFlag(name, '')
+                  const telemetry = telemetryByName.get(name) || {}
+                  const meta = detectRegionAndFlag(name, '', telemetry)
                   const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
-                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
+                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' && custom.customFlag !== '🌐' ? custom.customFlag : (meta.flag || '🌐')
                   const displayName = custom.customName || name
                   const os = custom.os || 'Debian Linux'
-
-                  const telemetry = telemetryByName.get(name) || {}
                   const uptimeText = telemetry.started_at ? formatUptime(telemetry.started_at) : (custom.uptime || '—')
                   const nodeStatus = telemetry.status || 'unknown'
                   const lastReportedAt = telemetry.last_reported_at || null
@@ -1114,11 +1114,11 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
             ) : viewMode === 'compact' ? (
               <div className="guest-compact-list mobile-single-line-list">
                 {filteredNames.map((name, index) => {
-                  const meta = detectRegionAndFlag(name, '')
-                  const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
-                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : (meta.flag || '🌐')
-                  const displayName = custom.customName || name
                   const telemetry = telemetryByName.get(name) || {}
+                  const meta = detectRegionAndFlag(name, '', telemetry)
+                  const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                  const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' && custom.customFlag !== '🌐' ? custom.customFlag : (meta.flag || '🌐')
+                  const displayName = custom.customName || name
                   const nodeStatus = telemetry.status || 'unknown'
                   const isOnline = nodeStatus === 'online'
                   const cpuPercent = numeric(telemetry.cpu_percent)
@@ -1200,10 +1200,10 @@ export function GuestView({ status, clientInfo, isRefreshing, onRefresh, onLogin
                   </thead>
                   <tbody>
                     {filteredNames.map((name, index) => {
-                      const meta = detectRegionAndFlag(name, '')
-                      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
                       const telemetry = telemetryByName.get(name) || {}
-                      const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' ? custom.customFlag : meta.flag
+                      const meta = detectRegionAndFlag(name, '', telemetry)
+                      const custom = allCustomMeta[name] || Object.values(allCustomMeta).find((m) => m.customName === name) || {}
+                      const displayFlag = custom.customFlag && custom.customFlag !== '自动识别' && custom.customFlag !== '🌐' ? custom.customFlag : meta.flag
                       const displayName = custom.customName || name
                       const coloredTags = parseColoredTags(custom.tags)
                       return (

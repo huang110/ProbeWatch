@@ -449,9 +449,11 @@ export const migrateLocalStorageBillingToBackend = async (nodes = [], { fetchImp
 export const getNodeCustomMeta = (nodeId, defaultNode = {}) => {
   const all = getStoredBillingData()
   const found = all[nodeId] || {}
+  const storedFlag = found.customFlag && found.customFlag !== '自动识别' && found.customFlag !== '🌐' ? found.customFlag : ''
+  const defaultFlag = defaultNode?.flag && defaultNode.flag !== '🌐' ? defaultNode.flag : ''
   return {
     customName: found.customName || defaultNode?.name || '',
-    customFlag: found.customFlag || defaultNode?.flag || '自动识别',
+    customFlag: storedFlag || defaultFlag || '自动识别',
     tags: found.tags || (defaultNode?.tag ? `${defaultNode.tag}<blue>;` : '电信CN2GIA<Red>;联通9929<blue>;移动CMIN2<Green>;'),
     bandwidth: found.bandwidth || '',
     group: found.group || '',
@@ -586,6 +588,7 @@ export const calculateRemainingValue = (billing) => {
 export const generateForumSalesPost = (node, billing, calc, markupCNY = 0) => {
   const totalPriceCNY = Math.max(0, calc.remainingValueCNY + Number(markupCNY))
   const rateInfo = resolveCurrency(billing.currency)
+  const probeOrigin = (typeof window !== 'undefined' && window.location?.origin) ? window.location.origin : 'https://tz.80.tn'
 
   return `[出] ${billing.merchant} - ${node.name} (${node.flag || '🌐'} ${node.region || '优化线路'})
 ------------------------------------------------
@@ -604,7 +607,7 @@ export const generateForumSalesPost = (node, billing, calc, markupCNY = 0) => {
 • 出机交易总价：¥${totalPriceCNY.toFixed(2)} 包 Push / 改邮箱
 
 【探针在线检测】
-可查看实时流速与三网延迟：https://tz.115yu.us.ci
+可查看实时流速与三网延迟：${probeOrigin}
 ------------------------------------------------
 有意请论坛 PM 或 Telegram 联系，先款后鸡！`
 }

@@ -138,38 +138,201 @@ export const formatUptime = (startedAt) => {
   return `${Math.max(1, minutes)}分钟`
 }
 
-export const detectRegionAndFlag = (name = '', hostname = '') => {
-  const text = `${name} ${hostname}`.toLowerCase()
-  if (/香港|hong kong|\bhk\b/.test(text)) {
-    return { flag: '🇭🇰', region: '中国香港', tag: '亚太优化' }
+const COUNTRY_CODE_META = {
+  HK: { flag: '🇭🇰', region: '中国香港', tag: '亚太优化' },
+  TW: { flag: '🇹🇼', region: '中国台湾', tag: '亚太直连' },
+  MO: { flag: '🇲🇴', region: '中国澳门', tag: '亚太优化' },
+  CN: { flag: '🇨🇳', region: '中国大陆', tag: '国内BGP' },
+  JP: { flag: '🇯🇵', region: '日本', tag: '软银/IIJ' },
+  SG: { flag: '🇸🇬', region: '新加坡', tag: '亚太直连' },
+  KR: { flag: '🇰🇷', region: '韩国', tag: '亚太直连' },
+  US: { flag: '🇺🇸', region: '美国', tag: '9929/4837' },
+  CA: { flag: '🇨🇦', region: '加拿大', tag: '北美BGP' },
+  DE: { flag: '🇩🇪', region: '德国', tag: '欧洲BGP' },
+  GB: { flag: '🇬🇧', region: '英国', tag: '欧洲BGP' },
+  UK: { flag: '🇬🇧', region: '英国', tag: '欧洲BGP' },
+  NL: { flag: '🇳🇱', region: '荷兰', tag: '欧洲BGP' },
+  FR: { flag: '🇫🇷', region: '法国', tag: '欧洲BGP' },
+  RU: { flag: '🇷🇺', region: '俄罗斯', tag: '欧亚伯利亚' },
+  AU: { flag: '🇦🇺', region: '澳大利亚', tag: '大洋洲BGP' },
+  MY: { flag: '🇲🇾', region: '马来西亚', tag: '东南亚BGP' },
+  TH: { flag: '🇹🇭', region: '泰国', tag: '东南亚BGP' },
+  VN: { flag: '🇻🇳', region: '越南', tag: '东南亚BGP' },
+  ID: { flag: '🇮🇩', region: '印度尼西亚', tag: '东南亚BGP' },
+  PH: { flag: '🇵🇭', region: '菲律宾', tag: '东南亚BGP' },
+  IN: { flag: '🇮🇳', region: '印度', tag: '南亚BGP' },
+  TR: { flag: '🇹🇷', region: '土耳其', tag: '欧亚BGP' },
+  AE: { flag: '🇦🇪', region: '阿联酋', tag: '中东BGP' },
+  CH: { flag: '🇨🇭', region: '瑞士', tag: '欧洲BGP' },
+  SE: { flag: '🇸🇪', region: '瑞典', tag: '欧洲BGP' },
+  FI: { flag: '🇫🇮', region: '芬兰', tag: '欧洲BGP' },
+  NO: { flag: '🇳🇴', region: '挪威', tag: '欧洲BGP' },
+  IT: { flag: '🇮🇹', region: '意大利', tag: '欧洲BGP' },
+  ES: { flag: '🇪🇸', region: '西班牙', tag: '欧洲BGP' },
+  AT: { flag: '🇦🇹', region: '奥地利', tag: '欧洲BGP' },
+  PL: { flag: '🇵🇱', region: '波兰', tag: '欧洲BGP' },
+  BR: { flag: '🇧🇷', region: '巴西', tag: '南美BGP' },
+  ZA: { flag: '🇿🇦', region: '南非', tag: '非洲BGP' },
+}
+
+const isoCodeToFlagEmoji = (code) => {
+  const clean = String(code || '').trim().toUpperCase()
+  if (!/^[A-Z]{2}$/.test(clean) || clean === 'XX' || clean === 'ZZ' || clean === 'UN') return ''
+  return String.fromCodePoint(
+    0x1F1E6 + clean.charCodeAt(0) - 65,
+    0x1F1E6 + clean.charCodeAt(1) - 65,
+  )
+}
+
+const matchKeywordRegion = (rawText) => {
+  const text = String(rawText || '').toLowerCase()
+  if (!text.trim()) return null
+  if (/香港|hong\s*kong|\bhk\b|\bhkg\b/.test(text)) {
+    return { ...COUNTRY_CODE_META.HK }
   }
-  if (/台湾|台北|\btw\b|taiwan/.test(text)) {
-    return { flag: '🇹🇼', region: '中国台湾', tag: '亚太直连' }
+  if (/台湾|台北|台中|台南|高雄|彰化|新北|桃园|新竹|\btw\b|\btpe\b|taiwan|taipei|taichung|changhua|kaohsiung|hinet/.test(text)) {
+    return { ...COUNTRY_CODE_META.TW }
   }
-  if (/日本|东京|大阪|\bjp\b|japan|tokyo|osaka/.test(text)) {
-    return { flag: '🇯🇵', region: '日本', tag: '软银/IIJ' }
+  if (/澳门|macau|macao|\bmo\b/.test(text)) {
+    return { ...COUNTRY_CODE_META.MO }
   }
-  if (/美国|美西|美东|圣何塞|洛杉矶|西雅图|达拉斯|纽约|\bus\b|\busa\b|\bsjc\b|\blax\b|\bsea\b/.test(text)) {
-    return { flag: '🇺🇸', region: '美国', tag: '9929/4837' }
+  if (/日本|东京|大阪|千叶|福冈|名古屋|横滨|\bjp\b|\bnrt\b|\bkix\b|\btyo\b|japan|tokyo|osaka|chiba/.test(text)) {
+    return { ...COUNTRY_CODE_META.JP }
   }
-  if (/新加坡|\bsg\b|singapore/.test(text)) {
-    return { flag: '🇸🇬', region: '新加坡', tag: '亚太直连' }
+  if (/美国|美西|美东|硅谷|圣何塞|洛杉矶|西雅图|达拉斯|纽约|芝加哥|凤凰城|弗吉尼亚|阿什本|波特兰|亚特兰大|迈阿密|休斯顿|盐湖城|加州|\bus\b|\busa\b|\bsjc\b|\blax\b|\bsea\b|\bdfw\b|\bord\b|\biad\b|\bewr\b|united\s*states|california|silicon\s*valley|san\s*jose|los\s*angeles|seattle|dallas|new\s*york|chicago|phoenix|ashburn|virginia/.test(text)) {
+    return { ...COUNTRY_CODE_META.US }
   }
-  if (/德国|法兰克福|\bde\b|germany|\bfra\b/.test(text)) {
-    return { flag: '🇩🇪', region: '德国', tag: '欧洲BGP' }
+  if (/新加坡|\bsg\b|\bsin\b|singapore/.test(text)) {
+    return { ...COUNTRY_CODE_META.SG }
   }
-  if (/英国|伦敦|\buk\b|\bgb\b|london/.test(text)) {
-    return { flag: '🇬🇧', region: '英国', tag: '欧洲BGP' }
+  if (/德国|法兰克福|黑森|慕尼黑|柏林|纽伦堡|杜塞尔多夫|\bde\b|\bfra\b|germany|frankfurt|hessen|munich|berlin|nuremberg/.test(text)) {
+    return { ...COUNTRY_CODE_META.DE }
   }
-  if (/韩国|首尔|\bkr\b|korea|seoul/.test(text)) {
-    return { flag: '🇰🇷', region: '韩国', tag: '亚太直连' }
+  if (/英国|伦敦|英格兰|曼彻斯特|伯明翰|考文垂|\buk\b|\bgb\b|\blhr\b|\blon\b|united\s*kingdom|england|britain|london|manchester/.test(text)) {
+    return { ...COUNTRY_CODE_META.GB }
   }
-  if (/俄罗斯|莫斯科|\bru\b|russia|moscow/.test(text)) {
-    return { flag: '🇷🇺', region: '俄罗斯', tag: '欧亚伯利亚' }
+  if (/韩国|首尔|釜山|仁川|\bkr\b|\bicn\b|korea|seoul|busan/.test(text)) {
+    return { ...COUNTRY_CODE_META.KR }
   }
-  if (/筋斗[雲云]|国内|中国|大陆|广州|北京|上海|深圳|杭州|成都|南京|武汉|电信|联通|移动|\bcn\b|china/.test(text)) {
-    return { flag: '🇨🇳', region: '中国大陆', tag: '国内BGP' }
+  if (/俄罗斯|莫斯科|圣彼得堡|新西伯利亚|海参崴|伯力|\bru\b|russia|moscow/.test(text)) {
+    return { ...COUNTRY_CODE_META.RU }
   }
+  if (/法国|巴黎|马赛|\bfr\b|\bcdg\b|france|paris/.test(text)) {
+    return { ...COUNTRY_CODE_META.FR }
+  }
+  if (/荷兰|阿姆斯特丹|\bnl\b|\bams\b|netherlands|amsterdam/.test(text)) {
+    return { ...COUNTRY_CODE_META.NL }
+  }
+  if (/加拿大|多伦多|温哥华|蒙特利尔|\bca\b|\byyz\b|\byvr\b|canada|toronto|vancouver|montreal/.test(text)) {
+    return { ...COUNTRY_CODE_META.CA }
+  }
+  if (/澳大利亚|澳洲|悉尼|墨尔本|\bau\b|\bsyd\b|australia|sydney|melbourne/.test(text)) {
+    return { ...COUNTRY_CODE_META.AU }
+  }
+  if (/马来西亚|吉隆坡|\bmy\b|\bkul\b|malaysia|kuala\s*lumpur/.test(text)) {
+    return { ...COUNTRY_CODE_META.MY }
+  }
+  if (/泰国|曼谷|\bth\b|\bbkk\b|thailand|bangkok/.test(text)) {
+    return { ...COUNTRY_CODE_META.TH }
+  }
+  if (/越南|河内|胡志明|\bvn\b|vietnam|hanoi/.test(text)) {
+    return { ...COUNTRY_CODE_META.VN }
+  }
+  if (/印尼|印度尼西亚|雅加达|\bid\b|indonesia|jakarta/.test(text)) {
+    return { ...COUNTRY_CODE_META.ID }
+  }
+  if (/菲律宾|马尼拉|\bph\b|philippines|manila/.test(text)) {
+    return { ...COUNTRY_CODE_META.PH }
+  }
+  if (/印度|孟买|新德里|\bin\b|india|mumbai/.test(text)) {
+    return { ...COUNTRY_CODE_META.IN }
+  }
+  if (/土耳其|伊斯坦布尔|\btr\b|turkey|istanbul/.test(text)) {
+    return { ...COUNTRY_CODE_META.TR }
+  }
+  if (/筋斗[雲云]|国内|中国|大陆|广州|北京|上海|深圳|杭州|成都|南京|武汉|广东|湖北|浙江|江苏|四川|福建|山东|河南|湖南|天津|重庆|西安|苏州|东莞|佛山|宁波|无锡|青岛|郑州|长沙|福州|厦门|合肥|南昌|济南|沈阳|大连|哈尔滨|长春|石家庄|太原|呼和浩特|南宁|海口|贵阳|昆明|拉萨|兰州|西宁|银川|乌鲁木齐|电信|联通|移动|\bcn\b|china|guangdong|hubei|zhejiang|jiangsu|beijing|shanghai|shenzhen|guangzhou/.test(text)) {
+    return { ...COUNTRY_CODE_META.CN }
+  }
+  return null
+}
+
+export const detectRegionAndFlag = (name = '', hostname = '', extra = null) => {
+  let nodeName = ''
+  let nodeHostname = ''
+  let hint = extra
+
+  if (typeof name === 'object' && name !== null) {
+    hint = name
+    nodeName = safeText(name.name)
+    nodeHostname = safeText(name.hostname || name.resource?.hostname)
+  } else {
+    nodeName = safeText(name)
+    nodeHostname = safeText(hostname)
+  }
+
+  // 1. Check explicit region keywords in the node name first
+  const byName = matchKeywordRegion(nodeName)
+  if (byName) return byName
+
+  // 2. Check structured GeoIP / IPQA country codes and location fields
+  if (hint && typeof hint === 'object') {
+    if (hint.flag && hint.flag !== '🌐' && hint.region && hint.region !== '公网节点') {
+      return { flag: hint.flag, region: hint.region, tag: hint.tag || 'BGP网络' }
+    }
+    const res = safeObject(hint.resource)
+    const ipq = safeObject(hint.ip_quality || hint.ipQuality || res.ip_quality || res.ipQuality)
+    const ipqa = safeObject(hint.ipqa || res.ipqa)
+    const ipqaV4 = safeObject(ipqa.ipv4)
+    const ipqaV6 = safeObject(ipqa.ipv6)
+
+    const codeCandidates = [
+      hint.country_code,
+      hint.countryCode,
+      ipq.country,
+      ipqaV4.country,
+      ipqaV6.country,
+      hint.country,
+      res.country,
+    ]
+    for (const rawCode of codeCandidates) {
+      const code = String(rawCode || '').trim().toUpperCase()
+      if (!code) continue
+      if (COUNTRY_CODE_META[code]) {
+        return { ...COUNTRY_CODE_META[code] }
+      }
+      const byCodeKeyword = matchKeywordRegion(code)
+      if (byCodeKeyword) return byCodeKeyword
+      if (/^[A-Z]{2}$/.test(code)) {
+        const emoji = isoCodeToFlagEmoji(code)
+        if (emoji) {
+          const regionLabel = safeText(ipqaV4.region || ipq.region || ipq.city || hint.region, code)
+          return { flag: emoji, region: regionLabel, tag: 'BGP网络' }
+        }
+      }
+    }
+
+    const geoText = [
+      ipqaV4.region,
+      ipqaV4.city,
+      ipqaV6.region,
+      ipqaV6.city,
+      ipq.region,
+      ipq.city,
+      hint.region !== '公网节点' ? hint.region : '',
+    ].filter(Boolean).join(' ')
+    const byGeoText = matchKeywordRegion(geoText)
+    if (byGeoText) return byGeoText
+  } else if (typeof hint === 'string' && hint.trim()) {
+    const code = hint.trim().toUpperCase()
+    if (COUNTRY_CODE_META[code]) return { ...COUNTRY_CODE_META[code] }
+    const byHint = matchKeywordRegion(hint)
+    if (byHint) return byHint
+  }
+
+  // 3. Check combined nodeName + nodeHostname
+  const byCombined = matchKeywordRegion(`${nodeName} ${nodeHostname}`)
+  if (byCombined) return byCombined
+
   return { flag: '🌐', region: '公网节点', tag: 'BGP网络' }
 }
 
@@ -193,7 +356,7 @@ export const normalizeNode = (node) => {
   const uuid = safeText(source.uuid)
   const name = safeText(source.name, '未命名节点')
   const hostname = safeText(resource.hostname)
-  const meta = detectRegionAndFlag(name, hostname)
+  const meta = detectRegionAndFlag(name, hostname, source)
 
   const memUsed = numeric(resource.memory_used_bytes)
   const memTotal = numeric(resource.memory_total_bytes)
