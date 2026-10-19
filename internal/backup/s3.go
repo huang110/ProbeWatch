@@ -11,9 +11,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // S3Config holds configuration for an S3-compatible remote backup target.
@@ -26,6 +28,10 @@ type S3Config struct {
 	AccessKey      string `json:"access_key"`
 	SecretKey      string `json:"secret_key"`
 	ForcePathStyle bool   `json:"force_path_style"`
+	// AllowPrivateNetwork is an explicit opt-in for self-hosted backup stores
+	// on private LANs or overlay networks. It never changes the default SSRF
+	// protection applied to public backup endpoints.
+	AllowPrivateNetwork bool `json:"allow_private_network"`
 }
 
 // Masked returns a safe copy of S3Config with secret key masked for API responses.
@@ -51,15 +57,56 @@ func NewS3Client(cfg S3Config) *S3Client {
 		cfg.Region = "us-east-1"
 	}
 	return &S3Client{
-		cfg: cfg,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		cfg:        cfg,
+		httpClient: backupHTTPClient(cfg.AllowPrivateNetwork),
 	}
 }
 
 // PutObject uploads data to S3 with content hashing and SigV4 authentication.
 func (c *S3Client) PutObject(ctx context.Context, objectKey string, data []byte, contentType string) error {
+	if strings.Trim(objectKey, "/") == "" {
+		return errors.New("s3 object key is required")
+	}
+	return c.putObjectReader(ctx, objectKey, bytes.NewReader(data), int64(len(data)), sha256Hex(data), contentType)
+}
+
+// PutObjectFile uploads a local file without loading the complete object into
+// memory. SigV4 needs the payload hash up front, so the file is read once for
+// hashing and reopened for the actual upload.
+func (c *S3Client) PutObjectFile(ctx context.Context, objectKey, path, contentType string) error {
+	if strings.Trim(objectKey, "/") == "" {
+		return errors.New("s3 object key is required")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat s3 upload file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("s3 upload path is not a regular file")
+	}
+
+	hashFile, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open s3 upload file for hashing: %w", err)
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, hashFile); err != nil {
+		_ = hashFile.Close()
+		return fmt.Errorf("hash s3 upload file: %w", err)
+	}
+	if err := hashFile.Close(); err != nil {
+		return fmt.Errorf("close s3 upload file after hashing: %w", err)
+	}
+
+	uploadFile, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open s3 upload file: %w", err)
+	}
+	defer uploadFile.Close()
+	return c.putObjectReader(ctx, objectKey, uploadFile, info.Size(), hex.EncodeToString(hash.Sum(nil)), contentType)
+}
+
+func (c *S3Client) putObjectReader(ctx context.Context, objectKey string, data io.Reader, size int64, payloadHash, contentType string) error {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
@@ -70,15 +117,15 @@ func (c *S3Client) PutObject(ctx context.Context, objectKey string, data []byte,
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, data)
 	if err != nil {
 		return fmt.Errorf("create put request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	req.ContentLength = size
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", size))
 
-	payloadHash := sha256Hex(data)
 	if err := c.signRequest(req, payloadHash); err != nil {
 		return fmt.Errorf("sign s3 request: %w", err)
 	}
@@ -99,6 +146,9 @@ func (c *S3Client) PutObject(ctx context.Context, objectKey string, data []byte,
 
 // DeleteObject deletes an object from the S3 bucket.
 func (c *S3Client) DeleteObject(ctx context.Context, objectKey string) error {
+	if strings.Trim(objectKey, "/") == "" {
+		return errors.New("s3 object key is required")
+	}
 	fullKey := c.buildKey(objectKey)
 	reqURL, err := c.buildURL(fullKey)
 	if err != nil {
@@ -157,17 +207,15 @@ func (c *S3Client) buildKey(key string) string {
 }
 
 func (c *S3Client) buildURL(key string) (string, error) {
-	endpoint := c.cfg.Endpoint
-	if endpoint == "" {
-		endpoint = "https://s3.amazonaws.com"
-	}
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		endpoint = "https://" + endpoint
-	}
-
-	u, err := url.Parse(endpoint)
+	u, err := parseBackupEndpoint(c.cfg.Endpoint, "https://s3.amazonaws.com")
 	if err != nil {
 		return "", fmt.Errorf("parse endpoint: %w", err)
+	}
+	if c.cfg.Bucket == "" || strings.ContainsAny(c.cfg.Bucket, `/\\?#`) || strings.TrimSpace(c.cfg.Bucket) != c.cfg.Bucket || strings.Contains(c.cfg.Bucket, "..") || strings.IndexFunc(c.cfg.Bucket, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("invalid bucket name")
+	}
+	if err := validateBackupObjectKey(key); err != nil {
+		return "", err
 	}
 
 	// Always path style for compatibility with R2, MinIO, OSS
@@ -180,6 +228,10 @@ func (c *S3Client) buildURL(key string) (string, error) {
 	}
 
 	u.Path = path
+	u.RawPath = ""
+	if len(u.EscapedPath()) > maxBackupPathLength {
+		return "", fmt.Errorf("s3 object path is too long")
+	}
 	return u.String(), nil
 }
 

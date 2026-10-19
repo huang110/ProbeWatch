@@ -21,6 +21,10 @@ func (s *Server) agentTerminalTunnel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.cfg.EnableRemoteTerminal {
+		writeJSONError(w, http.StatusServiceUnavailable, "remote terminal is disabled by server configuration")
+		return
+	}
 
 	conn, err := terminal.Upgrade(w, r)
 	if err != nil {
@@ -30,7 +34,7 @@ func (s *Server) agentTerminalTunnel(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	s.terminalManager.RegisterTunnel(node.UUID, conn)
-	defer s.terminalManager.UnregisterTunnel(node.UUID)
+	defer s.terminalManager.UnregisterTunnelConn(node.UUID, conn)
 
 	for {
 		var env terminal.Envelope
@@ -62,7 +66,22 @@ func (s *Server) terminalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := make([]statusItem, 0, len(nodes))
+	user, hasUser := UserFromContext(r.Context())
+	if !hasUser {
+		if resolved, ok := s.authenticateUser(w, r); ok && resolved != nil {
+			user = *resolved
+			hasUser = true
+		} else {
+			return
+		}
+	}
 	for _, n := range nodes {
+		// An administrator may still be restricted to an explicit node allow
+		// list. Do not turn the terminal status endpoint into a fleet-wide
+		// inventory leak for scoped administrators/PATs.
+		if hasUser && !user.CanAccessNode(n.UUID) {
+			continue
+		}
 		results = append(results, statusItem{
 			ID:             n.ID,
 			UUID:           n.UUID,
@@ -84,15 +103,20 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.service.AuthenticateWithError(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
-	}
-	user, err := s.service.Store().GetAdminUser(r.Context(), session.AdminUserID)
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
+	user, hasUser := UserFromContext(r.Context())
+	actorID := user.ID
+	if !hasUser {
+		session, err := s.service.AuthenticateWithError(r, time.Now().UTC())
+		if err != nil {
+			writeAuthenticationError(w, err)
+			return
+		}
+		user, err = s.service.Store().GetAdminUser(r.Context(), session.AdminUserID)
+		if err != nil {
+			writeAuthenticationError(w, err)
+			return
+		}
+		actorID = session.AdminUserID
 	}
 	if user.Disabled {
 		writeJSONError(w, http.StatusForbidden, "user account is disabled")
@@ -143,6 +167,10 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	if !user.CanAccessNode(node.UUID) {
+		writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+		return
+	}
 
 	if !s.terminalManager.IsNodeConnected(node.UUID) {
 		writeJSONError(w, http.StatusServiceUnavailable, "agent terminal is offline or not enabled on this node")
@@ -170,7 +198,7 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 		"duration_ms": res.DurationMS,
 		"client_ip":   publicLimiterKey(r),
 	})
-	_ = s.service.Store().RecordAudit(r.Context(), "terminal_exec", node.ID, session.AdminUserID, meta)
+	_ = s.service.Store().RecordAudit(r.Context(), "terminal_exec", node.ID, actorID, meta)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"exit_code":   res.ExitCode,
@@ -182,15 +210,29 @@ func (s *Server) terminalExec(w http.ResponseWriter, r *http.Request) {
 
 // terminalWS establishes a full interactive terminal session with the agent node.
 func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
-	sessionUser, err := s.service.AuthenticateWithError(r, time.Now().UTC())
-	if err != nil {
-		writeAuthenticationError(w, err)
+	// A browser WebSocket handshake carries the session cookie automatically,
+	// but does not pass through the normal CSRF middleware. Require an explicit
+	// same-origin Origin before upgrading; otherwise any third-party page could
+	// perform CSWSH and obtain an interactive shell on an online node.
+	if !sameOrigin(r, s.cfg.PublicBaseURL) {
+		writeJSONError(w, http.StatusForbidden, "same-origin WebSocket required")
 		return
 	}
-	user, err := s.service.Store().GetAdminUser(r.Context(), sessionUser.AdminUserID)
-	if err != nil {
-		writeAuthenticationError(w, err)
-		return
+
+	user, hasUser := UserFromContext(r.Context())
+	actorID := user.ID
+	if !hasUser {
+		sessionUser, err := s.service.AuthenticateWithError(r, time.Now().UTC())
+		if err != nil {
+			writeAuthenticationError(w, err)
+			return
+		}
+		user, err = s.service.Store().GetAdminUser(r.Context(), sessionUser.AdminUserID)
+		if err != nil {
+			writeAuthenticationError(w, err)
+			return
+		}
+		actorID = sessionUser.AdminUserID
 	}
 	if user.Disabled {
 		writeJSONError(w, http.StatusForbidden, "user account is disabled")
@@ -216,9 +258,13 @@ func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
 	rows, _ := strconv.Atoi(r.URL.Query().Get("rows"))
 	if cols <= 0 {
 		cols = 80
+	} else if cols > 500 {
+		cols = 500
 	}
 	if rows <= 0 {
 		rows = 24
+	} else if rows > 200 {
+		rows = 200
 	}
 
 	node, err := s.resolveNode(r, nodeID)
@@ -228,6 +274,10 @@ func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSONError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if !user.CanAccessNode(node.UUID) {
+		writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
 		return
 	}
 
@@ -247,7 +297,7 @@ func (s *Server) terminalWS(w http.ResponseWriter, r *http.Request) {
 			"duration_seconds": durationSeconds,
 			"client_ip":        publicLimiterKey(r),
 		})
-		_ = s.service.Store().RecordAudit(r.Context(), "terminal_session", node.ID, sessionUser.AdminUserID, meta)
+			_ = s.service.Store().RecordAudit(r.Context(), "terminal_session", node.ID, actorID, meta)
 	})
 	if err != nil {
 		_ = browserConn.WriteJSON(terminal.Envelope{

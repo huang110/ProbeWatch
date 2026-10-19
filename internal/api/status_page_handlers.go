@@ -7,17 +7,115 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
 )
 
-var (
-	statusPageCacheMu sync.RWMutex
-	statusPageCacheAt time.Time
-	statusPageCache   *db.PublicStatusPageResponse
-)
+// Public status pages intentionally expose only presentation fields. The
+// admin config contains internal node database IDs and an arbitrary custom CSS
+// blob; returning that config verbatim would disclose implementation details
+// (and needlessly turn an operator-authored CSS payload into public content).
+type publicStatusPageComponent struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Description string `json:"description,omitempty"`
+	ShowLatency bool   `json:"show_latency"`
+	Order       int    `json:"order"`
+}
+
+type publicStatusPageConfig struct {
+	Title          string                      `json:"title"`
+	Description    string                      `json:"description"`
+	Announcement   string                      `json:"announcement"`
+	ShowUptimeDays int                         `json:"show_uptime_days"`
+	Components     []publicStatusPageComponent `json:"components"`
+}
+
+type publicIncidentUpdate struct {
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+type publicIncident struct {
+	Title            string                 `json:"title"`
+	Status           string                 `json:"status"`
+	Impact           string                 `json:"impact"`
+	IsMaintenance    bool                   `json:"is_maintenance"`
+	ScheduledStartAt *int64                 `json:"scheduled_start_at,omitempty"`
+	ScheduledEndAt   *int64                 `json:"scheduled_end_at,omitempty"`
+	CreatedAt        int64                  `json:"created_at"`
+	ResolvedAt       *int64                 `json:"resolved_at,omitempty"`
+	UpdatedAt        int64                  `json:"updated_at"`
+	Updates          []publicIncidentUpdate `json:"updates,omitempty"`
+}
+
+type publicComponentStatus struct {
+	Component     publicStatusPageComponent `json:"component"`
+	CurrentStatus string                    `json:"current_status"`
+	LatencyMs     *float64                  `json:"latency_ms,omitempty"`
+	Uptime24h     float64                   `json:"uptime_24h"`
+	Uptime7d      float64                   `json:"uptime_7d"`
+	Uptime30d     float64                   `json:"uptime_30d"`
+	Uptime90d     float64                   `json:"uptime_90d"`
+	DailyUptimes  []db.DailyUptime          `json:"daily_uptimes"`
+}
+
+type publicStatusPageResponse struct {
+	Config          publicStatusPageConfig  `json:"config"`
+	OverallStatus   string                  `json:"overall_status"`
+	OverallMessage  string                  `json:"overall_message"`
+	ActiveIncidents []publicIncident         `json:"active_incidents"`
+	Maintenance     []publicIncident         `json:"maintenance"`
+	Components      []publicComponentStatus `json:"components"`
+	LastUpdatedAt   time.Time               `json:"last_updated_at"`
+}
+
+func sanitizePublicStatusPageConfig(cfg db.StatusPageConfig) publicStatusPageConfig {
+	components := make([]publicStatusPageComponent, 0, len(cfg.Components))
+	for index, component := range cfg.Components {
+		components = append(components, publicStatusPageComponent{
+			ID:          fmt.Sprintf("component-%d", index+1),
+			Name:        component.Name,
+			Group:       component.Group,
+			Description: component.Description,
+			ShowLatency: component.ShowLatency,
+			Order:       component.Order,
+		})
+	}
+	return publicStatusPageConfig{
+		Title:          cfg.Title,
+		Description:    cfg.Description,
+		Announcement:   cfg.Announcement,
+		ShowUptimeDays: cfg.ShowUptimeDays,
+		Components:     components,
+	}
+}
+
+func sanitizePublicIncident(incident db.Incident) publicIncident {
+	updates := make([]publicIncidentUpdate, 0, len(incident.Updates))
+	for _, update := range incident.Updates {
+		updates = append(updates, publicIncidentUpdate{
+			Status:    update.Status,
+			Message:   update.Message,
+			CreatedAt: update.CreatedAt,
+		})
+	}
+	return publicIncident{
+		Title:            incident.Title,
+		Status:           incident.Status,
+		Impact:           incident.Impact,
+		IsMaintenance:    incident.IsMaintenance,
+		ScheduledStartAt: incident.ScheduledStartAt,
+		ScheduledEndAt:   incident.ScheduledEndAt,
+		CreatedAt:        incident.CreatedAt,
+		ResolvedAt:       incident.ResolvedAt,
+		UpdatedAt:        incident.UpdatedAt,
+		Updates:          updates,
+	}
+}
 
 func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -26,20 +124,34 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	now := time.Now().UTC()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+	if !s.publicLimiter.Allow(s.publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 
 	// 5-second public cache to absorb traffic spikes
-	statusPageCacheMu.RLock()
-	if statusPageCache != nil && !statusPageCacheAt.IsZero() && now.Sub(statusPageCacheAt) < 5*time.Second {
-		cached := statusPageCache
-		statusPageCacheMu.RUnlock()
+	s.statusPageCacheMu.RLock()
+	if s.statusPageCache != nil && !s.statusPageCacheAt.IsZero() && now.Sub(s.statusPageCacheAt) < 5*time.Second {
+		cached := s.statusPageCache
+		s.statusPageCacheMu.RUnlock()
 		writeJSON(w, http.StatusOK, cached)
 		return
 	}
-	statusPageCacheMu.RUnlock()
+	s.statusPageCacheMu.RUnlock()
+	// The status page aggregates components, incidents, uptime and recent
+	// checks. Serialize cache misses so a public traffic burst cannot fan out
+	// into the same SQLite workload on a small VPS.
+	s.statusPageBuildMu.Lock()
+	defer s.statusPageBuildMu.Unlock()
+	now = time.Now().UTC()
+	s.statusPageCacheMu.RLock()
+	if s.statusPageCache != nil && !s.statusPageCacheAt.IsZero() && now.Sub(s.statusPageCacheAt) < 5*time.Second {
+		cached := s.statusPageCache
+		s.statusPageCacheMu.RUnlock()
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
+	s.statusPageCacheMu.RUnlock()
 
 	ctx := r.Context()
 	cfg, err := s.service.Store().GetStatusPageConfig(ctx, "default")
@@ -55,13 +167,14 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	activeIncidents := make([]db.Incident, 0)
-	maintenances := make([]db.Incident, 0)
+	activeIncidents := make([]publicIncident, 0)
+	maintenances := make([]publicIncident, 0)
 	for _, inc := range incidents {
+		publicInc := sanitizePublicIncident(inc)
 		if inc.IsMaintenance {
-			maintenances = append(maintenances, inc)
+			maintenances = append(maintenances, publicInc)
 		} else {
-			activeIncidents = append(activeIncidents, inc)
+			activeIncidents = append(activeIncidents, publicInc)
 		}
 	}
 
@@ -77,12 +190,12 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 		nodesMap[n.ID] = n
 	}
 
-	componentStatuses := make([]db.ComponentStatus, 0, len(cfg.Components))
+	componentStatuses := make([]publicComponentStatus, 0, len(cfg.Components))
 	hasOutage := false
 	hasDegraded := false
 	hasMajorOutage := false
 
-	for _, comp := range cfg.Components {
+	for componentIndex, comp := range cfg.Components {
 		dailyUptimes, u24h, u7d, u30d, u90d, _ := s.service.Store().CalculateComponentSLA(ctx, comp.NodeID, days)
 
 		curStatus := "operational"
@@ -124,8 +237,15 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 			hasDegraded = true
 		}
 
-		componentStatuses = append(componentStatuses, db.ComponentStatus{
-			Component:     comp,
+		componentStatuses = append(componentStatuses, publicComponentStatus{
+			Component: publicStatusPageComponent{
+				ID:          fmt.Sprintf("component-%d", componentIndex+1),
+				Name:        comp.Name,
+				Group:       comp.Group,
+				Description: comp.Description,
+				ShowLatency: comp.ShowLatency,
+				Order:       comp.Order,
+			},
 			CurrentStatus: curStatus,
 			LatencyMs:     latencyVal,
 			Uptime24h:     u24h,
@@ -164,8 +284,8 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 		overallMessage = "系统正在进行计划维护"
 	}
 
-	resp := &db.PublicStatusPageResponse{
-		Config:          *cfg,
+	resp := &publicStatusPageResponse{
+		Config:          sanitizePublicStatusPageConfig(*cfg),
 		OverallStatus:   overallStatus,
 		OverallMessage:  overallMessage,
 		ActiveIncidents: activeIncidents,
@@ -174,10 +294,10 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 		LastUpdatedAt:   now,
 	}
 
-	statusPageCacheMu.Lock()
-	statusPageCache = resp
-	statusPageCacheAt = now
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = resp
+	s.statusPageCacheAt = now
+	s.statusPageCacheMu.Unlock()
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -185,6 +305,10 @@ func (s *Server) publicStatusPageHandler(w http.ResponseWriter, r *http.Request)
 func (s *Server) publicIncidentsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 
@@ -200,15 +324,23 @@ func (s *Server) publicIncidentsHandler(w http.ResponseWriter, r *http.Request) 
 			offset = val
 		}
 	}
+	if offset > 10000 {
+		writeJSONError(w, http.StatusBadRequest, "offset too large")
+		return
+	}
 
 	incidents, total, err := s.service.Store().ListIncidents(r.Context(), true, limit, offset)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to query incidents")
 		return
 	}
+	publicIncidents := make([]publicIncident, 0, len(incidents))
+	for _, incident := range incidents {
+		publicIncidents = append(publicIncidents, sanitizePublicIncident(incident))
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"incidents": incidents,
+		"incidents": publicIncidents,
 		"total":     total,
 		"limit":     limit,
 		"offset":    offset,
@@ -221,9 +353,9 @@ func (s *Server) adminStatusPageRoute(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		middleware.RequireAuth(http.HandlerFunc(s.adminGetStatusPageConfig)).ServeHTTP(w, r)
+		middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.adminGetStatusPageConfig))).ServeHTTP(w, r)
 	case http.MethodPut:
-		middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.adminUpdateStatusPageConfig))).ServeHTTP(w, r)
+		middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.adminUpdateStatusPageConfig)))).ServeHTTP(w, r)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -258,9 +390,10 @@ func (s *Server) adminUpdateStatusPageConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Invalidate public cache
-	statusPageCacheMu.Lock()
-	statusPageCache = nil
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = nil
+	s.statusPageCacheAt = time.Time{}
+	s.statusPageCacheMu.Unlock()
 
 	// Audit log
 	_ = s.service.Store().RecordAuditLog(r.Context(), db.AuditLogEntry{
@@ -292,9 +425,9 @@ func (s *Server) adminIncidentsRoute(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 4 && parts[1] == "api" && parts[2] == "admin" && parts[3] == "incidents" {
 		switch r.Method {
 		case http.MethodGet:
-			middleware.RequireAuth(http.HandlerFunc(s.adminListIncidents)).ServeHTTP(w, r)
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.adminListIncidents))).ServeHTTP(w, r)
 		case http.MethodPost:
-			middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.adminCreateIncident))).ServeHTTP(w, r)
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.adminCreateIncident)))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -305,17 +438,17 @@ func (s *Server) adminIncidentsRoute(w http.ResponseWriter, r *http.Request) {
 		incidentID := parts[4]
 		switch r.Method {
 		case http.MethodGet:
-			middleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.adminGetIncident(w, r, incidentID)
-			})).ServeHTTP(w, r)
+			}))).ServeHTTP(w, r)
 		case http.MethodPut:
-			middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.adminUpdateIncident(w, r, incidentID)
-			}))).ServeHTTP(w, r)
+			})))).ServeHTTP(w, r)
 		case http.MethodDelete:
-			middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.adminDeleteIncident(w, r, incidentID)
-			}))).ServeHTTP(w, r)
+			})))).ServeHTTP(w, r)
 		default:
 			writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -325,9 +458,9 @@ func (s *Server) adminIncidentsRoute(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 6 && parts[1] == "api" && parts[2] == "admin" && parts[3] == "incidents" && parts[5] == "updates" {
 		incidentID := parts[4]
 		if r.Method == http.MethodPost {
-			middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				s.adminAddIncidentUpdate(w, r, incidentID)
-			}))).ServeHTTP(w, r)
+			})))).ServeHTTP(w, r)
 			return
 		}
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -410,9 +543,10 @@ func (s *Server) adminCreateIncident(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Invalidate public cache
-	statusPageCacheMu.Lock()
-	statusPageCache = nil
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = nil
+	s.statusPageCacheAt = time.Time{}
+	s.statusPageCacheMu.Unlock()
 
 	// Audit log
 	_ = s.service.Store().RecordAuditLog(r.Context(), db.AuditLogEntry{
@@ -467,9 +601,10 @@ func (s *Server) adminUpdateIncident(w http.ResponseWriter, r *http.Request, inc
 	}
 
 	// Invalidate public cache
-	statusPageCacheMu.Lock()
-	statusPageCache = nil
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = nil
+	s.statusPageCacheAt = time.Time{}
+	s.statusPageCacheMu.Unlock()
 
 	// Audit log
 	_ = s.service.Store().RecordAuditLog(r.Context(), db.AuditLogEntry{
@@ -521,9 +656,10 @@ func (s *Server) adminAddIncidentUpdate(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Invalidate public cache
-	statusPageCacheMu.Lock()
-	statusPageCache = nil
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = nil
+	s.statusPageCacheAt = time.Time{}
+	s.statusPageCacheMu.Unlock()
 
 	// Audit log
 	_ = s.service.Store().RecordAuditLog(r.Context(), db.AuditLogEntry{
@@ -559,9 +695,10 @@ func (s *Server) adminDeleteIncident(w http.ResponseWriter, r *http.Request, inc
 	}
 
 	// Invalidate public cache
-	statusPageCacheMu.Lock()
-	statusPageCache = nil
-	statusPageCacheMu.Unlock()
+	s.statusPageCacheMu.Lock()
+	s.statusPageCache = nil
+	s.statusPageCacheAt = time.Time{}
+	s.statusPageCacheMu.Unlock()
 
 	// Audit log
 	_ = s.service.Store().RecordAuditLog(r.Context(), db.AuditLogEntry{

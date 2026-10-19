@@ -126,8 +126,9 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	allowedNodes := strings.TrimSpace(req.AllowedNodes)
 	if allowedNodes == "" {
 		allowedNodes = user.AllowedNodes
-	} else if !user.IsAdmin() && user.AllowedNodes != "*" {
-		// Non-admin can only grant subset of their allowed nodes
+	} else if strings.TrimSpace(user.AllowedNodes) != "*" {
+		// A scoped user (including a scoped administrator) can only grant a
+		// subset of the nodes currently allowed to that user.
 		requested := strings.Split(allowedNodes, ",")
 		for _, node := range requested {
 			node = strings.TrimSpace(node)
@@ -167,7 +168,7 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		ResourceType: "token",
 		ResourceID:   token.ID,
 		Detail:       fmt.Sprintf("Created API token %q with role %q", token.Name, token.Role),
-		IPAddress:    clientIP(r),
+		IPAddress:    s.publicClientIP(r),
 		StatusCode:   http.StatusCreated,
 		CreatedAt:    now,
 	})
@@ -219,7 +220,7 @@ func (s *Server) updateToken(w http.ResponseWriter, r *http.Request, tokenID str
 		ResourceType: "token",
 		ResourceID:   tokenID,
 		Detail:       fmt.Sprintf("Token %s was %s", tokenID, actionDesc),
-		IPAddress:    clientIP(r),
+		IPAddress:    s.publicClientIP(r),
 		StatusCode:   http.StatusOK,
 		CreatedAt:    time.Now().UTC(),
 	})
@@ -256,7 +257,7 @@ func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request, tokenID str
 		ResourceType: "token",
 		ResourceID:   tokenID,
 		Detail:       fmt.Sprintf("Token %s was deleted", tokenID),
-		IPAddress:    clientIP(r),
+		IPAddress:    s.publicClientIP(r),
 		StatusCode:   http.StatusOK,
 		CreatedAt:    time.Now().UTC(),
 	})
@@ -265,19 +266,4 @@ func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request, tokenID str
 		"status":  "ok",
 		"message": "token deleted successfully",
 	})
-}
-
-func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		parts := strings.Split(fwd, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		return strings.TrimSpace(realIP)
-	}
-	remote := r.RemoteAddr
-	if idx := strings.LastIndex(remote, ":"); idx != -1 {
-		return remote[:idx]
-	}
-	return remote
 }

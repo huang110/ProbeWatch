@@ -73,14 +73,19 @@ func StartControlPlaneContext(ctx context.Context, cfg config.Config) error {
 		}()
 	}
 	startBackground(func(ctx context.Context) { runAuthCleanup(ctx, service) })
-	startBackground(func(ctx context.Context) { runLifecycleCleanup(ctx, store) })
-	startBackground(func(ctx context.Context) { runHistoryAggregation(ctx, store) })
-	startBackground(func(ctx context.Context) { runBillingCycleWatcher(ctx, store) })
+	// Resolve the store for every pass.  A live database restore swaps the
+	// service's store while the HTTP server keeps running; capturing `store`
+	// here would leave these loops issuing queries against the closed pre-restore
+	// SQLite handle forever.
+	storeProvider := service.Store
+	startBackground(func(ctx context.Context) { runLifecycleCleanupWithProvider(ctx, storeProvider) })
+	startBackground(func(ctx context.Context) { runHistoryAggregationWithProvider(ctx, storeProvider) })
+	startBackground(func(ctx context.Context) { runBillingCycleWatcherWithProvider(ctx, storeProvider) })
 	notifier := notify.NewNotifier(cfg)
 	background.Add(1)
 	go func() {
 		defer background.Done()
-		notify.RunAlertDispatcher(cleanupCtx, store, notifier)
+		notify.RunAlertDispatcherWithProvider(cleanupCtx, storeProvider, notifier)
 	}()
 	serverInstance := api.NewServer(cfg, service)
 	serverInstance.SetNotifier(notifier)
@@ -150,9 +155,20 @@ func runAuthCleanup(ctx context.Context, service *auth.Service) {
 }
 
 func runLifecycleCleanup(ctx context.Context, store *db.Store) {
+	runLifecycleCleanupWithProvider(ctx, func() *db.Store { return store })
+}
+
+func runLifecycleCleanupWithProvider(ctx context.Context, provider func() *db.Store) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	cleanup := func() {
+		store := provider()
+		if store == nil {
+			if ctx.Err() == nil {
+				slog.Error("lifecycle cleanup skipped: store unavailable")
+			}
+			return
+		}
 		cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		if _, err := store.CleanupLifecycle(cleanupCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {
@@ -174,9 +190,20 @@ func runLifecycleCleanup(ctx context.Context, store *db.Store) {
 // the hourly and daily aggregate tables once per hour. A failed pass is logged
 // and retried on the next tick; it never stops the control plane.
 func runHistoryAggregation(ctx context.Context, store *db.Store) {
+	runHistoryAggregationWithProvider(ctx, func() *db.Store { return store })
+}
+
+func runHistoryAggregationWithProvider(ctx context.Context, provider func() *db.Store) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	aggregate := func() {
+		store := provider()
+		if store == nil {
+			if ctx.Err() == nil {
+				slog.Error("history aggregation skipped: store unavailable")
+			}
+			return
+		}
 		aggregateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		boundary := time.Now().UTC().Add(-db.DefaultAggregateRetentionWindow)
@@ -196,9 +223,20 @@ func runHistoryAggregation(ctx context.Context, store *db.Store) {
 }
 
 func runBillingCycleWatcher(ctx context.Context, store *db.Store) {
+	runBillingCycleWatcherWithProvider(ctx, func() *db.Store { return store })
+}
+
+func runBillingCycleWatcherWithProvider(ctx context.Context, provider func() *db.Store) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	check := func() {
+		store := provider()
+		if store == nil {
+			if ctx.Err() == nil {
+				slog.Error("billing cycle check skipped: store unavailable")
+			}
+			return
+		}
 		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		if _, err := store.CheckAndAutoResetBillingCycles(checkCtx, time.Now().UTC()); err != nil && ctx.Err() == nil {

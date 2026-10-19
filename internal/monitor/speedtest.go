@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 const (
@@ -52,6 +55,17 @@ type SpeedtestRunner struct {
 	Client       *http.Client
 	RoundTripper http.RoundTripper
 	Timeout      time.Duration
+	allowPrivate bool // test-only escape hatch; production constructors leave this false
+}
+
+// NewSpeedtestRunner creates the SSRF-safe production speedtest runner.
+func NewSpeedtestRunner() *SpeedtestRunner { return &SpeedtestRunner{} }
+
+// NewSpeedtestRunnerWithOptions is intentionally limited to isolated tests.
+// Production code must use NewSpeedtestRunner so private/link-local/metadata
+// destinations remain blocked.
+func NewSpeedtestRunnerWithOptions(allowPrivate bool) *SpeedtestRunner {
+	return &SpeedtestRunner{allowPrivate: allowPrivate}
 }
 
 // calculateSpeedMbps converts a byte count and elapsed duration to Mbps.
@@ -92,19 +106,6 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 		}
 		targetURL = fmt.Sprintf("%s://%s:%d%s", scheme, task.Host, task.Port, path)
 	}
-	result.ServerURL = targetURL
-
-	parsedURL, err := url.Parse(targetURL)
-	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		result.Status = "error"
-		result.Error = "invalid speedtest target URL scheme"
-		result.DurationMS = time.Since(started).Milliseconds()
-		return result
-	}
-	if result.ServerName == "" {
-		result.ServerName = parsedURL.Hostname()
-	}
-
 	timeout := r.Timeout
 	if timeout <= 0 {
 		timeout = defaultSpeedtestTimeout
@@ -118,18 +119,31 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 	if timeout > maxSpeedtestTimeout {
 		timeout = maxSpeedtestTimeout
 	}
-
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+
+	validatedURL, err := r.validateURL(ctx, targetURL)
+	if err != nil {
+		result.Status = "error"
+		result.Error = "invalid speedtest target: " + err.Error()
+		result.DurationMS = time.Since(started).Milliseconds()
+		return result
+	}
+	targetURL = validatedURL.String()
+	result.ServerURL = targetURL
+	if result.ServerName == "" {
+		result.ServerName = validatedURL.Hostname()
+	}
 
 	client := r.getClient()
 
 	// 1. Latency and Jitter Probing (3 pings)
 	rtts := make([]int64, 0, pingProbeCount)
+	latencyLoop:
 	for i := 0; i < pingProbeCount; i++ {
 		select {
 		case <-ctx.Done():
-			break
+			break latencyLoop
 		default:
 		}
 		pingStart := time.Now()
@@ -152,7 +166,11 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 			_ = resp.Body.Close()
 			rtts = append(rtts, time.Since(pingStart).Milliseconds())
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			break latencyLoop
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 
 	if len(rtts) > 0 {
@@ -194,23 +212,27 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 		dlStart := time.Now()
 		dlResp, dlErr := client.Do(dlReq)
 		if dlErr == nil {
-			buf := make([]byte, streamBufferSize)
-			var totalRead int64
-			limitedBody := io.LimitReader(dlResp.Body, dlBytes)
-			for {
-				n, rErr := limitedBody.Read(buf)
-				totalRead += int64(n)
-				if rErr != nil {
-					break
+			if dlResp.StatusCode < http.StatusOK || dlResp.StatusCode >= http.StatusMultipleChoices {
+				_ = dlResp.Body.Close()
+				if result.Error == "" {
+					result.Error = fmt.Sprintf("download returned HTTP status %d", dlResp.StatusCode)
 				}
-				if totalRead >= dlBytes {
-					break
+			} else {
+				buf := make([]byte, streamBufferSize)
+				var totalRead int64
+				limitedBody := io.LimitReader(dlResp.Body, dlBytes)
+				for {
+					n, rErr := limitedBody.Read(buf)
+					totalRead += int64(n)
+					if rErr != nil || totalRead >= dlBytes {
+						break
+					}
 				}
+				_ = dlResp.Body.Close()
+				dlDuration := time.Since(dlStart)
+				result.BytesReceived = totalRead
+				result.DownloadSpeedMbps = calculateSpeedMbps(totalRead, dlDuration)
 			}
-			_ = dlResp.Body.Close()
-			dlDuration := time.Since(dlStart)
-			result.BytesReceived = totalRead
-			result.DownloadSpeedMbps = calculateSpeedMbps(totalRead, dlDuration)
 		} else if result.Error == "" {
 			result.Error = fmt.Sprintf("download failed: %v", dlErr)
 		}
@@ -245,12 +267,21 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 		ulDuration := time.Since(ulStart)
 		result.BytesSent = countingBody.count
 		if ulErr == nil {
-			_, _ = io.Copy(io.Discard, ulResp.Body)
+			// A hostile endpoint must not be able to keep an agent draining an
+			// unbounded response after the upload has completed.
+			_, _ = io.CopyN(io.Discard, ulResp.Body, 64<<10)
 			_ = ulResp.Body.Close()
-			result.UploadSpeedMbps = calculateSpeedMbps(countingBody.count, ulDuration)
+			if ulResp.StatusCode < http.StatusOK || ulResp.StatusCode >= http.StatusMultipleChoices {
+				if result.Error == "" {
+					result.Error = fmt.Sprintf("upload returned HTTP status %d", ulResp.StatusCode)
+				}
+			} else {
+				result.UploadSpeedMbps = calculateSpeedMbps(countingBody.count, ulDuration)
+			}
 		} else {
-			// If POST was rejected (e.g. 404 or 405 on a read-only endpoint) but some data sent
-			result.UploadSpeedMbps = calculateSpeedMbps(countingBody.count, ulDuration)
+			if result.Error == "" {
+				result.Error = fmt.Sprintf("upload failed: %v", ulErr)
+			}
 		}
 	}
 
@@ -260,30 +291,100 @@ func (r *SpeedtestRunner) Run(parent context.Context, task protocol.CheckTask) p
 		if result.Error == "" {
 			result.Error = "benchmark unreachable"
 		}
-	} else {
+	} else if result.Error == "" {
 		result.Status = "ok"
-		result.Error = ""
+	} else {
+		result.Status = "error"
 	}
 
 	return result
 }
 
 func (r *SpeedtestRunner) getClient() *http.Client {
-	if r.Client != nil {
-		return r.Client
+	var client http.Client
+	if r.Client != nil && r.allowPrivate {
+		// Private destinations are only enabled by isolated tests. Clone the
+		// client so caller-owned redirect policy is not mutated.
+		client = *r.Client
+	} else {
+		tr := r.RoundTripper
+		if tr == nil {
+			tr = &http.Transport{
+				Proxy:           nil,
+				DialContext:     r.dialContext,
+				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+				DisableKeepAlives: false,
+				MaxIdleConns:      10,
+				IdleConnTimeout:   30 * time.Second,
+			}
+		}
+		client.Transport = tr
 	}
-	tr := r.RoundTripper
-	if tr == nil {
-		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			},
-			DisableKeepAlives: false,
-			MaxIdleConns:      10,
-			IdleConnTimeout:   30 * time.Second,
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("redirect limit exceeded")
+		}
+		if _, err := r.validateURL(req.Context(), req.URL.String()); err != nil {
+			return fmt.Errorf("unsafe redirect: %w", err)
+		}
+		return nil
+	}
+	return &client
+}
+
+func (r *SpeedtestRunner) validateURL(ctx context.Context, raw string) (*url.URL, error) {
+	u, err := security.ValidateURLWithOptions(raw, []string{"http", "https"}, true, r.allowPrivate)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.resolveHost(ctx, u.Hostname()); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (r *SpeedtestRunner) resolveHost(ctx context.Context, host string) ([]netip.Addr, error) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if !r.allowPrivate && security.IsBlockedAddress(addr) {
+			return nil, fmt.Errorf("target resolved to blocked address %q", addr)
+		}
+		return []netip.Addr{addr}, nil
+	}
+	if err := security.ValidateHost(host); err != nil {
+		return nil, err
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if !r.allowPrivate {
+		if err := security.ValidateResolvedIPs(addresses); err != nil {
+			return nil, err
 		}
 	}
-	return &http.Client{
-		Transport: tr,
+	return addresses, nil
+}
+
+func (r *SpeedtestRunner) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
 	}
+	addresses, err := r.resolveHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, addr := range addresses {
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("target resolved to no addresses")
+	}
+	return nil, lastErr
 }

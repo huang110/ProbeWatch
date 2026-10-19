@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -191,6 +192,10 @@ func (s *AIService) HandleMCPJSONRPC(ctx context.Context, body []byte) (*JSONRPC
 }
 
 func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs json.RawMessage) (*MCPCallResult, error) {
+	store := s.Store()
+	if store == nil {
+		return nil, errors.New("AI service store is unavailable")
+	}
 	switch name {
 	case "probewatch_get_overview":
 		diag, err := s.RunDiagnosis(ctx)
@@ -224,7 +229,7 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 		}
 		_ = json.Unmarshal(rawArgs, &args)
 
-		nodes, err := s.store.ListNodes(ctx)
+		nodes, err := store.ListNodes(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -260,7 +265,7 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 			}
 		}
 
-		reportedAt, payload, err := s.store.GetResourceLatest(ctx, targetNodeID)
+		reportedAt, payload, err := store.GetResourceLatest(ctx, targetNodeID)
 		if err != nil {
 			return nil, fmt.Errorf("no resource metrics found for node %s", targetNodeName)
 		}
@@ -268,7 +273,7 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 		var snap protocol.ResourceSnapshot
 		_ = json.Unmarshal(payload, &snap)
 
-		billing, _ := s.store.GetNodeCycleTraffic(ctx, targetNodeID, time.Now().UTC())
+		billing, _ := store.GetNodeCycleTraffic(ctx, targetNodeID, time.Now().UTC())
 
 		memPct := "0.0%"
 		if snap.MemoryTotalBytes > 0 {
@@ -329,7 +334,7 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 		}
 		_ = json.Unmarshal(rawArgs, &args)
 
-		nodes, err := s.store.ListNodes(ctx)
+		nodes, err := store.ListNodes(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -350,7 +355,7 @@ func (s *AIService) executeMCPTool(ctx context.Context, name string, rawArgs jso
 			if args.NodeID != "" && node.ID != args.NodeID && node.UUID != args.NodeID {
 				continue
 			}
-			mtrList, _ := s.store.ListMTRLatest(ctx, node.ID)
+			mtrList, _ := store.ListMTRLatest(ctx, node.ID)
 			for _, m := range mtrList {
 				var res protocol.MTRResult
 				if err := json.Unmarshal(m.Payload, &res); err == nil {

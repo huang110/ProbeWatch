@@ -12,3 +12,13 @@ export const escapeShell = (val) => {
 // Quote the complete argument so spaces and shell metacharacters cannot turn
 // generated installer commands into multiple arguments or extra commands.
 export const quoteShell = (val) => `"${escapeShell(val)}"`
+
+// PowerShell single-quoted strings do not interpolate variables or execute
+// backticks.  A POSIX double-quoted string is not safe here because `\` is
+// not PowerShell's escape character, so values containing `$()` or backticks
+// would still be interpreted by PowerShell when the Windows installer command
+// is pasted into a terminal.
+export const quotePowerShell = (val) => {
+  const sanitized = String(val ?? '').replace(/[\r\n]+/g, ' ')
+  return `'${sanitized.replace(/'/g, "''")}'`
+}

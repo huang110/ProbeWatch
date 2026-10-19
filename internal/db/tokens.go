@@ -68,6 +68,22 @@ func HasScope(scopes, required string) bool {
 		if p == "*" || p == required {
 			return true
 		}
+		// A broad read/write scope also satisfies the corresponding family
+		// requirement (for example, read:nodes satisfies read). This lets the
+		// middleware enforce a safe read/write baseline without making existing
+		// resource-specific scopes unusable.
+		if required == "read" && (p == "read" || strings.HasPrefix(p, "read:")) {
+			return true
+		}
+		if required == "write" && (p == "write" || strings.HasPrefix(p, "write:")) {
+			return true
+		}
+		if (p == "read" || p == "read:*") && strings.HasPrefix(required, "read:") {
+			return true
+		}
+		if (p == "write" || p == "write:*") && strings.HasPrefix(required, "write:") {
+			return true
+		}
 		// Prefix wildcard match, e.g. "read:*" matches "read:nodes"
 		if strings.HasSuffix(p, ":*") {
 			prefix := strings.TrimSuffix(p, ":*")

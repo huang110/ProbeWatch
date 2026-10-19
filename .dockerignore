@@ -8,7 +8,11 @@ credentials/
 
 frontend/node_modules/
 node_modules/
+# Keep frontend/dist in the Docker build context: frontend/embed.go embeds it
+# into the server binary. Ignore other generated dist directories.
 dist/
+!frontend/dist/
+!frontend/dist/**
 
 .git/
 .gitignore

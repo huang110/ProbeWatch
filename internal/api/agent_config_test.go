@@ -210,7 +210,7 @@ func TestAgentConfigServesMediaRegionRulesAndValidates(t *testing.T) {
 	}
 }
 
-func TestAgentConfigRejectsUnvalidatableMediaPayload(t *testing.T) {
+func TestAgentConfigSkipsUnvalidatableMediaPayload(t *testing.T) {
 	handler, store, token, _ := newAgentConfigFixture(t)
 	now := time.Now().UTC()
 
@@ -220,7 +220,89 @@ func TestAgentConfigRejectsUnvalidatableMediaPayload(t *testing.T) {
 	}
 
 	response := agentConfigGet(t, handler, token)
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("agent config status = %d %q, want 503 for unvalidatable payload", response.Code, response.Body.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("agent config status = %d %q, want 200 with invalid target skipped", response.Code, response.Body.String())
+	}
+	var decoded protocol.AgentConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Tasks) != 0 {
+		t.Fatalf("invalid target tasks = %d, want 0", len(decoded.Tasks))
+	}
+}
+
+func TestAgentConfigMapsSyntheticTargetsToStrictTasks(t *testing.T) {
+	handler, store, token, _ := newAgentConfigFixture(t)
+	targets := []db.SyntheticTargetRecord{
+		{
+			ID: "syn-http-config", Name: "Synthetic HTTP", Protocol: "https",
+			TargetURL: "https://example.com/healthz?probe=1", Method: "get",
+			Headers: `{"X-Probe":"1"}`, Assertions: `[]`, TimeoutMS: 2500,
+			IntervalSeconds: 120, ConsensusNodes: 1, Enabled: true,
+		},
+		{
+			ID: "syn-grpc-config", Name: "Synthetic gRPC", Protocol: "grpc",
+			TargetURL: "grpcs://grpc.example.com:8443/", Method: "GET",
+			Headers: `{}`, Assertions: `[]`, TimeoutMS: 3000,
+			IntervalSeconds: 60, ConsensusNodes: 1, Enabled: true,
+		},
+	}
+	for _, target := range targets {
+		if err := store.CreateSyntheticTarget(context.Background(), target); err != nil {
+			t.Fatalf("create synthetic target %s: %v", target.ID, err)
+		}
+	}
+
+	response := agentConfigGet(t, handler, token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("agent config status = %d, body = %q", response.Code, response.Body.String())
+	}
+	var payload protocol.AgentConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := payload.Validate(); err != nil {
+		t.Fatalf("synthetic config must pass strict validation: %v", err)
+	}
+	byID := make(map[string]protocol.CheckTask, len(payload.Tasks))
+	for _, task := range payload.Tasks {
+		byID[task.ID] = task
+	}
+	httpTask, ok := byID["syn-http-config"]
+	if !ok {
+		t.Fatal("HTTP synthetic target missing from agent config")
+	}
+	if httpTask.Kind != "synthetic" || httpTask.Host != "example.com" || httpTask.Port != 443 || httpTask.Path != "/healthz" || httpTask.ServerURL != targets[0].TargetURL || httpTask.Method != "GET" {
+		t.Fatalf("HTTP synthetic task mapping = %#v", httpTask)
+	}
+	grpcTask, ok := byID["syn-grpc-config"]
+	if !ok {
+		t.Fatal("gRPC synthetic target missing from agent config")
+	}
+	if grpcTask.Kind != "grpc" || grpcTask.Host != "grpc.example.com" || grpcTask.Port != 8443 || grpcTask.Path != "/" || grpcTask.ServerURL != targets[1].TargetURL {
+		t.Fatalf("gRPC synthetic task mapping = %#v", grpcTask)
+	}
+}
+
+func TestAgentConfigSkipsMalformedSyntheticTarget(t *testing.T) {
+	handler, store, token, _ := newAgentConfigFixture(t)
+	if err := store.CreateSyntheticTarget(context.Background(), db.SyntheticTargetRecord{
+		ID: "syn-malformed-config", Name: "Malformed synthetic", Protocol: "https",
+		TargetURL: "https://example.com/healthz", Headers: "not-json", Assertions: "[]",
+		TimeoutMS: 5000, IntervalSeconds: 60, ConsensusNodes: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response := agentConfigGet(t, handler, token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("agent config status = %d, body = %q; want 200 with malformed target skipped", response.Code, response.Body.String())
+	}
+	var payload protocol.AgentConfigResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Tasks) != 0 {
+		t.Fatalf("malformed synthetic tasks = %d, want 0", len(payload.Tasks))
 	}
 }

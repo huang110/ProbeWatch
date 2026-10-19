@@ -42,22 +42,36 @@ type Server struct {
 	registrationLimiter *rateLimiter
 	publicLimiter       *rateLimiter
 	mcpLimiter          *rateLimiter
+	mcpSSESlots         chan struct{}
 	loginLimiter        *rateLimiter
 	totpLimiter         *rateLimiter
 	ipqaLimiter         *rateLimiter
-	terminalManager     *terminal.Manager
-	backupScheduler     *backup.Scheduler
-	agentReplayCache    *agentReplayCache
-	overviewCacheMu     sync.RWMutex
-	overviewCache       map[string]overviewCacheEntry
-	publicCacheMu       sync.RWMutex
-	publicCacheAt       time.Time
-	publicCache         publicStatusResponse
-	trustedProxyNets    []*net.IPNet
-	visitorGeoMu        sync.RWMutex
-	visitorGeoCache     map[string]visitorGeoCacheEntry
-	visitorGeoClient    *http.Client
-	visitorGeoFetch     func(ctx context.Context, ip string) (visitorGeoData, error)
+	// AI requests may invoke an external model/provider and are therefore
+	// deliberately rate limited separately from ordinary authenticated APIs.
+	aiLimiter          *rateLimiter
+	agentUpdateLimiter *rateLimiter
+	terminalManager    *terminal.Manager
+	backupScheduler    *backup.Scheduler
+	agentReplayCache   *agentReplayCache
+	overviewCacheMu    sync.RWMutex
+	overviewCache      map[string]overviewCacheEntry
+	publicCacheMu      sync.RWMutex
+	// publicBuildMu prevents a cache miss stampede. Without a second
+	// coordination lock, requests arriving just after the short public cache
+	// expires all fan out into the same N+1 SQLite workload simultaneously.
+	// This is especially costly on the low-memory VPS deployment.
+	publicBuildMu     sync.Mutex
+	publicCacheAt     time.Time
+	publicCache       publicStatusResponse
+	statusPageCacheMu sync.RWMutex
+	statusPageBuildMu sync.Mutex
+	statusPageCacheAt time.Time
+	statusPageCache   *publicStatusPageResponse
+	trustedProxyNets  []*net.IPNet
+	visitorGeoMu      sync.RWMutex
+	visitorGeoCache   map[string]visitorGeoCacheEntry
+	visitorGeoClient  *http.Client
+	visitorGeoFetch   func(ctx context.Context, ip string) (visitorGeoData, error)
 }
 
 func NewServer(cfg config.Config, service *auth.Service) *Server {
@@ -91,21 +105,25 @@ func NewServer(cfg config.Config, service *auth.Service) *Server {
 		registrationLimiter: newRateLimiter(10, time.Minute, 10000),
 		publicLimiter:       newRateLimiter(60, time.Minute, 10000),
 		mcpLimiter:          newRateLimiter(60, time.Minute, 10000),
+		mcpSSESlots:         make(chan struct{}, 32),
 		loginLimiter:        newRateLimiter(10, time.Minute, 10000),
 		totpLimiter:         newRateLimiter(6, time.Minute, 10000),
 		ipqaLimiter:         newRateLimiter(60, time.Minute, 5000),
-		terminalManager:     terminal.NewManager(),
-		backupScheduler:     backupSched,
-		agentReplayCache:    newAgentReplayCache(),
-		overviewCache:       make(map[string]overviewCacheEntry),
-		trustedProxyNets:    trustedNets,
-		visitorGeoCache:     make(map[string]visitorGeoCacheEntry),
-		visitorGeoClient: &http.Client{
-			Timeout: 2500 * time.Millisecond,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return errors.New("visitor geoip redirects disallowed")
-			},
-		},
+		// Keep the default conservative for small VPS deployments. The key used
+		// by AI handlers combines the authenticated user and client address so a
+		// single account cannot accidentally fan out expensive provider calls.
+		aiLimiter: newRateLimiter(10, time.Minute, 10000),
+		// Update downloads are intentionally public so a newly enrolled agent
+		// can fetch releases, but they must not become an unbounded bandwidth
+		// amplification endpoint.
+		agentUpdateLimiter: newRateLimiter(30, time.Minute, 10000),
+		terminalManager:    terminal.NewManager(),
+		backupScheduler:    backupSched,
+		agentReplayCache:   newAgentReplayCache(),
+		overviewCache:      make(map[string]overviewCacheEntry),
+		trustedProxyNets:   trustedNets,
+		visitorGeoCache:    make(map[string]visitorGeoCacheEntry),
+		visitorGeoClient:   newVisitorGeoHTTPClient(),
 	}
 	srv.seedEnvNotificationChannels(context.Background())
 	return srv
@@ -166,7 +184,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/api/totp/setup", middleware.RequireAuth(http.HandlerFunc(s.totpSetup)))
 	mux.Handle("/api/totp/enable", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.totpEnable))))
 	mux.Handle("/api/totp/disable", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.totpDisable))))
-	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken))))
+	// Registration tokens grant a new agent access to the control plane and
+	// therefore must remain an administrator-only operation.  CSRF protection
+	// alone is not sufficient here: an operator (or a PAT with write:nodes)
+	// could otherwise mint unlimited enrollment credentials.
+	mux.Handle("/api/registration-tokens", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.createRegistrationToken)))))
 	mux.Handle("/api/nodes", middleware.RequireAuth(http.HandlerFunc(s.listNodes)))
 	mux.Handle("/api/overview", middleware.RequireAuth(http.HandlerFunc(s.overview)))
 	mux.Handle("/api/alerts", middleware.RequireAuth(http.HandlerFunc(s.alertRoute)))
@@ -191,14 +213,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/public/dns-matrix", s.dnsMatrixHandler)
 	mux.Handle("/api/mesh-matrix", middleware.RequireAuth(http.HandlerFunc(s.meshMatrixHandler)))
 	mux.HandleFunc("/api/public/mesh-matrix", s.meshMatrixHandler)
-	mux.Handle("/api/speedtest/tasks", middleware.RequireAuth(http.HandlerFunc(s.speedtestTasksRoute)))
-	mux.Handle("/api/speedtest/tasks/", middleware.RequireAuth(http.HandlerFunc(s.speedtestTasksRoute)))
+	mux.Handle("/api/speedtest/tasks", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.speedtestTasksRoute))))
+	mux.Handle("/api/speedtest/tasks/", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.speedtestTasksRoute))))
 	mux.Handle("/api/speedtest/results", middleware.RequireAuth(http.HandlerFunc(s.speedtestResultsHandler)))
 	mux.HandleFunc("/api/public/speedtest/results", s.publicSpeedtestResultsHandler)
 	mux.Handle("/api/speedtest/history", middleware.RequireAuth(http.HandlerFunc(s.speedtestHistoryHandler)))
 	mux.Handle("/api/speedtest/run", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(middleware.RequireCSRF(http.HandlerFunc(s.speedtestRunHandler)))))
-	mux.Handle("/api/synthetic/targets", middleware.RequireAuth(http.HandlerFunc(s.syntheticTargetsRoute)))
-	mux.Handle("/api/synthetic/targets/", middleware.RequireAuth(http.HandlerFunc(s.syntheticTargetsRoute)))
+	mux.Handle("/api/synthetic/targets", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.syntheticTargetsRoute))))
+	mux.Handle("/api/synthetic/targets/", middleware.RequireAuth(middleware.RequireRole(db.RoleAdmin)(http.HandlerFunc(s.syntheticTargetsRoute))))
 	mux.Handle("/api/synthetic/results", middleware.RequireAuth(http.HandlerFunc(s.syntheticResultsHandler)))
 	mux.HandleFunc("/api/public/synthetic/results", s.publicSyntheticResultsHandler)
 	mux.Handle("/api/synthetic/history", middleware.RequireAuth(http.HandlerFunc(s.syntheticHistoryHandler)))
@@ -238,7 +260,7 @@ func (s *Server) Handler() http.Handler {
 
 	// AI Copilot & Diagnostics endpoints
 	mux.Handle("/api/ai/diagnose", middleware.RequireAuth(http.HandlerFunc(s.aiDiagnose)))
-	mux.Handle("/api/ai/chat", middleware.RequireAuth(http.HandlerFunc(s.aiChat)))
+	mux.Handle("/api/ai/chat", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.aiChat))))
 	mux.Handle("/api/ai/settings", middleware.RequireAuth(http.HandlerFunc(s.aiSettingsRoute)))
 	mux.Handle("/api/ai/mcp/token", middleware.RequireAuth(middleware.RequireCSRF(http.HandlerFunc(s.aiMCPTokenRegenerate))))
 	mux.Handle("/api/mcp/config", middleware.RequireAuth(http.HandlerFunc(s.mcpConfig)))
@@ -310,6 +332,9 @@ func (s *Server) targetRoute(w http.ResponseWriter, r *http.Request) {
 	mw := NewMiddleware(s.service, s.cfg)
 	if isWriteMethod(r.Method) {
 		mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !s.requireFleetWideNodeScope(w, r) {
+				return
+			}
 			if r.URL.Path == "/api/targets/seed-media" {
 				s.seedMediaTargets(w, r)
 				return
@@ -542,7 +567,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.loginLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if !s.loginLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
 		return
 	}

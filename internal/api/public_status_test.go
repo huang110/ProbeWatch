@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,19 @@ func publicStatusRegisterNode(t *testing.T, handler http.Handler, store *db.Stor
 	}
 	registered := task4Register(t, handler, protocol.RegisterRequest{NodeUUID: nodeUUID, Name: name, RegistrationToken: token.Token})
 	return mustNode(t, store, registered.NodeUUID)
+}
+
+func TestPublicClientIPUsesRightmostForwardedEntry(t *testing.T) {
+	_, trustedLoopback, err := net.ParseCIDR("127.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/public/client-info", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	request.Header.Set("X-Forwarded-For", "1.2.3.4, 203.0.113.10")
+	if got := publicClientIP(request, trustedLoopback); got != "203.0.113.10" {
+		t.Fatalf("public client IP = %q, want 203.0.113.10", got)
+	}
 }
 
 func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.T) {
@@ -106,6 +120,50 @@ func TestPublicStatusReturnsSanitizedAggregatesWithoutAuthentication(t *testing.
 	}
 	if !strings.Contains(body, "\"cpu_percent\":12.5") || !strings.Contains(body, "\"network_rx_bytes\"") {
 		t.Fatalf("public status body omitted allow-listed live telemetry: %s", body)
+	}
+}
+
+func TestBuildVisitorGeoURLRejectsUnsafeProviderTemplates(t *testing.T) {
+	unsafe := []string{
+		"http://127.0.0.1/geo/{ip}",
+		"http://localhost/geo/{ip}",
+		"http://169.254.169.254/latest/{ip}",
+		"ftp://geo.example.test/{ip}",
+		"https://user:pass@geo.example.test/{ip}",
+		"https://geo.example.test/{ip}#fragment",
+		"https://geo.example.test/{bad}",
+		"https://{ip}/geo",
+	}
+	for _, template := range unsafe {
+		t.Run(template, func(t *testing.T) {
+			if _, err := buildVisitorGeoURL(template, "198.51.100.42"); err == nil {
+				t.Fatalf("buildVisitorGeoURL accepted unsafe template %q", template)
+			}
+		})
+	}
+}
+
+func TestBuildVisitorGeoURLExpandsIPWithoutBreakingQuery(t *testing.T) {
+	withPlaceholder, err := buildVisitorGeoURL("https://geo.example.test/lookup/{ip}?lang=zh-CN", "1.1.1.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := withPlaceholder.String(); got != "https://geo.example.test/lookup/1.1.1.1?lang=zh-CN" {
+		t.Fatalf("expanded URL = %q", got)
+	}
+
+	withoutPlaceholder, err := buildVisitorGeoURL("https://geo.example.test/lookup?lang=zh-CN", "1.1.1.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := withoutPlaceholder.String(); got != "https://geo.example.test/lookup/1.1.1.1?lang=zh-CN" {
+		t.Fatalf("appended URL = %q", got)
+	}
+}
+
+func TestVisitorGeoDialContextRejectsBlockedLiteral(t *testing.T) {
+	if _, err := visitorGeoDialContext(context.Background(), "tcp", "127.0.0.1:80"); err == nil {
+		t.Fatal("visitorGeoDialContext accepted loopback address")
 	}
 }
 

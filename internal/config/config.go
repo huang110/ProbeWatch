@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 // Config contains all process configuration loaded at startup.
@@ -121,9 +123,12 @@ func LoadServerConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", false)
+	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", environment == "production")
 	if err != nil {
 		return Config{}, err
+	}
+	if environment == "production" && !cfg.AgentStrictAuth {
+		return Config{}, fmt.Errorf("PROBEWATCH_AGENT_STRICT_AUTH must be true in production")
 	}
 	cfg.MaxRequestBody, err = byteSizeValue(lookup, "MAX_REQUEST_BODY", cfg.MaxRequestBody)
 	if err != nil {
@@ -137,11 +142,14 @@ func LoadServerConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", true)
+	// Remote shell access is an explicit opt-in. Keeping the default disabled
+	// prevents a bare production/container environment from exposing terminal
+	// execution merely because the variable was omitted.
+	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", false)
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", true)
+	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -152,6 +160,11 @@ func LoadServerConfig() (Config, error) {
 	cfg.EnableVisitorGeoIP, err = boolValue(lookup, "PROBEWATCH_ENABLE_VISITOR_GEOIP", false)
 	if err != nil {
 		return Config{}, err
+	}
+	if cfg.EnableVisitorGeoIP {
+		if err := ValidateVisitorGeoIPURL(cfg.VisitorGeoIPURL); err != nil {
+			return Config{}, err
+		}
 	}
 	if _, err := ParseTrustedProxyCIDRs(cfg.TrustedProxyCIDRs); err != nil {
 		return Config{}, err
@@ -264,9 +277,12 @@ func LoadAgentConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", false)
+	cfg.AgentStrictAuth, err = boolValue(lookup, "PROBEWATCH_AGENT_STRICT_AUTH", environment == "production")
 	if err != nil {
 		return Config{}, err
+	}
+	if environment == "production" && !cfg.AgentStrictAuth {
+		return Config{}, fmt.Errorf("PROBEWATCH_AGENT_STRICT_AUTH must be true in production")
 	}
 	cfg.MaxRequestBody, err = byteSizeValue(lookup, "MAX_REQUEST_BODY", cfg.MaxRequestBody)
 	if err != nil {
@@ -276,11 +292,11 @@ func LoadAgentConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", true)
+	cfg.EnableRemoteTerminal, err = boolValue(lookup, "PROBEWATCH_ENABLE_REMOTE_TERMINAL", false)
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", true)
+	cfg.EnableTerminal, err = boolValue(lookup, "PROBEWATCH_AGENT_ENABLE_TERMINAL", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -364,6 +380,43 @@ func validateWebhookURL(raw string, production bool) error {
 	}
 	if production && isLocalWebhookHost(parsed.Hostname()) {
 		return fmt.Errorf("PROBEWATCH_WEBHOOK_URL must not target a local or private address in production")
+	}
+	return nil
+}
+
+// ValidateVisitorGeoIPURL validates the administrator-configured GeoIP
+// provider template without performing a network request. The only supported
+// substitution is {ip}, and it may not appear in the provider hostname.
+// Runtime requests perform an additional DNS/public-address check immediately
+// before dialing to prevent DNS rebinding from bypassing this validation.
+func ValidateVisitorGeoIPURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 4096 {
+		return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL must be a non-empty HTTP(S) URL no longer than 4096 bytes")
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL contains control characters")
+		}
+	}
+	const placeholder = "{ip}"
+	if strings.Count(raw, placeholder) > 1 {
+		return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL may contain at most one {ip} placeholder")
+	}
+	withoutPlaceholder := strings.ReplaceAll(raw, placeholder, "")
+	if strings.ContainsAny(withoutPlaceholder, "{}") {
+		return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL contains an unsupported template")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || parsed.Opaque != "" || parsed.Scheme == "" {
+		return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL must be an absolute HTTP(S) URL without credentials or fragment")
+	}
+	if strings.Contains(parsed.Host, placeholder) {
+		return fmt.Errorf("PROBEWATCH_VISITOR_GEOIP_URL placeholder must not be in the hostname")
+	}
+	expanded := strings.ReplaceAll(raw, placeholder, "1.1.1.1")
+	if _, err := security.ValidateURLWithOptions(expanded, []string{"http", "https"}, true); err != nil {
+		return fmt.Errorf("invalid PROBEWATCH_VISITOR_GEOIP_URL: %w", err)
 	}
 	return nil
 }

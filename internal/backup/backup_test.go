@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,6 +49,7 @@ func TestS3ClientPutAndDelete(t *testing.T) {
 	}
 
 	client := NewS3Client(cfg)
+	client.httpClient = &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -76,6 +78,21 @@ func TestS3ClientPutAndDelete(t *testing.T) {
 	}
 }
 
+func TestBackupObjectValidationRejectsUnsafeAndOversizedNames(t *testing.T) {
+	if err := validateBackupObjectName(" backup.db"); err == nil {
+		t.Fatal("leading whitespace in backup filename must be rejected")
+	}
+	if err := validateBackupObjectKey("safe/prefix/backup.db"); err != nil {
+		t.Fatalf("valid object key rejected: %v", err)
+	}
+	if err := validateBackupObjectKey("safe/../backup.db"); err == nil {
+		t.Fatal("object key traversal must be rejected")
+	}
+	if err := validateBackupObjectKey(strings.Repeat("a", maxBackupPathLength+1)); err == nil {
+		t.Fatal("oversized object key must be rejected")
+	}
+}
+
 func TestWebDAVClientPutAndDelete(t *testing.T) {
 	var receivedAuth string
 	var receivedMethod string
@@ -99,6 +116,7 @@ func TestWebDAVClientPutAndDelete(t *testing.T) {
 	}
 
 	client := NewWebDAVClient(cfg)
+	client.httpClient = &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -115,6 +133,70 @@ func TestWebDAVClientPutAndDelete(t *testing.T) {
 	if err := client.DeleteFile(ctx, "snap.db.gz"); err != nil {
 		t.Fatalf("delete file: %v", err)
 	}
+}
+
+func TestFileUploadMethodsStreamWithContentLength(t *testing.T) {
+	payload := strings.Repeat("backup-payload-", 1024)
+	filePath := filepath.Join(t.TempDir(), "snapshot.db.gz")
+	if err := os.WriteFile(filePath, []byte(payload), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("s3", func(t *testing.T) {
+		var got int64
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.ContentLength
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != payload {
+				t.Errorf("payload mismatch: got %d bytes", len(body))
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		client := NewS3Client(S3Config{
+			Endpoint:  server.URL,
+			Region:    "us-east-1",
+			Bucket:    "test-bucket",
+			AccessKey: "access",
+			SecretKey: "secret",
+		})
+		client.httpClient = &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport}
+		if err := client.PutObjectFile(context.Background(), "snapshot.db.gz", filePath, "application/gzip"); err != nil {
+			t.Fatal(err)
+		}
+		if got != int64(len(payload)) {
+			t.Fatalf("content length = %d, want %d", got, len(payload))
+		}
+	})
+
+	t.Run("webdav", func(t *testing.T) {
+		var got int64
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.ContentLength
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != payload {
+				t.Errorf("payload mismatch: got %d bytes", len(body))
+			}
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer server.Close()
+
+		client := NewWebDAVClient(WebDAVConfig{URL: server.URL})
+		client.httpClient = &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport}
+		if err := client.PutFilePath(context.Background(), "snapshot.db.gz", filePath); err != nil {
+			t.Fatal(err)
+		}
+		if got != int64(len(payload)) {
+			t.Fatalf("content length = %d, want %d", got, len(payload))
+		}
+	})
 }
 
 func TestSchedulerConfigMasking(t *testing.T) {

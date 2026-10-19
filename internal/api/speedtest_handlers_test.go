@@ -15,6 +15,22 @@ import (
 	"github.com/probewatch/probewatch/internal/protocol"
 )
 
+func TestSanitizePublicSpeedtestResultsKeepsNodeNameAligned(t *testing.T) {
+	response := SpeedtestResultsResponse{Rankings: []SpeedtestRankItem{
+		{NodeID: "node-a"},
+		{NodeID: "node-b"},
+		{NodeID: "node-a"},
+	}}
+	sanitized := sanitizePublicSpeedtestResults(response)
+	want := []string{"node-1", "node-2", "node-1"}
+	wantNames := []string{"Node 1", "Node 2", "Node 1"}
+	for i := range want {
+		if sanitized.Rankings[i].NodeID != want[i] || sanitized.Rankings[i].NodeName != wantNames[i] {
+			t.Fatalf("ranking[%d] = %+v, want ID %s and name %s", i, sanitized.Rankings[i], want[i], wantNames[i])
+		}
+	}
+}
+
 func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 	service, store := newTask4Auth(t)
 	defer store.Close()
@@ -93,6 +109,23 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 		Name:              "HK-Edge-01",
 	})
 	node := mustNode(t, store, regResp.NodeUUID)
+	// Before assigning the node, the scoped task must not be delivered.
+	recCfgUnassigned := meshAgentConfigGet(t, handler, regResp.NodeToken, "cfg-req-unassigned")
+	if recCfgUnassigned.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from unassigned config, got %d", recCfgUnassigned.Code)
+	}
+	var unassignedCfg protocol.AgentConfigResponse
+	_ = json.Unmarshal(recCfgUnassigned.Body.Bytes(), &unassignedCfg)
+	for _, tk := range unassignedCfg.Tasks {
+		if tk.ID == "speed-cloudflare" {
+			t.Fatal("task should not match node without required tags")
+		}
+	}
+	// The real endpoint rejects results from an unassigned node. Assign the
+	// node before submitting a result, representing the normal agent flow.
+	if err := store.UpdateNode(ctx, node.ID, "HK-Edge-01", "edge,asia"); err != nil {
+		t.Fatalf("tag speedtest node: %v", err)
+	}
 	now := time.Now().UTC()
 
 	speedResEnv := protocol.SpeedtestResultEnvelope{
@@ -158,9 +191,18 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 	if recPub.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on public endpoint, got %d", recPub.Code)
 	}
+	var publicResp SpeedtestResultsResponse
+	if err := json.Unmarshal(recPub.Body.Bytes(), &publicResp); err != nil {
+		t.Fatalf("failed to decode public speedtest response: %v", err)
+	}
+	if len(publicResp.Results) != 0 {
+		t.Fatalf("public speedtest response leaked raw results: %#v", publicResp.Results)
+	}
+	if len(publicResp.Rankings) != 1 || publicResp.Rankings[0].NodeID == node.ID || publicResp.Rankings[0].ServerName != "Benchmark" {
+		t.Fatalf("public speedtest ranking was not sanitized: %#v", publicResp.Rankings)
+	}
 
-	// 7. Verify Task Scoping in /api/agent/v1/config
-	// Node has no tags, so matching node_tags ["edge", "asia"] should not deliver it
+	// 7. Verify the now-assigned task is delivered in /api/agent/v1/config
 	recCfg := meshAgentConfigGet(t, handler, regResp.NodeToken, "cfg-req-1")
 	if recCfg.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from config, got %d", recCfg.Code)
@@ -173,26 +215,15 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 			hasSpeed = true
 		}
 	}
-	if hasSpeed {
-		t.Fatal("task should not match node without required tags")
+	if !hasSpeed {
+		t.Fatal("expected matching tagged node to receive speedtest task")
 	}
-
-	// Now tag the node with "edge"
-	_ = store.UpdateNode(ctx, node.ID, "HK-Edge-01", "edge,asia")
-	recCfg2 := meshAgentConfigGet(t, handler, regResp.NodeToken, "cfg-req-2")
-	var cfgResp2 protocol.AgentConfigResponse
-	_ = json.Unmarshal(recCfg2.Body.Bytes(), &cfgResp2)
-	hasSpeed2 := false
-	for _, tk := range cfgResp2.Tasks {
+	for _, tk := range cfgResp.Tasks {
 		if tk.ID == "speed-cloudflare" {
-			hasSpeed2 = true
 			if tk.Kind != "speedtest" || tk.DownloadBytes != 10485760 {
 				t.Fatalf("task misconfigured: %#v", tk)
 			}
 		}
-	}
-	if !hasSpeed2 {
-		t.Fatal("expected matching tagged node to receive speedtest task")
 	}
 
 	// 8. Test Speedtest Run trigger
@@ -218,5 +249,52 @@ func TestSpeedtestTasksCRUDAndResults(t *testing.T) {
 	handler.ServeHTTP(recDel, reqDel)
 	if recDel.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 No Content on delete, got %d", recDel.Code)
+	}
+}
+
+func TestSpeedtestHistoryScopedLimitDoesNotDropAuthorizedRows(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	_, _ = task4AdminSession(t, service, store)
+
+	allowedNode := publicStatusRegisterNode(t, handler, store, task4NodeUUID1, "Allowed speed node")
+	forbiddenNode := publicStatusRegisterNode(t, handler, store, task4NodeUUID2, "Forbidden speed node")
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.CreateSpeedtestTask(context.Background(), db.SpeedtestTaskRecord{
+		ID: "speed-scope-history", Name: "Scoped benchmark", ServerURL: "https://speed.example.com", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldAt := now.Add(-time.Hour)
+	newAt := now.Add(-30 * time.Minute)
+	for _, row := range []struct {
+		node string
+		at   time.Time
+		dl   float64
+	}{
+		{allowedNode.ID, oldAt, 111},
+		{forbiddenNode.ID, newAt, 222},
+	} {
+		payload, _ := json.Marshal(protocol.SpeedtestResult{DownloadSpeedMbps: row.dl, TestedAt: row.at.Unix(), Status: "ok"})
+		if _, err := store.DB().Exec(`INSERT INTO speedtest_results_history (node_id, task_id, payload, download_speed_mbps, upload_speed_mbps, latency_ms, jitter_ms, tested_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.node, "speed-scope-history", payload, row.dl, 1, 2, 3, row.at.UnixNano(), row.at.UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	history, err := store.ListSpeedtestHistoryForNodes(context.Background(), []string{allowedNode.ID}, "speed-scope-history", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].NodeID != allowedNode.ID || history[0].DownloadSpeedMbps != 111 || history[0].Status != "ok" || !history[0].TestedAt.Equal(oldAt) {
+		t.Fatalf("scoped speedtest history = %#v, want authorized older row", history)
+	}
+	if got, err := store.ListSpeedtestHistoryForNodes(context.Background(), nil, "speed-scope-history", 1); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 0 {
+		t.Fatalf("empty node scope returned %d rows, want 0", len(got))
 	}
 }

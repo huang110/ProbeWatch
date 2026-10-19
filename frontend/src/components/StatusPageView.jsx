@@ -39,7 +39,14 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
     try {
       const res = await fetchPublicStatusPage(controller.signal)
       if (controller.signal.aborted || !mountedRef.current) return
-      setData(res)
+      // Normalize the API's snake_case fields while keeping compatibility
+      // with older cached responses that used camelCase keys.
+      setData(res ? {
+        ...res,
+        overallStatus: res.overall_status ?? res.overallStatus,
+        overallMessage: res.overall_message ?? res.overallMessage,
+        activeIncidents: res.active_incidents ?? res.activeIncidents,
+      } : res)
       setLastRefreshed(new Date())
       setError(null)
     } catch (err) {
@@ -263,8 +270,8 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
             </h2>
 
             {/* Active Incidents */}
-            {activeIncidents.map((inc) => (
-              <div key={inc.id} className="p-5 rounded-xl bg-[#131520] border border-amber-500/30 space-y-4 shadow-lg">
+            {activeIncidents.map((inc, incIdx) => (
+              <div key={`${inc.title || 'incident'}-${inc.created_at || incIdx}`} className="p-5 rounded-xl bg-[#131520] border border-amber-500/30 space-y-4 shadow-lg">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
                     <span className="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
@@ -298,8 +305,8 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
             ))}
 
             {/* Scheduled Maintenance */}
-            {maintenance.map((m) => (
-              <div key={m.id} className="p-5 rounded-xl bg-[#131520] border border-sky-500/30 space-y-4 shadow-lg">
+            {maintenance.map((m, maintenanceIdx) => (
+              <div key={`${m.title || 'maintenance'}-${m.created_at || maintenanceIdx}`} className="p-5 rounded-xl bg-[#131520] border border-sky-500/30 space-y-4 shadow-lg">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
                     <span className="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-sky-500/20 text-sky-300 border border-sky-500/30">
@@ -445,12 +452,13 @@ export function StatusPageView({ onOpenLogin, theme, onThemeChange }) {
                   过去 90 天内暂无历史故障事件记录，系统持续稳定运行。
                 </div>
               ) : (
-                pastIncidents.map((p) => {
-                  const isExpanded = expandedPastIncidents[p.id]
+                pastIncidents.map((p, pastIdx) => {
+                  const publicIncidentKey = `${p.title || 'incident'}-${p.created_at || pastIdx}`
+                  const isExpanded = expandedPastIncidents[publicIncidentKey]
                   return (
-                    <div key={p.id} className="p-4 rounded-xl bg-[#0f111a] border border-white/5 space-y-2">
+                    <div key={publicIncidentKey} className="p-4 rounded-xl bg-[#0f111a] border border-white/5 space-y-2">
                       <div
-                        onClick={() => togglePastItem(p.id)}
+                        onClick={() => togglePastItem(publicIncidentKey)}
                         className="flex items-center justify-between cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5">

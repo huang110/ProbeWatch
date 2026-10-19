@@ -39,7 +39,9 @@ import {
 } from '../lib/billing.js'
 import { formatBytes, numeric, safeText, isVersionOutdated } from '../lib/format.js'
 import { fetchCsrfToken } from '../lib/api.js'
-import { quoteShell } from '../lib/shellEscape.js'
+import { quotePowerShell, quoteShell } from '../lib/shellEscape.js'
+import { generateUUID } from '../lib/uuid.js'
+import { getFavoriteNodeIds, getRecentNodeIds, toggleFavoriteNode } from '../lib/sessionPreferences.js'
 
 export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, latestAgentVersion = '', onSelectNode }) {
   const [showEnroll, setShowEnroll] = useState(false)
@@ -50,22 +52,14 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
   const [carrierFilter, setCarrierFilter] = useState('all')
   const [posterNode, setPosterNode] = useState(null)
   const [favorites, setFavorites] = useState(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem('probewatch:favorite-nodes') || '[]'))
-    } catch {
-      return new Set()
-    }
+    return getFavoriteNodeIds()
   })
 
   const toggleFavorite = (id, e) => {
     if (e) e.stopPropagation()
-    const next = new Set(favorites)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
+    toggleFavoriteNode(id)
+    const next = getFavoriteNodeIds()
     setFavorites(next)
-    try {
-      localStorage.setItem('probewatch:favorite-nodes', JSON.stringify(Array.from(next)))
-    } catch {}
   }
 
   const [groupFilter, setGroupFilter] = useState('all')
@@ -152,12 +146,7 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
       }
       if (statusFilter === 'favorite' && !favorites.has(id)) return false
       if (statusFilter === 'recent') {
-        try {
-          const recents = JSON.parse(localStorage.getItem('probewatch:recent-nodes') || '[]')
-          if (!recents.includes(id)) return false
-        } catch {
-          return false
-        }
+        if (!getRecentNodeIds().includes(id)) return false
       }
 
       // Region filter
@@ -300,7 +289,9 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
       if (!endpoint || (!endpoint.startsWith('http://') && !endpoint.startsWith('https://'))) {
         endpoint = `${window.location.origin}${endpoint && endpoint.startsWith('/') ? endpoint : '/api/agent/v1'}`
       }
-      setInstallEnrollment({ token, endpoint, uuid: node.uuid || crypto.randomUUID() })
+      const expiresAt = new Date(json.expires_at).getTime()
+      if (!token || !endpoint || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('token_failed')
+      setInstallEnrollment({ token, endpoint, uuid: node.uuid || generateUUID() })
     } catch {
       setCopyToast('获取一次性部署 Token 失败，请稍后重试')
     }
@@ -316,7 +307,16 @@ export function ServerManageView({ nodes = [], rates = {}, lossRates = {}, lates
     const safeEndpoint = quoteShell(endpoint)
     const safeToken = quoteShell(token)
     const safeUuid = quoteShell(uuid)
-    if (installTab === 'windows') return `curl.exe -fsSL ${safeBase} -o "$env:TEMP\\probewatch-install.sh"; bash "$env:TEMP\\probewatch-install.sh" --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
+    if (installTab === 'windows') {
+      const psBase = quotePowerShell(base)
+      const psEndpoint = quotePowerShell(endpoint)
+      const psToken = quotePowerShell(token)
+      const psUuid = quotePowerShell(uuid)
+      // PowerShell's `;` continues after a failed curl.  Guard the exit code
+      // before invoking bash so an HTML error page can never be treated as an
+      // installer script.
+      return `curl.exe -fsSL ${psBase} -o "$env:TEMP\\probewatch-install.sh"; if ($LASTEXITCODE -ne 0) { throw 'ProbeWatch installer download failed' }; bash "$env:TEMP\\probewatch-install.sh" --endpoint ${psEndpoint} --token ${psToken} --uuid ${psUuid}${remote}`
+    }
     if (installTab === 'macos') return `curl -fsSL ${safeBase} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`
     if (installTab === 'docker') return ''
     return `curl -fsSL ${safeBase} | bash -s -- --endpoint ${safeEndpoint} --token ${safeToken} --uuid ${safeUuid}${remote}`

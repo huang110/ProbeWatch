@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 )
@@ -20,6 +21,10 @@ var (
 
 const (
 	maxSessionIdle = 15 * time.Minute
+	// A terminal command is an arbitrary shell process on an edge node. Keep
+	// the number of in-flight commands bounded so authenticated callers cannot
+	// grow pendingExecs and process count without limit on a small VPS.
+	maxConcurrentExecs = 32
 )
 
 // AgentTunnel represents an active reverse WebSocket connection from an agent.
@@ -51,6 +56,7 @@ type Manager struct {
 	tunnels      map[string]*AgentTunnel
 	sessions     map[string]*ServerSession
 	pendingExecs map[string]chan Envelope
+	execSlots    chan struct{}
 }
 
 // NewManager creates an initialized terminal Manager.
@@ -59,6 +65,7 @@ func NewManager() *Manager {
 		tunnels:      make(map[string]*AgentTunnel),
 		sessions:     make(map[string]*ServerSession),
 		pendingExecs: make(map[string]chan Envelope),
+		execSlots:    make(chan struct{}, maxConcurrentExecs),
 	}
 }
 
@@ -70,6 +77,14 @@ func (m *Manager) RegisterTunnel(nodeUUID string, conn *Conn) *AgentTunnel {
 	// If existing tunnel exists, close it
 	if old, exists := m.tunnels[nodeUUID]; exists {
 		_ = old.Conn.Close()
+		// Sessions hold a pointer to the old tunnel. Close them before swapping
+		// so a reconnect cannot leave browser sessions writing to a dead socket.
+		for id, session := range m.sessions {
+			if session.NodeUUID == nodeUUID {
+				session.Close()
+				delete(m.sessions, id)
+			}
+		}
 	}
 
 	tunnel := &AgentTunnel{
@@ -83,9 +98,26 @@ func (m *Manager) RegisterTunnel(nodeUUID string, conn *Conn) *AgentTunnel {
 
 // UnregisterTunnel removes an agent tunnel.
 func (m *Manager) UnregisterTunnel(nodeUUID string) {
+	m.unregisterTunnel(nodeUUID, nil)
+}
+
+// UnregisterTunnelConn removes the tunnel only when it is still the active
+// connection supplied by the caller. This matters when an agent reconnects:
+// RegisterTunnel closes the old socket, but the old handler may run its defer
+// after the new socket has already been registered. An unconditional delete
+// there would accidentally drop the healthy replacement tunnel.
+func (m *Manager) UnregisterTunnelConn(nodeUUID string, conn *Conn) {
+	m.unregisterTunnel(nodeUUID, conn)
+}
+
+func (m *Manager) unregisterTunnel(nodeUUID string, expected *Conn) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	current, exists := m.tunnels[nodeUUID]
+	if !exists || (expected != nil && current.Conn != expected) {
+		return
+	}
 	delete(m.tunnels, nodeUUID)
 
 	// Terminate any active sessions targeting this node
@@ -118,6 +150,18 @@ func (m *Manager) ConnectedNodes() []string {
 
 // ExecuteCommand sends a single command to an agent node and awaits the result.
 func (m *Manager) ExecuteCommand(ctx context.Context, nodeUUID string, command string, timeoutSec int) (Envelope, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Wait for bounded command capacity before allocating an execution ID or
+	// pending response channel. Cancellation remains effective while queued.
+	select {
+	case m.execSlots <- struct{}{}:
+		defer func() { <-m.execSlots }()
+	case <-ctx.Done():
+		return Envelope{}, ctx.Err()
+	}
+
 	m.mu.RLock()
 	tunnel, ok := m.tunnels[nodeUUID]
 	m.mu.RUnlock()
@@ -142,20 +186,31 @@ func (m *Manager) ExecuteCommand(ctx context.Context, nodeUUID string, command s
 		m.mu.Unlock()
 	}()
 
+	normalizedTimeoutSec := timeoutSec
+	if normalizedTimeoutSec < 0 {
+		normalizedTimeoutSec = 0
+	}
+	maxTimeoutSec := int(maxExecTimeout / time.Second)
+	if normalizedTimeoutSec > maxTimeoutSec {
+		normalizedTimeoutSec = maxTimeoutSec
+	}
 	env := Envelope{
 		Type:       TypeExec,
 		ExecID:     execID,
 		Command:    command,
-		TimeoutSec: timeoutSec,
+		TimeoutSec: normalizedTimeoutSec,
 	}
 
 	if err := tunnel.Conn.WriteJSON(env); err != nil {
 		return Envelope{}, fmt.Errorf("dispatch command: %w", err)
 	}
 
-	timeoutDuration := time.Duration(timeoutSec+5) * time.Second
-	if timeoutSec <= 0 {
-		timeoutDuration = 35 * time.Second
+	// Keep the server-side wait bounded to the same ceiling as the agent.
+	// Without this clamp, a caller-controlled int can overflow time.Duration
+	// and make the request time out immediately while the agent keeps running.
+	timeoutDuration := 35 * time.Second
+	if normalizedTimeoutSec > 0 {
+		timeoutDuration = time.Duration(normalizedTimeoutSec+5) * time.Second
 	}
 
 	select {
@@ -186,7 +241,10 @@ func (m *Manager) HandleTunnelMessage(nodeUUID string, env Envelope) {
 		m.mu.RLock()
 		session, ok := m.sessions[env.SessionID]
 		m.mu.RUnlock()
-		if ok && session != nil {
+		// A tunnel is authenticated for one node. Do not let a compromised or
+		// buggy agent inject frames into a browser session belonging to another
+		// node merely by guessing a session ID.
+		if ok && session != nil && session.NodeUUID == nodeUUID {
 			session.handleAgentMessage(env)
 		}
 	}
@@ -259,7 +317,7 @@ func (m *Manager) CreateSession(sessionID, nodeUUID string, cols, rows int, brow
 			}
 
 			// Check idle timeout
-			if time.Since(session.LastSeen) > maxSessionIdle {
+			if session.idleExpired(time.Now()) {
 				_ = browserConn.WriteJSON(Envelope{
 					Type:  TypeError,
 					Error: "Session closed due to inactivity",
@@ -267,12 +325,20 @@ func (m *Manager) CreateSession(sessionID, nodeUUID string, cols, rows int, brow
 				return
 			}
 
+			// ReadJSON blocks on the socket, so the ticker above cannot enforce
+			// idle expiry by itself. A short read deadline wakes the loop to run
+			// the idle check even when the browser sends no frames.
+			_ = browserConn.SetReadDeadline(time.Now().Add(30 * time.Second))
 			var env Envelope
 			if err := browserConn.ReadJSON(&env); err != nil {
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					continue
+				}
 				return
 			}
 
-			session.LastSeen = time.Now()
+			session.touch(time.Now())
 
 			switch env.Type {
 			case TypeData:
@@ -332,6 +398,18 @@ func (s *ServerSession) handleAgentMessage(env Envelope) {
 		})
 		s.Close()
 	}
+}
+
+func (s *ServerSession) touch(now time.Time) {
+	s.mu.Lock()
+	s.LastSeen = now
+	s.mu.Unlock()
+}
+
+func (s *ServerSession) idleExpired(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return now.Sub(s.LastSeen) > maxSessionIdle
 }
 
 // Close closes the session.

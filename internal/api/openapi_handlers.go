@@ -38,6 +38,10 @@ func (s *Server) openAPIJSONHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) swaggerUIHandler(w http.ResponseWriter, r *http.Request) {
+	// Swagger UI is the only page that intentionally loads its documented CDN
+	// assets and bootstraps with an inline script. Keep this relaxation scoped to
+	// the docs routes; the rest of the application retains the strict global CSP.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 	html := `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>

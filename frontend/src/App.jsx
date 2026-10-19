@@ -486,6 +486,10 @@ export function App() {
   const [publicStatus, setPublicStatus] = useState(null)
   const [publicClientInfo, setPublicClientInfo] = useState(null)
   const [guestPreview, setGuestPreview] = useState(false)
+  // Keep data-fetch effects keyed to the effective access mode. A login/logout
+  // or guest-preview toggle can leave the selected node unchanged, so UUID and
+  // refresh timestamps alone are not sufficient to switch private/public APIs.
+  const isGuestMode = guestPreview || apiState.kind === 'guest' || !me
   const [clock, setClock] = useState(() => new Date())
   const refreshInterval = 5
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -494,6 +498,7 @@ export function App() {
   const coreAbortRef = useRef(null)
   const coreRequestRef = useRef(0)
   const overviewAbortRef = useRef(null)
+  const overviewLoaderRef = useRef(null)
   const counterRef = useRef(new Map())
 
   useEffect(() => {
@@ -688,7 +693,10 @@ export function App() {
       setRates(computeRates(normalized))
       markSync()
       setApiState(normalized.length ? { kind: 'ok', message: '' } : { kind: 'empty', message: 'API 返回空节点数组，暂无节点数据。' })
-      loadOverview()
+      // loadCore is intentionally stable between polls. Resolve the latest
+      // overview callback through a ref so its initial render cannot retain a
+      // stale unauthenticated `me`/guest closure after login.
+      overviewLoaderRef.current?.()
       return true
     } catch (error) {
       if (error?.name === 'AbortError') return
@@ -741,6 +749,8 @@ export function App() {
       return false
     }
   }, [me, guestPreview, apiState.kind])
+
+  overviewLoaderRef.current = loadOverview
 
   useEffect(() => {
     return () => { coreAbortRef.current?.abort(); overviewAbortRef.current?.abort(); historyAbortRef.current?.abort(); checksAbortRef.current?.abort(); trafficAbortRef.current?.abort() }
@@ -796,7 +806,7 @@ export function App() {
       : '15m'
 
     const fetchHistoryFromApi = async () => {
-      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      const isGuest = isGuestMode
       if (isGuest) {
         const response = await fetch(`/api/public/nodes/${encodeURIComponent(uuid)}/resource/history?range=${rangeParam}`, { credentials: 'same-origin', signal: controller.signal })
         if (!response.ok) throw new Error(`history:${response.status}`)
@@ -929,7 +939,7 @@ export function App() {
       if (!controller.signal.aborted) setHistoryLoading(false)
     })
     return () => controller.abort()
-  }, [selectedNode, detailNode, activeNav, targetDetailUuid, historyTimeRange, lastSync])
+  }, [selectedNode, detailNode, activeNav, targetDetailUuid, historyTimeRange, lastSync, isGuestMode])
 
   const analyticsNode = selectedNode || detailNode
   const analyticsUuid = analyticsNode ? (safeText(analyticsNode.uuid) || safeText(analyticsNode.id)) : (targetDetailUuid || '')
@@ -947,7 +957,7 @@ export function App() {
       : '1h'
 
     const fetchChecksFromApi = async () => {
-      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      const isGuest = isGuestMode
       if (isGuest) {
         const response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/checks/summary?range=${pingParam}`, { credentials: 'same-origin', signal: controller.signal })
         if (!response.ok) throw new Error(`checks:${response.status}`)
@@ -1005,7 +1015,7 @@ export function App() {
       if (!controller.signal.aborted) setChecksLoading(false)
     })
     return () => controller.abort()
-  }, [analyticsUuid, pingTimeRange, lastSync])
+  }, [analyticsUuid, pingTimeRange, lastSync, isGuestMode])
 
   useEffect(() => { setTrafficPeriod('day') }, [analyticsUuid])
 
@@ -1017,7 +1027,7 @@ export function App() {
     setTrafficLoading(true)
 
     const fetchTrafficFromApi = async () => {
-      const isGuest = guestPreview || apiState.kind === 'guest' || !me
+      const isGuest = isGuestMode
       if (isGuest) {
         const response = await fetch(`/api/public/nodes/${encodeURIComponent(analyticsUuid)}/traffic?period=${encodeURIComponent(trafficPeriod)}`, { credentials: 'same-origin', signal: controller.signal })
         if (!response.ok) throw new Error(`traffic:${response.status}`)
@@ -1054,7 +1064,7 @@ export function App() {
       if (!controller.signal.aborted) setTrafficLoading(false)
     })
     return () => controller.abort()
-  }, [analyticsUuid, trafficPeriod, lastSync])
+  }, [analyticsUuid, trafficPeriod, lastSync, isGuestMode])
 
   const ackAlert = async (id) => {
     setAckingId(id)

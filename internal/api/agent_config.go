@@ -2,19 +2,30 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 // agentConfigMaxAgeSeconds is the default freshness window served to agents.
 // An agent that cannot refresh its configuration within this window stops
 // probing (fail-closed) while continuing to report resources.
 const agentConfigMaxAgeSeconds = 1800
+
+// maxAgentConfigTasks mirrors the task limit enforced by
+// protocol.AgentConfigResponse.Validate. agentConfig truncates instead of
+// failing the whole feed so one oversized legacy dataset cannot push every
+// agent into the fail-closed window.
+const maxAgentConfigTasks = 1000
 
 var (
 	configVersionMu   sync.Mutex
@@ -62,6 +73,19 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	tasks := make([]protocol.CheckTask, 0)
+	taskIDs := make(map[string]struct{})
+	appendTask := func(task protocol.CheckTask) {
+		if task.ID == "" {
+			slog.WarnContext(r.Context(), "skipping agent target without task ID", "target_kind", "network")
+			return
+		}
+		if _, exists := taskIDs[task.ID]; exists {
+			slog.WarnContext(r.Context(), "skipping duplicate agent task ID", "task_id", task.ID, "target_kind", "network")
+			return
+		}
+		taskIDs[task.ID] = struct{}{}
+		tasks = append(tasks, task)
+	}
 	for _, kind := range targetKinds() {
 		targets, err := s.service.Store().ListTargets(r.Context(), kind)
 		if err != nil {
@@ -74,58 +98,96 @@ func (s *Server) agentConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			task, matches, err := targetToCheckTaskForNode(target, node)
 			if err != nil {
-				writeJSONError(w, http.StatusServiceUnavailable, "configuration unavailable")
-				return
+				slog.WarnContext(r.Context(), "skipping invalid legacy target in agent config", "target_id", target.ID, "target_kind", kind, "error", err)
+				continue
 			}
 			if !matches {
 				continue
 			}
-			tasks = append(tasks, task)
+			appendTask(task)
 		}
 	}
 	speedTasks, err := s.service.Store().ListEnabledSpeedtestTasks(r.Context())
-	if err == nil {
-		for _, st := range speedTasks {
-			if !nodeMatchesSpeedtestTask(node, st) {
-				continue
-			}
-			host := st.Name
-			if host == "" {
-				host = "speedtest"
-			}
-			tasks = append(tasks, protocol.CheckTask{
-				ID:              st.ID,
-				Kind:            "speedtest",
-				Host:            host,
-				Port:            443,
-				ServerURL:       st.ServerURL,
-				DownloadBytes:   st.DownloadBytes,
-				UploadBytes:     st.UploadBytes,
-				IntervalSeconds: st.IntervalSeconds,
-				MaxHops:         20,
-				TimeoutMS:       25000,
-				Enabled:         true,
-			})
+	if err != nil {
+		// Do not return a successful empty configuration when the database is
+		// unavailable.  Agents would cache that response and silently stop all
+		// configured checks until the next refresh window.
+		writeJSONError(w, http.StatusServiceUnavailable, "configuration unavailable")
+		return
+	}
+	for _, st := range speedTasks {
+		if !nodeMatchesSpeedtestTask(node, st) {
+			continue
 		}
+		host := st.Name
+		if host == "" {
+			host = "speedtest"
+		}
+		appendTask(protocol.CheckTask{
+			ID:              st.ID,
+			Kind:            "speedtest",
+			Host:            host,
+			Port:            443,
+			ServerURL:       st.ServerURL,
+			DownloadBytes:   st.DownloadBytes,
+			UploadBytes:     st.UploadBytes,
+			IntervalSeconds: st.IntervalSeconds,
+			MaxHops:         20,
+			TimeoutMS:       25000,
+			Enabled:         true,
+		})
 	}
 	syntheticTargets, err := s.service.Store().ListEnabledSyntheticTargets(r.Context())
-	if err == nil {
-		for _, st := range syntheticTargets {
-			if !nodeMatchesSyntheticTarget(node, st) {
-				continue
-			}
-			tasks = append(tasks, syntheticTargetToCheckTask(st))
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "configuration unavailable")
+		return
+	}
+	for _, st := range syntheticTargets {
+		if !nodeMatchesSyntheticTarget(node, st) {
+			continue
 		}
+		task, err := syntheticTargetToCheckTask(st, s.cfg.Environment == "development")
+		if err != nil {
+			slog.WarnContext(r.Context(), "skipping invalid synthetic target in agent config", "target_id", st.ID, "error", err)
+			continue
+		}
+		appendTask(task)
 	}
 
 	syncIPQA := checkAndClearNodeIPQASync(node.ID, node.UUID)
 
-	writeJSON(w, http.StatusOK, protocol.AgentConfigResponse{
-		Tasks:               tasks,
+	// Validate each task individually so a single malformed legacy row
+	// (for example a speedtest task with a stale server URL) cannot fail
+	// the whole /config feed. Agents fail closed after their max-age
+	// window, so a fleet-wide 503 would silently stop every check.
+	validTasks := make([]protocol.CheckTask, 0, len(tasks))
+	for _, task := range tasks {
+		if err := task.Validate(); err != nil {
+			slog.WarnContext(r.Context(), "skipping invalid task in agent config", "task_id", task.ID, "error", err)
+			continue
+		}
+		validTasks = append(validTasks, task)
+	}
+	if len(validTasks) > maxAgentConfigTasks {
+		slog.WarnContext(r.Context(), "agent config exceeds task limit, truncating", "task_count", len(validTasks), "limit", maxAgentConfigTasks)
+		validTasks = validTasks[:maxAgentConfigTasks]
+	}
+
+	response := protocol.AgentConfigResponse{
+		Tasks:               validTasks,
 		ConfigVersion:       getNextConfigVersion(),
 		ConfigMaxAgeSeconds: agentConfigMaxAgeSeconds,
 		SyncIPQA:            syncIPQA,
-	})
+	}
+	// Defense in depth: the per-task loop above already filtered invalid
+	// tasks and appendTask deduplicates IDs, so a failure here means the
+	// merged set itself is unusable and must not be served to agents.
+	if err := response.Validate(); err != nil {
+		slog.ErrorContext(r.Context(), "agent config response failed validation", "error", err)
+		writeJSONError(w, http.StatusServiceUnavailable, "configuration unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func targetToCheckTaskForNode(target db.TargetRecord, node db.Node) (protocol.CheckTask, bool, error) {
@@ -295,22 +357,80 @@ func nodeMatchesSyntheticTarget(node db.Node, st db.SyntheticTargetRecord) bool 
 	return false
 }
 
-func syntheticTargetToCheckTask(st db.SyntheticTargetRecord) protocol.CheckTask {
+func syntheticTargetToCheckTask(st db.SyntheticTargetRecord, allowPrivate ...bool) (protocol.CheckTask, error) {
+	protocolKind := strings.ToLower(strings.TrimSpace(st.Protocol))
+	switch protocolKind {
+	case "http", "https", "grpc", "websocket", "doh":
+	default:
+		return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid protocol", st.ID)
+	}
+	targetURL := strings.TrimSpace(st.TargetURL)
+	u, err := url.Parse(targetURL)
+	if err != nil || !u.IsAbs() || u.Hostname() == "" {
+		return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid target_url", st.ID)
+	}
+	if u.User != nil || u.Fragment != "" || u.Opaque != "" {
+		return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has unsafe target_url", st.ID)
+	}
+	allowedPrivate := len(allowPrivate) > 0 && allowPrivate[0]
+	if _, err := security.ValidateURLWithOptions(targetURL, syntheticURLSchemes(protocolKind), true, allowedPrivate); err != nil {
+		return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid target_url: %w", st.ID, err)
+	}
+
+	port := 0
+	if rawPort := u.Port(); rawPort != "" {
+		port, err = strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid port", st.ID)
+		}
+	} else {
+		switch strings.ToLower(u.Scheme) {
+		case "https", "wss", "grpcs":
+			port = 443
+		default:
+			port = 80
+		}
+	}
+
 	var headers map[string]string
 	if st.Headers != "" {
-		_ = json.Unmarshal([]byte(st.Headers), &headers)
+		if err := json.Unmarshal([]byte(st.Headers), &headers); err != nil {
+			return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid headers", st.ID)
+		}
 	}
 	var assertions []protocol.SyntheticAssertionRule
 	if st.Assertions != "" {
-		_ = json.Unmarshal([]byte(st.Assertions), &assertions)
+		if err := json.Unmarshal([]byte(st.Assertions), &assertions); err != nil {
+			return protocol.CheckTask{}, fmt.Errorf("synthetic target %q has invalid assertions", st.ID)
+		}
+	}
+	path := u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	method := strings.ToUpper(strings.TrimSpace(st.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	// HTTP/HTTPS synthetic targets must remain on the synthetic execution
+	// path. Reusing the ordinary network kinds would make the agent emit a
+	// NetworkResult, which the control plane then tries to bind to the legacy
+	// HTTP/HTTPS target tables instead of the synthetic target table.
+	taskKind := protocolKind
+	if protocolKind == "http" || protocolKind == "https" {
+		taskKind = "synthetic"
 	}
 
 	task := protocol.CheckTask{
 		ID:              st.ID,
-		Kind:            st.Protocol,
-		Host:            st.TargetURL,
-		Method:          st.Method,
-		ServerURL:       st.TargetURL,
+		Kind:            taskKind,
+		Host:            u.Hostname(),
+		Port:            port,
+		Path:            path,
+		MaxHops:         1, // synthetic protocols do not trace routes
+		Method:          method,
+		ServerURL:       targetURL,
 		Headers:         headers,
 		BodyPayload:     st.BodyPayload,
 		Assertions:      assertions,
@@ -325,6 +445,8 @@ func syntheticTargetToCheckTask(st db.SyntheticTargetRecord) protocol.CheckTask 
 	if task.IntervalSeconds <= 0 {
 		task.IntervalSeconds = 60
 	}
-	return task
+	if err := task.Validate(); err != nil {
+		return protocol.CheckTask{}, fmt.Errorf("synthetic target %q is invalid: %w", st.ID, err)
+	}
+	return task, nil
 }
-

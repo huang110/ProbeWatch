@@ -9,8 +9,13 @@ import (
 )
 
 var (
-	ErrWebAuthnChallengeNotFound = errors.New("webauthn challenge not found or expired")
+	ErrWebAuthnChallengeNotFound  = errors.New("webauthn challenge not found or expired")
 	ErrWebAuthnCredentialNotFound = errors.New("webauthn credential not found")
+	// ErrWebAuthnCredentialUsageConflict means another assertion advanced the
+	// authenticator counter between verification and persistence.  Callers
+	// must not issue a session when this happens: accepting the assertion would
+	// make concurrent replay possible.
+	ErrWebAuthnCredentialUsageConflict = errors.New("webauthn credential usage conflict")
 )
 
 type WebAuthnCredential struct {
@@ -189,13 +194,32 @@ func (s *Store) RenameWebAuthnCredential(ctx context.Context, id, adminID, name 
 
 // UpdateWebAuthnCredentialUsage increments the sign count and updates last_used_at.
 func (s *Store) UpdateWebAuthnCredentialUsage(ctx context.Context, id string, signCount uint32, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `
+	// Persist the counter monotonically.  The assertion is verified using a
+	// snapshot of the credential, so an unconditional UPDATE would let two
+	// concurrent assertions with the same counter both create sessions.  A
+	// A zero counter means that the authenticator does not provide a usable
+	// replay counter.  It may still authenticate, but must never downgrade a
+	// previously observed non-zero counter.
+	res, err := s.db.ExecContext(ctx, `
 		UPDATE webauthn_credentials
-		SET sign_count = ?, last_used_at = ?
+		SET sign_count = CASE WHEN ? > 0 THEN ? ELSE sign_count END,
+		    last_used_at = ?
 		WHERE id = ?
-	`, signCount, unixNano(now), id)
+		  AND (sign_count < ? OR ? = 0)
+	`, signCount, signCount, unixNano(now), id, signCount, signCount)
 	if err != nil {
 		return fmt.Errorf("update webauthn credential usage: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		var exists int
+		err := s.db.QueryRowContext(ctx, `SELECT 1 FROM webauthn_credentials WHERE id = ?`, id).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWebAuthnCredentialNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("check webauthn credential usage conflict: %w", err)
+		}
+		return ErrWebAuthnCredentialUsageConflict
 	}
 	return nil
 }

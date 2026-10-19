@@ -2,7 +2,9 @@ package monitor
 
 import (
 	"context"
-	"fmt"
+	"crypto/sha1"
+	"encoding/base64"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +14,13 @@ import (
 	"testing"
 
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/terminal"
 )
+
+func websocketAcceptForTest(key string) string {
+	h := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(h[:])
+}
 
 func TestSyntheticHTTPAssertionsPass(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +34,7 @@ func TestSyntheticHTTPAssertionsPass(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	port, _ := strconv.Atoi(u.Port())
 
-	monitor := NewSyntheticMonitor()
+	monitor := NewSyntheticMonitorWithOptions(true)
 	task := protocol.CheckTask{
 		ID:        "syn-1",
 		Kind:      "synthetic",
@@ -68,7 +76,7 @@ func TestSyntheticHTTPAssertionFails(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	port, _ := strconv.Atoi(u.Port())
 
-	monitor := NewSyntheticMonitor()
+	monitor := NewSyntheticMonitorWithOptions(true)
 	task := protocol.CheckTask{
 		ID:        "syn-fail",
 		Kind:      "synthetic",
@@ -95,41 +103,66 @@ func TestSyntheticHTTPAssertionFails(t *testing.T) {
 	}
 }
 
-func TestSyntheticWebSocketHandshake(t *testing.T) {
-	// Start TCP listener simulating WebSocket upgrade server
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
-	defer l.Close()
+func TestSyntheticExplicitStatusCodeAssertionCanPass(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer ts.Close()
 
-	go func() {
-		conn, err := l.Accept()
+	u, _ := url.Parse(ts.URL)
+	port, _ := strconv.Atoi(u.Port())
+	monitor := NewSyntheticMonitorWithOptions(true)
+	task := protocol.CheckTask{
+		ID:        "syn-explicit-status",
+		Kind:      "synthetic",
+		Host:      u.Hostname(),
+		Port:      port,
+		Path:      "/",
+		ServerURL: ts.URL,
+		TimeoutMS: 5000,
+		MaxHops:   10,
+		Assertions: []protocol.SyntheticAssertionRule{
+			{Source: "status_code", Operator: "equals", Target: "404"},
+		},
+	}
+
+	res := monitor.ExecuteSynthetic(context.Background(), task)
+	if !res.Passed {
+		t.Fatalf("expected explicit 404 assertion to pass, got error: %s, failed assertion: %s", res.Error, res.FailedAssertion)
+	}
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status code = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestSyntheticWebSocketHandshake(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := terminal.Upgrade(w, r)
 		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer conn.Close()
-
-		buf := make([]byte, 1024)
-		n, _ := conn.Read(buf)
-		req := string(buf[:n])
-		if strings.Contains(req, "Upgrade: websocket") {
-			resp := "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
-			_, _ = conn.Write([]byte(resp))
+		opcode, payload, err := conn.ReadMessage()
+		if err == nil {
+			_ = conn.WriteMessage(opcode, payload)
 		}
-	}()
+	}))
+	defer server.Close()
 
-	addr := l.Addr().String()
-	parts := strings.Split(addr, ":")
-	port, _ := strconv.Atoi(parts[1])
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse websocket test URL: %v", err)
+	}
+	port, _ := strconv.Atoi(u.Port())
 
-	monitor := NewSyntheticMonitor()
+	monitor := NewSyntheticMonitorWithOptions(true)
 	task := protocol.CheckTask{
 		ID:        "ws-1",
 		Kind:      "websocket",
-		Host:      "127.0.0.1",
+		Host:      u.Hostname(),
 		Port:      port,
-		ServerURL: fmt.Sprintf("ws://%s", addr),
+		ServerURL: "ws" + strings.TrimPrefix(server.URL, "http"),
 		TimeoutMS: 3000,
 		MaxHops:   10,
 	}
@@ -143,6 +176,115 @@ func TestSyntheticWebSocketHandshake(t *testing.T) {
 	}
 	if !res.WebSocketEcho {
 		t.Fatal("expected WebSocketEcho to be true")
+	}
+}
+
+func TestSyntheticWebSocketRejectsHandshakeOnlyServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Deliberately advertise an upgrade and then close without accepting a
+		// data frame. A handshake-only endpoint must not be reported as an echo
+		// monitor success.
+		key := r.Header.Get("Sec-WebSocket-Key")
+		accept := websocketAcceptForTest(key)
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", accept)
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer server.Close()
+
+	monitor := NewSyntheticMonitorWithOptions(true)
+	res := monitor.ExecuteSynthetic(context.Background(), protocol.CheckTask{
+		ID:        "ws-no-echo",
+		Kind:      "websocket",
+		ServerURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+		TimeoutMS: 1000,
+	})
+	if res.Passed || res.WebSocketEcho {
+		t.Fatalf("handshake-only WebSocket endpoint was incorrectly reported healthy: %#v", res)
+	}
+}
+
+func TestSyntheticWebSocketRejectsBadAccept(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Sec-WebSocket-Accept", "invalid")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer server.Close()
+
+	monitor := NewSyntheticMonitorWithOptions(true)
+	res := monitor.ExecuteSynthetic(context.Background(), protocol.CheckTask{
+		ID:        "ws-bad-accept",
+		Kind:      "websocket",
+		ServerURL: "ws" + strings.TrimPrefix(server.URL, "http"),
+		TimeoutMS: 1000,
+	})
+	if res.Passed {
+		t.Fatalf("bad WebSocket accept was incorrectly reported healthy: %#v", res)
+	}
+}
+
+func TestSyntheticGRPCRejectsPlainTCP(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("this is only a TCP service"))
+	}()
+
+	monitor := NewSyntheticMonitorWithOptions(true)
+	res := monitor.ExecuteSynthetic(context.Background(), protocol.CheckTask{
+		ID:        "grpc-plain-tcp",
+		Kind:      "grpc",
+		ServerURL: "grpc://" + l.Addr().String(),
+		TimeoutMS: 1000,
+	})
+	if res.Passed {
+		t.Fatalf("plain TCP service was incorrectly reported as gRPC SERVING: %#v", res)
+	}
+	if res.GRPCStatus == "SERVING" {
+		t.Fatalf("plain TCP service received SERVING status: %#v", res)
+	}
+}
+
+func TestSyntheticGRPCCleartextRequiresSettings(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		prefaceAndSettings := make([]byte, 24+9)
+		if _, err := io.ReadFull(conn, prefaceAndSettings); err != nil {
+			return
+		}
+		// A legal empty server SETTINGS frame: length=0, type=4, stream=0.
+		_, _ = conn.Write([]byte{0, 0, 0, 4, 0, 0, 0, 0, 0})
+	}()
+
+	monitor := NewSyntheticMonitorWithOptions(true)
+	res := monitor.ExecuteSynthetic(context.Background(), protocol.CheckTask{
+		ID:        "grpc-h2c",
+		Kind:      "grpc",
+		ServerURL: "grpc://" + l.Addr().String(),
+		TimeoutMS: 1000,
+	})
+	if !res.Passed || res.GRPCStatus != "SERVING" {
+		t.Fatalf("valid h2c SETTINGS exchange failed: %#v", res)
 	}
 }
 

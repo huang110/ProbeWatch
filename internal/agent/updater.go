@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -25,7 +26,10 @@ var (
 	ErrChecksumRequired   = errors.New("update metadata missing checksum")
 	ErrInvalidDownloadURL = errors.New("update download URL is not trusted")
 	ErrBinaryTooSmall     = errors.New("downloaded binary is abnormally small or incomplete")
+	ErrBinaryTooLarge     = errors.New("downloaded binary exceeds the maximum size")
 )
+
+const maxAgentBinaryBytes int64 = 256 << 20
 
 // UpdateCheckResult holds version metadata from the server.
 type UpdateCheckResult struct {
@@ -43,8 +47,11 @@ func CheckUpdate(ctx context.Context, client *http.Client, endpoint, token strin
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
-	url := strings.TrimRight(endpoint, "/") + "/update/check"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	checkURL, err := updateCheckURL(endpoint, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return nil, fmt.Errorf("create update check URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create update check request: %w", err)
 	}
@@ -69,6 +76,23 @@ func CheckUpdate(ctx context.Context, client *http.Client, endpoint, token strin
 
 	result.UpdateAvailable = version.IsUpgradeAvailable(version.AgentVersion, result.LatestAgentVersion)
 	return &result, nil
+}
+
+// updateCheckURL appends the running agent platform so the control plane can
+// return a matching binary and checksum. Keeping this in the agent (rather
+// than relying on server defaults) is important for Windows and ARM agents.
+func updateCheckURL(endpoint, goos, goarch string) (string, error) {
+	base, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || base.Scheme == "" || base.Host == "" || base.User != nil || base.Opaque != "" || (base.Scheme != "http" && base.Scheme != "https") {
+		return "", ErrInvalidDownloadURL
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/update/check"
+	base.RawPath = ""
+	q := base.Query()
+	q.Set("os", strings.ToLower(strings.TrimSpace(goos)))
+	q.Set("arch", strings.ToLower(strings.TrimSpace(goarch)))
+	base.RawQuery = q.Encode()
+	return base.String(), nil
 }
 
 type RuntimeStrategy string
@@ -202,11 +226,18 @@ func downloadAndApplyUpdateTo(ctx context.Context, client *http.Client, endpoint
 
 	hasher := sha256.New()
 	writer := io.MultiWriter(stagingFile, hasher)
-	written, err := io.Copy(writer, resp.Body)
+	// Bound the client-side staging write as well as the server-side response.
+	// A misconfigured or compromised endpoint must not be able to fill the
+	// agent's disk before checksum validation fails.
+	written, err := io.Copy(writer, io.LimitReader(resp.Body, maxAgentBinaryBytes+1))
 	_ = stagingFile.Close()
 	if err != nil {
 		_ = os.Remove(stagingPath)
 		return fmt.Errorf("save staging binary: %w", err)
+	}
+	if written > maxAgentBinaryBytes {
+		_ = os.Remove(stagingPath)
+		return ErrBinaryTooLarge
 	}
 
 	// Verify size (at least 1 MB for compiled Go binary)
@@ -296,7 +327,7 @@ func trustedDownloadURL(endpoint, raw string) (string, error) {
 		return "", ErrInvalidDownloadURL
 	}
 	base, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || base.Scheme == "" || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
+	if err != nil || base.Scheme == "" || base.Host == "" || base.User != nil || (base.Scheme != "http" && base.Scheme != "https") {
 		return "", ErrInvalidDownloadURL
 	}
 	ref, err := url.Parse(strings.TrimSpace(raw))
@@ -308,10 +339,29 @@ func trustedDownloadURL(endpoint, raw string) (string, error) {
 		baseForResolve.Path += "/"
 	}
 	resolved := baseForResolve.ResolveReference(ref)
-	if resolved.Scheme != base.Scheme || !strings.EqualFold(resolved.Host, base.Host) || resolved.User != nil {
+	if !sameUpdateOrigin(resolved, base) || resolved.User != nil {
 		return "", ErrInvalidDownloadURL
 	}
 	return resolved.String(), nil
+}
+
+// sameUpdateOrigin compares the actual network origin rather than URL.Host
+// verbatim. An endpoint written as https://host:443 and a release URL written
+// as https://host are the same origin, while a different explicit port is not.
+func sameUpdateOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil || !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if strings.EqualFold(u.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return port(a) == port(b)
 }
 
 // VerifyAndClearPendingUpgrade marks the upgrade as verified once healthy telemetry succeeds.

@@ -118,11 +118,14 @@ func New(cfg config.Config) (*Runner, error) {
 		}},
 		next: make(map[string]time.Time), now: time.Now, startedAt: processStartTime(),
 		cpu: newCPUTracker(), hardware: defaultHardwareCollector(), disk: newPlatformDiskTracker(), sockets: defaultSocketCollector(), health: defaultHostHealthCollector(), ipQuality: NewIPQualityCollector(), ipqa: NewIPQACollector(),
-		probe:               &monitor.Probe{},
-		media:               &monitor.MediaDetector{},
-		mtr:                 &monitor.MTRMonitor{},
-		speedtest:           &monitor.SpeedtestRunner{},
-		synthetic:           monitor.NewSyntheticMonitor(),
+		probe:     &monitor.Probe{},
+		media:     &monitor.MediaDetector{},
+		mtr:       &monitor.MTRMonitor{},
+		speedtest: monitor.NewSpeedtestRunner(),
+		// Development keeps the historical ability to probe local httptest or
+		// lab services. Production agents use the SSRF-safe default, which
+		// rejects private/link-local/metadata destinations at dial time.
+		synthetic:           monitor.NewSyntheticMonitorWithOptions(cfg.Environment == "development"),
 		fastProbeWorkerSem:  make(chan struct{}, maxConcurrentFastProbes),
 		heavyProbeWorkerSem: make(chan struct{}, maxConcurrentHeavyProbes),
 		runningTasks:        make(map[string]struct{}),

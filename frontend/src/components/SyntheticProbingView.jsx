@@ -115,6 +115,9 @@ export default function SyntheticProbingView() {
   const [activeProtocolTab, setActiveProtocolTab] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [syncState, setSyncState] = useState('loading')
+  // Public synthetic results are read-only. This can happen when an
+  // authenticated session expires while the dashboard remains open.
+  const [readOnly, setReadOnly] = useState(false)
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -138,8 +141,21 @@ export default function SyntheticProbingView() {
         fetchSyntheticTargets(controller.signal).catch((error) => { if (error?.name === 'AbortError') throw error; return null }),
       ])
       if (!controller.signal.aborted) {
+        const publicSnapshot = Boolean(overviewData?.__public || overviewData?.read_only)
         if (overviewData) setOverview(overviewData)
-        if (Array.isArray(targetsData)) setTargets(targetsData)
+        setReadOnly(publicSnapshot)
+        // The public DTO omits target URLs, assertions and real IDs. Never
+        // retain stale private targets beside that DTO.
+        if (publicSnapshot) {
+          setTargets([])
+          setIsModalOpen(false)
+          setIsPresetPickerOpen(false)
+          setIsTestModalOpen(false)
+          setEditingTarget(null)
+          setTestTarget(null)
+          setHistoryTarget(null)
+        }
+        else if (Array.isArray(targetsData)) setTargets(targetsData)
         if (!overviewData) throw new Error('加载合成监控数据失败，将自动重试')
         setError(null)
         setSyncState('ok')
@@ -241,7 +257,7 @@ export default function SyntheticProbingView() {
         </div>
 
         <div className="synthetic-page-actions">
-          <button
+          {!readOnly && <button
             onClick={() => {
               setTestTarget(null)
               setIsTestModalOpen(true)
@@ -250,8 +266,8 @@ export default function SyntheticProbingView() {
           >
             <Play size={16} weight="bold" className="text-emerald-400" />
             临时探测（不保存）
-          </button>
-          <button
+          </button>}
+          {!readOnly && <button
             onClick={() => {
               setEditingTarget(null)
               setIsModalOpen(true)
@@ -260,7 +276,7 @@ export default function SyntheticProbingView() {
           >
             <Plus size={16} weight="bold" />
             新建监控
-          </button>
+          </button>}
           <span className={`synthetic-sync-status ${syncState !== 'ok' ? 'is-syncing' : ''}`}>
             <span className={`status-dot ${syncState === 'retrying' ? 'status-warning' : 'status-online'}`} />
             {syncState === 'retrying' ? '同步失败，正在重试' : syncState === 'ok' ? (metrics.total > 0 ? '自动同步中' : '等待配置') : '同步中'}
@@ -383,7 +399,7 @@ export default function SyntheticProbingView() {
               ? '当前筛选条件下暂无目标，请清除筛选或更改搜索词。'
               : '创建一个 HTTP、HTTPS、DNS 或 TCP 任务开始监测'}
           </p>
-          {(overview?.total_targets || targets.length) === 0 ? (
+          {(overview?.total_targets || targets.length) === 0 && !readOnly ? (
             <div className="empty-state-actions">
               <button
                 type="button"
@@ -429,6 +445,7 @@ export default function SyntheticProbingView() {
                 setIsTestModalOpen(true)
               }}
               onViewHistory={() => setHistoryTarget(item.target)}
+              readOnly={readOnly}
             />
           ))}
         </div>
@@ -487,7 +504,7 @@ export default function SyntheticProbingView() {
   )
 }
 
-function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, deleting = false }) {
+function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, deleting = false, readOnly = false }) {
   const t = item.target || {}
   const proto = (t.protocol || 'https').toLowerCase()
   const protoStyle = PROTOCOL_CONFIG[proto] || PROTOCOL_CONFIG.https
@@ -543,17 +560,17 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-mono mt-1 break-all">
+            {!readOnly && <div className="flex items-center gap-2 text-xs text-slate-400 font-mono mt-1 break-all">
               <span className="text-slate-500 font-semibold">{t.method || 'GET'}</span>
               <span>{t.target_url}</span>
               {t.grpc_service && (
                 <span className="text-purple-400">· service: {t.grpc_service}</span>
               )}
-            </div>
+            </div>}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-end lg:self-center">
+        {!readOnly && <div className="flex items-center gap-2 self-end lg:self-center">
           <button
             onClick={onTest}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 transition"
@@ -584,7 +601,7 @@ function SyntheticTargetCard({ item, onEdit, onDelete, onTest, onViewHistory, de
           >
             {deleting ? <ArrowsClockwise size={15} className="animate-spin" /> : <Trash size={15} />}
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Timing Waterfall & Assertions */}

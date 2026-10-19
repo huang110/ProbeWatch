@@ -82,8 +82,23 @@ func TestAIChatEndpoint(t *testing.T) {
 	cookie := &http.Cookie{Name: "probewatch_session", Value: sessionVal}
 
 	chatPayload := []byte(`{"prompt":"分析全站网络延迟与丢包根因"}`)
+	// Browser-session writes must carry both a same-origin marker and a
+	// single-use CSRF token. This endpoint may invoke an external model and
+	// must not be triggerable by a cross-site form/image request.
+	withoutCSRF := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(chatPayload))
+	withoutCSRF.Header.Set("Content-Type", "application/json")
+	withoutCSRF.Header.Set("Origin", cfg.PublicBaseURL)
+	withoutCSRF.AddCookie(cookie)
+	withoutCSRFRec := httptest.NewRecorder()
+	handler.ServeHTTP(withoutCSRFRec, withoutCSRF)
+	if withoutCSRFRec.Code != http.StatusForbidden {
+		t.Fatalf("chat without CSRF = %d, want 403", withoutCSRFRec.Code)
+	}
+	csrf := task4CSRF(t, handler, sessionVal)
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", bytes.NewReader(chatPayload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", cfg.PublicBaseURL)
+	req.Header.Set("X-CSRF-Token", csrf)
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 

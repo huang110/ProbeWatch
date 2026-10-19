@@ -62,6 +62,16 @@ func TestLocalComposeKeepsHostLoopbackAndContainerListenSeparate(t *testing.T) {
 	if strings.Count(compose, "    volumes:\n") != 1 || strings.Count(compose, "    environment:\n") != 1 || strings.Count(compose, "    ports:\n") != 1 {
 		t.Fatal("compose must have one service environment, ports, and volumes section")
 	}
+	for _, required := range []string{
+		"    read_only: true\n",
+		"    cap_drop:\n      - ALL\n",
+		"    security_opt:\n      - no-new-privileges:true\n",
+		"    tmpfs:\n      - /tmp:rw,noexec,nosuid,nodev,size=64m\n",
+	} {
+		if !strings.Contains(compose, required) {
+			t.Fatalf("compose is missing container hardening %q", required)
+		}
+	}
 	for _, forbidden := range []string{
 		"/var/run/docker.sock",
 		"docker.sock",

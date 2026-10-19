@@ -1,24 +1,55 @@
 package api
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/probewatch/probewatch/internal/auth/webauthn"
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/security"
 )
 
+const (
+	// WebAuthn credential IDs are bounded by the protocol (max 1023 bytes).
+	// Keeping a tighter application bound also prevents oversized IDs from
+	// being used as an input/DB amplification vector.
+	maxWebAuthnCredentialIDBytes = 1024
+	maxWebAuthnChallengeIDBytes  = 256
+	maxWebAuthnClientDataBytes   = 64 << 10
+	maxWebAuthnAuthDataBytes     = 64 << 10
+	maxWebAuthnSignatureBytes    = 16 << 10
+	maxWebAuthnAttestationBytes  = 128 << 10
+	maxWebAuthnNameBytes         = 256
+	maxWebAuthnNameRunes         = 128
+)
+
 func (s *Server) webauthnOrigin(r *http.Request) string {
+	// In production the configured public origin is authoritative. Host and
+	// forwarded headers are request-controlled unless a trusted proxy has
+	// already normalized them, so they must not define the WebAuthn origin.
+	if s.cfg.Environment != "development" {
+		if origin := configuredWebAuthnOrigin(s.cfg.PublicBaseURL); origin != "" {
+			return origin
+		}
+		return ""
+	}
+	// Development servers commonly run behind a changing local test host; keep
+	// that convenience explicitly confined to development mode.
 	scheme := "https"
 	if r.TLS == nil {
 		if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-			scheme = proto
+			candidate := strings.ToLower(strings.TrimSpace(strings.Split(proto, ",")[0]))
+			if candidate == "http" || candidate == "https" {
+				scheme = candidate
+			}
 		} else if s.cfg.Environment == "development" {
 			scheme = "http"
 		}
@@ -26,26 +57,49 @@ func (s *Server) webauthnOrigin(r *http.Request) string {
 	if r.Host != "" {
 		return scheme + "://" + r.Host
 	}
-	if s.cfg.PublicBaseURL != "" {
-		return strings.TrimRight(s.cfg.PublicBaseURL, "/")
-	}
-	return scheme + "://localhost"
+	return configuredWebAuthnOrigin(s.cfg.PublicBaseURL)
 }
 
 func (s *Server) webauthnRPID(r *http.Request) string {
+	if s.cfg.Environment != "development" {
+		if origin := configuredWebAuthnOrigin(s.cfg.PublicBaseURL); origin != "" {
+			return webauthn.ExtractRPID(origin)
+		}
+		return ""
+	}
 	if r.Host != "" {
 		return webauthn.ExtractRPID(r.Host)
 	}
-	if s.cfg.PublicBaseURL != "" {
-		return webauthn.ExtractRPID(s.cfg.PublicBaseURL)
+	if origin := configuredWebAuthnOrigin(s.cfg.PublicBaseURL); origin != "" {
+		return webauthn.ExtractRPID(origin)
 	}
 	return "localhost"
+}
+
+func configuredWebAuthnOrigin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil ||
+		u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	u.Scheme = scheme
+	u.Path = ""
+	u.RawPath = ""
+	return u.Scheme + "://" + u.Host
 }
 
 // POST /api/webauthn/login/begin
 func (s *Server) webauthnLoginBegin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.loginLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
 		return
 	}
 	now := time.Now().UTC()
@@ -98,40 +152,59 @@ func (s *Server) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.loginLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
+		return
+	}
 	var req webauthnLoginFinishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	bodyLimit := s.requestBodyLimit()
+	if bodyLimit > 256<<10 {
+		bodyLimit = 256 << 10
+	}
+	if err := decodeJSONRequest(w, r, bodyLimit, &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
+	if req.Type != "public-key" {
+		writeJSONError(w, http.StatusBadRequest, "invalid credential type")
+		return
+	}
+	if n := len([]byte(req.ChallengeID)); n == 0 || n > maxWebAuthnChallengeIDBytes {
+		writeJSONError(w, http.StatusBadRequest, "invalid challenge_id")
 		return
 	}
 
 	now := time.Now().UTC()
-	expectedChallenge, _, err := s.service.Store().GetAndConsumeWebAuthnChallenge(r.Context(), req.ChallengeID, "login", now)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "challenge expired or invalid")
-		return
-	}
 
 	rawID, err := webauthn.Base64URLDecode(req.RawID)
-	if err != nil || len(rawID) == 0 {
+	credentialID, idErr := webauthn.Base64URLDecode(req.ID)
+	if err != nil || idErr != nil || len(rawID) == 0 || len(rawID) > maxWebAuthnCredentialIDBytes || !bytes.Equal(rawID, credentialID) {
 		writeJSONError(w, http.StatusBadRequest, "invalid rawId")
 		return
 	}
-
 	clientDataJSON, err := webauthn.Base64URLDecode(req.Response.ClientDataJSON)
-	if err != nil {
+	if err != nil || len(clientDataJSON) == 0 || len(clientDataJSON) > maxWebAuthnClientDataBytes {
 		writeJSONError(w, http.StatusBadRequest, "invalid clientDataJSON")
 		return
 	}
 
 	authenticatorData, err := webauthn.Base64URLDecode(req.Response.AuthenticatorData)
-	if err != nil {
+	if err != nil || len(authenticatorData) < 37 || len(authenticatorData) > maxWebAuthnAuthDataBytes {
 		writeJSONError(w, http.StatusBadRequest, "invalid authenticatorData")
 		return
 	}
 
 	signature, err := webauthn.Base64URLDecode(req.Response.Signature)
-	if err != nil {
+	if err != nil || len(signature) == 0 || len(signature) > maxWebAuthnSignatureBytes {
 		writeJSONError(w, http.StatusBadRequest, "invalid signature")
+		return
+	}
+	// Consume the challenge after all structural decoding has passed, but before
+	// credential lookup, so malformed input does not burn a valid challenge and
+	// credential existence cannot be probed without one.
+	expectedChallenge, _, err := s.service.Store().GetAndConsumeWebAuthnChallenge(r.Context(), req.ChallengeID, "login", now)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "challenge expired or invalid")
 		return
 	}
 
@@ -165,8 +238,21 @@ func (s *Server) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update credential usage & count
-	_ = s.service.Store().UpdateWebAuthnCredentialUsage(r.Context(), cred.ID, newSignCount, now)
+	// Update credential usage & count.  This is an atomic monotonic update;
+	// failing to persist it must fail the login rather than silently issuing a
+	// session with an unverifiable counter state.
+	if err := s.service.Store().UpdateWebAuthnCredentialUsage(r.Context(), cred.ID, newSignCount, now); err != nil {
+		if errors.Is(err, db.ErrWebAuthnCredentialUsageConflict) {
+			writeJSONError(w, http.StatusUnauthorized, "authenticator counter regression or replay detected")
+			return
+		}
+		if errors.Is(err, db.ErrWebAuthnCredentialNotFound) {
+			writeJSONError(w, http.StatusUnauthorized, "passkey not recognized")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "failed to update passkey usage")
+		return
+	}
 
 	// Issue admin session cookie
 	if err := s.service.IssueSessionCookie(w, r, cred.AdminID); err != nil {
@@ -187,6 +273,10 @@ func (s *Server) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 func (s *Server) webauthnRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.loginLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
 		return
 	}
 	now := time.Now().UTC()
@@ -272,6 +362,10 @@ func (s *Server) webauthnRegisterFinish(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.loginLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
+		return
+	}
 	now := time.Now().UTC()
 	user, err := s.service.CurrentUser(r, now)
 	if err != nil {
@@ -280,32 +374,56 @@ func (s *Server) webauthnRegisterFinish(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req webauthnRegisterFinishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	bodyLimit := s.requestBodyLimit()
+	if bodyLimit > 256<<10 {
+		bodyLimit = 256 << 10
+	}
+	if err := decodeJSONRequest(w, r, bodyLimit, &req); err != nil {
+		writeRequestError(w, err)
 		return
 	}
-
-	expectedChallenge, challengeAdminID, err := s.service.Store().GetAndConsumeWebAuthnChallenge(r.Context(), req.ChallengeID, "register", now)
-	if err != nil || (challengeAdminID != "" && challengeAdminID != user.ID) {
-		writeJSONError(w, http.StatusBadRequest, "challenge expired or invalid")
+	if req.Type != "public-key" {
+		writeJSONError(w, http.StatusBadRequest, "invalid credential type")
+		return
+	}
+	if n := len([]byte(req.ChallengeID)); n == 0 || n > maxWebAuthnChallengeIDBytes {
+		writeJSONError(w, http.StatusBadRequest, "invalid challenge_id")
 		return
 	}
 
 	rawID, err := webauthn.Base64URLDecode(req.RawID)
-	if err != nil || len(rawID) == 0 {
+	credentialID, idErr := webauthn.Base64URLDecode(req.ID)
+	if err != nil || idErr != nil || len(rawID) == 0 || len(rawID) > maxWebAuthnCredentialIDBytes || !bytes.Equal(rawID, credentialID) {
 		writeJSONError(w, http.StatusBadRequest, "invalid rawId")
 		return
 	}
 
 	clientDataJSON, err := webauthn.Base64URLDecode(req.Response.ClientDataJSON)
-	if err != nil {
+	if err != nil || len(clientDataJSON) == 0 || len(clientDataJSON) > maxWebAuthnClientDataBytes {
 		writeJSONError(w, http.StatusBadRequest, "invalid clientDataJSON")
 		return
 	}
 
 	attestationObject, err := webauthn.Base64URLDecode(req.Response.AttestationObject)
-	if err != nil {
+	if err != nil || len(attestationObject) == 0 || len(attestationObject) > maxWebAuthnAttestationBytes {
 		writeJSONError(w, http.StatusBadRequest, "invalid attestationObject")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = fmt.Sprintf("Passkey %s", now.Format("01-02 15:04"))
+	}
+	if len([]byte(name)) > maxWebAuthnNameBytes || utf8.RuneCountInString(name) > maxWebAuthnNameRunes {
+		writeJSONError(w, http.StatusBadRequest, "passkey name is too long")
+		return
+	}
+
+	// Consume the challenge only after structural validation of the response so
+	// malformed input cannot invalidate a legitimate registration attempt.
+	expectedChallenge, challengeAdminID, err := s.service.Store().GetAndConsumeWebAuthnChallenge(r.Context(), req.ChallengeID, "register", now)
+	if err != nil || (challengeAdminID != "" && challengeAdminID != user.ID) {
+		writeJSONError(w, http.StatusBadRequest, "challenge expired or invalid")
 		return
 	}
 
@@ -323,11 +441,6 @@ func (s *Server) webauthnRegisterFinish(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("registration verification failed: %v", err))
 		return
-	}
-
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = fmt.Sprintf("Passkey %s", now.Format("01-02 15:04"))
 	}
 
 	credID, err := security.GenerateToken()
@@ -425,7 +538,12 @@ func (s *Server) webauthnCredentialsRoute(w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusBadRequest, "valid name required")
 			return
 		}
-		if err := s.service.Store().RenameWebAuthnCredential(r.Context(), credID, user.ID, strings.TrimSpace(req.Name)); err != nil {
+		name := strings.TrimSpace(req.Name)
+		if len([]byte(name)) > maxWebAuthnNameBytes || utf8.RuneCountInString(name) > maxWebAuthnNameRunes {
+			writeJSONError(w, http.StatusBadRequest, "name too long")
+			return
+		}
+		if err := s.service.Store().RenameWebAuthnCredential(r.Context(), credID, user.ID, name); err != nil {
 			if errors.Is(err, db.ErrWebAuthnCredentialNotFound) {
 				writeJSONError(w, http.StatusNotFound, "credential not found")
 				return

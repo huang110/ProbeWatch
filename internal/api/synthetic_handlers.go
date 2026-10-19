@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/probewatch/probewatch/internal/db"
 	"github.com/probewatch/probewatch/internal/monitor"
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/security"
 )
 
 // CertificateItem represents a monitored SSL/TLS certificate's details.
@@ -76,16 +78,81 @@ type DNSMatrixResponse struct {
 	Matrix          []DNSTargetMatrix `json:"matrix"`
 }
 
+// sanitizePublicCertificates removes target domains, certificate identities,
+// node IDs and other inventory details from the unauthenticated dashboard.
+// Public pages retain only fleet health counts and expiry status.
+func sanitizePublicCertificates(response CertificatesResponse) CertificatesResponse {
+	for i := range response.Certificates {
+		item := &response.Certificates[i]
+		item.TargetID = fmt.Sprintf("certificate-%d", i+1)
+		item.TargetName = fmt.Sprintf("HTTPS target %d", i+1)
+		item.Host = ""
+		item.Port = 0
+		item.Subject = ""
+		item.Issuer = ""
+		item.DNSNames = nil
+		item.NodeID = ""
+		item.NodeName = fmt.Sprintf("Node %d", i+1)
+		item.CipherSuite = ""
+	}
+	return response
+}
+
+func sanitizePublicDNSMatrix(response DNSMatrixResponse) DNSMatrixResponse {
+	for i := range response.Matrix {
+		item := &response.Matrix[i]
+		item.TargetID = fmt.Sprintf("dns-target-%d", i+1)
+		item.TargetName = fmt.Sprintf("DNS target %d", i+1)
+		item.Host = ""
+		nodeLabels := make(map[string]string, len(item.Nodes))
+		for j := range item.Nodes {
+			node := &item.Nodes[j]
+			// Capture the original node name before it is overwritten so
+			// DivergentNodes entries (which reference original names) can
+			// be mapped to the sanitized per-position label.
+			originalName := node.NodeName
+			node.NodeID = fmt.Sprintf("node-%d", j+1)
+			node.NodeName = fmt.Sprintf("Node %d", j+1)
+			nodeLabels[originalName] = node.NodeName
+			node.Records = nil
+			node.Nameserver = ""
+		}
+		for j, name := range item.DivergentNodes {
+			if label, ok := nodeLabels[name]; ok {
+				item.DivergentNodes[j] = label
+				continue
+			}
+			item.DivergentNodes[j] = fmt.Sprintf("Node %d", len(nodeLabels)+1)
+		}
+	}
+	return response
+}
+
 func (s *Server) certificatesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 	ctx := r.Context()
+	isPublic := strings.HasPrefix(r.URL.Path, "/api/public/")
+	fullAccess := true
+	var allowedIDs map[string]struct{}
+	if !isPublic {
+		user, ok := s.authenticateUser(w, r)
+		if !ok {
+			return
+		}
+		var err error
+		fullAccess, _, allowedIDs, err = s.getUserNodeScope(ctx, user)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "certificates unavailable")
+			return
+		}
+	}
 
 	// Load target names and hosts
 	targetMap := make(map[string]db.TargetRecord)
@@ -116,6 +183,11 @@ func (s *Server) certificatesHandler(w http.ResponseWriter, r *http.Request) {
 	// Group certificates by TargetID, keeping the worst/lowest DaysLeft (or freshest)
 	certByTarget := make(map[string]CertificateItem)
 	for _, item := range allLatest {
+		if !isPublic && !fullAccess {
+			if _, allowed := allowedIDs[item.NodeID]; !allowed {
+				continue
+			}
+		}
 		var res protocol.NetworkResult
 		if err := json.Unmarshal(item.Payload, &res); err != nil || res.TLSCert == nil {
 			continue
@@ -185,13 +257,17 @@ func (s *Server) certificatesHandler(w http.ResponseWriter, r *http.Request) {
 		return items[i].DaysLeft < items[j].DaysLeft
 	})
 
-	writeJSON(w, http.StatusOK, CertificatesResponse{
+	response := CertificatesResponse{
 		Total:        len(items),
 		ValidCount:   validCount,
 		ExpiringSoon: expiringSoonCount,
 		ExpiredCount: expiredCount,
 		Certificates: items,
-	})
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/public/") {
+		response = sanitizePublicCertificates(response)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) dnsMatrixHandler(w http.ResponseWriter, r *http.Request) {
@@ -199,11 +275,26 @@ func (s *Server) dnsMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if strings.HasPrefix(r.URL.Path, "/api/public/") && s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 	ctx := r.Context()
+	isPublic := strings.HasPrefix(r.URL.Path, "/api/public/")
+	fullAccess := true
+	var allowedIDs map[string]struct{}
+	if !isPublic {
+		user, ok := s.authenticateUser(w, r)
+		if !ok {
+			return
+		}
+		var err error
+		fullAccess, _, allowedIDs, err = s.getUserNodeScope(ctx, user)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "dns matrix unavailable")
+			return
+		}
+	}
 
 	// Load DNS targets
 	targetMap := make(map[string]db.TargetRecord)
@@ -237,6 +328,11 @@ func (s *Server) dnsMatrixHandler(w http.ResponseWriter, r *http.Request) {
 	matrixData := make(map[string]*targetData)
 
 	for _, item := range allLatest {
+		if !isPublic && !fullAccess {
+			if _, allowed := allowedIDs[item.NodeID]; !allowed {
+				continue
+			}
+		}
 		var res protocol.NetworkResult
 		if err := json.Unmarshal(item.Payload, &res); err != nil || res.DNS == nil {
 			continue
@@ -366,12 +462,16 @@ func (s *Server) dnsMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		return matrix[i].TargetName < matrix[j].TargetName
 	})
 
-	writeJSON(w, http.StatusOK, DNSMatrixResponse{
+	response := DNSMatrixResponse{
 		TotalTargets:    len(matrix),
 		ConsistentCount: consistentCount,
 		DivergentCount:  divergentCount,
 		Matrix:          matrix,
-	})
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/public/") {
+		response = sanitizePublicDNSMatrix(response)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // SyntheticTargetRequest represents the payload for creating or updating a synthetic target.
@@ -415,6 +515,118 @@ type SyntheticResultsOverviewResponse struct {
 	GeneratedAt     int64                   `json:"generated_at"`
 }
 
+// RestrictedSyntheticTarget is returned to authenticated users without
+// fleet-wide administrative access. A scoped administrator must not receive
+// target URLs, headers, assertions or raw payloads outside the node scope.
+// Synthetic target definitions may contain credentials in headers/body and
+// internal URLs in the target configuration, so those fields must not be
+// exposed merely because a user can view node metrics.
+type RestrictedSyntheticTarget struct {
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Protocol        string    `json:"protocol"`
+	Method          string    `json:"method"`
+	TimeoutMS       int       `json:"timeout_ms"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	ConsensusNodes  int       `json:"consensus_nodes"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type RestrictedSyntheticResultRecord struct {
+	NodeName   string    `json:"node_name"`
+	Protocol   string    `json:"protocol"`
+	StatusCode int       `json:"status_code"`
+	Passed     bool      `json:"passed"`
+	DNSMS      int64     `json:"dns_ms"`
+	ConnectMS  int64     `json:"connect_ms"`
+	TLSMS      int64     `json:"tls_ms"`
+	TTFBMS     int64     `json:"ttfb_ms"`
+	TotalMS    int64     `json:"total_ms"`
+	CheckedAt  time.Time `json:"checked_at"`
+}
+
+type RestrictedSyntheticTargetStatus struct {
+	Target          RestrictedSyntheticTarget         `json:"target"`
+	LatestResults   []RestrictedSyntheticResultRecord `json:"latest_results"`
+	TotalNodes      int                               `json:"total_nodes"`
+	PassingNodes    int                               `json:"passing_nodes"`
+	FailingNodes    int                               `json:"failing_nodes"`
+	ConsensusStatus string                            `json:"consensus_status"`
+	AvgLatencyMS    float64                           `json:"avg_latency_ms"`
+	AvgTTFBMS       float64                           `json:"avg_ttfb_ms"`
+}
+
+type RestrictedSyntheticResultsOverviewResponse struct {
+	TotalTargets    int                               `json:"total_targets"`
+	PassingTargets  int                               `json:"passing_targets"`
+	DegradedTargets int                               `json:"degraded_targets"`
+	FailingTargets  int                               `json:"failing_targets"`
+	Targets         []RestrictedSyntheticTargetStatus `json:"targets"`
+	GeneratedAt     int64                             `json:"generated_at"`
+	ReadOnly        bool                              `json:"read_only"`
+}
+
+type RestrictedSyntheticHistoryRecord struct {
+	NodeName   string    `json:"node_name"`
+	Protocol   string    `json:"protocol"`
+	StatusCode int       `json:"status_code"`
+	Passed     bool      `json:"passed"`
+	DNSMS      int64     `json:"dns_ms"`
+	ConnectMS  int64     `json:"connect_ms"`
+	TLSMS      int64     `json:"tls_ms"`
+	TTFBMS     int64     `json:"ttfb_ms"`
+	TotalMS    int64     `json:"total_ms"`
+	CheckedAt  time.Time `json:"checked_at"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// PublicSyntheticTarget is the allow-listed target shape exposed to guests.
+// The private target record contains URLs, headers, assertions, node IDs and
+// scheduling details; none of those belong in an unauthenticated response.
+type PublicSyntheticTarget struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+}
+
+// PublicSyntheticResultRecord contains only anonymous outcome and timing
+// information. In particular it deliberately omits target/node IDs, raw
+// payloads, assertion details and operator-selected names.
+type PublicSyntheticResultRecord struct {
+	NodeName   string    `json:"node_name"`
+	Protocol   string    `json:"protocol"`
+	StatusCode int       `json:"status_code"`
+	Passed     bool      `json:"passed"`
+	DNSMS      int64     `json:"dns_ms"`
+	ConnectMS  int64     `json:"connect_ms"`
+	TLSMS      int64     `json:"tls_ms"`
+	TTFBMS     int64     `json:"ttfb_ms"`
+	TotalMS    int64     `json:"total_ms"`
+	CheckedAt  time.Time `json:"checked_at"`
+}
+
+type PublicSyntheticTargetStatus struct {
+	Target          PublicSyntheticTarget         `json:"target"`
+	LatestResults   []PublicSyntheticResultRecord `json:"latest_results"`
+	TotalNodes      int                           `json:"total_nodes"`
+	PassingNodes    int                           `json:"passing_nodes"`
+	FailingNodes    int                           `json:"failing_nodes"`
+	ConsensusStatus string                        `json:"consensus_status"`
+	AvgLatencyMS    float64                       `json:"avg_latency_ms"`
+	AvgTTFBMS       float64                       `json:"avg_ttfb_ms"`
+}
+
+type PublicSyntheticResultsOverviewResponse struct {
+	TotalTargets    int                           `json:"total_targets"`
+	PassingTargets  int                           `json:"passing_targets"`
+	DegradedTargets int                           `json:"degraded_targets"`
+	FailingTargets  int                           `json:"failing_targets"`
+	Targets         []PublicSyntheticTargetStatus `json:"targets"`
+	GeneratedAt     int64                         `json:"generated_at"`
+}
+
 // SyntheticTestRequest represents the payload to test a synthetic target in real-time.
 type SyntheticTestRequest struct {
 	Protocol    string                            `json:"protocol"`
@@ -427,8 +639,67 @@ type SyntheticTestRequest struct {
 	TimeoutMS   int                               `json:"timeout_ms,omitempty"`
 }
 
+const (
+	// Keep persisted synthetic targets within the same bounds enforced by the
+	// agent wire validator. Without server-side checks an administrator could
+	// save a 1ms interval or an unbounded consensus threshold, causing a low-
+	// memory agent to schedule excessive work or produce permanently degraded
+	// status calculations.
+	minSyntheticTimeoutMS      = 100
+	maxSyntheticTimeoutMS      = 30_000
+	minSyntheticIntervalSec    = 10
+	maxSyntheticIntervalSec    = 86_400
+	maxSyntheticConsensusNodes = 1_000
+)
+
+func validateSyntheticSchedule(timeoutMS, intervalSeconds, consensusNodes int, requireAll bool) error {
+	if requireAll || timeoutMS != 0 {
+		if timeoutMS < minSyntheticTimeoutMS || timeoutMS > maxSyntheticTimeoutMS {
+			return fmt.Errorf("timeout_ms must be between %d and %d", minSyntheticTimeoutMS, maxSyntheticTimeoutMS)
+		}
+	}
+	if requireAll || intervalSeconds != 0 {
+		if intervalSeconds < minSyntheticIntervalSec || intervalSeconds > maxSyntheticIntervalSec {
+			return fmt.Errorf("interval_seconds must be between %d and %d", minSyntheticIntervalSec, maxSyntheticIntervalSec)
+		}
+	}
+	if requireAll || consensusNodes != 0 {
+		if consensusNodes < 1 || consensusNodes > maxSyntheticConsensusNodes {
+			return fmt.Errorf("consensus_nodes must be between 1 and %d", maxSyntheticConsensusNodes)
+		}
+	}
+	return nil
+}
+
+func syntheticURLSchemes(proto string) []string {
+	switch proto {
+	case "http":
+		return []string{"http"}
+	case "https":
+		return []string{"https"}
+	case "websocket":
+		return []string{"ws", "wss", "http", "https"}
+	case "grpc":
+		return []string{"grpc", "grpcs", "http", "https"}
+	case "doh":
+		return []string{"http", "https"}
+	default:
+		return nil
+	}
+}
+
+func (s *Server) validateSyntheticURL(raw, proto string) error {
+	if _, err := security.ValidateURLWithOptions(raw, syntheticURLSchemes(proto), true, s.cfg.Environment == "development"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Server) syntheticTargetsRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if !s.requireFleetWideNodeScope(w, r) {
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/synthetic/targets")
 	path = strings.TrimPrefix(path, "/")
 
@@ -520,6 +791,10 @@ func (s *Server) createSyntheticTarget(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "target_url is required")
 		return
 	}
+	if err := s.validateSyntheticURL(targetURL, proto); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid target_url: "+err.Error())
+		return
+	}
 
 	for _, a := range req.Assertions {
 		if err := a.Validate(); err != nil {
@@ -546,16 +821,32 @@ func (s *Server) createSyntheticTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	timeoutMS := req.TimeoutMS
+	if timeoutMS < 0 {
+		writeJSONError(w, http.StatusBadRequest, "timeout_ms must not be negative")
+		return
+	}
 	if timeoutMS <= 0 {
 		timeoutMS = 5000
 	}
 	intervalSeconds := req.IntervalSeconds
+	if intervalSeconds < 0 {
+		writeJSONError(w, http.StatusBadRequest, "interval_seconds must not be negative")
+		return
+	}
 	if intervalSeconds <= 0 {
 		intervalSeconds = 60
 	}
 	consensusNodes := req.ConsensusNodes
+	if consensusNodes < 0 {
+		writeJSONError(w, http.StatusBadRequest, "consensus_nodes must not be negative")
+		return
+	}
 	if consensusNodes <= 0 {
 		consensusNodes = 1
+	}
+	if err := validateSyntheticSchedule(timeoutMS, intervalSeconds, consensusNodes, true); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	enabled := true
@@ -587,6 +878,10 @@ func (s *Server) createSyntheticTarget(w http.ResponseWriter, r *http.Request) {
 		NodeIDs:         nodeIDs,
 		ConsensusNodes:  consensusNodes,
 		Enabled:         enabled,
+	}
+	if _, err := syntheticTargetToCheckTask(record, s.cfg.Environment == "development"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid synthetic target: "+err.Error())
+		return
 	}
 
 	if err := s.service.Store().CreateSyntheticTarget(r.Context(), record); err != nil {
@@ -633,7 +928,18 @@ func (s *Server) updateSyntheticTarget(w http.ResponseWriter, r *http.Request, i
 		}
 	}
 	if req.TargetURL != "" {
-		existing.TargetURL = strings.TrimSpace(req.TargetURL)
+		targetURL := strings.TrimSpace(req.TargetURL)
+		if err := s.validateSyntheticURL(targetURL, existing.Protocol); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid target_url: "+err.Error())
+			return
+		}
+		existing.TargetURL = targetURL
+	}
+	if req.Protocol != "" && req.TargetURL == "" {
+		if err := s.validateSyntheticURL(existing.TargetURL, existing.Protocol); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid target_url: "+err.Error())
+			return
+		}
 	}
 	if req.Method != "" {
 		existing.Method = strings.ToUpper(strings.TrimSpace(req.Method))
@@ -658,13 +964,25 @@ func (s *Server) updateSyntheticTarget(w http.ResponseWriter, r *http.Request, i
 	if req.GRPCService != "" {
 		existing.GRPCService = req.GRPCService
 	}
-	if req.TimeoutMS > 0 {
+	if req.TimeoutMS != 0 {
+		if err := validateSyntheticSchedule(req.TimeoutMS, 0, 0, false); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		existing.TimeoutMS = req.TimeoutMS
 	}
-	if req.IntervalSeconds > 0 {
+	if req.IntervalSeconds != 0 {
+		if err := validateSyntheticSchedule(0, req.IntervalSeconds, 0, false); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		existing.IntervalSeconds = req.IntervalSeconds
 	}
-	if req.ConsensusNodes > 0 {
+	if req.ConsensusNodes != 0 {
+		if err := validateSyntheticSchedule(0, 0, req.ConsensusNodes, false); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		existing.ConsensusNodes = req.ConsensusNodes
 	}
 	if req.NodeTags != nil {
@@ -675,6 +993,10 @@ func (s *Server) updateSyntheticTarget(w http.ResponseWriter, r *http.Request, i
 	}
 	if req.Enabled != nil {
 		existing.Enabled = *req.Enabled
+	}
+	if _, err := syntheticTargetToCheckTask(existing, s.cfg.Environment == "development"); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid synthetic target: "+err.Error())
+		return
 	}
 
 	if err := s.service.Store().UpdateSyntheticTarget(r.Context(), existing); err != nil {
@@ -707,7 +1029,7 @@ func (s *Server) syntheticResultsHandler(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	s.serveSyntheticResults(w, r)
+	s.serveSyntheticResults(w, r, false)
 }
 
 func (s *Server) publicSyntheticResultsHandler(w http.ResponseWriter, r *http.Request) {
@@ -715,11 +1037,48 @@ func (s *Server) publicSyntheticResultsHandler(w http.ResponseWriter, r *http.Re
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	s.serveSyntheticResults(w, r)
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
+	s.serveSyntheticResults(w, r, true)
 }
 
-func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request, isPublic bool) {
+	w.Header().Set("Cache-Control", "no-store")
 	ctx := r.Context()
+	fullAccess := true
+	adminAccess := false
+	var allowedIDs map[string]struct{}
+	var allowedNodes []db.Node
+	if !isPublic {
+		user, ok := s.authenticateUser(w, r)
+		if !ok {
+			return
+		}
+		var scopeErr error
+		fullAccess, _, allowedIDs, scopeErr = s.getUserNodeScope(ctx, user)
+		if scopeErr != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "synthetic results unavailable")
+			return
+		}
+		// An administrator with an explicit node allow-list is still scoped.
+		// Treat only fleet-wide administrators as entitled to private target
+		// definitions and raw result payloads.
+		adminAccess = user.IsAdmin() && fullAccess
+		if !fullAccess {
+			nodes, listErr := s.service.Store().ListNodes(ctx)
+			if listErr != nil {
+				writeJSONError(w, http.StatusServiceUnavailable, "synthetic results unavailable")
+				return
+			}
+			for _, node := range nodes {
+				if _, allowed := allowedIDs[node.ID]; allowed {
+					allowedNodes = append(allowedNodes, node)
+				}
+			}
+		}
+	}
 	targets, err := s.service.Store().ListSyntheticTargets(ctx)
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "synthetic results unavailable")
@@ -733,6 +1092,11 @@ func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request) {
 
 	resultsByTarget := make(map[string][]db.SyntheticResultRecord)
 	for _, res := range latestResults {
+		if !isPublic && !fullAccess {
+			if _, allowed := allowedIDs[res.NodeID]; !allowed {
+				continue
+			}
+		}
 		resultsByTarget[res.TargetID] = append(resultsByTarget[res.TargetID], res)
 	}
 
@@ -742,6 +1106,18 @@ func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request) {
 	failingTargets := 0
 
 	for _, target := range targets {
+		if !isPublic && !fullAccess {
+			matches := false
+			for _, node := range allowedNodes {
+				if nodeMatchesSyntheticTarget(node, target) {
+					matches = true
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+		}
 		resList := resultsByTarget[target.ID]
 		total := len(resList)
 		passing := 0
@@ -765,7 +1141,13 @@ func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if total > 0 {
-			if failing >= reqConsensus {
+			// A target cannot be healthy until the configured number of
+			// distinct nodes has reported. Treat missing samples as degraded
+			// instead of silently declaring a single passing node healthy.
+			if total < reqConsensus {
+				consensus = "degraded"
+				degradedTargets++
+			} else if failing >= reqConsensus {
 				consensus = "failing"
 				failingTargets++
 			} else if failing > 0 {
@@ -803,14 +1185,196 @@ func (s *Server) serveSyntheticResults(w http.ResponseWriter, r *http.Request) {
 		overviewTargets = []SyntheticTargetStatus{}
 	}
 
-	writeJSON(w, http.StatusOK, SyntheticResultsOverviewResponse{
-		TotalTargets:    len(targets),
+	response := SyntheticResultsOverviewResponse{
+		// For node-scoped users, targets without any allowed node are omitted
+		// above. Count the response slice rather than the unfiltered store list,
+		// otherwise the UI leaks the fleet-wide target count and shows an
+		// impossible pass-rate denominator.
+		TotalTargets:    len(overviewTargets),
 		PassingTargets:  passingTargets,
 		DegradedTargets: degradedTargets,
 		FailingTargets:  failingTargets,
 		Targets:         overviewTargets,
 		GeneratedAt:     time.Now().UTC().Unix(),
-	})
+	}
+	if isPublic {
+		writeJSON(w, http.StatusOK, sanitizePublicSyntheticResults(response))
+		return
+	}
+	if !adminAccess {
+		writeJSON(w, http.StatusOK, sanitizeRestrictedSyntheticResults(response))
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// sanitizePublicSyntheticResults converts the private overview into a strict
+// allow-list for the unauthenticated dashboard. Anonymous labels are assigned
+// per response and are never derived from database IDs or operator names.
+func sanitizePublicSyntheticResults(response SyntheticResultsOverviewResponse) PublicSyntheticResultsOverviewResponse {
+	publicTargets := make([]PublicSyntheticTargetStatus, 0, len(response.Targets))
+	nodeLabels := make(map[string]string)
+	nextNode := 1
+	for targetIndex, item := range response.Targets {
+		targetLabel := fmt.Sprintf("Synthetic target %d", targetIndex+1)
+		publicResults := make([]PublicSyntheticResultRecord, 0, len(item.LatestResults))
+		for _, result := range item.LatestResults {
+			labelKey := result.NodeID
+			if labelKey == "" {
+				// A missing node ID is unusual, but do not let several such
+				// records collapse into one public label.
+				labelKey = fmt.Sprintf("missing-node-%d", nextNode)
+			}
+			label, ok := nodeLabels[labelKey]
+			if !ok {
+				label = fmt.Sprintf("Node %d", nextNode)
+				nodeLabels[labelKey] = label
+				nextNode++
+			}
+			publicResults = append(publicResults, PublicSyntheticResultRecord{
+				NodeName: label,
+				// The result is agent-supplied telemetry. Use the persisted target
+				// protocol so an untrusted agent cannot inject an arbitrary label
+				// into the public response or contradict the configured check.
+				Protocol:   item.Target.Protocol,
+				StatusCode: result.StatusCode,
+				Passed:     result.Passed,
+				DNSMS:      result.DNSMS,
+				ConnectMS:  result.ConnectMS,
+				TLSMS:      result.TLSMS,
+				TTFBMS:     result.TTFBMS,
+				TotalMS:    result.TotalMS,
+				CheckedAt:  result.CheckedAt,
+			})
+		}
+		if publicResults == nil {
+			publicResults = []PublicSyntheticResultRecord{}
+		}
+		publicTargets = append(publicTargets, PublicSyntheticTargetStatus{
+			Target: PublicSyntheticTarget{
+				ID:       fmt.Sprintf("synthetic-%d", targetIndex+1),
+				Name:     targetLabel,
+				Protocol: item.Target.Protocol,
+			},
+			LatestResults:   publicResults,
+			TotalNodes:      item.TotalNodes,
+			PassingNodes:    item.PassingNodes,
+			FailingNodes:    item.FailingNodes,
+			ConsensusStatus: item.ConsensusStatus,
+			AvgLatencyMS:    item.AvgLatencyMS,
+			AvgTTFBMS:       item.AvgTTFBMS,
+		})
+	}
+	if publicTargets == nil {
+		publicTargets = []PublicSyntheticTargetStatus{}
+	}
+	return PublicSyntheticResultsOverviewResponse{
+		TotalTargets:    response.TotalTargets,
+		PassingTargets:  response.PassingTargets,
+		DegradedTargets: response.DegradedTargets,
+		FailingTargets:  response.FailingTargets,
+		Targets:         publicTargets,
+		GeneratedAt:     response.GeneratedAt,
+	}
+}
+
+// sanitizeSyntheticHistory removes identifiers, target names and raw agent
+// payloads from history returned to non-admin users. Synthetic checks commonly
+// contain internal URLs and credentials; timing/outcome data is sufficient for
+// read-only dashboards.
+func sanitizeSyntheticHistory(history []db.SyntheticHistoryRecord) []RestrictedSyntheticHistoryRecord {
+	result := make([]RestrictedSyntheticHistoryRecord, 0, len(history))
+	nodeLabels := make(map[string]string)
+	nextNode := 1
+	for _, item := range history {
+		key := item.NodeID
+		if key == "" {
+			key = fmt.Sprintf("missing-node-%d", nextNode)
+		}
+		label, ok := nodeLabels[key]
+		if !ok {
+			label = fmt.Sprintf("Node %d", nextNode)
+			nodeLabels[key] = label
+			nextNode++
+		}
+		result = append(result, RestrictedSyntheticHistoryRecord{
+			NodeName:   label,
+			Protocol:   item.Protocol,
+			StatusCode: item.StatusCode,
+			Passed:     item.Passed,
+			DNSMS:      item.DNSMS,
+			ConnectMS:  item.ConnectMS,
+			TLSMS:      item.TLSMS,
+			TTFBMS:     item.TTFBMS,
+			TotalMS:    item.TotalMS,
+			CheckedAt:  item.CheckedAt,
+			RecordedAt: item.RecordedAt,
+		})
+	}
+	return result
+}
+
+func sanitizeRestrictedSyntheticResults(response SyntheticResultsOverviewResponse) RestrictedSyntheticResultsOverviewResponse {
+	targets := make([]RestrictedSyntheticTargetStatus, 0, len(response.Targets))
+	nodeLabels := make(map[string]string)
+	nextNode := 1
+	for targetIndex, item := range response.Targets {
+		results := make([]RestrictedSyntheticResultRecord, 0, len(item.LatestResults))
+		for _, result := range item.LatestResults {
+			labelKey := result.NodeID
+			if labelKey == "" {
+				labelKey = fmt.Sprintf("missing-node-%d", nextNode)
+			}
+			label, ok := nodeLabels[labelKey]
+			if !ok {
+				label = fmt.Sprintf("Node %d", nextNode)
+				nodeLabels[labelKey] = label
+				nextNode++
+			}
+			results = append(results, RestrictedSyntheticResultRecord{
+				NodeName:   label,
+				Protocol:   item.Target.Protocol,
+				StatusCode: result.StatusCode,
+				Passed:     result.Passed,
+				DNSMS:      result.DNSMS,
+				ConnectMS:  result.ConnectMS,
+				TLSMS:      result.TLSMS,
+				TTFBMS:     result.TTFBMS,
+				TotalMS:    result.TotalMS,
+				CheckedAt:  result.CheckedAt,
+			})
+		}
+		targets = append(targets, RestrictedSyntheticTargetStatus{
+			Target: RestrictedSyntheticTarget{
+				ID:              fmt.Sprintf("synthetic-%d", targetIndex+1),
+				Name:            item.Target.Name,
+				Protocol:        item.Target.Protocol,
+				Method:          item.Target.Method,
+				TimeoutMS:       item.Target.TimeoutMS,
+				IntervalSeconds: item.Target.IntervalSeconds,
+				ConsensusNodes:  item.Target.ConsensusNodes,
+				Enabled:         item.Target.Enabled,
+				CreatedAt:       item.Target.CreatedAt,
+				UpdatedAt:       item.Target.UpdatedAt,
+			},
+			LatestResults:   results,
+			TotalNodes:      item.TotalNodes,
+			PassingNodes:    item.PassingNodes,
+			FailingNodes:    item.FailingNodes,
+			ConsensusStatus: item.ConsensusStatus,
+			AvgLatencyMS:    item.AvgLatencyMS,
+			AvgTTFBMS:       item.AvgTTFBMS,
+		})
+	}
+	return RestrictedSyntheticResultsOverviewResponse{
+		TotalTargets:    response.TotalTargets,
+		PassingTargets:  response.PassingTargets,
+		DegradedTargets: response.DegradedTargets,
+		FailingTargets:  response.FailingTargets,
+		Targets:         targets,
+		GeneratedAt:     response.GeneratedAt,
+		ReadOnly:        true,
+	}
 }
 
 func (s *Server) syntheticHistoryHandler(w http.ResponseWriter, r *http.Request) {
@@ -818,8 +1382,23 @@ func (s *Server) syntheticHistoryHandler(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	targetID := r.URL.Query().Get("target_id")
-	nodeID := r.URL.Query().Get("node_id")
+	targetID := strings.TrimSpace(r.URL.Query().Get("target_id"))
+	nodeID := strings.TrimSpace(r.URL.Query().Get("node_id"))
+	user, ok := s.authenticateUser(w, r)
+	if !ok {
+		return
+	}
+	fullAccess, _, allowedIDs, scopeErr := s.getUserNodeScope(r.Context(), user)
+	if scopeErr != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "synthetic history unavailable")
+		return
+	}
+	if !fullAccess && nodeID != "" {
+		if _, allowed := allowedIDs[nodeID]; !allowed {
+			writeJSON(w, http.StatusOK, []db.SyntheticHistoryRecord{})
+			return
+		}
+	}
 	limitStr := r.URL.Query().Get("limit")
 	limit := 100
 	if limitStr != "" {
@@ -831,7 +1410,25 @@ func (s *Server) syntheticHistoryHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	history, err := s.service.Store().ListSyntheticHistory(r.Context(), nodeID, targetID, limit)
+	var history []db.SyntheticHistoryRecord
+	var err error
+	if fullAccess {
+		history, err = s.service.Store().ListSyntheticHistory(r.Context(), nodeID, targetID, limit)
+	} else if nodeID != "" {
+		// The node was authorized above. Keep the scope predicate in SQL so the
+		// requested limit is applied to authorized rows, not to fleet-wide rows
+		// that are filtered out afterwards.
+		history, err = s.service.Store().ListSyntheticHistoryForNodes(r.Context(), []string{nodeID}, targetID, limit)
+	} else {
+		// Apply the node allow-list in SQL before LIMIT. Filtering a fleet-wide
+		// result after the query can hide older authorized samples whenever newer
+		// samples belong to nodes outside the caller's scope.
+		nodeIDs := make([]string, 0, len(allowedIDs))
+		for id := range allowedIDs {
+			nodeIDs = append(nodeIDs, id)
+		}
+		history, err = s.service.Store().ListSyntheticHistoryForNodes(r.Context(), nodeIDs, targetID, limit)
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "synthetic history unavailable")
 		return
@@ -839,12 +1436,19 @@ func (s *Server) syntheticHistoryHandler(w http.ResponseWriter, r *http.Request)
 	if history == nil {
 		history = []db.SyntheticHistoryRecord{}
 	}
+	if !fullAccess || !user.IsAdmin() {
+		writeJSON(w, http.StatusOK, sanitizeSyntheticHistory(history))
+		return
+	}
 	writeJSON(w, http.StatusOK, history)
 }
 
 func (s *Server) syntheticTestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requireFleetWideNodeScope(w, r) {
 		return
 	}
 	var req SyntheticTestRequest
@@ -867,13 +1471,25 @@ func (s *Server) syntheticTestHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "target_url is required")
 		return
 	}
+	if err := s.validateSyntheticURL(targetURL, proto); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid target_url: "+err.Error())
+		return
+	}
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	if method == "" {
 		method = "GET"
 	}
 	timeoutMS := req.TimeoutMS
+	if timeoutMS < 0 {
+		writeJSONError(w, http.StatusBadRequest, "timeout_ms must not be negative")
+		return
+	}
 	if timeoutMS <= 0 {
 		timeoutMS = 5000
+	}
+	if err := validateSyntheticSchedule(timeoutMS, 0, 0, false); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	task := protocol.CheckTask{
@@ -890,7 +1506,9 @@ func (s *Server) syntheticTestHandler(w http.ResponseWriter, r *http.Request) {
 		Enabled:     true,
 	}
 
-	synMonitor := monitor.NewSyntheticMonitor()
+	// Development mode may intentionally exercise a local httptest/lab
+	// endpoint. Production keeps the monitor SSRF-safe by default.
+	synMonitor := monitor.NewSyntheticMonitorWithOptions(s.cfg.Environment == "development")
 	result := synMonitor.Run(r.Context(), task)
 	writeJSON(w, http.StatusOK, result)
 }

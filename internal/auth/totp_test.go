@@ -156,6 +156,10 @@ func TestSetupEnableDisableTOTPFlow(t *testing.T) {
 	if err != nil || enabled || string(storedSecret) != secret {
 		t.Fatalf("setup did not persist the pending secret: enabled=%v err=%v", enabled, err)
 	}
+	secondSecret, secondURL, err := service.SetupTOTP(context.Background(), admin.ID, "alice", now.Add(time.Second))
+	if err != nil || secondSecret != secret || !strings.Contains(secondURL, secret) {
+		t.Fatalf("repeated setup replaced pending secret: secret=%q url=%q err=%v", secondSecret, secondURL, err)
+	}
 
 	if err := service.EnableTOTP(context.Background(), admin.ID, "000000", now); err == nil {
 		t.Fatal("enable accepted an invalid code")

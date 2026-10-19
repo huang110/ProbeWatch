@@ -43,6 +43,9 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if cfg.AgentIgnoreUnsafeCert {
 		t.Fatal("development default enabled unsafe certificate bypass")
 	}
+	if cfg.EnableRemoteTerminal || cfg.EnableTerminal {
+		t.Fatalf("remote terminal must be explicit opt-in by default: server=%t agent=%t", cfg.EnableRemoteTerminal, cfg.EnableTerminal)
+	}
 	if cfg.TokenPepper == "" {
 		t.Fatal("development token pepper is empty")
 	}
@@ -90,6 +93,50 @@ func TestLoadParsesEnvironmentValues(t *testing.T) {
 	}
 	if cfg.TokenPepper != "development-token-pepper" {
 		t.Fatalf("TokenPepper = %q", cfg.TokenPepper)
+	}
+}
+
+func TestValidateVisitorGeoIPURL(t *testing.T) {
+	valid := []string{
+		"https://ipwho.is/{ip}?lang=zh-CN",
+		"https://geo.example.test/lookup?lang=zh-CN",
+	}
+	for _, value := range valid {
+		if err := ValidateVisitorGeoIPURL(value); err != nil {
+			t.Errorf("ValidateVisitorGeoIPURL(%q) = %v", value, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"ftp://geo.example.test/{ip}",
+		"https://user:pass@geo.example.test/{ip}",
+		"https://{ip}/lookup",
+		"https://geo.example.test/{other}",
+		"https://geo.example.test/lookup#fragment",
+	}
+	for _, value := range invalid {
+		if err := ValidateVisitorGeoIPURL(value); err == nil {
+			t.Errorf("ValidateVisitorGeoIPURL(%q) accepted unsafe URL", value)
+		}
+	}
+}
+
+func TestLoadRejectsUnsafeEnabledVisitorGeoIPURL(t *testing.T) {
+	for _, value := range []string{
+		"ftp://geo.example.test/{ip}",
+		"https://{ip}/lookup",
+		"https://user:pass@geo.example.test/{ip}",
+	} {
+		t.Run(value, func(t *testing.T) {
+			clearConfigEnvironment(t)
+			t.Setenv("PROBEWATCH_ENV", "development")
+			t.Setenv("PROBEWATCH_ENABLE_VISITOR_GEOIP", "true")
+			t.Setenv("PROBEWATCH_VISITOR_GEOIP_URL", value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PROBEWATCH_VISITOR_GEOIP_URL") {
+				t.Fatalf("Load error = %v, want visitor GeoIP URL validation error", err)
+			}
+		})
 	}
 }
 
@@ -510,6 +557,8 @@ func clearConfigEnvironment(t *testing.T) {
 		"PROBEWATCH_AGENT_DATA",
 		"PROBEWATCH_AGENT_ENABLE_TERMINAL",
 		"PROBEWATCH_ENABLE_REMOTE_TERMINAL",
+		"PROBEWATCH_ENABLE_VISITOR_GEOIP",
+		"PROBEWATCH_VISITOR_GEOIP_URL",
 		"AGENT_TOKEN_TTL",
 		"AGENT_NODE_TOKEN_TTL",
 		"AGENT_CLOCK_SKEW",

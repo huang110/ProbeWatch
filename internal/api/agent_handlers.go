@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.registrationLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if !s.registrationLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
 		return
 	}
@@ -83,9 +84,12 @@ func (s *Server) reportAgent(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, "invalid report")
 			return
 		}
-		if err := s.validateTargetBinding(r.Context(), db.TargetKind(result.Kind), result.ID); err != nil {
-			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) { continue }
-			writeTargetBindingError(w, err); return
+		if err := s.validateTargetBinding(r.Context(), node, db.TargetKind(result.Kind), result.ID); err != nil {
+			if errors.Is(err, db.ErrTargetNotFound) || errors.Is(err, db.ErrTargetDisabled) {
+				continue
+			}
+			writeTargetBindingError(w, err)
+			return
 		}
 		validResults = append(validResults, result)
 	}
@@ -155,7 +159,7 @@ func (s *Server) networkResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid network result")
 		return
 	}
-	targetKind, err := s.validateNetworkTargetBinding(r.Context(), request.TargetID)
+	targetKind, err := s.validateNetworkTargetBinding(r.Context(), node, request.TargetID)
 	if err != nil {
 		writeTargetBindingError(w, err)
 		return
@@ -202,7 +206,7 @@ func (s *Server) mtrResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid mtr result")
 		return
 	}
-	if err := s.validateTargetBinding(r.Context(), db.TargetKindMTR, request.TargetID); err != nil {
+	if err := s.validateTargetBinding(r.Context(), node, db.TargetKindMTR, request.TargetID); err != nil {
 		writeTargetBindingError(w, err)
 		return
 	}
@@ -248,7 +252,7 @@ func (s *Server) mediaResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid media result")
 		return
 	}
-	if err := s.validateTargetBinding(r.Context(), db.TargetKindMediaHTTP, request.DetectorID); err != nil {
+	if err := s.validateTargetBinding(r.Context(), node, db.TargetKindMediaHTTP, request.DetectorID); err != nil {
 		writeTargetBindingError(w, err)
 		return
 	}
@@ -294,7 +298,7 @@ func (s *Server) speedtestResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid speedtest result")
 		return
 	}
-	if err := s.validateTargetBinding(r.Context(), db.TargetKindSpeedtest, request.TaskID); err != nil {
+	if err := s.validateTargetBinding(r.Context(), node, db.TargetKindSpeedtest, request.TaskID); err != nil {
 		writeTargetBindingError(w, err)
 		return
 	}
@@ -345,7 +349,7 @@ func (s *Server) syntheticResultAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid synthetic result")
 		return
 	}
-	if err := s.validateTargetBinding(r.Context(), db.TargetKindSynthetic, request.TargetID); err != nil {
+	if err := s.validateTargetBinding(r.Context(), node, db.TargetKindSynthetic, request.TargetID); err != nil {
 		writeTargetBindingError(w, err)
 		return
 	}
@@ -374,7 +378,7 @@ func (s *Server) syntheticResultAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request) (db.Node, string, time.Time, bool) {
-	if !s.agentIPLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if !s.agentIPLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
 		return db.Node{}, "", time.Time{}, false
 	}
@@ -409,7 +413,7 @@ func (s *Server) authenticateAgentRequest(w http.ResponseWriter, r *http.Request
 	return node, requestID, now, true
 }
 
-func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, id string) error {
+func (s *Server) validateTargetBinding(ctx context.Context, node db.Node, kind db.TargetKind, id string) error {
 	if kind == db.TargetKindSpeedtest {
 		task, err := s.service.Store().GetSpeedtestTask(ctx, id)
 		if err != nil {
@@ -417,6 +421,9 @@ func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, 
 		}
 		if !task.Enabled {
 			return db.ErrTargetDisabled
+		}
+		if !nodeMatchesSpeedtestTask(node, task) {
+			return db.ErrTargetNotFound
 		}
 		return nil
 	}
@@ -428,18 +435,37 @@ func (s *Server) validateTargetBinding(ctx context.Context, kind db.TargetKind, 
 		if !target.Enabled {
 			return db.ErrTargetDisabled
 		}
+		if !nodeMatchesSyntheticTarget(node, target) {
+			return db.ErrTargetNotFound
+		}
 		return nil
 	}
-	_, err := s.service.Store().LookupEnabledTarget(ctx, kind, id)
-	return err
+	target, err := s.service.Store().LookupEnabledTarget(ctx, kind, id)
+	if err != nil {
+		return err
+	}
+	var config agentTargetPayload
+	if err := json.Unmarshal(target.Payload, &config); err != nil {
+		return fmt.Errorf("decode target configuration: %w", err)
+	}
+	if !nodeMatchesTarget(node, config) {
+		return db.ErrTargetNotFound
+	}
+	return nil
 }
 
-
-func (s *Server) validateNetworkTargetBinding(ctx context.Context, id string) (db.TargetKind, error) {
+func (s *Server) validateNetworkTargetBinding(ctx context.Context, node db.Node, id string) (db.TargetKind, error) {
 	for _, kind := range []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} {
 		if target, err := s.service.Store().GetTarget(ctx, kind, id); err == nil {
 			if !target.Enabled {
 				return "", db.ErrTargetDisabled
+			}
+			var config agentTargetPayload
+			if err := json.Unmarshal(target.Payload, &config); err != nil {
+				return "", fmt.Errorf("decode target configuration: %w", err)
+			}
+			if !nodeMatchesTarget(node, config) {
+				return "", db.ErrTargetNotFound
 			}
 			return kind, nil
 		} else if !errors.Is(err, db.ErrTargetNotFound) && !errors.Is(err, db.ErrTargetKindMismatch) {
@@ -516,7 +542,9 @@ func validateResultTimestampWithPastSkew(unixSeconds int64, now time.Time, pastS
 }
 
 func maxOutboxAgeForReports(skew time.Duration) time.Duration {
-	if skew < 7*24*time.Hour { return 7 * 24 * time.Hour }
+	if skew < 7*24*time.Hour {
+		return 7 * 24 * time.Hour
+	}
 	return skew
 }
 
@@ -540,7 +568,6 @@ func checkResultTimestampWithPastSkew(result protocol.CheckResult, now time.Time
 		return errors.New("invalid check result shape")
 	}
 }
-
 
 func writeAgentRequestError(w http.ResponseWriter, err error) {
 	if errors.Is(err, db.ErrReplay) {

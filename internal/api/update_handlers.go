@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,17 +27,45 @@ type UpdateCheckResponse struct {
 	ChecksumSHA256     string `json:"checksum_sha256,omitempty"`
 }
 
+const maxAgentBinaryBytes int64 = 256 << 20
+
+func (s *Server) allowAgentUpdate(w http.ResponseWriter, r *http.Request) bool {
+	if s.agentUpdateLimiter != nil && !s.agentUpdateLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeRateLimitError(w)
+		return false
+	}
+	return true
+}
+
 // agentUpdateCheck returns metadata about the latest release.
 func (s *Server) agentUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.allowAgentUpdate(w, r) {
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 
-	// Calculate checksum if binary is available locally
+	// Agents identify their platform so the returned binary and checksum always
+	// match the running executable (Windows/ARM must never receive Linux/amd64).
+	targetOS := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("os")))
+	if targetOS == "" {
+		targetOS = "linux"
+	}
+	targetArch := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("arch")))
+	if targetArch == "" {
+		targetArch = "amd64"
+	}
+	if !validAgentTarget(targetOS, targetArch) {
+		writeJSONError(w, http.StatusBadRequest, "unsupported agent platform")
+		return
+	}
+
+	// Calculate checksum if a matching binary is available locally.
 	var checksum string
-	binaryPath := s.findAgentBinaryPath("linux", "amd64")
+	binaryPath := s.findAgentBinaryPath(targetOS, targetArch)
 	if binaryPath != "" {
 		if sum, err := computeFileSHA256(binaryPath); err == nil {
 			checksum = sum
@@ -47,6 +76,7 @@ func (s *Server) agentUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.PublicBaseURL == "" {
 		downloadURL = "/api/agent/v1/update/download"
 	}
+	downloadURL += "?" + url.Values{"os": {targetOS}, "arch": {targetArch}}.Encode()
 
 	resp := UpdateCheckResponse{
 		ServerVersion:      version.ServerVersion,
@@ -65,6 +95,9 @@ func (s *Server) agentUpdateDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.allowAgentUpdate(w, r) {
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 
 	q := r.URL.Query()
@@ -78,12 +111,8 @@ func (s *Server) agentUpdateDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Security: strictly validate os and arch parameters
-	if targetOS != "linux" && targetOS != "darwin" && targetOS != "windows" {
-		writeJSONError(w, http.StatusBadRequest, "unsupported target os")
-		return
-	}
-	if targetArch != "amd64" && targetArch != "arm64" {
-		writeJSONError(w, http.StatusBadRequest, "unsupported target arch")
+	if !validAgentTarget(targetOS, targetArch) {
+		writeJSONError(w, http.StatusBadRequest, "unsupported target platform")
 		return
 	}
 
@@ -98,13 +127,45 @@ func (s *Server) agentUpdateDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "binary not available")
 		return
 	}
-
-	checksum, err := computeFileSHA256(binaryPath)
-	if err == nil && checksum != "" {
-		w.Header().Set("X-Checksum-SHA256", checksum)
+	if info.Size() <= 0 || info.Size() > maxAgentBinaryBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "agent binary exceeds the maximum download size")
+		return
 	}
+	binaryFile, err := os.Open(binaryPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "binary not available")
+		return
+	}
+	defer binaryFile.Close()
+	// Re-stat the opened handle so a concurrent replacement cannot make the
+	// response exceed the advertised cap. ServeContent also preserves HEAD and
+	// Range semantics without exposing a path-based file race.
+	openedInfo, err := binaryFile.Stat()
+	if err != nil || openedInfo.IsDir() || openedInfo.Size() <= 0 || openedInfo.Size() > maxAgentBinaryBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "agent binary exceeds the maximum download size")
+		return
+	}
+
+	// Hash the same open handle that will be passed to ServeContent. Hashing
+	// by path here creates a TOCTOU window: on Unix an atomic replacement could
+	// make the checksum describe a different inode than the bytes we stream.
+	checksum, err := computeSHA256Reader(binaryFile)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to checksum binary")
+		return
+	}
+	if _, err := binaryFile.Seek(0, io.SeekStart); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to prepare binary")
+		return
+	}
+	w.Header().Set("X-Checksum-SHA256", checksum)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="probewatch-agent-%s-%s"`, targetOS, targetArch))
-	http.ServeFile(w, r, binaryPath)
+	http.ServeContent(w, r, filepath.Base(binaryPath), openedInfo.ModTime(), binaryFile)
+}
+
+func validAgentTarget(targetOS, targetArch string) bool {
+	return (targetOS == "linux" || targetOS == "darwin" || targetOS == "windows") &&
+		(targetArch == "amd64" || targetArch == "arm64")
 }
 
 // publicVersion provides public version info for dashboards and status checks.
@@ -196,9 +257,12 @@ func computeFileSHA256(filePath string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
+	return computeSHA256Reader(f)
+}
 
+func computeSHA256Reader(r io.Reader) (string, error) {
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
+	if _, err := io.Copy(hasher, r); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil

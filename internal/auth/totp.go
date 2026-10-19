@@ -133,10 +133,24 @@ func totpAuthURL(secret, accountName string) string {
 	return "otpauth://totp/" + url.PathEscape(totpIssuerName) + ":" + url.PathEscape(accountName) + "?" + query.Encode()
 }
 
-// SetupTOTP generates a fresh TOTP secret for the administrator and stores it
-// in the disabled state. The enrollment URL and secret are returned once;
-// calling setup again replaces any not-yet-confirmed secret.
+// SetupTOTP returns the existing valid pending secret when enrollment is
+// already in progress. This makes the idempotent GET setup endpoint safe to
+// refresh and prevents an unsolicited request from invalidating the secret
+// currently shown in an authenticator app.
 func (s *Service) SetupTOTP(ctx context.Context, adminUserID, login string, now time.Time) (string, string, error) {
+	storedSecret, enabled, err := s.store.GetAdminUserTOTP(ctx, adminUserID)
+	if err == nil {
+		if enabled {
+			return "", "", ErrTOTPAlreadyEnabled
+		}
+		if decoded, decodeErr := decodeTOTPSecret(string(storedSecret)); decodeErr == nil && len(decoded) == totpSecretBytes {
+			secret := string(storedSecret)
+			return secret, totpAuthURL(secret, login), nil
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+
 	secret, err := generateTOTPSecret()
 	if err != nil {
 		return "", "", err

@@ -2,12 +2,15 @@ package db
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +21,13 @@ const (
 	RoleAdmin    = "admin"
 	RoleOperator = "operator"
 	RoleViewer   = "viewer"
+)
+
+const (
+	passwordHashPrefix      = "pbkdf2-sha256"
+	passwordHashIterations  = 210000
+	passwordHashSaltBytes   = 16
+	passwordHashOutputBytes = 32
 )
 
 var (
@@ -47,7 +57,10 @@ type UpdateUserInput struct {
 
 // CanAccessNode returns whether the user has permission to view/operate on a given node UUID.
 func (u AdminUser) CanAccessNode(nodeUUID string) bool {
-	if u.Role == RoleAdmin || u.AllowedNodes == "*" {
+	// Role and node scope are independent dimensions. An administrator with
+	// an explicit allow-list (including a PAT-derived intersection) must not
+	// regain fleet-wide access merely because of the role.
+	if strings.TrimSpace(u.AllowedNodes) == "*" {
 		return true
 	}
 	if strings.TrimSpace(u.AllowedNodes) == "" {
@@ -93,32 +106,89 @@ func (u AdminUser) DisplayNameOrLogin() string {
 	return u.ProviderUserID
 }
 
-// HashUserPassword generates a salted digest of the password using server pepper.
+// HashUserPassword generates a deliberately slow, salted password digest using
+// PBKDF2-HMAC-SHA256 and the server pepper. The versioned format lets old
+// installations transparently upgrade legacy fast hashes after a successful
+// login without invalidating existing accounts.
 func HashUserPassword(password string, pepper []byte) (string, error) {
-	salt := make([]byte, 16)
+	salt := make([]byte, passwordHashSaltBytes)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
 	}
-	hash := security.Digest(append(salt, pepper...), password)
-	return hex.EncodeToString(salt) + "$" + hex.EncodeToString(hash), nil
+	derived := derivePasswordKey(password, pepper, salt, passwordHashIterations, passwordHashOutputBytes)
+	return fmt.Sprintf("%s$%d$%s$%s", passwordHashPrefix, passwordHashIterations, hex.EncodeToString(salt), hex.EncodeToString(derived)), nil
 }
 
 // VerifyUserPassword checks the given password against a salted digest.
 func VerifyUserPassword(storedHash, password string, pepper []byte) bool {
 	parts := strings.Split(storedHash, "$")
+	if len(parts) == 4 && parts[0] == passwordHashPrefix {
+		iterations, err := strconv.Atoi(parts[1])
+		if err != nil || iterations < 10000 || iterations > 1000000 {
+			return false
+		}
+		salt, err := hex.DecodeString(parts[2])
+		if err != nil || len(salt) < 16 || len(salt) > 64 {
+			return false
+		}
+		expectedHash, err := hex.DecodeString(parts[3])
+		if err != nil || len(expectedHash) != passwordHashOutputBytes {
+			return false
+		}
+		actualHash := derivePasswordKey(password, pepper, salt, iterations, len(expectedHash))
+		return subtle.ConstantTimeCompare(actualHash, expectedHash) == 1
+	}
+
+	// Legacy format: <salt-hex>$<HMAC-SHA256>. Keep this branch solely for
+	// migration; successful authentication upgrades it to PBKDF2 below.
 	if len(parts) != 2 {
 		return false
 	}
 	salt, err := hex.DecodeString(parts[0])
-	if err != nil {
+	if err != nil || len(salt) == 0 {
 		return false
 	}
 	expectedHash, err := hex.DecodeString(parts[1])
-	if err != nil {
+	if err != nil || len(expectedHash) != sha256.Size {
 		return false
 	}
-	actualHash := security.Digest(append(salt, pepper...), password)
+	actualHash := security.Digest(append(append([]byte(nil), salt...), pepper...), password)
 	return subtle.ConstantTimeCompare(actualHash, expectedHash) == 1
+}
+
+func derivePasswordKey(password string, pepper, salt []byte, iterations, outputLen int) []byte {
+	material := make([]byte, 0, len(password)+1+len(pepper))
+	material = append(material, password...)
+	material = append(material, 0)
+	material = append(material, pepper...)
+	return pbkdf2HMACSHA256(material, salt, iterations, outputLen)
+}
+
+// pbkdf2HMACSHA256 is kept local to avoid pulling a large crypto dependency
+// into the small agent/control-plane binaries.
+func pbkdf2HMACSHA256(password, salt []byte, iterations, keyLen int) []byte {
+	if iterations <= 0 || keyLen <= 0 {
+		return nil
+	}
+	blocks := (keyLen + sha256.Size - 1) / sha256.Size
+	out := make([]byte, 0, blocks*sha256.Size)
+	for block := 1; block <= blocks; block++ {
+		mac := hmac.New(sha256.New, password)
+		_, _ = mac.Write(salt)
+		mac.Write([]byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)})
+		u := mac.Sum(nil)
+		t := append([]byte(nil), u...)
+		for i := 1; i < iterations; i++ {
+			mac = hmac.New(sha256.New, password)
+			_, _ = mac.Write(u)
+			u = mac.Sum(nil)
+			for j := range t {
+				t[j] ^= u[j]
+			}
+		}
+		out = append(out, t...)
+	}
+	return out[:keyLen]
 }
 
 // ListAdminUsers returns all registered administrators, operators, and viewers.
@@ -355,6 +425,13 @@ func (s *Store) AuthenticateLocalUser(ctx context.Context, login, password strin
 
 	if passwordHash == "" || !VerifyUserPassword(passwordHash, password, s.pepper) {
 		return AdminUser{}, ErrInvalidCredentials
+	}
+	if !strings.HasPrefix(passwordHash, passwordHashPrefix+"$") {
+		if upgraded, hashErr := HashUserPassword(password, s.pepper); hashErr == nil {
+			// A successful login remains valid even if a best-effort migration
+			// cannot be persisted; the next login can retry the upgrade.
+			_, _ = s.db.ExecContext(ctx, `UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE id = ?`, upgraded, unixNano(time.Now().UTC()), user.ID)
+		}
 	}
 
 	return user, nil

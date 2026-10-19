@@ -126,6 +126,38 @@ func (s *Server) targetAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listTargets(w http.ResponseWriter, r *http.Request) {
+	// Target definitions contain operator-chosen URLs, headers/paths and node
+	// selectors.  A scoped operator/PAT may only enumerate targets that would
+	// actually run on at least one node in its allow-list; otherwise a plain
+	// GET /api/targets becomes a cross-tenant inventory/URL disclosure.
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		if resolved, authenticated := s.authenticateUser(w, r); authenticated && resolved != nil {
+			user = *resolved
+			ok = true
+		} else {
+			return
+		}
+	}
+	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), &user)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "targets unavailable")
+		return
+	}
+	var allowedNodes []db.Node
+	if !fullAccess && len(allowedIDs) > 0 {
+		nodes, listErr := s.service.Store().ListNodes(r.Context())
+		if listErr != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "targets unavailable")
+			return
+		}
+		for _, node := range nodes {
+			if _, allowed := allowedIDs[node.ID]; allowed {
+				allowedNodes = append(allowedNodes, node)
+			}
+		}
+	}
+
 	all := make([]targetResponse, 0)
 	for _, kind := range targetKinds() {
 		targets, err := s.service.Store().ListTargets(r.Context(), kind)
@@ -138,6 +170,26 @@ func (s *Server) listTargets(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				writeJSONError(w, http.StatusServiceUnavailable, "targets unavailable")
 				return
+			}
+			if !fullAccess {
+				var config targetPayload
+				if err := json.Unmarshal(target.Payload, &config); err != nil {
+					writeJSONError(w, http.StatusServiceUnavailable, "targets unavailable")
+					return
+				}
+				matches := false
+				for _, node := range allowedNodes {
+					if nodeMatchesTarget(node, agentTargetPayload{
+						NodeTags: config.NodeTags,
+						NodeIDs:  config.NodeIDs,
+					}) {
+						matches = true
+						break
+					}
+				}
+				if !matches {
+					continue
+				}
 			}
 			all = append(all, response)
 		}
@@ -599,10 +651,10 @@ func (s *Server) seedMediaTargets(w http.ResponseWriter, r *http.Request) {
 			path: "/",
 		},
 		{
-			id:          "media-bilibili",
-			name:        "Bilibili 港澳台",
-			host:        "api.bilibili.com",
-			path:        "/pgc/player/web/v2/playurl?cid=144541892&ep_id=234405",
+			id:   "media-bilibili",
+			name: "Bilibili 港澳台",
+			host: "api.bilibili.com",
+			path: "/pgc/player/web/v2/playurl?cid=144541892&ep_id=234405",
 			regionRules: []protocol.RegionRule{
 				{Region: "TW", Contains: "\"code\":0"},
 				{Region: "HK", Contains: "\"code\":-10403"},

@@ -914,6 +914,18 @@ func TestCleanupLifecycleRemovesOnlyEligibleRows(t *testing.T) {
 	if _, err := store.db.Exec(`INSERT INTO resource_history (id,node_id,payload,reported_at,recorded_at) VALUES (1,'cleanup-node',X'01',?,?), (2,'cleanup-node',X'02',?,?)`, old30, old30, fresh, fresh); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.db.Exec(`INSERT INTO speedtest_tasks (id,name,server_url,created_at,updated_at) VALUES ('cleanup-speed','cleanup','https://example.com',?,?)`, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO speedtest_results_history (node_id,task_id,payload,tested_at,recorded_at) VALUES ('cleanup-node','cleanup-speed',X'01',?,?), ('cleanup-node','cleanup-speed',X'02',?,?)`, old30, old30, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO synthetic_targets (id,name,protocol,target_url,created_at,updated_at) VALUES ('cleanup-synthetic','cleanup','https','https://example.com',?,?)`, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO synthetic_results_history (node_id,target_id,payload,protocol,checked_at,recorded_at) VALUES ('cleanup-node','cleanup-synthetic',X'01','https',?,?), ('cleanup-node','cleanup-synthetic',X'02','https',?,?)`, old30, old30, fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.db.Exec(`INSERT INTO audit_events (id,action,created_at) VALUES ('old-audit','test',?), ('fresh-audit','test',?)`, old90, fresh); err != nil {
 		t.Fatal(err)
 	}
@@ -927,13 +939,15 @@ func TestCleanupLifecycleRemovesOnlyEligibleRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ResourceHistory != 1 || result.AuditEvents != 1 || result.RegistrationTokens != 1 || result.RequestReplays != 1 {
+	if result.ResourceHistory != 1 || result.SpeedtestResultsHistory != 1 || result.SyntheticResultsHistory != 1 || result.AuditEvents != 1 || result.RegistrationTokens != 1 || result.RequestReplays != 1 {
 		t.Fatalf("cleanup result = %#v", result)
 	}
 	assertRowCount(t, store, `SELECT count(*) FROM resource_history`, 1)
 	assertRowCount(t, store, `SELECT count(*) FROM audit_events`, 1)
 	assertRowCount(t, store, `SELECT count(*) FROM registration_tokens`, 1)
 	assertRowCount(t, store, `SELECT count(*) FROM request_replays`, 1)
+	assertRowCount(t, store, `SELECT count(*) FROM speedtest_results_history`, 1)
+	assertRowCount(t, store, `SELECT count(*) FROM synthetic_results_history`, 1)
 }
 
 func TestRequestIDReplayIsRejectedAndExpiredIDsAreCleaned(t *testing.T) {
@@ -1321,6 +1335,49 @@ func registerTestNode(t *testing.T, store *Store, uuid string) RegisteredNode {
 	return node
 }
 
+func TestListSyntheticHistoryForNodesAppliesScopeBeforeLimit(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	allowed := registerTestNode(t, store, "synthetic-allowed")
+	forbidden := registerTestNode(t, store, "synthetic-forbidden")
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO synthetic_targets (id, name, protocol, target_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"synthetic-scope", "scope target", "https", "https://example.com", time.Now().UnixNano(), time.Now().UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The forbidden node has the newest sample. A scoped query with LIMIT 1
+	// must still return the older authorized sample; filtering after LIMIT
+	// would incorrectly return an empty result.
+	oldAt := time.Now().UTC().Add(-time.Hour)
+	newAt := oldAt.Add(time.Minute)
+	for _, row := range []struct {
+		node string
+		at   time.Time
+	}{
+		{allowed.Node.ID, oldAt},
+		{forbidden.Node.ID, newAt},
+	} {
+		if _, err := store.db.ExecContext(ctx, `INSERT INTO synthetic_results_history (node_id, target_id, payload, protocol, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			row.node, "synthetic-scope", []byte(`{"status":"ok"}`), "https", row.at.UnixNano(), row.at.UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	history, err := store.ListSyntheticHistoryForNodes(ctx, []string{allowed.Node.ID}, "synthetic-scope", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].NodeID != allowed.Node.ID || !history[0].CheckedAt.Equal(oldAt) {
+		t.Fatalf("scoped synthetic history = %#v, want only authorized older row", history)
+	}
+
+	if got, err := store.ListSyntheticHistoryForNodes(ctx, nil, "synthetic-scope", 1); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 0 {
+		t.Fatalf("empty node scope returned %d rows, want 0", len(got))
+	}
+}
+
 func testUUID(value string) string {
 	if len(value) == 36 && value[8] == '-' && value[13] == '-' && value[18] == '-' && value[23] == '-' {
 		return value
@@ -1480,5 +1537,34 @@ func TestGetResourceHistoryMultiNodeOrderAsc(t *testing.T) {
 					i, records[i].ReportedAt, i-1, records[i-1].ReportedAt)
 			}
 		}
+	}
+}
+
+func TestGetResourceHistoryZeroLimitReturnsAllWithoutPanic(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	node := registerTestNode(t, store, "resource-history-zero-limit")
+	base := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		at := base.Add(time.Duration(i) * time.Minute)
+		if err := store.PersistAgentReport(ctx, AgentReportInput{
+			NodeID:          node.Node.ID,
+			RequestID:       fmt.Sprintf("zero-limit-%d", i),
+			ReportedAt:      at,
+			Now:             at,
+			ResourcePayload: []byte(fmt.Sprintf(`{"sample":%d}`, i)),
+		}); err != nil {
+			t.Fatalf("PersistAgentReport: %v", err)
+		}
+	}
+
+	records, err := store.GetResourceHistory(ctx, node.Node.ID, base.Add(-time.Minute), base.Add(5*time.Minute), 0)
+	if err != nil {
+		t.Fatalf("GetResourceHistory(limit=0): %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("GetResourceHistory(limit=0) returned %d records, want 3", len(records))
 	}
 }

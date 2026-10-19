@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -93,6 +94,17 @@ func TestWebAuthnStore(t *testing.T) {
 	byCred, _ = store.GetWebAuthnCredentialByCredID(ctx, credID)
 	if byCred.SignCount != 2 || byCred.LastUsedAt == nil {
 		t.Fatalf("expected updated usage, got %+v", byCred)
+	}
+	// A stale assertion must not be able to move the authenticator counter
+	// backwards (or re-apply the same positive counter).
+	if err := store.UpdateWebAuthnCredentialUsage(ctx, cred.ID, 2, usageTime.Add(time.Minute)); !errors.Is(err, ErrWebAuthnCredentialUsageConflict) {
+		t.Fatalf("expected counter conflict for stale usage update, got %v", err)
+	}
+	if err := store.UpdateWebAuthnCredentialUsage(ctx, cred.ID, 1, usageTime.Add(2*time.Minute)); !errors.Is(err, ErrWebAuthnCredentialUsageConflict) {
+		t.Fatalf("expected counter conflict for counter regression, got %v", err)
+	}
+	if err := store.UpdateWebAuthnCredentialUsage(ctx, "missing", 3, usageTime); !errors.Is(err, ErrWebAuthnCredentialNotFound) {
+		t.Fatalf("expected not found for missing credential, got %v", err)
 	}
 
 	// 7. Rename

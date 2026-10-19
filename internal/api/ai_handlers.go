@@ -6,10 +6,28 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/ai"
 	"github.com/probewatch/probewatch/internal/db"
 )
+
+// allowAIRequest protects the external-provider boundary from accidental or
+// malicious request storms. It is intentionally keyed by both the authenticated
+// principal and the client address: user-only keys allow one compromised account
+// to consume the whole budget, while IP-only keys punish legitimate operators
+// behind a shared NAT.
+func (s *Server) allowAIRequest(w http.ResponseWriter, r *http.Request, user db.AdminUser) bool {
+	if s.aiLimiter == nil {
+		return true
+	}
+	key := user.ID + "|" + s.publicLimiterKey(r)
+	if s.aiLimiter.Allow(key, time.Now().UTC()) {
+		return true
+	}
+	writeRateLimitError(w)
+	return false
+}
 
 func (s *Server) aiDiagnose(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -19,6 +37,9 @@ func (s *Server) aiDiagnose(w http.ResponseWriter, r *http.Request) {
 
 	user, ok := s.authenticateUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.allowAIRequest(w, r, *user) {
 		return
 	}
 
@@ -58,6 +79,9 @@ func (s *Server) aiChat(w http.ResponseWriter, r *http.Request) {
 	}
 	user, ok := s.authenticateUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.allowAIRequest(w, r, *user) {
 		return
 	}
 	fullAccess, _, allowedIDs, err := s.getUserNodeScope(r.Context(), user)
@@ -153,8 +177,14 @@ func (s *Server) aiMCPTokenRegenerate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !user.IsAdmin() && user.AllowedNodes != "*" {
+	if !user.IsAdmin() {
 		writeJSONError(w, http.StatusForbidden, "administrator access required")
+		return
+	}
+	if strings.TrimSpace(user.AllowedNodes) != "*" {
+		// MCP uses one server-wide bearer token and its tool layer aggregates
+		// fleet data. Do not issue that global credential to a scoped admin.
+		writeJSONError(w, http.StatusForbidden, "MCP requires a fleet-wide administrator")
 		return
 	}
 
@@ -180,8 +210,12 @@ func (s *Server) mcpConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !user.IsAdmin() && user.AllowedNodes != "*" {
+	if !user.IsAdmin() {
 		writeJSONError(w, http.StatusForbidden, "administrator access required")
+		return
+	}
+	if strings.TrimSpace(user.AllowedNodes) != "*" {
+		writeJSONError(w, http.StatusForbidden, "MCP requires a fleet-wide administrator")
 		return
 	}
 

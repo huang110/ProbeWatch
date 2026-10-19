@@ -1,0 +1,1 @@
+const t=new Set,n=[];function s(){return new Set(t)}function c(i){const e=String(i||"").trim();return e?(t.has(e)?t.delete(e):t.add(e),t.has(e)):!1}function d(i,e=10){const r=String(i||"").trim();if(!r)return;const o=n.indexOf(r);o>=0&&n.splice(o,1),n.unshift(r),n.splice(Math.max(1,Number(e)||10))}function a(){return n.slice()}export{a,s as g,d as r,c as t};

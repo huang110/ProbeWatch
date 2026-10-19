@@ -41,9 +41,8 @@ func TestSpeedtestRunnerSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := &SpeedtestRunner{
-		Client: server.Client(),
-	}
+	runner := NewSpeedtestRunnerWithOptions(true)
+	runner.Client = server.Client()
 
 	task := protocol.CheckTask{
 		ID:            "speed-task-1",
@@ -89,15 +88,14 @@ func TestSpeedtestRunnerInvalidURL(t *testing.T) {
 	if res.Status != "error" {
 		t.Fatalf("expected error status for invalid scheme, got %q", res.Status)
 	}
-	if !strings.Contains(res.Error, "invalid speedtest target URL scheme") {
+	if !strings.Contains(res.Error, "target URL scheme is not allowed") {
 		t.Fatalf("unexpected error message: %q", res.Error)
 	}
 }
 
 func TestSpeedtestRunnerUnreachable(t *testing.T) {
-	runner := &SpeedtestRunner{
-		Timeout: 200 * time.Millisecond,
-	}
+	runner := NewSpeedtestRunnerWithOptions(true)
+	runner.Timeout = 200 * time.Millisecond
 	task := protocol.CheckTask{
 		ID:        "speed-task-3",
 		Kind:      "speedtest",
@@ -108,5 +106,32 @@ func TestSpeedtestRunnerUnreachable(t *testing.T) {
 	res := runner.Run(context.Background(), task)
 	if res.Status != "error" {
 		t.Fatalf("expected error for unreachable server, got %q", res.Status)
+	}
+}
+
+func TestSpeedtestRunnerRejectsPrivateTargetByDefault(t *testing.T) {
+	runner := NewSpeedtestRunner()
+	res := runner.Run(context.Background(), protocol.CheckTask{
+		ID:        "speed-private",
+		Kind:      "speedtest",
+		ServerURL: "http://127.0.0.1:59999/private",
+		TimeoutMS: 200,
+	})
+	if res.Status != "error" {
+		t.Fatalf("expected private target to be rejected, got %q", res.Status)
+	}
+	if !strings.Contains(res.Error, "blocked") {
+		t.Fatalf("expected blocked target error, got %q", res.Error)
+	}
+}
+
+func TestSpeedtestRunnerRejectsUnsafeRedirect(t *testing.T) {
+	runner := NewSpeedtestRunner()
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:8080/redirect", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.getClient().CheckRedirect(req, nil); err == nil {
+		t.Fatal("expected redirect to private target to be rejected")
 	}
 }

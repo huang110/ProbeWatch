@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,12 @@ func TestCheckUpdate(t *testing.T) {
 		if r.URL.Path != "/update/check" {
 			http.NotFound(w, r)
 			return
+		}
+		if got := r.URL.Query().Get("os"); got != runtime.GOOS {
+			t.Fatalf("update check os = %q, want %q", got, runtime.GOOS)
+		}
+		if got := r.URL.Query().Get("arch"); got != runtime.GOARCH {
+			t.Fatalf("update check arch = %q, want %q", got, runtime.GOARCH)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"server_version":       "0.9.0",
@@ -61,6 +68,42 @@ func TestCheckUpdate(t *testing.T) {
 	}
 	if res2.UpdateAvailable {
 		t.Fatal("expected no update available when versions match")
+	}
+}
+
+func TestUpdateCheckURLPreservesEndpointQuery(t *testing.T) {
+	got, err := updateCheckURL("https://control.example/api/agent/v1?tenant=prod", "windows", "arm64")
+	if err != nil {
+		t.Fatalf("updateCheckURL: %v", err)
+	}
+	if got != "https://control.example/api/agent/v1/update/check?arch=arm64&os=windows&tenant=prod" {
+		t.Fatalf("updateCheckURL = %q", got)
+	}
+}
+
+func TestTrustedDownloadURLRejectsCredentialedEndpointAndPortMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		raw      string
+	}{
+		{name: "endpoint userinfo", endpoint: "https://user:pass@control.example/api/agent/v1", raw: "/api/agent/v1/update/download"},
+		{name: "download userinfo", endpoint: "https://control.example/api/agent/v1", raw: "https://user:pass@control.example/api/agent/v1/update/download"},
+		{name: "port mismatch", endpoint: "https://control.example:8443/api/agent/v1", raw: "https://control.example/api/agent/v1/update/download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := trustedDownloadURL(tc.endpoint, tc.raw); !errors.Is(err, ErrInvalidDownloadURL) {
+				t.Fatalf("trustedDownloadURL(%q, %q) error = %v, want ErrInvalidDownloadURL", tc.endpoint, tc.raw, err)
+			}
+		})
+	}
+
+	got, err := trustedDownloadURL("https://control.example/api/agent/v1", "https://control.example:443/api/agent/v1/update/download")
+	if err != nil {
+		t.Fatalf("trustedDownloadURL default HTTPS port: %v", err)
+	}
+	if !strings.HasPrefix(got, "https://control.example:443/") {
+		t.Fatalf("trustedDownloadURL default HTTPS port = %q", got)
 	}
 }
 

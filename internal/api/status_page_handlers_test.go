@@ -36,6 +36,9 @@ func TestPublicStatusPageAndIncidents(t *testing.T) {
 	if pubResp.Config.Title == "" {
 		t.Error("expected non-empty status page title")
 	}
+	if bytes.Contains(pubRec.Body.Bytes(), []byte(`"custom_css"`)) || bytes.Contains(pubRec.Body.Bytes(), []byte(`"node_id"`)) {
+		t.Fatalf("public status response leaked private config fields: %s", pubRec.Body.String())
+	}
 
 	// 2. GET /api/public/incidents
 	incReq := httptest.NewRequest(http.MethodGet, "/api/public/incidents", nil)

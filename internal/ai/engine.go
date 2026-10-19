@@ -3,8 +3,12 @@ package ai
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +17,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/probewatch/probewatch/internal/config"
@@ -21,6 +26,7 @@ import (
 )
 
 type AIService struct {
+	storeMu sync.RWMutex
 	store  *db.Store
 	cfg    *config.Config
 	client *http.Client
@@ -58,6 +64,22 @@ func NewAIService(store *db.Store, cfg *config.Config) *AIService {
 	}
 }
 
+// Store returns the currently active persistence store. Database restore can
+// replace the store while the HTTP server remains alive, so callers must not
+// retain the pointer beyond the operation they are performing.
+func (s *AIService) Store() *db.Store {
+	s.storeMu.RLock()
+	defer s.storeMu.RUnlock()
+	return s.store
+}
+
+// SetStore publishes a replacement store after a database restore.
+func (s *AIService) SetStore(store *db.Store) {
+	s.storeMu.Lock()
+	s.store = store
+	s.storeMu.Unlock()
+}
+
 type AISettings struct {
 	Enabled     bool   `json:"enabled"`
 	Provider    string `json:"provider"` // "local", "deepseek", "openai", "claude", "ollama", "custom"
@@ -78,11 +100,12 @@ type AIChatResponse struct {
 }
 
 func (s *AIService) GetAISettings(ctx context.Context) (AISettings, error) {
-	enabledStr, _ := s.store.GetSetting(ctx, "ai_enabled", "false")
-	provider, _ := s.store.GetSetting(ctx, "ai_provider", "local")
-	endpoint, _ := s.store.GetSetting(ctx, "ai_api_endpoint", "https://api.deepseek.com/v1")
-	model, _ := s.store.GetSetting(ctx, "ai_model", "deepseek-chat")
-	apiKey, _ := s.store.GetSetting(ctx, "ai_api_key", "")
+	store := s.Store()
+	enabledStr, _ := store.GetSetting(ctx, "ai_enabled", "false")
+	provider, _ := store.GetSetting(ctx, "ai_provider", "local")
+	endpoint, _ := store.GetSetting(ctx, "ai_api_endpoint", "https://api.deepseek.com/v1")
+	model, _ := store.GetSetting(ctx, "ai_model", "deepseek-chat")
+	apiKey, _ := store.GetSetting(ctx, "ai_api_key", "")
 
 	return AISettings{
 		Enabled:     enabledStr == "true",
@@ -98,21 +121,22 @@ func (s *AIService) SaveAISettings(ctx context.Context, settings AISettings) err
 	if settings.Enabled {
 		enabledStr = "true"
 	}
-	if err := s.store.SetSetting(ctx, "ai_enabled", enabledStr); err != nil {
+	store := s.Store()
+	if err := store.SetSetting(ctx, "ai_enabled", enabledStr); err != nil {
 		return err
 	}
-	if err := s.store.SetSetting(ctx, "ai_provider", settings.Provider); err != nil {
+	if err := store.SetSetting(ctx, "ai_provider", settings.Provider); err != nil {
 		return err
 	}
-	if err := s.store.SetSetting(ctx, "ai_api_endpoint", settings.APIEndpoint); err != nil {
+	if err := store.SetSetting(ctx, "ai_api_endpoint", settings.APIEndpoint); err != nil {
 		return err
 	}
-	if err := s.store.SetSetting(ctx, "ai_model", settings.Model); err != nil {
+	if err := store.SetSetting(ctx, "ai_model", settings.Model); err != nil {
 		return err
 	}
 	// Only update API key if non-empty, so frontend doesn't wipe existing key when sending masked value
 	if strings.TrimSpace(settings.APIKey) != "" && !strings.Contains(settings.APIKey, "•••") {
-		if err := s.store.SetSetting(ctx, "ai_api_key", strings.TrimSpace(settings.APIKey)); err != nil {
+		if err := store.SetSetting(ctx, "ai_api_key", strings.TrimSpace(settings.APIKey)); err != nil {
 			return err
 		}
 	}
@@ -120,9 +144,19 @@ func (s *AIService) SaveAISettings(ctx context.Context, settings AISettings) err
 }
 
 func (s *AIService) GetOrGenerateMCPToken(ctx context.Context) (string, error) {
-	token, err := s.store.GetSetting(ctx, "mcp_auth_token", "")
-	if err == nil && token != "" {
-		return token, nil
+	store := s.Store()
+	stored, err := store.GetSetting(ctx, "mcp_auth_token", "")
+	if err == nil && stored != "" {
+		if token, decryptErr := s.decodeMCPToken(stored); decryptErr == nil && token != "" {
+			// Migrate legacy plaintext settings in place while preserving the
+			// existing credential so external MCP clients do not break.
+			if !strings.HasPrefix(stored, "enc:v1:") {
+				if encrypted, encErr := s.encodeMCPToken(token); encErr == nil {
+					_ = store.SetSetting(ctx, "mcp_auth_token", encrypted)
+				}
+			}
+			return token, nil
+		}
 	}
 	return s.RegenerateMCPToken(ctx)
 }
@@ -133,7 +167,11 @@ func (s *AIService) RegenerateMCPToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("generate mcp token: %w", err)
 	}
 	token := "pw_mcp_" + hex.EncodeToString(buf)
-	if err := s.store.SetSetting(ctx, "mcp_auth_token", token); err != nil {
+	encrypted, err := s.encodeMCPToken(token)
+	if err != nil {
+		return "", err
+	}
+	if err := s.Store().SetSetting(ctx, "mcp_auth_token", encrypted); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -143,11 +181,65 @@ func (s *AIService) ValidateMCPToken(ctx context.Context, token string) bool {
 	if token == "" {
 		return false
 	}
-	stored, err := s.store.GetSetting(ctx, "mcp_auth_token", "")
+	stored, err := s.Store().GetSetting(ctx, "mcp_auth_token", "")
 	if err != nil || stored == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(stored)) == 1
+	decoded, err := s.decodeMCPToken(stored)
+	return err == nil && subtle.ConstantTimeCompare([]byte(token), []byte(decoded)) == 1
+}
+
+func (s *AIService) mcpTokenAEAD() (cipher.AEAD, error) {
+	store := s.Store()
+	if store == nil {
+		return nil, errors.New("AI service store is unavailable")
+	}
+	secret := ""
+	if s.cfg != nil {
+		secret = s.cfg.SessionSecret
+	}
+	keyMaterial := "probewatch-mcp-token-v1\x00" + secret + "\x00" + string(store.Pepper())
+	key := sha256.Sum256([]byte(keyMaterial))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func (s *AIService) encodeMCPToken(token string) (string, error) {
+	aead, err := s.mcpTokenAEAD()
+	if err != nil {
+		return "", fmt.Errorf("initialize MCP token encryption: %w", err)
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("generate MCP token nonce: %w", err)
+	}
+	ciphertext := aead.Seal(nil, nonce, []byte(token), nil)
+	encoded := append(nonce, ciphertext...)
+	return "enc:v1:" + base64.RawStdEncoding.EncodeToString(encoded), nil
+}
+
+func (s *AIService) decodeMCPToken(stored string) (string, error) {
+	if !strings.HasPrefix(stored, "enc:v1:") {
+		// Legacy installations stored this setting directly. It is accepted only
+		// long enough for GetOrGenerateMCPToken to migrate it.
+		return stored, nil
+	}
+	aead, err := s.mcpTokenAEAD()
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(stored, "enc:v1:"))
+	if err != nil || len(raw) < aead.NonceSize() {
+		return "", errors.New("invalid encrypted MCP token")
+	}
+	plain, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], nil)
+	if err != nil {
+		return "", errors.New("cannot decrypt MCP token")
+	}
+	return string(plain), nil
 }
 
 func (s *AIService) RunDiagnosis(ctx context.Context) (*DiagnosisReport, error) {
@@ -155,7 +247,8 @@ func (s *AIService) RunDiagnosis(ctx context.Context) (*DiagnosisReport, error) 
 }
 
 func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map[string]struct{}) (*DiagnosisReport, error) {
-	allNodes, err := s.store.ListNodes(ctx)
+	store := s.Store()
+	allNodes, err := store.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list nodes: %w", err)
 	}
@@ -201,7 +294,7 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 		}
 	}
 
-	alerts, _ := s.store.ListAlerts(ctx, db.AlertQuery{
+	alerts, _ := store.ListAlerts(ctx, db.AlertQuery{
 		Statuses: []string{"open"},
 		NodeIDs:  alertNodeIDs,
 		Limit:    100,
@@ -229,7 +322,7 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 
 	for _, node := range nodes {
 		// 1. Fetch Node Latest Resource
-		reportedAt, payload, err := s.store.GetResourceLatest(ctx, node.ID)
+		reportedAt, payload, err := store.GetResourceLatest(ctx, node.ID)
 		isOnline := false
 		var snap protocol.ResourceSnapshot
 		if err == nil && len(payload) > 0 {
@@ -311,7 +404,7 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 		}
 
 		// 3. Billing & Cost Audit
-		billingInfo, err := s.store.GetNodeCycleTraffic(ctx, node.ID, now)
+		billingInfo, err := store.GetNodeCycleTraffic(ctx, node.ID, now)
 		if err == nil {
 			// Monthly cost normalization using unified canonical cycle definitions
 			monthlyCost := CalculateMonthlyCost(billingPriceToCNY(billingInfo.Price, billingInfo.Currency), billingInfo.Cycle)
@@ -435,7 +528,7 @@ func (s *AIService) RunDiagnosisForNodes(ctx context.Context, allowedNodeIDs map
 		}
 
 		// 4. MTR & Network Anomaly Inspection
-		mtrResults, _ := s.store.ListMTRLatest(ctx, node.ID)
+		mtrResults, _ := store.ListMTRLatest(ctx, node.ID)
 		for _, mtrItem := range mtrResults {
 			var mtrRes protocol.MTRResult
 			if err := json.Unmarshal(mtrItem.Payload, &mtrRes); err == nil {
@@ -477,7 +570,7 @@ func (s *AIService) Chat(ctx context.Context, prompt string, allowedNodeIDs map[
 	}
 
 	settings, _ := s.GetAISettings(ctx)
-	storedKey, _ := s.store.GetSetting(ctx, "ai_api_key", "")
+	storedKey, _ := s.Store().GetSetting(ctx, "ai_api_key", "")
 
 	// Check if external LLM call is enabled and key exists
 	if settings.Enabled && storedKey != "" && settings.Provider != "local" {

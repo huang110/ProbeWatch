@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,11 +128,11 @@ func TestCertificatesAndDNSMatrixHandlers(t *testing.T) {
 	if certResp.Total != 1 || certResp.ValidCount != 1 || certResp.ExpiredCount != 0 {
 		t.Fatalf("cert stats = %#v, want Total=1, Valid=1", certResp)
 	}
-	if certResp.Certificates[0].Subject != "tz.115yu.us.ci" {
-		t.Fatalf("cert subject = %q, want tz.115yu.us.ci", certResp.Certificates[0].Subject)
+	if certResp.Certificates[0].Subject != "" || certResp.Certificates[0].Host != "" || certResp.Certificates[0].NodeID != "" {
+		t.Fatalf("public certificate response leaked identity fields: %#v", certResp.Certificates[0])
 	}
-	if certResp.Certificates[0].TargetName != "ProbeWatch Portal" {
-		t.Fatalf("target name = %q, want ProbeWatch Portal", certResp.Certificates[0].TargetName)
+	if certResp.Certificates[0].TargetName != "HTTPS target 1" {
+		t.Fatalf("public target name = %q, want sanitized label", certResp.Certificates[0].TargetName)
 	}
 
 	// 2. Test GET /api/certificates with admin session
@@ -141,6 +142,13 @@ func TestCertificatesAndDNSMatrixHandlers(t *testing.T) {
 	handler.ServeHTTP(adminCertRec, adminCertReq)
 	if adminCertRec.Code != http.StatusOK {
 		t.Fatalf("GET /api/certificates returned %d", adminCertRec.Code)
+	}
+	var adminCertResp CertificatesResponse
+	if err := json.Unmarshal(adminCertRec.Body.Bytes(), &adminCertResp); err != nil {
+		t.Fatalf("unmarshal admin cert response: %v", err)
+	}
+	if len(adminCertResp.Certificates) != 1 || adminCertResp.Certificates[0].Subject != "tz.115yu.us.ci" || adminCertResp.Certificates[0].TargetName != "ProbeWatch Portal" {
+		t.Fatalf("authenticated certificate response lost private details: %#v", adminCertResp)
 	}
 
 	// 3. Test GET /api/public/dns-matrix (Consistent case)
@@ -204,6 +212,24 @@ func TestCertificatesAndDNSMatrixHandlers(t *testing.T) {
 	}
 	if len(divResp.Matrix[0].DivergentNodes) != 1 || divResp.Matrix[0].DivergentNodes[0] != "Node-Frankfurt" {
 		t.Fatalf("divergent nodes = %#v, want [Node-Frankfurt]", divResp.Matrix[0].DivergentNodes)
+	}
+}
+
+func TestSanitizePublicDNSMatrixKeepsDivergentNodeNumbers(t *testing.T) {
+	response := DNSMatrixResponse{Matrix: []DNSTargetMatrix{{
+		DivergentNodes: []string{"edge-3"},
+		Nodes: []DNSNodeRecord{
+			{NodeID: "edge-1", NodeName: "edge-1"},
+			{NodeID: "edge-2", NodeName: "edge-2"},
+			{NodeID: "edge-3", NodeName: "edge-3"},
+		},
+	}}}
+	sanitized := sanitizePublicDNSMatrix(response)
+	if len(sanitized.Matrix) != 1 || len(sanitized.Matrix[0].DivergentNodes) != 1 {
+		t.Fatalf("unexpected sanitized matrix: %+v", sanitized)
+	}
+	if got := sanitized.Matrix[0].DivergentNodes[0]; got != "Node 3" {
+		t.Fatalf("divergent node = %q, want Node 3", got)
 	}
 }
 
@@ -298,11 +324,17 @@ func TestSyntheticTargetsCRUDAndResults(t *testing.T) {
 		NodeUUID:          task4NodeUUID1,
 		Name:              "Edge Node Singapore",
 	})
+	// The target is scoped to edge/prod nodes. Keep the fixture aligned with
+	// the production binding check so an agent cannot submit a result for a
+	// target it would never receive in its configuration.
+	if err := store.UpdateNode(context.Background(), mustNode(t, store, regResp.NodeUUID).ID, "Edge Node Singapore", "edge,prod"); err != nil {
+		t.Fatalf("tag synthetic node: %v", err)
+	}
 	now := time.Now().UTC()
 
 	synRes := protocol.SyntheticResult{
 		Status:     "ok",
-		Protocol:   "https",
+		Protocol:   "agent-forged-protocol",
 		TargetURL:  "https://api.example.com/healthz",
 		StatusCode: 200,
 		Timing: protocol.SyntheticTiming{
@@ -333,7 +365,6 @@ func TestSyntheticTargetsCRUDAndResults(t *testing.T) {
 		t.Fatalf("expected 204 NoContent, got %d: %s", agentRec.Code, agentRec.Body.String())
 	}
 
-
 	// 5. Test GET /api/synthetic/results & /api/public/synthetic/results
 	reqResults := httptest.NewRequest(http.MethodGet, "/api/public/synthetic/results", nil)
 	recResults := httptest.NewRecorder()
@@ -349,8 +380,26 @@ func TestSyntheticTargetsCRUDAndResults(t *testing.T) {
 	if overview.TotalTargets != 1 || len(overview.Targets) != 1 {
 		t.Fatalf("unexpected overview targets count: %d", overview.TotalTargets)
 	}
-	if overview.Targets[0].ConsensusStatus != "healthy" {
-		t.Fatalf("expected consensus healthy, got %s", overview.Targets[0].ConsensusStatus)
+	if overview.Targets[0].ConsensusStatus != "degraded" {
+		t.Fatalf("expected consensus degraded while only one of two required nodes reported, got %s", overview.Targets[0].ConsensusStatus)
+	}
+	publicBody := recResults.Body.String()
+	for _, secret := range []string{
+		"https://api.example.com/healthz",
+		"syn-api-test",
+		"X-Test",
+		"Production API Health",
+		"Edge Node Singapore",
+	} {
+		if strings.Contains(publicBody, secret) {
+			t.Fatalf("public synthetic response leaked %q: %s", secret, publicBody)
+		}
+	}
+	if strings.Contains(publicBody, "target_url") || strings.Contains(publicBody, "payload") || strings.Contains(publicBody, "failed_assertion") {
+		t.Fatalf("public synthetic response contains private fields: %s", publicBody)
+	}
+	if !strings.Contains(publicBody, `"protocol":"https"`) {
+		t.Fatalf("public synthetic response did not derive protocol from configured target: %s", publicBody)
 	}
 
 	// 6. Test GET /api/synthetic/history
@@ -381,6 +430,137 @@ func TestSyntheticTargetsCRUDAndResults(t *testing.T) {
 
 	if recDel.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 on delete, got %d", recDel.Code)
+	}
+}
+
+func TestSyntheticHistoryScopedLimitDoesNotDropAuthorizedRows(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	// Seed the bootstrap administrator so the store's last-admin protection
+	// allows creation of a scoped operator below.
+	_, _ = task4AdminSession(t, service, store)
+
+	allowedNode := publicStatusRegisterNode(t, handler, store, task4NodeUUID1, "Allowed synthetic node")
+	forbiddenNode := publicStatusRegisterNode(t, handler, store, task4NodeUUID2, "Forbidden synthetic node")
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := store.CreateSyntheticTarget(context.Background(), db.SyntheticTargetRecord{
+		ID: "syn-scope-history", Name: "Scoped history", Protocol: "https", TargetURL: "https://example.com", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldAt := now.Add(-time.Hour)
+	newAt := now.Add(-30 * time.Minute)
+	for _, row := range []struct {
+		nodeID string
+		at     time.Time
+		total  int
+	}{
+		{allowedNode.ID, oldAt, 111},
+		{forbiddenNode.ID, newAt, 222},
+	} {
+		if _, err := store.DB().Exec(`INSERT INTO synthetic_results_history (node_id, target_id, payload, protocol, status_code, passed, dns_ms, connect_ms, tls_ms, ttfb_ms, total_ms, checked_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.nodeID, "syn-scope-history", []byte(`{"status":"ok"}`), "https", 200, 1, 1, 2, 3, 4, row.total, row.at.UnixNano(), row.at.UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	user, err := store.UpsertAdminUser(context.Background(), "local", "scoped-synthetic-reader", "scoped", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := db.RoleOperator
+	allowedNodes := allowedNode.UUID
+	if _, err := store.UpdateAdminUser(context.Background(), user.ID, db.UpdateUserInput{Role: &role, AllowedNodes: &allowedNodes}, now); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.CreateSessionForUser(context.Background(), user.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/synthetic/history?target_id=syn-scope-history&limit=1", nil)
+	req.AddCookie(task4SessionCookie(session))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("scoped synthetic history status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var history []RestrictedSyntheticHistoryRecord
+	if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].TotalMS != 111 || !history[0].CheckedAt.Equal(oldAt) {
+		t.Fatalf("scoped synthetic history = %#v, want authorized older sample", history)
+	}
+}
+
+func TestSyntheticTargetRejectsOversizedAgentFields(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	server := NewServer(cfg, service)
+	handler := server.Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	oversizedHeaders := make(map[string]string, 33)
+	for i := 0; i < 33; i++ {
+		oversizedHeaders["X-Probe-Header-"+strconv.Itoa(i)] = "value"
+	}
+	body, _ := json.Marshal(map[string]any{
+		"id":         "syn-too-many-headers",
+		"name":       "Too many headers",
+		"protocol":   "https",
+		"target_url": "https://example.com/healthz",
+		"headers":    oversizedHeaders,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/synthetic/targets", bytes.NewReader(body))
+	req.AddCookie(task4SessionCookie(session))
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.Header.Set("Origin", "http://127.0.0.1:8080")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized headers status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if next := rec.Header().Get("X-CSRF-Token"); next != "" {
+		csrf = next
+	}
+
+	session, csrf = task4AdminSession(t, service, store)
+	validBody, _ := json.Marshal(map[string]any{
+		"id":         "syn-too-large-body",
+		"name":       "Large body",
+		"protocol":   "https",
+		"target_url": "https://example.com/healthz",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/synthetic/targets", bytes.NewReader(validBody))
+	createReq.AddCookie(task4SessionCookie(session))
+	createReq.Header.Set("X-CSRF-Token", csrf)
+	createReq.Header.Set("Origin", "http://127.0.0.1:8080")
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("valid synthetic target status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	if next := createRec.Header().Get("X-CSRF-Token"); next != "" {
+		csrf = next
+	}
+
+	updateBody, _ := json.Marshal(map[string]any{"body_payload": strings.Repeat("x", 65537)})
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/synthetic/targets/syn-too-large-body", bytes.NewReader(updateBody))
+	updateReq.AddCookie(task4SessionCookie(session))
+	updateReq.Header.Set("X-CSRF-Token", csrf)
+	updateReq.Header.Set("Origin", "http://127.0.0.1:8080")
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized body status = %d, body = %s", updateRec.Code, updateRec.Body.String())
 	}
 }
 
@@ -440,4 +620,3 @@ func TestSyntheticSimulationTest(t *testing.T) {
 		t.Fatalf("expected test probe to pass, got: %#v", res)
 	}
 }
-

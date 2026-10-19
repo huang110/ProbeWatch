@@ -80,12 +80,14 @@ export function BackupManagementCard() {
       region: 'us-east-1',
       access_key: '',
       secret_key: '',
+      allow_private_network: false,
     },
     webdav: {
       enabled: false,
       url: '',
       username: '',
       password: '',
+      allow_private_network: false,
     },
   })
 
@@ -123,12 +125,14 @@ export function BackupManagementCard() {
             region: cfg.s3?.region || 'us-east-1',
             access_key: cfg.s3?.access_key || '',
             secret_key: cfg.s3?.secret_key || '',
+            allow_private_network: !!cfg.s3?.allow_private_network,
           },
           webdav: {
             enabled: !!cfg.webdav?.enabled,
             url: cfg.webdav?.url || '',
             username: cfg.webdav?.username || '',
             password: cfg.webdav?.password || '',
+            allow_private_network: !!cfg.webdav?.allow_private_network,
           },
         })
       }
@@ -708,6 +712,24 @@ export function BackupManagementCard() {
                 />
               </div>
 
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(cloudConfig.s3.allow_private_network)}
+                    onChange={(e) =>
+                      setCloudConfig({
+                        ...cloudConfig,
+                        s3: { ...cloudConfig.s3, allow_private_network: e.target.checked },
+                      })
+                    }
+                  />
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    允许连接内网 / Tailscale 自建 S3（默认关闭，仅建议用于可信私有网络）
+                  </span>
+                </label>
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: 'var(--muted)', marginBottom: '4px' }}>
                   存储桶名称 (Bucket)
@@ -866,6 +888,24 @@ export function BackupManagementCard() {
                     })
                   }
                 />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(cloudConfig.webdav.allow_private_network)}
+                    onChange={(e) =>
+                      setCloudConfig({
+                        ...cloudConfig,
+                        webdav: { ...cloudConfig.webdav, allow_private_network: e.target.checked },
+                      })
+                    }
+                  />
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    允许连接内网 / Tailscale 自建 WebDAV（默认关闭，仅建议用于可信私有网络）
+                  </span>
+                </label>
               </div>
 
               <div>

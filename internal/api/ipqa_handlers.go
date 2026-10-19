@@ -71,7 +71,10 @@ func pruneIPQACaches(now time.Time) {
 	}
 }
 
-type ipqaArchiveStamp struct { date string; checkedAt int64 }
+type ipqaArchiveStamp struct {
+	date      string
+	checkedAt int64
+}
 
 const (
 	ipqaSyncCooldown   = 5 * time.Second
@@ -225,7 +228,9 @@ func (s *Server) postNodeIPQASync(w http.ResponseWriter, r *http.Request, uuid s
 		return
 	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 
 	// Cooldown check to prevent sync abuse and queue sync to connected agent
 	ipqaCooldownMu.Lock()
@@ -283,7 +288,9 @@ func (s *Server) postNodeIPQATest(w http.ResponseWriter, r *http.Request, uuid s
 		return
 	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 
 	var req testIPQARequest
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024*32)).Decode(&req)
@@ -362,7 +369,10 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 	stamp := ipqaArchiveStamp{date: ipqa.LatestArchiveDate, checkedAt: ipqa.LastCheckedAt}
 	ipqaCooldownMu.Lock()
 	previous, unchanged := ipqaLastArchive[node.ID]
-	if unchanged && previous == stamp { ipqaCooldownMu.Unlock(); return }
+	if unchanged && previous == stamp {
+		ipqaCooldownMu.Unlock()
+		return
+	}
 	ipqaLastArchive[node.ID] = stamp
 	ipqaCooldownMu.Unlock()
 
@@ -451,7 +461,7 @@ func (s *Server) handleIPQAReport(ctx context.Context, node db.Node, ipqa *proto
 }
 
 func (s *Server) checkIPQARateLimit(w http.ResponseWriter, r *http.Request) bool {
-	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(publicLimiterKey(r), time.Now()) {
+	if s.ipqaLimiter != nil && !s.ipqaLimiter.Allow(s.publicLimiterKey(r), time.Now()) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 		return false
 	}

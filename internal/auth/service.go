@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,7 +57,7 @@ func NewService(cfg config.Config, store *db.Store, provider ProviderEndpoints) 
 		}
 	}
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
 		Transport: &http.Transport{MaxResponseHeaderBytes: 32 << 10},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
@@ -285,6 +286,9 @@ func (s *Service) AuthenticateUserCredentials(w http.ResponseWriter, r *http.Req
 			logInternalError("upsert local admin user", err)
 			return db.AdminUser{}, err
 		}
+		if admin.Disabled {
+			return db.AdminUser{}, db.ErrAccountDisabled
+		}
 		if err := s.completeLoginForUser(w, r, admin); err != nil {
 			return db.AdminUser{}, err
 		}
@@ -303,6 +307,9 @@ func (s *Service) AuthenticateUserCredentials(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Service) completeLoginForUser(w http.ResponseWriter, r *http.Request, user db.AdminUser) error {
+	if user.Disabled {
+		return db.ErrAccountDisabled
+	}
 	totpSecret, totpEnabled, err := s.Store().GetAdminUserTOTP(r.Context(), user.ID)
 	if err != nil {
 		logInternalError("read admin totp state", err)
@@ -536,12 +543,19 @@ func (s *Service) AuthenticateAPIToken(ctx context.Context, rawToken string, now
 		return nil, nil, db.ErrAPITokenExpired
 	}
 
-	// Fetch creator user to ensure creator account is still active and not disabled
+	// Fetch the current creator user. A token must never outlive its owner,
+	// and its effective role/scope must follow later account restrictions.
+	// Failing closed here is important: continuing with the values snapshotted
+	// on the PAT would let a deleted/demoted account retain old privileges.
 	user, err := s.Store().GetAdminUser(ctx, tok.UserID)
-	if err == nil {
-		if user.Disabled {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, db.ErrAPITokenDisabled
 		}
+		return nil, nil, err
+	}
+	if user.Disabled {
+		return nil, nil, db.ErrAPITokenDisabled
 	}
 
 	caller := &db.AdminUser{
@@ -549,9 +563,9 @@ func (s *Service) AuthenticateAPIToken(ctx context.Context, rawToken string, now
 		Provider:       "token",
 		ProviderUserID: tok.Name,
 		Login:          tok.Name,
-		Role:           tok.Role,
+		Role:           effectiveTokenRole(tok.Role, user.Role),
 		DisplayName:    tok.Name,
-		AllowedNodes:   tok.AllowedNodes,
+		AllowedNodes:   intersectTokenNodeScope(tok.AllowedNodes, user.AllowedNodes),
 		Disabled:       false,
 	}
 
@@ -561,6 +575,77 @@ func (s *Service) AuthenticateAPIToken(ctx context.Context, rawToken string, now
 	}(tok.ID, now)
 
 	return tok, caller, nil
+}
+
+// effectiveTokenRole prevents a PAT from retaining a role that its owner no
+// longer has. The lower privilege wins; invalid legacy values fail closed to
+// viewer rather than becoming an implicit administrator.
+func effectiveTokenRole(tokenRole, userRole string) string {
+	rank := func(role string) int {
+		switch strings.ToLower(strings.TrimSpace(role)) {
+		case db.RoleAdmin:
+			return 3
+		case db.RoleOperator:
+			return 2
+		case db.RoleViewer:
+			return 1
+		default:
+			return 0
+		}
+	}
+	roles := map[int]string{1: db.RoleViewer, 2: db.RoleOperator, 3: db.RoleAdmin}
+	minRank := rank(tokenRole)
+	if userRank := rank(userRole); userRank < minRank {
+		minRank = userRank
+	}
+	if role, ok := roles[minRank]; ok {
+		return role
+	}
+	return db.RoleViewer
+}
+
+// intersectTokenNodeScope intersects the scope stored on a PAT with the
+// owner's current node allow-list. Both lists use comma-separated node UUIDs;
+// an empty scope historically means all nodes for PATs, while an empty owner
+// allow-list means no nodes.
+func intersectTokenNodeScope(tokenScope, userScope string) string {
+	tokenScope = strings.TrimSpace(tokenScope)
+	if tokenScope == "" {
+		tokenScope = "*"
+	}
+	userScope = strings.TrimSpace(userScope)
+	if userScope == "*" {
+		return tokenScope
+	}
+	if userScope == "" {
+		return ""
+	}
+	if tokenScope == "*" {
+		return userScope
+	}
+
+	tokenNodes := make(map[string]struct{})
+	for _, node := range strings.Split(tokenScope, ",") {
+		node = strings.TrimSpace(node)
+		if node != "" {
+			tokenNodes[node] = struct{}{}
+		}
+	}
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, node := range strings.Split(userScope, ",") {
+		node = strings.TrimSpace(node)
+		if node == "" {
+			continue
+		}
+		if _, allowed := tokenNodes[node]; allowed {
+			if _, duplicate := seen[node]; !duplicate {
+				result = append(result, node)
+				seen[node] = struct{}{}
+			}
+		}
+	}
+	return strings.Join(result, ",")
 }
 
 func (s *Service) CurrentUser(r *http.Request, now time.Time) (db.AdminUser, error) {

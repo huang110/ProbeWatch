@@ -3,7 +3,7 @@
 # ProbeWatch Linux / OpenWrt / Alpine 一键安装与服务配置脚本 (v0.6.0)
 # 支持环境:
 #   - Linux (systemd: Debian, Ubuntu, CentOS, Rocky, Arch, Fedora)
-#   - OpenWrt / iStoreOS / ImmortalWrt (procd: x86_64, aarch64, arm, mips, mipsle)
+#   - OpenWrt / iStoreOS / ImmortalWrt (procd: x86_64, aarch64)
 #   - Alpine Linux (OpenRC: rc-service, rc-update)
 # 安全加固:
 #   - 优先专用低权限账户 (Linux systemd 下使用 probewatch 用户)
@@ -23,6 +23,13 @@ info()  { printf "%b[INFO]%b %s\n" "${BLUE}" "${PLAIN}" "$*"; }
 ok()    { printf "%b[OK]%b %s\n" "${GREEN}" "${PLAIN}" "$*"; }
 warn()  { printf "%b[WARN]%b %s\n" "${YELLOW}" "${PLAIN}" "$*"; }
 error() { printf "%b[ERROR]%b %s\n" "${RED}" "${PLAIN}" "$*" >&2; }
+
+validate_safe_value() {
+    if printf '%s' "$1" | LC_ALL=C grep -q '[^[:alnum:]_./:@%+=,~-]'; then
+        error "configuration value contains unsupported characters"
+        exit 1
+    fi
+}
 
 check_temp_space() {
     TMP_ROOT="${TMPDIR:-/tmp}"
@@ -56,7 +63,7 @@ show_install_help() {
     printf '%s\n' "  -h, --help                          显示此帮助信息并退出"
     printf '%s\n' ""
     printf '%s\n' "说明: 远程管理默认关闭 (false)。参数支持 true/false、1/0、yes/no 或 on/off (大小写不敏感)。"
-    printf '%s\n' "支持环境: amd64/arm64/arm/mips/mipsle/386/riscv64，自动配置 systemd/OpenRC/OpenWrt。"
+    printf '%s\n' "支持环境: amd64/arm64，自动配置 systemd/OpenRC/OpenWrt。"
 }
 
 parse_remote_control_val() {
@@ -246,6 +253,14 @@ esac
 info "检测到系统硬件架构: $ARCH (目标二进制架构: $TARGET_ARCH)"
 
 # 2. 服务管理系统判定 (OpenWrt procd / OpenRC / systemd)
+case "$TARGET_ARCH" in
+    amd64|arm64) ;;
+    *)
+        error "unsupported agent architecture: $ARCH (only amd64 and arm64 are published)"
+        exit 1
+        ;;
+esac
+
 INIT_SYSTEM="systemd"
 if [ -f /etc/openwrt_release ] || [ -f /etc/rc.common ] || [ -x /sbin/procd ]; then
     INIT_SYSTEM="openwrt"
@@ -290,6 +305,25 @@ NODE_UUID="${CLI_UUID:-${PROBEWATCH_AGENT_NODE_UUID:-}}"
 NODE_TOKEN="${CLI_TOKEN:-${PROBEWATCH_AGENT_NODE_TOKEN:-}}"
 REG_TOKEN="${CLI_REG_TOKEN:-${PROBEWATCH_AGENT_REGISTRATION_TOKEN:-}}"
 
+# Normalize the endpoint before composing register, update-check, and
+# download URLs. This also keeps the generated EnvironmentFile consistent.
+normalize_endpoint() {
+    case "$ENDPOINT" in
+        http://*|https://*) ;;
+        *)
+            error "endpoint must be an absolute http:// or https:// URL"
+            exit 1
+            ;;
+    esac
+    while [ "${ENDPOINT%/}" != "$ENDPOINT" ]; do
+        ENDPOINT="${ENDPOINT%/}"
+    done
+    SERVER_BASE="${ENDPOINT%/api/agent/v1}"
+}
+if [ -n "$ENDPOINT" ]; then
+    normalize_endpoint
+fi
+
 if [ -z "$ENDPOINT" ]; then
     printf "请输入主控上报地址 (例如 https://monitor.example.com/api/agent/v1): "
     read -r ENDPOINT
@@ -299,17 +333,25 @@ if [ -z "$NODE_UUID" ]; then
     read -r NODE_UUID
 fi
 
+validate_safe_value "$NODE_UUID"
+if [ -n "$REG_TOKEN" ]; then
+    validate_safe_value "$REG_TOKEN"
+fi
+
 # 如果未提供长期 Token，但提供了 15 分钟临时 Registration Token，自动向主控换取长期 Node Token
+normalize_endpoint
+
 if [ -z "$NODE_TOKEN" ] && [ -n "$REG_TOKEN" ]; then
     info "检测到临时注册凭据，正在自动向主控注册并换取长期凭证..."
     NODE_NAME="$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "ProbeWatch-Node")"
+    validate_safe_value "$NODE_NAME"
     REG_BODY="{\"registration_token\":\"${REG_TOKEN}\",\"node_uuid\":\"${NODE_UUID}\",\"name\":\"${NODE_NAME}\"}"
 
     REG_RESP=""
     if command -v curl >/dev/null 2>&1; then
-        REG_RESP=$(curl -fsS -X POST -H "Content-Type: application/json" -d "$REG_BODY" "${ENDPOINT}/register" 2>/dev/null || true)
+        REG_RESP=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -fsS -X POST -H "Content-Type: application/json" -d "$REG_BODY" "${ENDPOINT}/register" 2>/dev/null || true)
     elif command -v wget >/dev/null 2>&1; then
-        REG_RESP=$(wget -qO- --post-data="$REG_BODY" --header="Content-Type: application/json" "${ENDPOINT}/register" 2>/dev/null || true)
+        REG_RESP=$(wget -T 15 -t 3 -qO- --post-data="$REG_BODY" --header="Content-Type: application/json" "${ENDPOINT}/register" 2>/dev/null || true)
     fi
 
     # 从 JSON 响应提取 node_token
@@ -323,6 +365,8 @@ if [ -z "$NODE_TOKEN" ] && [ -n "$REG_TOKEN" ]; then
     fi
 fi
 
+normalize_endpoint
+
 if [ -z "$NODE_TOKEN" ]; then
     printf "请输入节点长期 Token: "
     read -r NODE_TOKEN
@@ -332,6 +376,12 @@ if [ -z "$ENDPOINT" ] || [ -z "$NODE_UUID" ] || [ -z "$NODE_TOKEN" ]; then
     error "缺少必要的安装参数 (Endpoint, UUID, Token)，安装中止"
     exit 1
 fi
+
+validate_safe_value "$SERVER_BASE"
+validate_safe_value "$ENDPOINT"
+validate_safe_value "$NODE_UUID"
+validate_safe_value "$NODE_TOKEN"
+validate_safe_value "$REMOTE_CONTROL_ENABLED"
 
 check_temp_space
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
@@ -343,8 +393,22 @@ if [ "$INIT_SYSTEM" = "systemd" ] && ! command -v systemctl >/dev/null 2>&1; the
 fi
 
 # 5. 配置目录准备
-mkdir -p /etc/probewatch /var/lib/probewatch
-DATA_DIR="/var/lib/probewatch"
+# Respect the directory supplied by the generated installer command.  The
+# previous hard-coded path silently discarded PROBEWATCH_AGENT_DATA, causing
+# outbox/update/IPQA state to land in a different directory than requested.
+DATA_DIR="${PROBEWATCH_AGENT_DATA:-/var/lib/probewatch}"
+case "$DATA_DIR" in
+    /*) ;;
+    *) error "PROBEWATCH_AGENT_DATA must be an absolute path"; exit 1 ;;
+esac
+case "$DATA_DIR" in
+    /|/etc|/usr|/var|/bin|/sbin|/opt)
+        error "PROBEWATCH_AGENT_DATA points to a protected system directory"
+        exit 1
+        ;;
+esac
+validate_safe_value "$DATA_DIR"
+mkdir -p /etc/probewatch "$DATA_DIR"
 
 # 6. 二进制程序下载与放置
 BIN_PATH="/usr/local/bin/probewatch-agent"
@@ -354,6 +418,19 @@ if [ "$INIT_SYSTEM" = "openwrt" ]; then
 fi
 
 if [ ! -f "./probewatch-agent" ]; then
+    BIN_TMP="${BIN_PATH}.tmp.$$"
+    CHECK_URL="${SERVER_BASE}/api/agent/v1/update/check?os=linux&arch=${TARGET_ARCH}"
+    CHECK_RESP=""
+    if command -v curl >/dev/null 2>&1; then
+        CHECK_RESP=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -fsSL -H "Authorization: Bearer ${NODE_TOKEN}" "$CHECK_URL" 2>/dev/null || true)
+    elif command -v wget >/dev/null 2>&1; then
+        CHECK_RESP=$(wget -T 15 -t 3 -qO- --header="Authorization: Bearer ${NODE_TOKEN}" "$CHECK_URL" 2>/dev/null || true)
+    fi
+    CHECKSUM=$(printf '%s' "$CHECK_RESP" | sed -n 's/.*"checksum_sha256"[[:space:]]*:[[:space:]]*"\([0-9A-Fa-f][0-9A-Fa-f]*\)".*/\1/p' | head -n 1)
+    if [ "${#CHECKSUM}" -ne 64 ]; then
+        error "control plane did not provide a valid SHA-256 checksum; refusing unsigned agent download"
+        exit 1
+    fi
     # 尝试从主控下载对应架构的二进制
     SERVER_BASE="${ENDPOINT%/api/agent/v1}"
     DOWNLOAD_URL="${SERVER_BASE}/api/agent/v1/update/download?os=linux&arch=${TARGET_ARCH}"
@@ -372,15 +449,32 @@ if [ ! -f "./probewatch-agent" ]; then
         fi
     fi
 
-    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ -s "$BIN_TMP" ] && "$BIN_TMP" --version >/dev/null 2>&1; then
+    ACTUAL_CHECKSUM=""
+    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ -s "$BIN_TMP" ]; then
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_CHECKSUM=$(sha256sum "$BIN_TMP" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL_CHECKSUM=$(shasum -a 256 "$BIN_TMP" | awk '{print $1}')
+        else
+            error "sha256sum or shasum is required to verify the agent download"
+            rm -f "$BIN_TMP"
+            exit 1
+        fi
+    fi
+    DOWNLOAD_VALID=0
+    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ "$ACTUAL_CHECKSUM" = "$CHECKSUM" ] && [ -s "$BIN_TMP" ] && "$BIN_TMP" --version >/dev/null 2>&1; then
         chmod 0755 "$BIN_TMP"
         mv -f "$BIN_TMP" "$BIN_PATH"
+        DOWNLOAD_VALID=1
         ok "Agent 二进制下载成功: $BIN_PATH"
     else
         rm -f "$BIN_TMP"
         warn "从主控自动下载二进制未完成，请检查 Endpoint、Token、架构和网络"
         warn "下载地址: $DOWNLOAD_URL"
         warn "也可以手动放置 probewatch-agent 到 $BIN_PATH 后重新运行安装器"
+    fi
+    if [ "$DOWNLOAD_VALID" -ne 1 ]; then
+        exit 1
     fi
 elif [ -f "./probewatch-agent" ]; then
     # 原子替换运行中的二进制，避免直接覆盖触发 Linux ETXTBSY (Text file busy)。
@@ -406,7 +500,10 @@ fi
 
 # 7. 写入配置文件
 cat > /etc/probewatch/agent.env <<EOF
-PROBEWATCH_ENV=development
+# Production is the safe default for installed agents. Development mode
+# intentionally enables private-address test targets and must be opted into
+# explicitly by editing this file in an isolated lab.
+PROBEWATCH_ENV=production
 PROBEWATCH_PUBLIC_BASE_URL=${SERVER_BASE:-${ENDPOINT%/api/agent/v1}}
 PROBEWATCH_AGENT_ENDPOINT=${ENDPOINT}
 PROBEWATCH_AGENT_NODE_UUID=${NODE_UUID}
@@ -509,9 +606,9 @@ else
     # 创建专用 probewatch 用户
     if ! id -u probewatch >/dev/null 2>&1; then
         info "创建系统专用非 root 账户 probewatch..."
-        useradd -r -s /usr/sbin/nologin -d /var/lib/probewatch -m probewatch 2>/dev/null || true
+        useradd -r -s /usr/sbin/nologin -d "$DATA_DIR" -m probewatch 2>/dev/null || true
     fi
-    chown -R probewatch:probewatch /var/lib/probewatch 2>/dev/null || true
+    chown -R probewatch:probewatch "$DATA_DIR" 2>/dev/null || true
     chown probewatch:probewatch /etc/probewatch/agent.env 2>/dev/null || true
 
     cat > /etc/systemd/system/probewatch-agent.service <<EOF
@@ -539,7 +636,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/probewatch
+ReadWritePaths=${DATA_DIR}
 AmbientCapabilities=CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_RAW
 

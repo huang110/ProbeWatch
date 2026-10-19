@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/probewatch/probewatch/internal/version"
 )
@@ -101,5 +102,29 @@ func TestParseAgentVersion(t *testing.T) {
 				t.Fatalf("parseAgentVersion(%q) = %q, %v; want %q, %v", tc.out, got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+func TestAgentUpdateEndpointsAreRateLimited(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	server := NewServer(task4Config(), service)
+	server.agentUpdateLimiter = newRateLimiter(1, time.Minute, 8)
+	handler := server.Handler()
+
+	first := httptest.NewRequest(http.MethodGet, "/api/agent/v1/update/check", nil)
+	first.RemoteAddr = "198.51.100.10:1234"
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first update check status = %d, body = %q", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodGet, "/api/agent/v1/update/check", nil)
+	second.RemoteAddr = "198.51.100.10:5678"
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second update check status = %d, want 429", secondRec.Code)
 	}
 }

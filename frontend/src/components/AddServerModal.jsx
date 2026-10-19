@@ -23,6 +23,7 @@ const formatCountdown = (ms) => {
 }
 
 import { escapeShell, quoteShell } from '../lib/shellEscape.js'
+import { generateUUID } from '../lib/uuid.js'
 export { escapeShell }
 
 export function AddServerModal({ onClose, onInstalled }) {
@@ -35,6 +36,7 @@ export function AddServerModal({ onClose, onInstalled }) {
 
   // 自定义配置表单
   const [nodeName, setNodeName] = useState('')
+  // Custom configuration form
   const [terminalEnabled, setTerminalEnabled] = useState(false)
 
   // 折叠高级配置
@@ -84,12 +86,12 @@ export function AddServerModal({ onClose, onInstalled }) {
         endpoint = `${window.location.origin}${endpoint && endpoint.startsWith('/') ? endpoint : '/api/agent/v1'}`
       }
       const expiresAt = new Date(json?.expires_at).getTime()
-      if (!token) throw new Error('invalid')
+      if (!token || !endpoint || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('invalid')
 
       setEnrollment({
         token,
         endpoint,
-        nodeUuid: crypto.randomUUID(),
+        nodeUuid: generateUUID(),
         expiresAt,
       })
       setNow(Date.now())
@@ -398,7 +400,7 @@ export function AddServerModal({ onClose, onInstalled }) {
               <span className="lite-dl-title">手动运行或离线部署？</span>
               <div className="lite-dl-links">
                 <a
-                  href="/downloads/probewatch-agent-linux-amd64"
+                  href="/api/agent/v1/update/download?os=linux&arch=amd64"
                   download
                   className="lite-dl-btn"
                 >
@@ -406,7 +408,7 @@ export function AddServerModal({ onClose, onInstalled }) {
                   <span>下载 Linux x86_64</span>
                 </a>
                 <a
-                  href="/downloads/probewatch-agent-linux-arm64"
+                  href="/api/agent/v1/update/download?os=linux&arch=arm64"
                   download
                   className="lite-dl-btn"
                 >

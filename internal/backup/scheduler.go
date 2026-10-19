@@ -23,6 +23,8 @@ const (
 	SettingKeyBackupConfig = "backup_scheduler_config"
 	DefaultIntervalHours   = 24
 	DefaultRetentionCount  = 7
+	MaxIntervalHours       = 24 * 30
+	MaxRetentionCount      = 365
 )
 
 // Config represents full backup and remote replication configuration.
@@ -44,24 +46,24 @@ func (c Config) Masked() Config {
 
 // RunReport documents the outcome of an automated or manual backup execution.
 type RunReport struct {
-	BackupInfo   db.BackupInfo `json:"backup_info"`
-	S3Uploaded   bool          `json:"s3_uploaded"`
-	S3Error      string        `json:"s3_error,omitempty"`
-	WebDAVUploaded bool        `json:"webdav_uploaded"`
-	WebDAVError  string        `json:"webdav_error,omitempty"`
-	PrunedCount  int           `json:"pruned_count"`
-	DurationMS   int64         `json:"duration_ms"`
+	BackupInfo     db.BackupInfo `json:"backup_info"`
+	S3Uploaded     bool          `json:"s3_uploaded"`
+	S3Error        string        `json:"s3_error,omitempty"`
+	WebDAVUploaded bool          `json:"webdav_uploaded"`
+	WebDAVError    string        `json:"webdav_error,omitempty"`
+	PrunedCount    int           `json:"pruned_count"`
+	DurationMS     int64         `json:"duration_ms"`
 }
 
 // VerificationResult contains the detailed diagnostic report of a dry-run restore check.
 type VerificationResult struct {
-	Filename     string    `json:"filename"`
-	SizeBytes    int64     `json:"size_bytes"`
-	SHA256       string    `json:"sha256"`
-	Integrity    string    `json:"integrity"`
-	TablesCount  int       `json:"tables_count"`
-	DurationMS   int64     `json:"duration_ms"`
-	VerifiedAt   time.Time `json:"verified_at"`
+	Filename    string    `json:"filename"`
+	SizeBytes   int64     `json:"size_bytes"`
+	SHA256      string    `json:"sha256"`
+	Integrity   string    `json:"integrity"`
+	TablesCount int       `json:"tables_count"`
+	DurationMS  int64     `json:"duration_ms"`
+	VerifiedAt  time.Time `json:"verified_at"`
 }
 
 // Scheduler handles periodic database snapshots, remote sync, and retention cleanup.
@@ -69,9 +71,11 @@ type Scheduler struct {
 	store     *db.Store
 	backupDir string
 
-	mu        sync.RWMutex
-	running   bool
-	cancel    context.CancelFunc
+	mu      sync.RWMutex
+	runMu   sync.Mutex
+	running bool
+	cancel  context.CancelFunc
+	loopDone chan struct{}
 }
 
 // NewScheduler creates an initialized backup Scheduler.
@@ -84,6 +88,30 @@ func NewScheduler(store *db.Store, backupDir string) *Scheduler {
 
 // SetStore dynamically updates the active store.
 func (s *Scheduler) SetStore(newStore *db.Store) {
+	// Wait for any in-flight config read/write, verification, or backup run to
+	// finish before publishing the replacement.  Restore callers close the old
+	// Store immediately after SetStore returns, so this hand-off is part of the
+	// Store lifetime contract.
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store = newStore
+}
+
+// WithStoreSwap excludes all scheduler work while the caller atomically
+// restores/replaces the underlying Store.  Restore must hold this lock before
+// closing the old SQLite handle; otherwise RunOnce can capture the old pointer
+// in the small hand-off window and issue queries against a closed database.
+func (s *Scheduler) WithStoreSwap(fn func() error) error {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	return fn()
+}
+
+// SwapStore publishes a replacement while WithStoreSwap is held. Callers that
+// do not need an atomic restore hand-off should use SetStore instead.
+func (s *Scheduler) SwapStore(newStore *db.Store) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store = newStore
@@ -91,6 +119,18 @@ func (s *Scheduler) SetStore(newStore *db.Store) {
 
 // LoadConfig loads the backup configuration from system settings.
 func (s *Scheduler) LoadConfig(ctx context.Context) (Config, error) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	return s.loadConfig(ctx)
+}
+
+func (s *Scheduler) currentStore() *db.Store {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.store
+}
+
+func (s *Scheduler) loadConfig(ctx context.Context) (Config, error) {
 	def := Config{
 		Enabled:        false,
 		IntervalHours:  DefaultIntervalHours,
@@ -100,7 +140,11 @@ func (s *Scheduler) LoadConfig(ctx context.Context) (Config, error) {
 		},
 	}
 
-	val, err := s.store.GetSetting(ctx, SettingKeyBackupConfig, "")
+	store := s.currentStore()
+	if store == nil {
+		return def, errors.New("backup scheduler store is not initialized")
+	}
+	val, err := store.GetSetting(ctx, SettingKeyBackupConfig, "")
 	if err != nil || val == "" {
 		return def, nil
 	}
@@ -109,10 +153,10 @@ func (s *Scheduler) LoadConfig(ctx context.Context) (Config, error) {
 	if err := json.Unmarshal([]byte(val), &cfg); err != nil {
 		return def, nil
 	}
-	if cfg.IntervalHours <= 0 {
+	if cfg.IntervalHours <= 0 || cfg.IntervalHours > MaxIntervalHours {
 		cfg.IntervalHours = DefaultIntervalHours
 	}
-	if cfg.RetentionCount <= 0 {
+	if cfg.RetentionCount <= 0 || cfg.RetentionCount > MaxRetentionCount {
 		cfg.RetentionCount = DefaultRetentionCount
 	}
 	return cfg, nil
@@ -120,15 +164,21 @@ func (s *Scheduler) LoadConfig(ctx context.Context) (Config, error) {
 
 // SaveConfig persists the backup configuration to system settings.
 func (s *Scheduler) SaveConfig(ctx context.Context, cfg Config) error {
-	if cfg.IntervalHours <= 0 {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	return s.saveConfig(ctx, cfg)
+}
+
+func (s *Scheduler) saveConfig(ctx context.Context, cfg Config) error {
+	if cfg.IntervalHours <= 0 || cfg.IntervalHours > MaxIntervalHours {
 		cfg.IntervalHours = DefaultIntervalHours
 	}
-	if cfg.RetentionCount <= 0 {
+	if cfg.RetentionCount <= 0 || cfg.RetentionCount > MaxRetentionCount {
 		cfg.RetentionCount = DefaultRetentionCount
 	}
 
 	// Preserve secret keys if user left them masked
-	existing, _ := s.LoadConfig(ctx)
+	existing, _ := s.loadConfig(ctx)
 	if strings.Contains(cfg.S3.SecretKey, "••••") {
 		cfg.S3.SecretKey = existing.S3.SecretKey
 	}
@@ -140,7 +190,11 @@ func (s *Scheduler) SaveConfig(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return s.store.SetSetting(ctx, SettingKeyBackupConfig, string(b))
+	store := s.currentStore()
+	if store == nil {
+		return errors.New("backup scheduler store is not initialized")
+	}
+	return store.SetSetting(ctx, SettingKeyBackupConfig, string(b))
 }
 
 // Start launches the background scheduler loop.
@@ -152,22 +206,35 @@ func (s *Scheduler) Start(parentCtx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	s.cancel = cancel
+	loopDone := make(chan struct{})
+	s.loopDone = loopDone
 	s.running = true
 	s.mu.Unlock()
 
-	go s.loop(ctx)
+	go func() {
+		defer close(loopDone)
+		s.loop(ctx)
+	}()
 }
 
 // Stop stops the scheduler.
 func (s *Scheduler) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
 	s.running = false
-	if s.cancel != nil {
-		s.cancel()
+	cancel := s.cancel
+	loopDone := s.loopDone
+	s.cancel = nil
+	s.loopDone = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if loopDone != nil {
+		<-loopDone
 	}
 }
 
@@ -200,25 +267,30 @@ func (s *Scheduler) loop(ctx context.Context) {
 
 // RunOnce performs an immediate backup, uploads to enabled cloud destinations, and prunes old backups.
 func (s *Scheduler) RunOnce(ctx context.Context, prefix string) (RunReport, error) {
+	// Scheduled and manually-triggered backups share the same SQLite and disk
+	// resources. Serialize them so concurrent VACUUMs cannot exhaust disk space
+	// or race while retention pruning removes an upload in progress.
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+
 	start := time.Now()
 	if prefix == "" {
 		prefix = "probewatch-backup"
 	}
 
-	cfg, _ := s.LoadConfig(ctx)
+	cfg, _ := s.loadConfig(ctx)
+	store := s.currentStore()
+	if store == nil {
+		return RunReport{}, errors.New("backup scheduler store is not initialized")
+	}
 
 	// 1. Create local consistent atomic backup
-	info, err := s.store.CreateBackup(ctx, s.backupDir, prefix)
+	info, err := store.CreateBackup(ctx, s.backupDir, prefix)
 	if err != nil {
 		return RunReport{}, fmt.Errorf("create hot backup: %w", err)
 	}
 
 	backupFilePath := filepath.Join(s.backupDir, info.Filename)
-	backupBytes, err := os.ReadFile(backupFilePath)
-	if err != nil {
-		return RunReport{}, fmt.Errorf("read backup file: %w", err)
-	}
-
 	report := RunReport{
 		BackupInfo: info,
 	}
@@ -226,7 +298,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, prefix string) (RunReport, erro
 	// 2. Upload to S3 if configured & enabled
 	if cfg.S3.Enabled && cfg.S3.Bucket != "" {
 		s3Client := NewS3Client(cfg.S3)
-		if err := s3Client.PutObject(ctx, info.Filename, backupBytes, "application/gzip"); err != nil {
+		if err := s3Client.PutObjectFile(ctx, info.Filename, backupFilePath, "application/gzip"); err != nil {
 			report.S3Error = err.Error()
 		} else {
 			report.S3Uploaded = true
@@ -236,7 +308,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, prefix string) (RunReport, erro
 	// 3. Upload to WebDAV if configured & enabled
 	if cfg.WebDAV.Enabled && cfg.WebDAV.URL != "" {
 		webdavClient := NewWebDAVClient(cfg.WebDAV)
-		if err := webdavClient.PutFile(ctx, info.Filename, backupBytes); err != nil {
+		if err := webdavClient.PutFilePath(ctx, info.Filename, backupFilePath); err != nil {
 			report.WebDAVError = err.Error()
 		} else {
 			report.WebDAVUploaded = true
@@ -264,6 +336,8 @@ func (s *Scheduler) RunOnce(ctx context.Context, prefix string) (RunReport, erro
 
 // VerifyBackup runs a dry-run verification on a candidate backup without touching active data.
 func (s *Scheduler) VerifyBackup(ctx context.Context, filename string) (VerificationResult, error) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
 	start := time.Now()
 	if !db.IsValidBackupFilename(filename) {
 		return VerificationResult{}, errors.New("invalid backup filename")
@@ -298,9 +372,14 @@ func (s *Scheduler) VerifyBackup(ctx context.Context, filename string) (Verifica
 		if err != nil {
 			return VerificationResult{}, err
 		}
-		if _, err := io.Copy(outFile, gzReader); err != nil {
+		written, err := io.Copy(outFile, io.LimitReader(gzReader, db.MaxExpandedBackupBytes+1))
+		if err != nil {
 			outFile.Close()
 			return VerificationResult{}, fmt.Errorf("decompress sandbox: %w", err)
+		}
+		if written > db.MaxExpandedBackupBytes {
+			outFile.Close()
+			return VerificationResult{}, fmt.Errorf("decompressed backup exceeds %d bytes", db.MaxExpandedBackupBytes)
 		}
 		outFile.Close()
 	} else {
@@ -314,9 +393,14 @@ func (s *Scheduler) VerifyBackup(ctx context.Context, filename string) (Verifica
 		if err != nil {
 			return VerificationResult{}, err
 		}
-		if _, err := io.Copy(outFile, io.TeeReader(src, hasher)); err != nil {
+		written, err := io.Copy(outFile, io.LimitReader(io.TeeReader(src, hasher), db.MaxExpandedBackupBytes+1))
+		if err != nil {
 			outFile.Close()
 			return VerificationResult{}, err
+		}
+		if written > db.MaxExpandedBackupBytes {
+			outFile.Close()
+			return VerificationResult{}, fmt.Errorf("backup exceeds %d bytes", db.MaxExpandedBackupBytes)
 		}
 		outFile.Close()
 	}

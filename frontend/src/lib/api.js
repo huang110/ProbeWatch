@@ -1732,7 +1732,9 @@ export async function restoreBackup(filename) {
 export async function uploadBackupFile(file) {
   const csrf = await fetchCsrfToken()
   const formData = new FormData()
-  formData.append('file', file)
+  // The server expects the stable multipart field name `backup_file`.
+  // Using `file` here makes every upload fail with HTTP 400.
+  formData.append('backup_file', file)
   const res = await fetch('/api/system/backups/upload', {
     method: 'POST',
     credentials: 'same-origin',
@@ -1922,10 +1924,11 @@ export async function fetchAIDiagnosis() {
 }
 
 export async function sendAIChatPrompt(prompt) {
+  const csrf = await fetchCsrfToken()
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
     body: JSON.stringify({ prompt }),
   })
   if (!res.ok) {
@@ -2238,31 +2241,37 @@ export async function deleteAdminIncident(id) {
 
 export async function fetchCertificates(signal) {
   const res = await fetch('/api/certificates', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  // Only an unauthenticated session should switch to the intentionally public
+  // view. Falling back on 403/5xx would hide permission and outage errors and
+  // silently replace an operator's data with a public snapshot.
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/certificates', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch certificates')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch certificates (${res.status})`)
   return await res.json()
 }
 
 export async function fetchDNSMatrix(signal) {
   const res = await fetch('/api/dns-matrix', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/dns-matrix', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch DNS matrix')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch DNS matrix (${res.status})`)
   return await res.json()
 }
 
 export async function fetchMeshMatrix(signal) {
   const res = await fetch('/api/mesh-matrix', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/mesh-matrix', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch mesh matrix')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch mesh matrix (${res.status})`)
   return await res.json()
 }
 
@@ -2333,11 +2342,12 @@ export async function deleteSpeedtestTask(id) {
 
 export async function fetchSpeedtestResults(signal) {
   const res = await fetch('/api/speedtest/results', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/speedtest/results', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch speedtest results')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch speedtest results (${res.status})`)
   return await res.json()
 }
 
@@ -2425,12 +2435,17 @@ export async function deleteSyntheticTarget(id) {
 
 export async function fetchSyntheticResults(signal) {
   const res = await fetch('/api/synthetic/results', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/synthetic/results', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch synthetic results')
-    return await pubRes.json()
+    const data = await pubRes.json()
+    // Mark anonymous snapshots explicitly. A session may expire while the
+    // dashboard is open, and the public DTO must remain read-only in the UI.
+    return { ...data, __public: true }
   }
-  return await res.json()
+  if (!res.ok) throw new Error(`Failed to fetch synthetic results (${res.status})`)
+  const data = await res.json()
+  return { ...data, __public: false }
 }
 
 export async function fetchSyntheticHistory(targetId, nodeId, limit = 100, signal) {
@@ -2460,53 +2475,54 @@ export async function testSyntheticTarget(payload = {}) {
 
 export async function fetchFleetContainerOverview(signal) {
   const res = await fetch('/api/containers/overview', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/containers/overview', { credentials: 'same-origin', signal })
     if (!pubRes.ok) throw new Error('Failed to fetch fleet container overview')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch fleet container overview (${res.status})`)
   return await res.json()
 }
 
 export async function fetchNodeContainers(nodeUuid, signal) {
   const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/containers`, { credentials: 'same-origin', signal })
-  if (!res.ok) {
-    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/containers`, { credentials: 'same-origin', signal })
-    if (!pubRes.ok) throw new Error('Failed to fetch node containers')
-    return await pubRes.json()
-  }
+  if (res.status === 401) throw new Error('auth')
+  if (!res.ok) throw new Error(`Failed to fetch node containers (${res.status})`)
   return await res.json()
 }
 
 export async function fetchNodeProcesses(nodeUuid, signal) {
   const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/processes`, { credentials: 'same-origin', signal })
-  if (!res.ok) {
-    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/processes`, { credentials: 'same-origin', signal })
-    if (!pubRes.ok) throw new Error('Failed to fetch node processes')
-    return await pubRes.json()
-  }
+  if (res.status === 401) throw new Error('auth')
+  if (!res.ok) throw new Error(`Failed to fetch node processes (${res.status})`)
   return await res.json()
 }
 
 export async function fetchNodes(signal) {
   const res = await fetch('/api/nodes', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const guest = await fetchGuestStatus(signal).catch(() => null)
     if (guest && guest.nodes) return guest.nodes
     throw new Error('Failed to fetch nodes')
   }
+  if (!res.ok) throw new Error(`Failed to fetch nodes (${res.status})`)
   return await res.json()
 }
 
 // System Events & Log Streaming API
 export async function fetchEventsOverview(signal) {
   const res = await fetch('/api/events/overview', { credentials: 'same-origin', signal })
-  if (!res.ok) {
+  if (res.status === 401) {
     const pubRes = await fetch('/api/public/events/overview', { credentials: 'same-origin', signal })
-    if (res.status === 401 || pubRes.status === 401) throw new Error('auth')
+    // The authenticated request is known to be 401 in this branch.  Only
+    // propagate an auth error when the public fallback is also unavailable;
+    // otherwise a valid public overview must be returned to guest/read-only
+    // views.
+    if (pubRes.status === 401) throw new Error('auth')
     if (!pubRes.ok) throw new Error('Failed to fetch events overview')
     return await pubRes.json()
   }
+  if (!res.ok) throw new Error(`Failed to fetch events overview (${res.status})`)
   return await res.json()
 }
 
@@ -2528,11 +2544,8 @@ export async function fetchNodeEvents(nodeUuid, { category = '', severity = '', 
   if (severity) params.set('severity', severity)
   if (limit) params.set('limit', String(limit))
   const res = await fetch(`/api/nodes/${encodeURIComponent(nodeUuid)}/events?${params.toString()}`, { credentials: 'same-origin', signal })
-  if (!res.ok) {
-    const pubRes = await fetch(`/api/public/nodes/${encodeURIComponent(nodeUuid)}/events?${params.toString()}`, { credentials: 'same-origin', signal })
-    if (!pubRes.ok) throw new Error('Failed to fetch node events')
-    return await pubRes.json()
-  }
+  if (res.status === 401) throw new Error('auth')
+  if (!res.ok) throw new Error(`Failed to fetch node events (${res.status})`)
   return await res.json()
 }
 

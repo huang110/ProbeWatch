@@ -1,11 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/probewatch/probewatch/internal/db"
 )
 
 func TestOpenAPIAndDocsEndpoints(t *testing.T) {
@@ -164,5 +169,94 @@ func TestAPITokenCRUDAndAuthentication(t *testing.T) {
 	logs := auditResp["logs"].([]any)
 	if len(logs) < 3 {
 		t.Fatalf("expected at least 3 audit logs (create, update, delete), got %d", len(logs))
+	}
+}
+
+func TestAPITokenFollowsOwnerPrivilegesAndScopes(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	handler := NewServer(cfg, service).Handler()
+	session, csrf := task4AdminSession(t, service, store)
+
+	create := func(role, scopes, allowed string) string {
+		t.Helper()
+		body := fmt.Sprintf(`{"name":"audit-%s","role":%q,"scopes":%q,"allowed_nodes":%q}`, role, role, scopes, allowed)
+		var nextCSRF string
+		resp, nextCSRF := task4AdminWriteWithCSRF(t, handler, http.MethodPost, session, csrf, "/api/tokens", body)
+		if nextCSRF != "" {
+			csrf = nextCSRF
+		}
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("create PAT status=%d body=%s", resp.Code, resp.Body.String())
+		}
+		var payload struct {
+			RawToken string `json:"raw_token"`
+		}
+		if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil || payload.RawToken == "" {
+			t.Fatalf("create PAT response=%s err=%v", resp.Body.String(), err)
+		}
+		return payload.RawToken
+	}
+
+	// A token initially created as administrator must not retain administrator
+	// privileges after its owner is demoted and restricted to a node subset.
+	pat := create(db.RoleAdmin, "*", "*")
+	readNodesPAT := create(db.RoleAdmin, "read:nodes", "*")
+	users, err := store.ListAdminUsers(context.Background())
+	if err != nil || len(users) == 0 {
+		t.Fatalf("list users: %v", err)
+	}
+	owner := users[0]
+	// Keep one active administrator so the last-admin guard does not prevent the
+	// privilege transition under test.
+	if _, err := store.UpsertAdminUser(context.Background(), "github", "second-admin", "second-admin", time.Now().UTC()); err != nil {
+		t.Fatalf("create second admin: %v", err)
+	}
+	newRole := db.RoleViewer
+	allowed := "node-a,node-b"
+	if _, err := store.UpdateAdminUser(context.Background(), owner.ID, db.UpdateUserInput{Role: &newRole, AllowedNodes: &allowed}, time.Now().UTC()); err != nil {
+		t.Fatalf("demote owner: %v", err)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+pat)
+	meRec := httptest.NewRecorder()
+	handler.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("PAT /api/me after demotion status=%d body=%s", meRec.Code, meRec.Body.String())
+	}
+	var me map[string]any
+	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if me["role"] != db.RoleViewer || me["allowed_nodes"] != allowed {
+		t.Fatalf("PAT privilege drift: role=%v allowed_nodes=%v", me["role"], me["allowed_nodes"])
+	}
+
+	// Viewer owner cannot use an administrator PAT to mutate token state.
+	writeReq := httptest.NewRequest(http.MethodPost, "/api/tokens", strings.NewReader(`{"name":"should-fail"}`))
+	writeReq.Header.Set("Authorization", "Bearer "+pat)
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeRec := httptest.NewRecorder()
+	handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusForbidden {
+		t.Fatalf("demoted PAT write status=%d body=%s", writeRec.Code, writeRec.Body.String())
+	}
+
+	// Resource scopes are enforced instead of being decorative metadata.
+	nodesReq := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	nodesReq.Header.Set("Authorization", "Bearer "+readNodesPAT)
+	nodesRec := httptest.NewRecorder()
+	handler.ServeHTTP(nodesRec, nodesReq)
+	if nodesRec.Code != http.StatusOK {
+		t.Fatalf("read:nodes /api/nodes status=%d body=%s", nodesRec.Code, nodesRec.Body.String())
+	}
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/alerts", nil)
+	alertsReq.Header.Set("Authorization", "Bearer "+readNodesPAT)
+	alertsRec := httptest.NewRecorder()
+	handler.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusForbidden {
+		t.Fatalf("read:nodes /api/alerts status=%d body=%s", alertsRec.Code, alertsRec.Body.String())
 	}
 }

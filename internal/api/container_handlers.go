@@ -29,6 +29,14 @@ func (s *Server) workloadAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid workload report: "+err.Error())
 		return
 	}
+	// Validate the payload timestamp independently of the request signature
+	// timestamp.  A valid node token must not be able to pin the latest
+	// workload row in the future and thereby make subsequent real reports look
+	// stale forever.
+	if err := validateAgentPayloadTimestamp(report.ReportedAt, now, s.agentClockSkew()); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid workload report")
+		return
+	}
 	if report.NodeUUID != node.UUID {
 		writeJSONError(w, http.StatusBadRequest, "node uuid mismatch")
 		return
@@ -189,7 +197,7 @@ func (s *Server) publicFleetContainerOverviewHandler(w http.ResponseWriter, r *h
 		return
 	}
 	now := time.Now().UTC()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+	if !s.publicLimiter.Allow(s.publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}

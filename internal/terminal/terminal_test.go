@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -94,6 +95,41 @@ func TestRunExecTimeout(t *testing.T) {
 	res := RunExec(ctx, cmd, 1)
 	if res.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit code on timeout, got 0")
+	}
+}
+
+func TestLimitedWriterCapsOutputWithoutShortWrite(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &limitedWriter{w: &buf, limit: 4}
+
+	n, err := lw.Write([]byte("abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 6 {
+		t.Fatalf("limited writer consumed %d bytes, want 6", n)
+	}
+	if buf.String() != "abcd" {
+		t.Fatalf("limited writer output = %q, want %q", buf.String(), "abcd")
+	}
+	n, err = lw.Write([]byte("gh"))
+	if err != nil || n != 2 {
+		t.Fatalf("discarded write = (%d, %v), want (2, nil)", n, err)
+	}
+	if buf.String() != "abcd" {
+		t.Fatalf("limited writer exceeded cap: %q", buf.String())
+	}
+}
+
+func TestNormalizeExecTimeoutClampsBeforeDurationMultiplication(t *testing.T) {
+	if got := normalizeExecTimeout(0); got != defaultExecTimeout {
+		t.Fatalf("zero timeout = %s, want %s", got, defaultExecTimeout)
+	}
+	if got := normalizeExecTimeout(5); got != 5*time.Second {
+		t.Fatalf("five-second timeout = %s", got)
+	}
+	if got := normalizeExecTimeout(int(^uint(0) >> 1)); got != maxExecTimeout {
+		t.Fatalf("huge timeout = %s, want %s", got, maxExecTimeout)
 	}
 }
 
@@ -222,4 +258,3 @@ func TestAgentClientIntegration(t *testing.T) {
 		}
 	}
 }
-

@@ -82,7 +82,7 @@ func (s *Server) meshMatrixHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isPublic := strings.HasPrefix(r.URL.Path, "/api/public/")
-	if isPublic && s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if isPublic && s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}

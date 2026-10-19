@@ -531,6 +531,35 @@ func TestAdminJSONWritesRejectNullWithoutSideEffects(t *testing.T) {
 	}
 }
 
+func TestRegistrationTokenCreationRequiresAdminRole(t *testing.T) {
+	service, store := newTask4Auth(t)
+	defer store.Close()
+	cfg := task4Config()
+	handler := NewServer(cfg, service).Handler()
+
+	// Create the first admin so the database's last-admin protection remains
+	// satisfied, then explicitly provision an operator account.
+	_, _ = task4AdminSession(t, service, store)
+	operator, err := store.UpsertAdminUser(context.Background(), "local", "registration-operator", "registration-operator", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := db.RoleOperator
+	if _, err := store.UpdateAdminUser(context.Background(), operator.ID, db.UpdateUserInput{Role: &role}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.CreateSessionForUser(context.Background(), operator.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf := task4CSRF(t, handler, session)
+
+	response, _ := task4AdminPost(t, handler, session, csrf, "/api/registration-tokens", `{}`)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("operator registration-token creation status = %d, body = %q, want 403", response.Code, response.Body.String())
+	}
+}
+
 func mustNode(t *testing.T, store *db.Store, uuid string) db.Node {
 	t.Helper()
 	nodes, err := store.ListNodes(context.Background())

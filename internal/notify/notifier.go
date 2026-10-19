@@ -51,10 +51,10 @@ func NewNotifierWithStore(cfg config.Config, store *db.Store) *Notifier {
 				DialContext:            safeDialContext,
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("notification redirect limit exceeded")
-				}
-				return nil
+				// Webhook payloads may contain node names, alert reasons, and
+				// operator-selected target IDs. Never forward them to a different
+				// host through an untrusted redirect.
+				return http.ErrUseLastResponse
 			},
 		},
 		dispatched: make(map[string]int64),
@@ -75,6 +75,15 @@ func (n *Notifier) SetStore(store *db.Store) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.store = store
+}
+
+// Store returns the current persistence handle. Callers should retain the
+// returned pointer only for the duration of their operation; a live restore
+// may publish a replacement at any time.
+func (n *Notifier) Store() *db.Store {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.store
 }
 
 func safeDialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -103,8 +112,8 @@ func (n *Notifier) Enabled() bool {
 		strings.TrimSpace(n.cfg.WebhookURL) != "" {
 		return true
 	}
-	if n.store != nil {
-		channels, err := n.store.ListNotificationChannels(context.Background())
+	if store := n.Store(); store != nil {
+		channels, err := store.ListNotificationChannels(context.Background())
 		if err == nil {
 			for _, ch := range channels {
 				if ch.Enabled {
@@ -118,8 +127,8 @@ func (n *Notifier) Enabled() bool {
 
 func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.Node) error {
 	// 1. Check if alert is silenced (via maintenance window or snooze)
-	if n.store != nil {
-		silenced, reason, sErr := n.store.IsAlertSilenced(ctx, alert.NodeID, alert.Category, alert.TargetID, alert.Fingerprint, time.Now().UTC())
+	if store := n.Store(); store != nil {
+		silenced, reason, sErr := store.IsAlertSilenced(ctx, alert.NodeID, alert.Category, alert.TargetID, alert.Fingerprint, time.Now().UTC())
 		if sErr == nil && silenced {
 			slog.Info("alert silenced by maintenance window or snooze", "alert_id", alert.ID, "node_id", alert.NodeID, "reason", reason)
 			return nil
@@ -159,31 +168,37 @@ func (n *Notifier) Dispatch(ctx context.Context, alert db.AlertEvent, node db.No
 
 	err := n.dispatchToChannels(ctx, alert, node)
 
-	n.mu.Lock()
-	if alert.Status == db.AlertStatusResolved {
-		n.dispatched[alert.ID] = -1 // marked as resolved dispatched
-	} else {
-		n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
-	}
-	if len(n.dispatched) > 5000 {
-		trimmed := make(map[string]int64)
-		for k, v := range n.dispatched {
-			trimmed[k] = v
-			if len(trimmed) >= 2500 {
-				break
-			}
+	// Do not mark an occurrence as delivered when any channel failed. The
+	// dispatcher retries the same alert on its next scan; marking it first
+	// would permanently suppress that retry and silently lose notifications
+	// during a transient Telegram/Webhook outage.
+	if err == nil {
+		n.mu.Lock()
+		if alert.Status == db.AlertStatusResolved {
+			n.dispatched[alert.ID] = -1 // marked as resolved dispatched
+		} else {
+			n.dispatched[alert.ID] = int64(alert.OccurrenceCount)
 		}
-		n.dispatched = trimmed
+		if len(n.dispatched) > 5000 {
+			trimmed := make(map[string]int64)
+			for k, v := range n.dispatched {
+				trimmed[k] = v
+				if len(trimmed) >= 2500 {
+					break
+				}
+			}
+			n.dispatched = trimmed
+		}
+		n.mu.Unlock()
 	}
-	n.mu.Unlock()
 
 	return err
 }
 
 func (n *Notifier) dispatchToChannels(ctx context.Context, alert db.AlertEvent, node db.Node) error {
 	var channels []db.NotificationChannel
-	if n.store != nil {
-		dbChannels, err := n.store.ListNotificationChannels(ctx)
+	if store := n.Store(); store != nil {
+		dbChannels, err := store.ListNotificationChannels(ctx)
 		if err == nil {
 			for _, ch := range dbChannels {
 				if ch.Enabled {
@@ -759,15 +774,46 @@ func (n *Notifier) sendWebhook(ctx context.Context, webhookURL string, alert db.
 	return nil
 }
 
+// RunAlertDispatcher keeps the historical fixed-store API for callers that
+// do not support live database replacement. New long-running runtimes should
+// use RunAlertDispatcherWithProvider so a hot restore cannot leave the
+// dispatcher querying a closed *db.Store.
 func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier) {
-	if notifier != nil {
-		notifier.SetStore(store)
+	RunAlertDispatcherWithProvider(ctx, func() *db.Store { return store }, notifier)
+}
+
+// RunAlertDispatcherWithProvider evaluates and dispatches alerts using the
+// currently active store returned by provider on every scan. The provider is
+// intentionally invoked immediately before work starts, so a database restore
+// can publish a replacement without restarting the control plane.
+func RunAlertDispatcherWithProvider(ctx context.Context, provider func() *db.Store, notifier *Notifier) {
+	if provider == nil {
+		provider = func() *db.Store { return nil }
 	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
-	scanAndDispatch := func() {
-		scanCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	const periodicScanTimeout = 12 * time.Second
+	const startupScanTimeout = 60 * time.Second
+	scanAndDispatch := func(timeout time.Duration) {
+		store := provider()
+		if store == nil {
+			if ctx.Err() == nil {
+				slog.Error("alert dispatcher store is unavailable")
+			}
+			return
+		}
+		if notifier == nil {
+			if ctx.Err() == nil {
+				slog.Error("alert dispatcher notifier is unavailable")
+			}
+			return
+		}
+		// Keep the notifier's persistence handle aligned with the provider. This
+		// is harmless for the same pointer and closes the restore hand-off gap
+		// for dispatch bookkeeping.
+		notifier.SetStore(store)
+		scanCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		now := time.Now().UTC()
@@ -784,9 +830,17 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 			}
 			gracePeriod := time.Duration(gracePeriodSec) * time.Second
 
+			// Read all latest resource rows in one query. The previous per-node
+			// lookup made startup scans O(number of nodes) SQLite round trips and
+			// routinely exhausted the scan deadline on large databases.
+			latestResources, latestErr := store.GetAllResourceLatest(scanCtx)
 			for _, node := range nodes {
-				reportedAt, _, rErr := store.GetResourceLatest(scanCtx, node.ID)
-				if rErr == nil && !reportedAt.IsZero() {
+				if latestErr != nil {
+					break
+				}
+				latest, ok := latestResources[node.ID]
+				if ok && !latest.ReportedAt.IsZero() {
+					reportedAt := latest.ReportedAt
 					isOffline := time.Since(reportedAt) > gracePeriod
 					_ = store.EvaluateAlert(scanCtx, node.ID, db.AlertEvaluation{
 						Category: "node",
@@ -834,7 +888,15 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 		}
 
 		for _, alert := range alerts {
-			node, nErr := store.GetNodeByUUID(scanCtx, alert.NodeID)
+			// AlertEvent.NodeID is the internal nodes.id produced by
+			// EvaluateAlert.  Looking it up as a UUID silently loses the node
+			// name and metadata and causes notifications to display an opaque
+			// database id.  Keep a UUID fallback for legacy rows created by
+			// older versions.
+			node, nErr := store.GetNodeByID(scanCtx, alert.NodeID)
+			if nErr != nil {
+				node, nErr = store.GetNodeByUUID(scanCtx, alert.NodeID)
+			}
 			if nErr != nil {
 				node = db.Node{ID: alert.NodeID, Name: alert.NodeID}
 			}
@@ -852,7 +914,10 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 		})
 		if err == nil {
 			for _, alert := range resolvedAlerts {
-				node, nErr := store.GetNodeByUUID(scanCtx, alert.NodeID)
+				node, nErr := store.GetNodeByID(scanCtx, alert.NodeID)
+				if nErr != nil {
+					node, nErr = store.GetNodeByUUID(scanCtx, alert.NodeID)
+				}
 				if nErr != nil {
 					node = db.Node{ID: alert.NodeID, Name: alert.NodeID}
 				}
@@ -861,13 +926,16 @@ func RunAlertDispatcher(ctx context.Context, store *db.Store, notifier *Notifier
 		}
 	}
 
-	scanAndDispatch()
+	// The first pass may have to warm SQLite's page cache on a large
+	// production database. Give it a longer budget so startup does not silently
+	// skip alert evaluation and notification dispatch.
+	scanAndDispatch(startupScanTimeout)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			scanAndDispatch()
+			scanAndDispatch(periodicScanTimeout)
 		}
 	}
 }

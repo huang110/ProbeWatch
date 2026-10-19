@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,19 @@ func (s *Server) eventsAgent(w http.ResponseWriter, r *http.Request) {
 	if err := batch.Validate(); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid events report: "+err.Error())
 		return
+	}
+	// Keep the batch timestamp close to the authenticated request time.  Event
+	// occurrence times may legitimately lag while an agent is offline, but a
+	// future occurrence would pollute the public 24h aggregates and ordering.
+	if err := validateAgentPayloadTimestamp(batch.ReportedAt, now, s.agentClockSkew()); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid events report")
+		return
+	}
+	for _, event := range batch.Events {
+		if err := validateAgentPayloadTimestampWithPastSkew(event.OccurredAt, now, maxOutboxAgeForReports(s.agentClockSkew()), s.agentClockSkew()); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid events report")
+			return
+		}
 	}
 
 	if batch.NodeUUID != node.UUID {
@@ -232,7 +246,7 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	now := time.Now().UTC()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
@@ -244,24 +258,25 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Sanitize recent events to hide private IPs or sensitive tokens in messages
+	nodeLabels := make(map[string]string)
+	nextNode := 1
 	sanitizedRecent := make([]map[string]any, 0, len(overview.RecentEvents))
 	for _, ev := range overview.RecentEvents {
-		title := "系统状态异常"
-		switch ev.Category {
-		case "ssh_auth", "security":
-			title = "安全登录鉴权拦截"
-		case "oom":
-			title = "内存保护触发 (OOM)"
-		case "kernel":
-			title = "内核保护事件"
-		case "service", "system":
-			title = "系统服务状态异常"
+		labelKey := ev.NodeID
+		if labelKey == "" {
+			labelKey = fmt.Sprintf("missing-node-%d", nextNode)
 		}
+		label, ok := nodeLabels[labelKey]
+		if !ok {
+			label = fmt.Sprintf("Node %d", nextNode)
+			nodeLabels[labelKey] = label
+			nextNode++
+		}
+		title := publicEventTitle(publicEventCategory(ev.Category))
 		sanitizedRecent = append(sanitizedRecent, map[string]any{
-			"id":          ev.ID,
-			"node_name":   sanitizeNodeName(ev.NodeName),
-			"category":    ev.Category,
-			"severity":    ev.Severity,
+			"node_name":   label,
+			"category":    publicEventCategory(ev.Category),
+			"severity":    publicEventSeverity(ev.Severity),
 			"title":       title,
 			"occurred_at": ev.OccurredAt,
 		})
@@ -271,9 +286,50 @@ func (s *Server) publicEventsOverviewHandler(w http.ResponseWriter, r *http.Requ
 		"total_events_24h":    overview.TotalEvents24h,
 		"critical_events_24h": overview.CriticalEvents24h,
 		"warning_events_24h":  overview.WarningEvents24h,
-		"category_counts":     overview.CategoryCounts,
+		"category_counts":     sanitizePublicEventCategoryCounts(overview.CategoryCounts),
 		"recent_events":       sanitizedRecent,
 	})
+}
+
+func publicEventCategory(category string) string {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "oom", "kernel", "ssh_auth", "security", "service", "system":
+		return strings.ToLower(strings.TrimSpace(category))
+	default:
+		return "other"
+	}
+}
+
+func publicEventSeverity(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical", "warning", "info":
+		return strings.ToLower(strings.TrimSpace(severity))
+	default:
+		return "info"
+	}
+}
+
+func sanitizePublicEventCategoryCounts(counts map[string]int64) map[string]int64 {
+	result := make(map[string]int64)
+	for category, count := range counts {
+		result[publicEventCategory(category)] += count
+	}
+	return result
+}
+
+func publicEventTitle(category string) string {
+	switch category {
+	case "ssh_auth", "security":
+		return "安全登录鉴权拦截"
+	case "oom":
+		return "内存保护触发 (OOM)"
+	case "kernel":
+		return "内核保护事件"
+	case "service", "system":
+		return "系统服务状态异常"
+	default:
+		return "系统状态异常"
+	}
 }
 
 // queryNodeLogs handles secure, parameterized system log retrieval for a node.

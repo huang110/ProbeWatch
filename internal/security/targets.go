@@ -17,6 +17,21 @@ var blockedMetadataAddresses = [...]netip.Addr{
 	netip.MustParseAddr("100.100.100.200"),
 }
 
+// blockedNonPublicPrefixes covers address space which netip.Addr.IsPrivate
+// intentionally does not classify as RFC1918/ULA private space.  These
+// ranges are not valid public Internet destinations and must not be reachable
+// through user-controlled monitors, otherwise a VPS can be used to probe
+// carrier NAT, cloud infrastructure, benchmark and documentation networks.
+var blockedNonPublicPrefixes = [...]netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),   // RFC 6598 CGNAT
+	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("2001:db8::/32"),   // IPv6 documentation
+}
+
 // IsBlockedAddress reports whether addr belongs to a non-public address range.
 func IsBlockedAddress(addr netip.Addr) bool {
 	if !addr.IsValid() {
@@ -25,6 +40,11 @@ func IsBlockedAddress(addr netip.Addr) bool {
 	addr = addr.Unmap()
 	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() || addr.IsMulticast() {
 		return true
+	}
+	for _, prefix := range blockedNonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
 	}
 	for _, blocked := range blockedMetadataAddresses {
 		if addr == blocked {
@@ -80,7 +100,17 @@ func ValidateHost(host string) error {
 }
 
 // ValidateURL validates an HTTP(S) target URL without resolving or connecting to it.
+// Query strings are intentionally rejected because the generic network target
+// API is also used for URLs that may contain credentials or bearer tokens.
 func ValidateURL(raw string, allowedSchemes []string) (*url.URL, error) {
+	return ValidateURLWithOptions(raw, allowedSchemes, false)
+}
+
+// ValidateURLWithOptions validates a target URL without resolving or
+// connecting to it. It is shared by protocol-specific monitors that need a
+// query string (for example DoH) while retaining the same host, credentials,
+// fragment, port, and size checks as ValidateURL.
+func ValidateURLWithOptions(raw string, allowedSchemes []string, allowQuery bool, allowPrivate ...bool) (*url.URL, error) {
 	if raw == "" || len(raw) > maxTargetURLLength {
 		return nil, fmt.Errorf("target URL exceeds maximum length of %d bytes", maxTargetURLLength)
 	}
@@ -88,24 +118,43 @@ func ValidateURL(raw string, allowedSchemes []string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse target URL: %w", err)
 	}
-	if !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(raw, "#") || parsed.Opaque != "" {
-		return nil, fmt.Errorf("target URL must be an absolute URL without credentials, query, or fragment")
+	if !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || strings.Contains(raw, "#") || parsed.Opaque != "" {
+		return nil, fmt.Errorf("target URL must be an absolute URL without credentials or fragment")
+	}
+	if !allowQuery && (parsed.RawQuery != "" || parsed.ForceQuery) {
+		return nil, fmt.Errorf("target URL must not contain a query string")
+	}
+	if allowQuery && parsed.ForceQuery {
+		return nil, fmt.Errorf("target URL must not contain an empty query string")
 	}
 	if len(parsed.EscapedPath()) > maxTargetPathLength {
 		return nil, fmt.Errorf("target URL path exceeds maximum length of %d bytes", maxTargetPathLength)
 	}
 
 	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" || !containsScheme(allowedSchemes, scheme) {
+	if !containsScheme(allowedSchemes, scheme) {
 		return nil, fmt.Errorf("target URL scheme is not allowed")
 	}
 	if err := validateExplicitPort(parsed.Host); err != nil {
 		return nil, err
 	}
 	if err := ValidateHost(parsed.Hostname()); err != nil {
-		return nil, fmt.Errorf("invalid target URL host: %w", err)
+		// Isolated unit tests may deliberately target httptest's loopback
+		// listener. Keep that escape hatch explicit and limited to literal
+		// blocked addresses; production callers never pass allowPrivate=true.
+		if len(allowPrivate) == 0 || !allowPrivate[0] || !isBlockedHostLiteral(parsed.Hostname()) {
+			return nil, fmt.Errorf("invalid target URL host: %w", err)
+		}
 	}
 	return parsed, nil
+}
+
+func isBlockedHostLiteral(host string) bool {
+	if strings.EqualFold(host, "localhost") || strings.EqualFold(host, "localhost.localdomain") || strings.EqualFold(host, "ip6-localhost") || strings.EqualFold(host, "ip6-loopback") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && IsBlockedAddress(addr)
 }
 
 func containsScheme(allowedSchemes []string, scheme string) bool {

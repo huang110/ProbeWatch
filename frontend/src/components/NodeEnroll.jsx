@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ArrowClockwise, Check, Copy, PlugsConnected } from '@phosphor-icons/react'
 import { fetchCsrfToken } from '../lib/api.js'
 import { safeText } from '../lib/format.js'
+import { quoteShell } from '../lib/shellEscape.js'
+import { generateUUID } from '../lib/uuid.js'
 
 const ENROLL_RULE = '注册 Token 15 分钟内有效，仅可注册一个节点，成功注册后立即失效。'
 
@@ -49,8 +51,8 @@ export function NodeEnroll() {
         endpoint = `${window.location.origin}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
       }
       const expiresAt = new Date(source.expires_at).getTime()
-      if (!token || !endpoint || !Number.isFinite(expiresAt)) throw new Error('invalid')
-      setEnrollment({ token, endpoint, nodeUuid: crypto.randomUUID(), expiresAt })
+      if (!token || !endpoint || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('invalid')
+      setEnrollment({ token, endpoint, nodeUuid: generateUUID(), expiresAt })
       setNow(Date.now())
     } catch (caught) {
       const messages = { auth: '需要登录后才能接入节点。', forbidden: '接入命令生成被拒绝，请刷新后重试。', invalid: '接入命令 API 返回了意外格式，请稍后重试。', error: '生成接入命令失败，请稍后重试。' }
@@ -61,9 +63,9 @@ export function NodeEnroll() {
   }
 
   const script = enrollment ? [
-    `export PROBEWATCH_AGENT_ENDPOINT="${enrollment.endpoint}"`,
-    `export PROBEWATCH_AGENT_NODE_UUID="${enrollment.nodeUuid}"`,
-    `export PROBEWATCH_AGENT_REGISTRATION_TOKEN="${enrollment.token}"`,
+    `export PROBEWATCH_AGENT_ENDPOINT=${quoteShell(enrollment.endpoint)}`,
+    `export PROBEWATCH_AGENT_NODE_UUID=${quoteShell(enrollment.nodeUuid)}`,
+    `export PROBEWATCH_AGENT_REGISTRATION_TOKEN=${quoteShell(enrollment.token)}`,
     '',
     '# 下载 Agent 二进制后执行',
     './probewatch-agent',

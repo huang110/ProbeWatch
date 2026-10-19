@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -81,6 +83,14 @@ func (s *Server) publicClientInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	// This endpoint may perform a server-side GeoIP lookup on a cache miss.
+	// Apply the same per-client public limit as the other unauthenticated
+	// aggregate endpoints so an attacker cannot turn it into an outbound
+	// request/connection amplifier on a small VPS.
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 	ip := s.publicClientIP(r)
@@ -166,24 +176,24 @@ func publicClientConnectionFamily(ipStr string) string {
 }
 
 type publicStatusNodes struct {
-	Online    int                    `json:"online"`
-	Total     int                    `json:"total"`
-	Names     []string               `json:"names"`
-	Telemetry []publicNodeTelemetry  `json:"telemetry"`
+	Online    int                   `json:"online"`
+	Total     int                   `json:"total"`
+	Names     []string              `json:"names"`
+	Telemetry []publicNodeTelemetry `json:"telemetry"`
 }
 
 type publicStatusChecks struct {
-	SuccessRate  *float64 `json:"success_rate"`
-	AvgLatencyMs *float64 `json:"avg_latency_ms"`
-	Total        int      `json:"total"`
-	Success      int      `json:"success"`
-	Failure      int      `json:"failure"`
-	CoverageTotal   int      `json:"coverage_total"`
-	CoverageSampled int      `json:"coverage_sampled"`
-	CoverageMissing []string `json:"coverage_missing"`
-	LatencyThresholdMs int `json:"latency_threshold_ms"`
-	RecentFailureStreak int `json:"recent_failure_streak"`
-	WindowHours int `json:"window_hours"`
+	SuccessRate         *float64 `json:"success_rate"`
+	AvgLatencyMs        *float64 `json:"avg_latency_ms"`
+	Total               int      `json:"total"`
+	Success             int      `json:"success"`
+	Failure             int      `json:"failure"`
+	CoverageTotal       int      `json:"coverage_total"`
+	CoverageSampled     int      `json:"coverage_sampled"`
+	CoverageMissing     []string `json:"coverage_missing"`
+	LatencyThresholdMs  int      `json:"latency_threshold_ms"`
+	RecentFailureStreak int      `json:"recent_failure_streak"`
+	WindowHours         int      `json:"window_hours"`
 }
 
 // publicNodeTelemetry is the allow-listed, read-only data used by the public
@@ -191,24 +201,24 @@ type publicStatusChecks struct {
 // deliberately omitting internal database IDs, secret tokens, passwords, hostnames,
 // listening ports, and raw network payloads.
 type publicNodeTelemetry struct {
-	UUID              string                 `json:"uuid"`
-	Name              string                 `json:"name"`
-	Status            string                 `json:"status"`
-	LastReportedAt   *time.Time             `json:"last_reported_at"`
-	CPUPercent        *float64               `json:"cpu_percent"`
-	Load1             *float64               `json:"load1"`
-	MemoryUsedBytes   *uint64                `json:"memory_used_bytes"`
-	MemoryTotalBytes  *uint64                `json:"memory_total_bytes"`
-	FilesystemUsed    *uint64                `json:"filesystem_used_bytes"`
-	FilesystemTotal   *uint64                `json:"filesystem_total_bytes"`
-	NetworkRxBytes    *uint64                `json:"network_rx_bytes"`
-	NetworkTxBytes    *uint64                `json:"network_tx_bytes"`
-	StartedAt         *int64                 `json:"started_at"`
-	LatencyMS         *float64               `json:"latency_ms"`
-	LossRate          *float64               `json:"loss_rate"`
-	LastCheckedAt     *time.Time             `json:"last_checked_at"`
-	Checks            []publicNodeCheck      `json:"checks"`
-	IPQuality         *publicIPQualityDTO    `json:"ip_quality,omitempty"`
+	UUID             string              `json:"uuid"`
+	Name             string              `json:"name"`
+	Status           string              `json:"status"`
+	LastReportedAt   *time.Time          `json:"last_reported_at"`
+	CPUPercent       *float64            `json:"cpu_percent"`
+	Load1            *float64            `json:"load1"`
+	MemoryUsedBytes  *uint64             `json:"memory_used_bytes"`
+	MemoryTotalBytes *uint64             `json:"memory_total_bytes"`
+	FilesystemUsed   *uint64             `json:"filesystem_used_bytes"`
+	FilesystemTotal  *uint64             `json:"filesystem_total_bytes"`
+	NetworkRxBytes   *uint64             `json:"network_rx_bytes"`
+	NetworkTxBytes   *uint64             `json:"network_tx_bytes"`
+	StartedAt        *int64              `json:"started_at"`
+	LatencyMS        *float64            `json:"latency_ms"`
+	LossRate         *float64            `json:"loss_rate"`
+	LastCheckedAt    *time.Time          `json:"last_checked_at"`
+	Checks           []publicNodeCheck   `json:"checks"`
+	IPQuality        *publicIPQualityDTO `json:"ip_quality,omitempty"`
 }
 
 type publicNodeCheck struct {
@@ -265,10 +275,26 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+	if !s.publicLimiter.Allow(s.publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
+	s.publicCacheMu.RLock()
+	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 2*time.Second {
+		cached := s.publicCache
+		s.publicCacheMu.RUnlock()
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
+	s.publicCacheMu.RUnlock()
+
+	// Only one request should rebuild the aggregate at a time. The endpoint
+	// intentionally performs several bounded aggregate queries per node, so a
+	// cache miss stampede can otherwise multiply SQLite work and memory usage.
+	s.publicBuildMu.Lock()
+	defer s.publicBuildMu.Unlock()
+	// Re-check after waiting: another request may have populated the cache.
+	now = time.Now().UTC()
 	s.publicCacheMu.RLock()
 	if !s.publicCacheAt.IsZero() && now.Sub(s.publicCacheAt) < 2*time.Second {
 		cached := s.publicCache
@@ -294,7 +320,10 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	const latencyAlertThresholdMs = 200
 	const windowHours = 24
 	coverageLabels := map[string]bool{"联通": false, "电信": false, "移动": false}
-	type checkOutcome struct { at time.Time; ok bool }
+	type checkOutcome struct {
+		at time.Time
+		ok bool
+	}
 	var outcomes []checkOutcome
 	seenChecks := make(map[string]struct{})
 	var lastUpdated time.Time
@@ -315,17 +344,17 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				telemetry.Status = "attention"
 			}
 			var resource struct {
-				CPUPercent float64 `json:"cpu_percent"`
-				Load1 float64 `json:"load1"`
-				MemoryUsedBytes uint64 `json:"memory_used_bytes"`
-				MemoryTotalBytes uint64 `json:"memory_total_bytes"`
-				FilesystemUsedBytes uint64 `json:"filesystem_used_bytes"`
-				FilesystemTotalBytes uint64 `json:"filesystem_total_bytes"`
-				NetworkRxBytes uint64 `json:"network_rx_bytes"`
-				NetworkTxBytes uint64 `json:"network_tx_bytes"`
-				StartedAt int64 `json:"started_at"`
-				IPQuality *protocol.IPQualityInfo `json:"ip_quality"`
-				IPQA      *protocol.IPQAInfo      `json:"ipqa"`
+				CPUPercent           float64                 `json:"cpu_percent"`
+				Load1                float64                 `json:"load1"`
+				MemoryUsedBytes      uint64                  `json:"memory_used_bytes"`
+				MemoryTotalBytes     uint64                  `json:"memory_total_bytes"`
+				FilesystemUsedBytes  uint64                  `json:"filesystem_used_bytes"`
+				FilesystemTotalBytes uint64                  `json:"filesystem_total_bytes"`
+				NetworkRxBytes       uint64                  `json:"network_rx_bytes"`
+				NetworkTxBytes       uint64                  `json:"network_tx_bytes"`
+				StartedAt            int64                   `json:"started_at"`
+				IPQuality            *protocol.IPQualityInfo `json:"ip_quality"`
+				IPQA                 *protocol.IPQAInfo      `json:"ipqa"`
 			}
 			if json.Unmarshal(payload, &resource) == nil {
 				telemetry.CPUPercent = &resource.CPUPercent
@@ -354,30 +383,66 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 		var latencyCount, latestTotal, latestFailure int
 		var latestChecked time.Time
 		for _, latest := range latestResults {
-			var result struct { Status string `json:"status"`; Latency int64 `json:"latency_ms"` }
-			if json.Unmarshal(latest.Payload, &result) != nil { continue }
+			var result struct {
+				Status  string `json:"status"`
+				Latency int64  `json:"latency_ms"`
+			}
+			if json.Unmarshal(latest.Payload, &result) != nil {
+				continue
+			}
 			latestTotal++
-			if result.Status != "success" && result.Status != "available" { latestFailure++ }
-			if result.Latency > 0 { latencyTotal += result.Latency; latencyCount++ }
-			if latestChecked.IsZero() || latest.CheckedAt.After(latestChecked) { latestChecked = latest.CheckedAt }
+			if result.Status != "success" && result.Status != "available" {
+				latestFailure++
+			}
+			if result.Latency > 0 {
+				latencyTotal += result.Latency
+				latencyCount++
+			}
+			if latestChecked.IsZero() || latest.CheckedAt.After(latestChecked) {
+				latestChecked = latest.CheckedAt
+			}
 		}
 		if latestTotal > 0 {
 			loss := float64(latestFailure) / float64(latestTotal)
 			telemetry.LossRate = &loss
 		}
-		if latencyCount > 0 { avg := float64(latencyTotal) / float64(latencyCount); telemetry.LatencyMS = &avg }
-		if telemetry.LatencyMS != nil { telemetryLatencyTotal += *telemetry.LatencyMS; telemetryLatencyCount++ }
-		if !latestChecked.IsZero() { telemetry.LastCheckedAt = &latestChecked }
+		if latencyCount > 0 {
+			avg := float64(latencyTotal) / float64(latencyCount)
+			telemetry.LatencyMS = &avg
+		}
+		if telemetry.LatencyMS != nil {
+			telemetryLatencyTotal += *telemetry.LatencyMS
+			telemetryLatencyCount++
+		}
+		if !latestChecked.IsZero() {
+			telemetry.LastCheckedAt = &latestChecked
+		}
 		if summaries, e := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now); e == nil {
 			for _, summary := range summaries {
 				check := publicNodeCheck{Kind: summary.Kind, Label: publicCheckLabel(summary.Name, summary.Kind)}
-				if _, known := coverageLabels[check.Label]; known && summary.HasWindowData { coverageLabels[check.Label] = true }
-				if summary.HasWindowData && summary.LatencyCount > 0 { value := summary.LatencyAvgMS; check.LatencyMS = &value }
-				if summary.HasWindowData && summary.LatencyP95MS != nil { p95 := *summary.LatencyP95MS; check.LatencyP95MS = &p95 }
+				if _, known := coverageLabels[check.Label]; known && summary.HasWindowData {
+					coverageLabels[check.Label] = true
+				}
+				if summary.HasWindowData && summary.LatencyCount > 0 {
+					value := summary.LatencyAvgMS
+					check.LatencyMS = &value
+				}
+				if summary.HasWindowData && summary.LatencyP95MS != nil {
+					p95 := *summary.LatencyP95MS
+					check.LatencyP95MS = &p95
+				}
 				check.SampleCount = summary.SampleCount
-				if summary.HasWindowData && summary.Total > 0 { value := float64(summary.Failure) / float64(summary.Total); check.LossRate = &value }
-				if !summary.LastCheckedAt.IsZero() { value := summary.LastCheckedAt; check.LastCheckedAt = &value }
-				if check.LatencyMS != nil || check.LossRate != nil || check.LastCheckedAt != nil { telemetry.Checks = append(telemetry.Checks, check) }
+				if summary.HasWindowData && summary.Total > 0 {
+					value := float64(summary.Failure) / float64(summary.Total)
+					check.LossRate = &value
+				}
+				if !summary.LastCheckedAt.IsZero() {
+					value := summary.LastCheckedAt
+					check.LastCheckedAt = &value
+				}
+				if check.LatencyMS != nil || check.LossRate != nil || check.LastCheckedAt != nil {
+					telemetry.Checks = append(telemetry.Checks, check)
+				}
 			}
 		}
 		response.Nodes.Names = append(response.Nodes.Names, telemetry.Name)
@@ -388,7 +453,10 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			for _, record := range records {
-				key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+				// Keep samples from different nodes distinct. Agents commonly report
+				// on the same interval, so target+timestamp alone would collapse
+				// one sample per node and undercount fleet-wide success/failure rates.
+				key := node.ID + "\x00" + record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
 				if _, exists := seenChecks[key]; exists {
 					continue
 				}
@@ -442,7 +510,9 @@ func (s *Server) publicStatus(w http.ResponseWriter, r *http.Request) {
 	response.Checks.WindowHours = windowHours
 	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].at.After(outcomes[j].at) })
 	for _, outcome := range outcomes {
-		if outcome.ok { break }
+		if outcome.ok {
+			break
+		}
 		response.Checks.RecentFailureStreak++
 	}
 	if !lastUpdated.IsZero() {
@@ -534,7 +604,11 @@ func publicClientIP(r *http.Request, trustedNets ...*net.IPNet) string {
 			}
 		}
 		if forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ","); len(forwarded) > 0 {
-			for _, part := range forwarded {
+			// Use the rightmost parseable entry: it is supplied or overwritten
+			// by the nearest trusted proxy. Earlier entries can be client
+			// supplied when a proxy appends instead of replacing the header.
+			for i := len(forwarded) - 1; i >= 0; i-- {
+				part := forwarded[i]
 				if canonical := normalizeCanonicalIPString(part); canonical != "" {
 					return canonical
 				}
@@ -671,14 +745,11 @@ func (s *Server) resolveVisitorGeo(ctx context.Context, r *http.Request, clientI
 }
 
 func isGeoRoutableVisitorIP(ipStr string) bool {
-	ip := net.ParseIP(strings.TrimSpace(ipStr))
-	if ip == nil {
+	ip, err := netip.ParseAddr(strings.TrimSpace(ipStr))
+	if err != nil {
 		return false
 	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-		return false
-	}
-	return true
+	return !security.IsBlockedAddress(ip)
 }
 
 func (s *Server) lookupVisitorGeoCached(ctx context.Context, clientIP string) (visitorGeoData, bool) {
@@ -737,14 +808,12 @@ func (s *Server) fetchVisitorGeoHTTP(ctx context.Context, clientIP string) (visi
 	if template == "" {
 		template = "https://ipwho.is/{ip}?lang=zh-CN"
 	}
-	targetURL := template
-	if strings.Contains(targetURL, "{ip}") {
-		targetURL = strings.ReplaceAll(targetURL, "{ip}", url.PathEscape(clientIP))
-	} else {
-		targetURL = strings.TrimRight(targetURL, "/") + "/" + url.PathEscape(clientIP)
+	target, err := buildVisitorGeoURL(template, clientIP)
+	if err != nil {
+		return visitorGeoData{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return visitorGeoData{}, err
 	}
@@ -753,7 +822,10 @@ func (s *Server) fetchVisitorGeoHTTP(ctx context.Context, clientIP string) (visi
 
 	client := s.visitorGeoClient
 	if client == nil {
-		client = http.DefaultClient
+		// Never fall back to http.DefaultClient here: it honors proxy settings,
+		// follows arbitrary redirects, and does not re-check DNS results at dial
+		// time. The GeoIP provider URL is configuration-controlled.
+		client = newVisitorGeoHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -769,6 +841,118 @@ func (s *Server) fetchVisitorGeoHTTP(ctx context.Context, clientIP string) (visi
 		return visitorGeoData{}, err
 	}
 	return parseVisitorGeoResponse(body)
+}
+
+const maxVisitorGeoIPURLLength = 4096
+
+// buildVisitorGeoURL validates and expands the administrator-configured
+// provider URL. It intentionally accepts only a single documented
+// placeholder, {ip}; arbitrary template syntax can otherwise turn a harmless
+// provider URL into a request to an attacker-controlled host or path.
+func buildVisitorGeoURL(template, clientIP string) (*url.URL, error) {
+	template = strings.TrimSpace(template)
+	if template == "" || len(template) > maxVisitorGeoIPURLLength {
+		return nil, errors.New("visitor geoip URL is empty or too long")
+	}
+	if !isGeoRoutableVisitorIP(clientIP) {
+		return nil, errors.New("visitor geoip client address is not routable")
+	}
+	if strings.ContainsAny(template, "\r\n\x00") {
+		return nil, errors.New("visitor geoip URL contains control characters")
+	}
+	placeholder := "{ip}"
+	if strings.Count(template, placeholder) > 1 {
+		return nil, errors.New("visitor geoip URL may contain at most one {ip} placeholder")
+	}
+	if strings.Contains(template, "{") || strings.Contains(template, "}") {
+		withoutPlaceholder := strings.ReplaceAll(template, placeholder, "")
+		if strings.ContainsAny(withoutPlaceholder, "{}") {
+			return nil, errors.New("visitor geoip URL contains an unsupported template")
+		}
+	}
+
+	// Validate the provider origin before expansion when possible. This catches
+	// malformed URLs and placeholders placed in the hostname rather than in a
+	// path/query value. The expanded URL is validated again below.
+	if strings.Contains(template, placeholder) {
+		parsedTemplate, err := url.Parse(template)
+		if err != nil || parsedTemplate.Host == "" || parsedTemplate.User != nil || parsedTemplate.Fragment != "" || parsedTemplate.Opaque != "" || parsedTemplate.Scheme == "" {
+			return nil, errors.New("visitor geoip URL must be an absolute HTTP(S) URL")
+		}
+		if strings.Contains(parsedTemplate.Host, placeholder) {
+			return nil, errors.New("visitor geoip URL placeholder must not be in the hostname")
+		}
+		template = strings.ReplaceAll(template, placeholder, url.PathEscape(strings.TrimSpace(clientIP)))
+	} else {
+		parsedTemplate, err := security.ValidateURLWithOptions(template, []string{"http", "https"}, true)
+		if err != nil {
+			return nil, fmt.Errorf("invalid visitor geoip URL: %w", err)
+		}
+		parsedTemplate.Path = strings.TrimRight(parsedTemplate.Path, "/") + "/" + url.PathEscape(strings.TrimSpace(clientIP))
+		parsedTemplate.RawPath = ""
+		template = parsedTemplate.String()
+	}
+
+	target, err := security.ValidateURLWithOptions(template, []string{"http", "https"}, true)
+	if err != nil {
+		return nil, fmt.Errorf("invalid visitor geoip URL: %w", err)
+	}
+	return target, nil
+}
+
+func newVisitorGeoHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 2500 * time.Millisecond,
+		Transport: &http.Transport{
+			Proxy:                  nil,
+			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
+			MaxResponseHeaderBytes: 32 << 10,
+			DialContext:            visitorGeoDialContext,
+		},
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errors.New("visitor geoip redirects disallowed")
+		},
+	}
+}
+
+// visitorGeoDialContext resolves the provider hostname immediately before
+// connecting and validates every answer. The actual connection is made to a
+// validated address while net/http retains the original hostname for Host and
+// TLS SNI, preventing DNS rebinding from bypassing the SSRF check.
+func visitorGeoDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+		if security.IsBlockedAddress(literal) {
+			return nil, fmt.Errorf("visitor geoip target address is blocked: %s", literal)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(literal.String(), port))
+	}
+	if err := security.ValidateHost(host); err != nil {
+		return nil, err
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if err := security.ValidateResolvedIPs(addresses); err != nil {
+		return nil, fmt.Errorf("visitor geoip target address is blocked: %w", err)
+	}
+	dialer := &net.Dialer{}
+	var lastErr error
+	for _, addr := range addresses {
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("visitor geoip provider resolved to no addresses")
+	}
+	return nil, lastErr
 }
 
 func parseVisitorGeoResponse(body []byte) (visitorGeoData, error) {
@@ -908,64 +1092,63 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-
 // publicNodeResource is the strict, safe public whitelist representation of node hardware and utilization.
 // Sensitive network configuration, physical MAC addresses, local processes, listening sockets,
 // internal identifiers, and database internals are strictly excluded.
 type publicNodeResource struct {
-	OS                  string               `json:"os,omitempty"`
-	Kernel              string               `json:"kernel,omitempty"`
-	Architecture        string               `json:"architecture,omitempty"`
-	Arch                string               `json:"arch,omitempty"`
-	CPUModel            string               `json:"cpu_model,omitempty"`
-	CPUCores            int                  `json:"cpu_cores,omitempty"`
-	CPUMHz              float64              `json:"cpu_mhz,omitempty"`
-	CPUPercent          *float64             `json:"cpu_percent,omitempty"`
-	MemoryUsedBytes     uint64               `json:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes    uint64               `json:"memory_total_bytes,omitempty"`
-	FilesystemUsedBytes uint64               `json:"filesystem_used_bytes,omitempty"`
-	FilesystemTotalBytes uint64              `json:"filesystem_total_bytes,omitempty"`
-	NetworkRxBytes      uint64               `json:"network_rx_bytes,omitempty"`
-	NetworkTxBytes      uint64               `json:"network_tx_bytes,omitempty"`
-	UptimeSeconds       int64                `json:"uptime_seconds,omitempty"`
-	Virtualization      string               `json:"virtualization,omitempty"`
-	StartedAt           int64                `json:"started_at,omitempty"`
-	HasIPv4             bool                 `json:"has_ipv4,omitempty"`
-	HasIPv6             bool                 `json:"has_ipv6,omitempty"`
-	DualStack           bool                 `json:"dual_stack,omitempty"`
+	OS                   string   `json:"os,omitempty"`
+	Kernel               string   `json:"kernel,omitempty"`
+	Architecture         string   `json:"architecture,omitempty"`
+	Arch                 string   `json:"arch,omitempty"`
+	CPUModel             string   `json:"cpu_model,omitempty"`
+	CPUCores             int      `json:"cpu_cores,omitempty"`
+	CPUMHz               float64  `json:"cpu_mhz,omitempty"`
+	CPUPercent           *float64 `json:"cpu_percent,omitempty"`
+	MemoryUsedBytes      uint64   `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes     uint64   `json:"memory_total_bytes,omitempty"`
+	FilesystemUsedBytes  uint64   `json:"filesystem_used_bytes,omitempty"`
+	FilesystemTotalBytes uint64   `json:"filesystem_total_bytes,omitempty"`
+	NetworkRxBytes       uint64   `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes       uint64   `json:"network_tx_bytes,omitempty"`
+	UptimeSeconds        int64    `json:"uptime_seconds,omitempty"`
+	Virtualization       string   `json:"virtualization,omitempty"`
+	StartedAt            int64    `json:"started_at,omitempty"`
+	HasIPv4              bool     `json:"has_ipv4,omitempty"`
+	HasIPv6              bool     `json:"has_ipv6,omitempty"`
+	DualStack            bool     `json:"dual_stack,omitempty"`
 }
 
 type publicIPQualityDTO struct {
-	IPType              string             `json:"ip_type,omitempty"`
-	Country             string             `json:"country,omitempty"`
-	Region              string             `json:"region,omitempty"`
-	City                string             `json:"city,omitempty"`
-	ASN                 string             `json:"asn,omitempty"`
-	Organization        string             `json:"organization,omitempty"`
-	Risk                string             `json:"risk,omitempty"`
-	Proxy               *bool              `json:"proxy,omitempty"`
-	VPN                 *bool              `json:"vpn,omitempty"`
-	Tor                 *bool              `json:"tor,omitempty"`
-	Abuse               *bool              `json:"abuse,omitempty"`
-	Scores              map[string]float64 `json:"scores,omitempty"`
-	Flags               map[string]*bool   `json:"flags,omitempty"`
-	CheckedAt           int64              `json:"checked_at,omitempty"`
-	Stale               bool               `json:"stale"`
-	Source              string             `json:"source,omitempty"`
-	IPQAEnabled         bool               `json:"ipqa_enabled"`
-	IPQAInstalled       bool               `json:"ipqa_installed"`
-	IPQAState           string             `json:"ipqa_state,omitempty"`
-	HighestSeverity     string             `json:"highest_severity,omitempty"`
-	AlertCount          int                `json:"alert_count,omitempty"`
-	CriticalCount       int                `json:"critical_count,omitempty"`
-	WarningCount        int                `json:"warning_count,omitempty"`
-	InfoCount           int                `json:"info_count,omitempty"`
-	LastCheckedAt       *int64             `json:"last_checked_at,omitempty"`
-	HasRecentChanges    bool               `json:"has_recent_changes,omitempty"`
-	RecentChangeSummary string             `json:"recent_change_summary,omitempty"`
-	LatestArchiveDate   string             `json:"latest_archive_date,omitempty"`
-	Sources             []string           `json:"sources,omitempty"`
-	RiskScore           *float64           `json:"risk_score,omitempty"`
+	IPType              string                   `json:"ip_type,omitempty"`
+	Country             string                   `json:"country,omitempty"`
+	Region              string                   `json:"region,omitempty"`
+	City                string                   `json:"city,omitempty"`
+	ASN                 string                   `json:"asn,omitempty"`
+	Organization        string                   `json:"organization,omitempty"`
+	Risk                string                   `json:"risk,omitempty"`
+	Proxy               *bool                    `json:"proxy,omitempty"`
+	VPN                 *bool                    `json:"vpn,omitempty"`
+	Tor                 *bool                    `json:"tor,omitempty"`
+	Abuse               *bool                    `json:"abuse,omitempty"`
+	Scores              map[string]float64       `json:"scores,omitempty"`
+	Flags               map[string]*bool         `json:"flags,omitempty"`
+	CheckedAt           int64                    `json:"checked_at,omitempty"`
+	Stale               bool                     `json:"stale"`
+	Source              string                   `json:"source,omitempty"`
+	IPQAEnabled         bool                     `json:"ipqa_enabled"`
+	IPQAInstalled       bool                     `json:"ipqa_installed"`
+	IPQAState           string                   `json:"ipqa_state,omitempty"`
+	HighestSeverity     string                   `json:"highest_severity,omitempty"`
+	AlertCount          int                      `json:"alert_count,omitempty"`
+	CriticalCount       int                      `json:"critical_count,omitempty"`
+	WarningCount        int                      `json:"warning_count,omitempty"`
+	InfoCount           int                      `json:"info_count,omitempty"`
+	LastCheckedAt       *int64                   `json:"last_checked_at,omitempty"`
+	HasRecentChanges    bool                     `json:"has_recent_changes,omitempty"`
+	RecentChangeSummary string                   `json:"recent_change_summary,omitempty"`
+	LatestArchiveDate   string                   `json:"latest_archive_date,omitempty"`
+	Sources             []string                 `json:"sources,omitempty"`
+	RiskScore           *float64                 `json:"risk_score,omitempty"`
 	RiskLevel           string                   `json:"risk_level,omitempty"`
 	HasIPv4             bool                     `json:"has_ipv4,omitempty"`
 	HasIPv6             bool                     `json:"has_ipv6,omitempty"`
@@ -1005,21 +1188,97 @@ func sanitizePublicTargetHost(host string) string {
 	return trimmed
 }
 
+// publicTargetAliasMap gives public consumers stable, non-identifying target
+// labels. Raw target IDs and operator-chosen names are private inventory data.
+func publicTargetAliasMap(summaries []db.CheckSummary) map[string]string {
+	ids := make([]string, 0, len(summaries))
+	seen := make(map[string]struct{}, len(summaries))
+	for _, summary := range summaries {
+		id := strings.TrimSpace(summary.TargetID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	aliases := make(map[string]string, len(ids))
+	for index, id := range ids {
+		aliases[id] = fmt.Sprintf("check-%d", index+1)
+	}
+	return aliases
+}
+
+func publicTargetAliasFor(aliases map[string]string, rawTargetID string) string {
+	rawTargetID = strings.TrimSpace(rawTargetID)
+	if alias, ok := aliases[rawTargetID]; ok {
+		return alias
+	}
+	if rawTargetID == "" {
+		return "unknown"
+	}
+	alias := fmt.Sprintf("check-%d", len(aliases)+1)
+	aliases[rawTargetID] = alias
+	return alias
+}
+
+func publicCheckSummaryItem(summary db.CheckSummary, alias string, windowHours int) publicCheckSummaryDTO {
+	label := publicCheckLabel(summary.Name, summary.Kind)
+	if label == "" {
+		label = "TARGET"
+	}
+	item := publicCheckSummaryDTO{
+		TargetID: alias,
+		Name:     label,
+		Kind:     strings.ToUpper(strings.TrimSpace(summary.Kind)),
+	}
+	if !summary.LastCheckedAt.IsZero() {
+		checkedAt := summary.LastCheckedAt
+		item.LastCheckedAt = &checkedAt
+	}
+	if summary.HasWindowData {
+		total, success, failure := summary.Total, summary.Success, summary.Failure
+		item.Total, item.Success, item.Failure = &total, &success, &failure
+		if summary.Total > 0 {
+			lossRate := float64(summary.Failure) / float64(summary.Total)
+			item.LossRate = &lossRate
+		}
+		if summary.LatencyCount > 0 {
+			latencyAvg := summary.LatencyAvgMS
+			item.LatencyAvgMS = &latencyAvg
+		}
+		if summary.HasJitter {
+			jitter := summary.JitterMS
+			item.JitterMS = &jitter
+		}
+		if summary.LatencyP95MS != nil {
+			p95 := *summary.LatencyP95MS
+			item.LatencyP95MS = &p95
+		}
+		item.SampleCount = summary.SampleCount
+		item.WindowHours = windowHours
+	}
+	return item
+}
+
 type publicCheckSummaryDTO struct {
 	TargetID      string     `json:"target_id"`
 	Name          string     `json:"name"`
 	Kind          string     `json:"kind"`
 	Host          string     `json:"host,omitempty"`
 	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
-	Total        *int64     `json:"total,omitempty"`
-	Success      *int64     `json:"success,omitempty"`
-	Failure      *int64     `json:"failure,omitempty"`
-	LossRate     *float64   `json:"loss_rate,omitempty"`
-	LatencyAvgMS *float64   `json:"latency_avg_ms,omitempty"`
-	LatencyP95MS *float64   `json:"latency_p95_ms,omitempty"`
-	JitterMS     *float64   `json:"jitter_ms,omitempty"`
-	SampleCount  int        `json:"sample_count,omitempty"`
-	WindowHours  int        `json:"window_hours,omitempty"`
+	Total         *int64     `json:"total,omitempty"`
+	Success       *int64     `json:"success,omitempty"`
+	Failure       *int64     `json:"failure,omitempty"`
+	LossRate      *float64   `json:"loss_rate,omitempty"`
+	LatencyAvgMS  *float64   `json:"latency_avg_ms,omitempty"`
+	LatencyP95MS  *float64   `json:"latency_p95_ms,omitempty"`
+	JitterMS      *float64   `json:"jitter_ms,omitempty"`
+	SampleCount   int        `json:"sample_count,omitempty"`
+	WindowHours   int        `json:"window_hours,omitempty"`
 }
 
 type publicNodeDetailResponse struct {
@@ -1041,7 +1300,7 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	if !s.publicLimiter.Allow(publicLimiterKey(r), now) {
+	if !s.publicLimiter.Allow(s.publicLimiterKey(r), now) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
@@ -1083,7 +1342,7 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 5 && parts[4] == "traffic" {
-		s.nodeTraffic(w, r, node.UUID)
+		s.writePublicNodeTraffic(w, r, node.ID)
 		return
 	}
 	if len(parts) == 5 && parts[4] == "media" {
@@ -1095,6 +1354,54 @@ func (s *Server) publicNodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONError(w, http.StatusNotFound, "not found")
+}
+
+// writePublicNodeTraffic serves the guest node detail page's traffic chart.
+// It deliberately bypasses authorizeNodeScope: the public route has already
+// resolved the node through the public UUID endpoint and the response contains
+// only aggregate byte deltas and bucket timestamps, never raw resource
+// payloads or node identifiers beyond the URL supplied by the caller.
+func (s *Server) writePublicNodeTraffic(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	period := strings.TrimSpace(r.URL.Query().Get("period"))
+	if period == "" {
+		period = "day"
+	}
+	shape, ok := trafficPeriods[period]
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid period")
+		return
+	}
+	now := time.Now().UTC()
+	report, err := s.service.Store().GetTrafficReport(r.Context(), nodeID, now.Add(-shape.window), now, shape.step)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "traffic report unavailable")
+		return
+	}
+	response := trafficReportResponse{
+		Period:      period,
+		Window:      map[string]time.Time{"from": report.From, "to": report.To},
+		RxResets:    report.RxResets,
+		TxResets:    report.TxResets,
+		IntervalSec: int64(shape.step / time.Second),
+		Series:      make([]trafficPointResponse, 0, len(report.Buckets)),
+	}
+	if report.HasData {
+		rx, tx := report.RxBytes, report.TxBytes
+		response.RxBytes, response.TxBytes = &rx, &tx
+	}
+	for _, bucket := range report.Buckets {
+		point := trafficPointResponse{Time: bucket.Start}
+		if bucket.HasData {
+			rx, tx := bucket.RxBytes, bucket.TxBytes
+			point.RxBytes, point.TxBytes = &rx, &tx
+		}
+		response.Series = append(response.Series, point)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // writePublicNodeDetail serves safe, read-only telemetry for the guest node detail page.
@@ -1145,26 +1452,26 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 	arch := snapshot.Arch
 
 	publicResource := publicNodeResource{
-		OS:                  snapshot.OS,
-		Kernel:              snapshot.Kernel,
-		Architecture:        arch,
-		Arch:                arch,
-		CPUModel:            snapshot.CPUModel,
-		CPUCores:            snapshot.CPUCores,
-		CPUMHz:              snapshot.CPUMHz,
-		CPUPercent:          &cpuP,
-		MemoryUsedBytes:     snapshot.MemoryUsedBytes,
-		MemoryTotalBytes:    snapshot.MemoryTotalBytes,
-		FilesystemUsedBytes: snapshot.FilesystemUsedBytes,
+		OS:                   snapshot.OS,
+		Kernel:               snapshot.Kernel,
+		Architecture:         arch,
+		Arch:                 arch,
+		CPUModel:             snapshot.CPUModel,
+		CPUCores:             snapshot.CPUCores,
+		CPUMHz:               snapshot.CPUMHz,
+		CPUPercent:           &cpuP,
+		MemoryUsedBytes:      snapshot.MemoryUsedBytes,
+		MemoryTotalBytes:     snapshot.MemoryTotalBytes,
+		FilesystemUsedBytes:  snapshot.FilesystemUsedBytes,
 		FilesystemTotalBytes: snapshot.FilesystemTotalBytes,
-		NetworkRxBytes:      snapshot.NetworkRxBytes,
-		NetworkTxBytes:      snapshot.NetworkTxBytes,
-		UptimeSeconds:       uptimeSeconds,
-		Virtualization:      "",
-		StartedAt:           snapshot.StartedAt,
-		HasIPv4:             snapshot.IPv4 != "",
-		HasIPv6:             snapshot.IPv6 != "",
-		DualStack:           snapshot.IPv4 != "" && snapshot.IPv6 != "",
+		NetworkRxBytes:       snapshot.NetworkRxBytes,
+		NetworkTxBytes:       snapshot.NetworkTxBytes,
+		UptimeSeconds:        uptimeSeconds,
+		Virtualization:       "",
+		StartedAt:            snapshot.StartedAt,
+		HasIPv4:              snapshot.IPv4 != "",
+		HasIPv6:              snapshot.IPv6 != "",
+		DualStack:            snapshot.IPv4 != "" && snapshot.IPv6 != "",
 	}
 
 	// Collect public media results: prioritize real IPQA archive results
@@ -1203,42 +1510,11 @@ func (s *Server) writePublicNodeDetail(w http.ResponseWriter, r *http.Request, n
 	// Collect 24h checks summary
 	now := time.Now().UTC()
 	summaries, err := s.service.Store().GetCheckSummary(r.Context(), node.ID, now.Add(-24*time.Hour), now)
+	aliases := publicTargetAliasMap(summaries)
 	checksList := make([]publicCheckSummaryDTO, 0, len(summaries))
 	if err == nil {
 		for _, summary := range summaries {
-			item := publicCheckSummaryDTO{
-				TargetID: summary.TargetID,
-				Name:     summary.Name,
-				Kind:     summary.Kind,
-				Host:     sanitizePublicTargetHost(summary.Host),
-			}
-			if !summary.LastCheckedAt.IsZero() {
-				checkedAt := summary.LastCheckedAt
-				item.LastCheckedAt = &checkedAt
-			}
-			if summary.HasWindowData {
-				total, success, failure := summary.Total, summary.Success, summary.Failure
-				item.Total, item.Success, item.Failure = &total, &success, &failure
-				if summary.Total > 0 {
-					lossRate := float64(summary.Failure) / float64(summary.Total)
-					item.LossRate = &lossRate
-				}
-				if summary.LatencyCount > 0 {
-					latencyAvg := summary.LatencyAvgMS
-					item.LatencyAvgMS = &latencyAvg
-				}
-				if summary.HasJitter {
-					jitter := summary.JitterMS
-					item.JitterMS = &jitter
-				}
-				if summary.LatencyP95MS != nil {
-					p95 := *summary.LatencyP95MS
-					item.LatencyP95MS = &p95
-				}
-				item.SampleCount = summary.SampleCount
-				item.WindowHours = 24
-			}
-			checksList = append(checksList, item)
+			checksList = append(checksList, publicCheckSummaryItem(summary, aliases[summary.TargetID], 24))
 		}
 	}
 
@@ -1621,41 +1897,10 @@ func (s *Server) writePublicNodeChecksSummary(w http.ResponseWriter, r *http.Req
 		writeJSONError(w, http.StatusServiceUnavailable, "checks summary unavailable")
 		return
 	}
+	aliases := publicTargetAliasMap(summaries)
 	checksList := make([]publicCheckSummaryDTO, 0, len(summaries))
 	for _, summary := range summaries {
-		item := publicCheckSummaryDTO{
-			TargetID: summary.TargetID,
-			Name:     summary.Name,
-			Kind:     summary.Kind,
-			Host:     sanitizePublicTargetHost(summary.Host),
-		}
-		if !summary.LastCheckedAt.IsZero() {
-			checkedAt := summary.LastCheckedAt
-			item.LastCheckedAt = &checkedAt
-		}
-		if summary.HasWindowData {
-			total, success, failure := summary.Total, summary.Success, summary.Failure
-			item.Total, item.Success, item.Failure = &total, &success, &failure
-			if summary.Total > 0 {
-				lossRate := float64(summary.Failure) / float64(summary.Total)
-				item.LossRate = &lossRate
-			}
-			if summary.LatencyCount > 0 {
-				latencyAvg := summary.LatencyAvgMS
-				item.LatencyAvgMS = &latencyAvg
-			}
-			if summary.HasJitter {
-				jitter := summary.JitterMS
-				item.JitterMS = &jitter
-			}
-			if summary.LatencyP95MS != nil {
-				p95 := *summary.LatencyP95MS
-				item.LatencyP95MS = &p95
-			}
-			item.SampleCount = summary.SampleCount
-			item.WindowHours = int(to.Sub(from).Hours())
-		}
-		checksList = append(checksList, item)
+		checksList = append(checksList, publicCheckSummaryItem(summary, aliases[summary.TargetID], int(to.Sub(from).Hours())))
 	}
 	writeJSON(w, http.StatusOK, checksList)
 }
@@ -1725,11 +1970,36 @@ func (s *Server) writePublicNodeNetworkHistory(w http.ResponseWriter, r *http.Re
 		writeJSONError(w, http.StatusBadRequest, "invalid query parameters")
 		return
 	}
-	records, err := s.service.Store().GetResultHistory(r.Context(), db.TargetKindTCP, nodeID, from, to, limit)
-	if err != nil {
-		writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
-		return
+	// Match the private node history endpoint: "network" is the aggregate
+	// network view and includes TCP, HTTP, HTTPS, and DNS checks.  The old
+	// public implementation queried TCP only, so guest pages silently lost
+	// history whenever a node was monitored with HTTP/HTTPS/DNS targets.
+	kinds := []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS}
+	records := make([]db.ResultHistoryRecord, 0, limit*len(kinds))
+	seen := make(map[string]struct{})
+	for _, kind := range kinds {
+		kindRecords, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
+			return
+		}
+		for _, record := range kindRecords {
+			key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			records = append(records, record)
+		}
 	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].CheckedAt.After(records[j].CheckedAt)
+	})
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	summaries, _ := s.service.Store().GetCheckSummary(r.Context(), nodeID, from, to)
+	aliases := publicTargetAliasMap(summaries)
 	out := make([]publicNetworkHistoryItemDTO, 0, len(records))
 	for _, record := range records {
 		var res struct {
@@ -1750,8 +2020,12 @@ func (s *Server) writePublicNodeNetworkHistory(w http.ResponseWriter, r *http.Re
 		if status == "" {
 			status = "success"
 		}
+		targetID := aliases[record.TargetID]
+		if targetID == "" {
+			targetID = publicTargetAliasFor(aliases, record.TargetID)
+		}
 		out = append(out, publicNetworkHistoryItemDTO{
-			TargetID:  record.TargetID,
+			TargetID:  targetID,
 			CheckedAt: record.CheckedAt,
 			LatencyMS: pLat,
 			Status:    status,
@@ -1763,4 +2037,3 @@ func (s *Server) writePublicNodeNetworkHistory(w http.ResponseWriter, r *http.Re
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-

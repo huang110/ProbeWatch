@@ -121,3 +121,73 @@ func TestRestoreCorruptedFileFailsIntegrityCheck(t *testing.T) {
 		t.Fatal("expected restore of corrupt file to fail integrity check")
 	}
 }
+
+func TestCreateBackupUsesDistinctNamesWithinSameSecond(t *testing.T) {
+	tempDir := t.TempDir()
+	store, err := OpenStore(filepath.Join(tempDir, "test.db"), []byte(testPepper))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	backupDir := filepath.Join(tempDir, "backups")
+
+	first, err := store.CreateBackup(context.Background(), backupDir, "same-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateBackup(context.Background(), backupDir, "same-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Filename == second.Filename {
+		t.Fatalf("backups reused filename %q", first.Filename)
+	}
+	list, err := ListBackups(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("backup count = %d, want 2", len(list))
+	}
+}
+
+func TestRestoreDoesNotReplaceDatabaseWhenPreRestoreBackupFails(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+	backupDir := filepath.Join(tempDir, "backups")
+	store, err := OpenStore(dbPath, []byte(testPepper))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	admin, err := store.UpsertAdminUser(ctx, "local", "before", "before", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := store.CreateBackup(ctx, backupDir, "restore-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAdminUser(ctx, "local", "after", "after", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	// Closing the active DB makes only the pre-restore safety snapshot fail;
+	// candidate extraction and integrity verification still run first.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RestoreBackup(ctx, backupDir, backup.Filename); err == nil {
+		t.Fatal("restore succeeded without a pre-restore backup")
+	}
+
+	// The active database file must remain untouched when the safety snapshot
+	// cannot be created.
+	reopened, err := OpenStore(dbPath, []byte(testPepper))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.GetAdminUser(ctx, admin.ID); err != nil {
+		t.Fatalf("original database was replaced after pre-backup failure: %v", err)
+	}
+}

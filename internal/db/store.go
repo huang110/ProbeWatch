@@ -104,7 +104,11 @@ type Store struct {
 	db     *sql.DB
 	pepper []byte
 	mu     sync.Mutex
-	path   string
+	// backupMu serializes VACUUM INTO and restore file replacement.  A
+	// scheduler run and a manual/API backup can otherwise race on the same
+	// SQLite file and overwrite a same-second snapshot.
+	backupMu sync.Mutex
+	path     string
 }
 
 type RegistrationToken struct {
@@ -264,7 +268,12 @@ func OpenStore(databasePath string, pepper []byte) (*Store, error) {
 	return store, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
 
 func (s *Store) DB() *sql.DB {
 	return s.db
@@ -337,16 +346,18 @@ func (s *Store) ConsumeOAuthState(ctx context.Context, stateDigest []byte, now t
 }
 
 type LifecycleCleanupResult struct {
-	ResourceHistory       int64
-	NetworkResultsHistory int64
-	MTRResultsHistory     int64
-	MediaResultsHistory   int64
-	AuditEvents           int64
-	ResolvedAlertEvents   int64
-	RegistrationTokens    int64
-	NodeTokens            int64
-	RequestReplays        int64
-	SystemEventsHistory   int64
+	ResourceHistory         int64
+	NetworkResultsHistory   int64
+	MTRResultsHistory       int64
+	MediaResultsHistory     int64
+	SpeedtestResultsHistory int64
+	SyntheticResultsHistory int64
+	AuditEvents             int64
+	ResolvedAlertEvents     int64
+	RegistrationTokens      int64
+	NodeTokens              int64
+	RequestReplays          int64
+	SystemEventsHistory     int64
 }
 
 func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleCleanupResult, error) {
@@ -381,6 +392,8 @@ func (s *Store) CleanupLifecycle(ctx context.Context, now time.Time) (LifecycleC
 		{"network results history", `DELETE FROM network_results_history WHERE rowid IN (SELECT rowid FROM network_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.NetworkResultsHistory},
 		{"mtr results history", `DELETE FROM mtr_results_history WHERE rowid IN (SELECT rowid FROM mtr_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.MTRResultsHistory},
 		{"media results history", `DELETE FROM media_results_history WHERE rowid IN (SELECT rowid FROM media_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.MediaResultsHistory},
+		{"speedtest results history", `DELETE FROM speedtest_results_history WHERE rowid IN (SELECT rowid FROM speedtest_results_history WHERE tested_at < ? ORDER BY tested_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.SpeedtestResultsHistory},
+		{"synthetic results history", `DELETE FROM synthetic_results_history WHERE rowid IN (SELECT rowid FROM synthetic_results_history WHERE checked_at < ? ORDER BY checked_at, rowid LIMIT ?)`, []any{cutoff30, maxLifecycleCleanupRows}, &result.SyntheticResultsHistory},
 		{"audit events", `DELETE FROM audit_events WHERE rowid IN (SELECT rowid FROM audit_events WHERE created_at < ? ORDER BY created_at, rowid LIMIT ?)`, []any{cutoff90, maxLifecycleCleanupRows}, &result.AuditEvents},
 		{"resolved alert events", `DELETE FROM alert_events WHERE rowid IN (SELECT rowid FROM alert_events WHERE status = 'resolved' AND resolved_at IS NOT NULL AND resolved_at < ? ORDER BY resolved_at, rowid LIMIT ?)`, []any{cutoff90, maxLifecycleCleanupRows}, &result.ResolvedAlertEvents},
 		{"registration tokens", `DELETE FROM registration_tokens WHERE rowid IN (SELECT rowid FROM registration_tokens WHERE expires_at <= ? ORDER BY expires_at, rowid LIMIT ?)`, []any{unixNano(now), maxLifecycleCleanupRows}, &result.RegistrationTokens},
@@ -1431,9 +1444,14 @@ func (s *Store) GetResourceHistory(ctx context.Context, nodeID string, from, to 
 	var rows *sql.Rows
 	var err error
 
-	// If time window is wider than 30 minutes, compute downsampling bucket size
-	bucketSize := span / int64(limit)
-	if bucketSize > int64(15*time.Second) {
+	// Only compute a downsampling bucket when the caller requested a bounded
+	// result.  limit <= 0 intentionally means "all records"; calculating
+	// span/limit before checking that contract used to panic on limit == 0.
+	bucketSize := int64(0)
+	if limit > 0 {
+		bucketSize = span / int64(limit)
+	}
+	if limit > 0 && bucketSize > int64(15*time.Second) {
 		query := `
 SELECT reported_at, recorded_at, payload
 FROM (
@@ -1446,14 +1464,21 @@ WHERE rn = 1
 ORDER BY reported_at ASC
 LIMIT ?`
 		rows, err = s.db.QueryContext(ctx, query, bucketSize, nodeID, fromNano, toNano, limit)
+	} else if limit > 0 {
+		query := `
+SELECT reported_at, recorded_at, payload
+FROM resource_history
+WHERE node_id = ? AND reported_at >= ? AND reported_at <= ?
+		ORDER BY reported_at ASC
+		LIMIT ?`
+		rows, err = s.db.QueryContext(ctx, query, nodeID, fromNano, toNano, limit)
 	} else {
 		query := `
 SELECT reported_at, recorded_at, payload
 FROM resource_history
 WHERE node_id = ? AND reported_at >= ? AND reported_at <= ?
-ORDER BY reported_at ASC
-LIMIT ?`
-		rows, err = s.db.QueryContext(ctx, query, nodeID, fromNano, toNano, limit)
+ORDER BY reported_at ASC`
+		rows, err = s.db.QueryContext(ctx, query, nodeID, fromNano, toNano)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query resource history: %w", err)
@@ -3063,9 +3088,36 @@ type SpeedtestHistoryRecord struct {
 	UploadSpeedMbps   float64   `json:"upload_speed_mbps"`
 	LatencyMS         int64     `json:"latency_ms"`
 	JitterMS          int64     `json:"jitter_ms"`
+	Status            string    `json:"status,omitempty"`
+	ErrorMessage      string    `json:"error_message,omitempty"`
 	Payload           []byte    `json:"payload"`
 	TestedAt          time.Time `json:"tested_at"`
 	RecordedAt        time.Time `json:"recorded_at"`
+}
+
+// speedtestHistoryStatus extracts the outcome fields from the original agent
+// payload.  The history table intentionally keeps the raw payload for audit
+// purposes instead of duplicating every protocol field in the schema, so the
+// API response must decode these fields when a history row is read.
+func speedtestHistoryStatus(payload []byte, download, upload float64, latency int64) (status, errorMessage string) {
+	var result struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if len(payload) > 0 && json.Unmarshal(payload, &result) == nil {
+		status = strings.TrimSpace(result.Status)
+		errorMessage = strings.TrimSpace(result.Error)
+	}
+	if status == "" {
+		// Rows written by older agents may not have included status. Preserve a
+		// useful UI result for those rows based on the measurements available.
+		if download > 0 || upload > 0 || latency > 0 {
+			status = "ok"
+		} else {
+			status = "error"
+		}
+	}
+	return status, errorMessage
 }
 
 func (s *Store) CreateSpeedtestTask(ctx context.Context, task SpeedtestTaskRecord) error {
@@ -3252,18 +3304,57 @@ func (s *Store) ListLatestSpeedtestResults(ctx context.Context) ([]SpeedtestResu
 }
 
 func (s *Store) ListSpeedtestHistory(ctx context.Context, nodeID, taskID string, limit int) ([]SpeedtestHistoryRecord, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		nodeID = ""
+	}
+	return s.listSpeedtestHistory(ctx, []string{nodeID}, taskID, limit)
+}
+
+// ListSpeedtestHistoryForNodes applies a node allow-list in SQL before LIMIT.
+// This is required for scoped users: filtering a fleet-wide result after the
+// query can let newer rows from unauthorized nodes consume the page and hide
+// older rows the caller is entitled to see.
+func (s *Store) ListSpeedtestHistoryForNodes(ctx context.Context, nodeIDs []string, taskID string, limit int) ([]SpeedtestHistoryRecord, error) {
+	cleanIDs := make([]string, 0, len(nodeIDs))
+	seen := make(map[string]struct{}, len(nodeIDs))
+	for _, rawID := range nodeIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+	return s.listSpeedtestHistory(ctx, cleanIDs, taskID, limit)
+}
+
+func (s *Store) listSpeedtestHistory(ctx context.Context, nodeIDs []string, taskID string, limit int) ([]SpeedtestHistoryRecord, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	var conditions []string
 	var args []any
-	if nodeID != "" {
+	if len(nodeIDs) == 1 && nodeIDs[0] == "" {
+		// Legacy ListSpeedtestHistory uses an empty node ID as unrestricted.
+	} else if len(nodeIDs) == 0 {
+		return []SpeedtestHistoryRecord{}, nil
+	} else if len(nodeIDs) == 1 {
 		conditions = append(conditions, "h.node_id = ?")
-		args = append(args, nodeID)
+		args = append(args, nodeIDs[0])
+	} else {
+		marks := make([]string, len(nodeIDs))
+		for i, id := range nodeIDs {
+			marks[i] = "?"
+			args = append(args, id)
+		}
+		conditions = append(conditions, "h.node_id IN ("+strings.Join(marks, ",")+")")
 	}
-	if taskID != "" {
+	if strings.TrimSpace(taskID) != "" {
 		conditions = append(conditions, "h.task_id = ?")
-		args = append(args, taskID)
+		args = append(args, strings.TrimSpace(taskID))
 	}
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -3294,6 +3385,7 @@ func (s *Store) ListSpeedtestHistory(ctx context.Context, nodeID, taskID string,
 		if err := rows.Scan(&h.ID, &h.NodeID, &h.NodeName, &h.TaskID, &h.TaskName, &h.DownloadSpeedMbps, &h.UploadSpeedMbps, &h.LatencyMS, &h.JitterMS, &h.Payload, &testedAt, &recordedAt); err != nil {
 			return nil, fmt.Errorf("scan speedtest history: %w", err)
 		}
+		h.Status, h.ErrorMessage = speedtestHistoryStatus(h.Payload, h.DownloadSpeedMbps, h.UploadSpeedMbps, h.LatencyMS)
 		h.TestedAt = time.Unix(0, testedAt).UTC()
 		h.RecordedAt = time.Unix(0, recordedAt).UTC()
 		history = append(history, h)
@@ -3539,18 +3631,62 @@ func (s *Store) ListLatestSyntheticResults(ctx context.Context) ([]SyntheticResu
 }
 
 func (s *Store) ListSyntheticHistory(ctx context.Context, nodeID, targetID string, limit int) ([]SyntheticHistoryRecord, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		nodeID = ""
+	}
+	if strings.TrimSpace(targetID) == "" {
+		targetID = ""
+	}
+	return s.listSyntheticHistory(ctx, []string{nodeID}, targetID, limit)
+}
+
+// ListSyntheticHistoryForNodes returns synthetic history restricted to the
+// supplied internal node IDs. The node predicate is applied in SQL before the
+// LIMIT so callers enforcing a node scope do not lose older authorized rows
+// merely because newer rows belong to other nodes.
+func (s *Store) ListSyntheticHistoryForNodes(ctx context.Context, nodeIDs []string, targetID string, limit int) ([]SyntheticHistoryRecord, error) {
+	cleanIDs := make([]string, 0, len(nodeIDs))
+	seen := make(map[string]struct{}, len(nodeIDs))
+	for _, rawID := range nodeIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+	return s.listSyntheticHistory(ctx, cleanIDs, strings.TrimSpace(targetID), limit)
+}
+
+func (s *Store) listSyntheticHistory(ctx context.Context, nodeIDs []string, targetID string, limit int) ([]SyntheticHistoryRecord, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	var conditions []string
 	var args []any
-	if nodeID != "" {
+	if len(nodeIDs) == 1 && nodeIDs[0] == "" {
+		// The single empty value is the legacy ListSyntheticHistory sentinel for
+		// an unrestricted node query. Keep it distinct from an explicit empty
+		// allow-list, which must return no rows.
+	} else if len(nodeIDs) == 0 {
+		return []SyntheticHistoryRecord{}, nil
+	} else if len(nodeIDs) == 1 {
 		conditions = append(conditions, "h.node_id = ?")
-		args = append(args, nodeID)
+		args = append(args, nodeIDs[0])
+	} else {
+		marks := make([]string, len(nodeIDs))
+		for i, id := range nodeIDs {
+			marks[i] = "?"
+			args = append(args, id)
+		}
+		conditions = append(conditions, "h.node_id IN ("+strings.Join(marks, ",")+")")
 	}
-	if targetID != "" {
+	if strings.TrimSpace(targetID) != "" {
 		conditions = append(conditions, "h.target_id = ?")
-		args = append(args, targetID)
+		args = append(args, strings.TrimSpace(targetID))
 	}
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -3644,6 +3780,23 @@ func (s *Store) SaveNodeWorkload(ctx context.Context, nodeID string, report prot
 		return fmt.Errorf("begin save node workload tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	// Workload reports can arrive out of order after a reconnect.  Check the
+	// current snapshot before touching either table so an older report cannot
+	// clear the containers belonging to a newer report.  The upsert below has
+	// the same monotonic condition, but that condition alone is insufficient
+	// because the container replacement is a separate DELETE/INSERT sequence.
+	var currentReportedAt int64
+	lookupErr := tx.QueryRowContext(ctx, `SELECT reported_at FROM node_workload_latest WHERE node_id = ?`, nodeID).Scan(&currentReportedAt)
+	switch {
+	case lookupErr == nil && report.ReportedAt < currentReportedAt:
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit stale node workload: %w", err)
+		}
+		return nil
+	case lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows):
+		return fmt.Errorf("read current node workload: %w", lookupErr)
+	}
 
 	procsJSON, err := json.Marshal(report.TopProcesses)
 	if err != nil {

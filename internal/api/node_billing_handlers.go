@@ -31,14 +31,20 @@ func (s *Server) putNodeBilling(w http.ResponseWriter, r *http.Request, uuid str
 	}
 
 	req, err := s.service.Store().GetNodeBillingSettings(r.Context(), node.ID)
-	if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "failed to load billing settings"); return }
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to load billing settings")
+		return
+	}
 	var body map[string]json.RawMessage
 	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &body); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	encoded, _ := json.Marshal(body)
-	if err := json.Unmarshal(encoded, &req); err != nil { writeJSONError(w, http.StatusBadRequest, "invalid request body"); return }
+	if err := json.Unmarshal(encoded, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	req.NodeID = node.ID
 
 	if err := s.service.Store().UpsertNodeBillingSettings(r.Context(), req); err != nil {
@@ -88,7 +94,10 @@ type publicBillingResponse struct {
 }
 
 func (s *Server) publicNodeBilling(w http.ResponseWriter, r *http.Request, uuid string) {
-	if s.publicLimiter != nil && !s.publicLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) { writeJSONError(w, http.StatusTooManyRequests, "too many requests"); return }
+	if s.publicLimiter != nil && !s.publicLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	if !security.IsRFC4122UUID(uuid) {
 		writeJSONError(w, http.StatusNotFound, "node not found")
 		return

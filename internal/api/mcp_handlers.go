@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 )
 
 func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
-	if s.mcpLimiter != nil && !s.mcpLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if s.mcpLimiter != nil && !s.mcpLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeJSONError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
@@ -27,7 +28,12 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Authenticate Request: Authorization header or Admin session cookie.
+	// 1. Authenticate Request using the dedicated Bearer token only. A browser
+	// session cookie is intentionally not accepted here: MCP POST requests are
+	// state-changing from the browser's point of view and this endpoint is not
+	// wrapped by the normal session CSRF middleware. Requiring the explicit
+	// bearer credential removes the session-cookie CSRF ambiguity and keeps the
+	// MCP secret out of browser ambient authentication.
 	// Query-string tokens are deliberately rejected because URLs are copied to
 	// access logs, browser history, proxy logs, and referrer headers.
 	if r.URL.Query().Get("token") != "" {
@@ -45,13 +51,6 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 	if token != "" && s.aiService.ValidateMCPToken(r.Context(), token) {
 		authenticated = true
 		fullAccess = true
-	} else if s.service != nil {
-		if _, err := s.service.AuthenticateWithError(r, time.Now().UTC()); err == nil {
-			if user, userErr := s.service.CurrentUser(r, time.Now().UTC()); userErr == nil && !user.Disabled {
-				authenticated = true
-				fullAccess = user.IsAdmin() || user.AllowedNodes == "*"
-			}
-		}
 	}
 	if !authenticated {
 		w.Header().Set("Content-Type", "application/json")
@@ -74,6 +73,17 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		isSSE := strings.Contains(r.Header.Get("Accept"), "text/event-stream") || r.URL.Query().Get("format") == "sse"
 		if isSSE {
+			if s.mcpSSESlots != nil {
+				select {
+				case s.mcpSSESlots <- struct{}{}:
+					defer func() { <-s.mcpSSESlots }()
+				default:
+					writeJSONError(w, http.StatusTooManyRequests, "too many MCP SSE connections")
+					return
+				}
+			}
+			sseCtx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+			defer cancel()
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")
@@ -90,8 +100,8 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-r.Context().Done():
-					return
+			case <-sseCtx.Done():
+				return
 				case <-ticker.C:
 					_, _ = fmt.Fprintf(w, ": ping\n\n")
 					if ok {
@@ -113,6 +123,10 @@ func (s *Server) mcpHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Handle POST (JSON-RPC 2.0 message)
 	if r.Method == http.MethodPost {
+		if !isJSONContentType(r.Header.Get("Content-Type")) {
+			writeJSONError(w, http.StatusBadRequest, "content type must be application/json")
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{

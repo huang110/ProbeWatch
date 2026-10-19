@@ -128,7 +128,7 @@ func writeTOTPError(w http.ResponseWriter, err error) {
 // totpVerifyLogin is the unauthenticated (pending-cookie) completion of a
 // two-factor login; the auth service enforces method, origin, and code.
 func (s *Server) totpVerifyLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && !s.totpLimiter.Allow(publicLimiterKey(r), time.Now().UTC()) {
+	if r.Method == http.MethodPost && !s.totpLimiter.Allow(s.publicLimiterKey(r), time.Now().UTC()) {
 		writeRateLimitError(w)
 		return
 	}

@@ -264,17 +264,50 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request, filename 
 		writeJSONError(w, http.StatusBadRequest, "invalid backup filename")
 		return
 	}
-	newStore, err := s.service.Store().RestoreBackup(r.Context(), s.backupDir(), filename)
+	var err error
+	restore := func() error {
+		candidate, restoreErr := s.service.Store().RestoreBackup(r.Context(), s.backupDir(), filename)
+		if restoreErr != nil {
+			return restoreErr
+		}
+		oldStore := s.service.SwapStore(candidate)
+		if s.aiService != nil {
+			s.aiService.SetStore(candidate)
+		}
+		if s.notifier != nil {
+			s.notifier.SetStore(candidate)
+		}
+		if s.backupScheduler != nil {
+			// This callback runs under WithStoreSwap's runMu, so no scheduler
+			// operation can capture oldStore between publication and close.
+			s.backupScheduler.SwapStore(candidate)
+		}
+		if oldStore != nil {
+			_ = oldStore.Close()
+		}
+		// The restored database may contain different nodes, checks, incidents,
+		// and status-page configuration. Do not serve pre-restore aggregates.
+		s.overviewCacheMu.Lock()
+		s.overviewCache = make(map[string]overviewCacheEntry)
+		s.overviewCacheMu.Unlock()
+		s.publicCacheMu.Lock()
+		s.publicCache = publicStatusResponse{}
+		s.publicCacheAt = time.Time{}
+		s.publicCacheMu.Unlock()
+		s.statusPageCacheMu.Lock()
+		s.statusPageCache = nil
+		s.statusPageCacheAt = time.Time{}
+		s.statusPageCacheMu.Unlock()
+		return nil
+	}
+	if s.backupScheduler != nil {
+		err = s.backupScheduler.WithStoreSwap(restore)
+	} else {
+		err = restore()
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "restore failed: "+err.Error())
 		return
-	}
-	oldStore := s.service.SwapStore(newStore)
-	if oldStore != nil {
-		_ = oldStore.Close()
-	}
-	if s.backupScheduler != nil {
-		s.backupScheduler.SetStore(newStore)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":   "ok",
@@ -349,10 +382,27 @@ func (s *Server) uploadBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	destPath := filepath.Join(backupDir, finalName)
-	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "failed to create destination file")
-		return
+	ext := ".db"
+	if strings.HasSuffix(finalName, ".db.gz") {
+		ext = ".db.gz"
+	}
+	stem := strings.TrimSuffix(finalName, ext)
+	var dst *os.File
+	for suffix := 0; ; suffix++ {
+		candidate := finalName
+		if suffix > 0 {
+			candidate = fmt.Sprintf("%s-%d%s", stem, suffix, ext)
+		}
+		destPath = filepath.Join(backupDir, candidate)
+		dst, err = os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+		if err == nil {
+			finalName = candidate
+			break
+		}
+		if !os.IsExist(err) {
+			writeJSONError(w, http.StatusInternalServerError, "failed to create destination file")
+			return
+		}
 	}
 	defer dst.Close()
 

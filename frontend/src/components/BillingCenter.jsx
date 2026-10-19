@@ -35,7 +35,7 @@ export function BillingCenter({ nodes = [] }) {
     return () => window.clearInterval(timer)
   }, [])
 
-  // Synchronize server billing and migrate legacy localStorage once mounted
+  // Synchronize server billing and migrate any legacy client data once mounted
   useEffect(() => {
     if (nodes && nodes.length > 0) {
       fetchAllNodesBilling(nodes).catch(() => {})

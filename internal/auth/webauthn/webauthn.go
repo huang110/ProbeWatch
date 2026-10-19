@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -82,14 +83,18 @@ func Base64URLDecode(s string) ([]byte, error) {
 func ExtractRPID(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if strings.Contains(raw, "://") {
-		if u, err := url.Parse(raw); err == nil {
-			raw = u.Host
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			raw = u.Hostname()
 		}
+	} else if host, _, err := net.SplitHostPort(raw); err == nil {
+		raw = host
+	} else {
+		// A bracketed IPv6 literal without a port is valid host syntax but is
+		// not accepted by net.SplitHostPort. Strip only the brackets; never
+		// split an unbracketed IPv6 address at its first colon.
+		raw = strings.TrimPrefix(strings.TrimSuffix(raw, "]"), "[")
 	}
-	if host, _, err := strings.Cut(raw, ":"); host != "" && err {
-		return host
-	}
-	return raw
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 // NormalizeOrigin standardizes the origin string for comparison.
@@ -100,18 +105,33 @@ func NormalizeOrigin(origin string) string {
 
 // MatchOrigin verifies if client origin matches expected server origin.
 func MatchOrigin(clientOrigin, expectedOrigin string) bool {
-	c := NormalizeOrigin(clientOrigin)
-	e := NormalizeOrigin(expectedOrigin)
-	if c == e {
-		return true
+	parse := func(raw string) (*url.URL, bool) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil ||
+			u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, false
+		}
+		scheme := strings.ToLower(u.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return nil, false
+		}
+		return u, true
 	}
-	// Allow reverse-proxy / local port variations if host matches
-	uC, errC := url.Parse(c)
-	uE, errE := url.Parse(e)
-	if errC == nil && errE == nil && uC.Hostname() == uE.Hostname() {
-		return true
+	c, okC := parse(clientOrigin)
+	e, okE := parse(expectedOrigin)
+	if !okC || !okE || !strings.EqualFold(c.Scheme, e.Scheme) || !strings.EqualFold(c.Hostname(), e.Hostname()) {
+		return false
 	}
-	return false
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if strings.EqualFold(u.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return port(c) == port(e)
 }
 
 // VerifyRegistration parses and validates the client response during passkey enrollment.
@@ -124,6 +144,9 @@ func VerifyRegistration(rawID []byte, clientDataJSONRaw []byte, attestationObjec
 
 	if clientData.Type != "webauthn.create" {
 		return nil, fmt.Errorf("%w: unexpected type %q", ErrInvalidClientData, clientData.Type)
+	}
+	if clientData.CrossOrigin {
+		return nil, fmt.Errorf("%w: cross-origin ceremony is not allowed", ErrInvalidClientData)
 	}
 
 	decodedChallenge, err := Base64URLDecode(clientData.Challenge)
@@ -283,6 +306,9 @@ func VerifyAssertion(rawID []byte, clientDataJSONRaw []byte, authenticatorData [
 
 	if clientData.Type != "webauthn.get" {
 		return 0, fmt.Errorf("%w: unexpected type %q", ErrInvalidClientData, clientData.Type)
+	}
+	if clientData.CrossOrigin {
+		return 0, fmt.Errorf("%w: cross-origin ceremony is not allowed", ErrInvalidClientData)
 	}
 
 	decodedChallenge, err := Base64URLDecode(clientData.Challenge)

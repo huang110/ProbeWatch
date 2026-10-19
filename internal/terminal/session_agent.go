@@ -39,7 +39,12 @@ func StartAgentSession(parentCtx context.Context, sessionID string, cols, rows i
 		}
 	}
 
+	// Bind the process to the caller's context so cancellation (for example
+	// when the agent shuts down or the owning session is abandoned) actually
+	// terminates the interactive shell.  Close still performs the platform-
+	// specific process-tree cleanup for descendants.
 	cmd := exec.CommandContext(ctx, shell, args...)
+	configureProcessGroup(cmd)
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",
 		"LANG=en_US.UTF-8",
@@ -146,7 +151,7 @@ func (s *AgentSession) Close() error {
 	}
 	s.cancel()
 	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
+		_ = terminateProcessTree(s.cmd)
 	}
 	return nil
 }

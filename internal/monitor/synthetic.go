@@ -3,9 +3,7 @@ package monitor
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -13,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -20,6 +19,8 @@ import (
 	"time"
 
 	"github.com/probewatch/probewatch/internal/protocol"
+	"github.com/probewatch/probewatch/internal/security"
+	"github.com/probewatch/probewatch/internal/terminal"
 	"github.com/probewatch/probewatch/internal/version"
 )
 
@@ -31,17 +32,27 @@ const (
 
 // SyntheticMonitor executes multi-protocol synthetic SLA contracts and assertions.
 type SyntheticMonitor struct {
-	client *http.Client
+	client       *http.Client
+	allowPrivate bool // test-only escape hatch; production constructors leave this false
 }
 
 // NewSyntheticMonitor creates a new instance with optimized keep-alive and TLS settings.
 func NewSyntheticMonitor() *SyntheticMonitor {
+	return NewSyntheticMonitorWithOptions(false)
+}
+
+// NewSyntheticMonitorWithOptions creates a synthetic monitor. Private target
+// access is intentionally opt-in and should only be used by isolated tests;
+// production callers must use NewSyntheticMonitor so all target protocols are
+// SSRF-protected by default.
+func NewSyntheticMonitorWithOptions(allowPrivate bool) *SyntheticMonitor {
+	monitor := &SyntheticMonitor{allowPrivate: allowPrivate}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		// Synthetic probes must not inherit HTTP_PROXY/HTTPS_PROXY from the
+		// agent/container environment. A proxy can bypass the resolved-target
+		// checks and also leak operator-supplied headers to an intermediary.
+		Proxy:                 nil,
+		DialContext:           monitor.dialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -51,12 +62,24 @@ func NewSyntheticMonitor() *SyntheticMonitor {
 			InsecureSkipVerify: false,
 		},
 	}
-	return &SyntheticMonitor{
-		client: &http.Client{
-			Transport: transport,
-			Timeout:   defaultSyntheticTimeout,
+	monitor.client = &http.Client{
+		Transport: transport,
+		// Per-task contexts choose the effective timeout (up to
+		// maxSyntheticTimeout). Do not leave http.Client's shorter default at
+		// 10s, otherwise a configured 20–30s synthetic probe is silently
+		// aborted early while gRPC/WebSocket use the full task deadline.
+		Timeout: maxSyntheticTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("redirect limit exceeded")
+			}
+			if _, err := monitor.validateURL(req.Context(), req.URL.String(), []string{"http", "https"}); err != nil {
+				return fmt.Errorf("unsafe redirect: %w", err)
+			}
+			return nil
 		},
 	}
+	return monitor
 }
 
 // Run executes a synthetic probe matching monitor interface convention.
@@ -102,6 +125,77 @@ func (m *SyntheticMonitor) ExecuteSynthetic(ctx context.Context, task protocol.C
 	}
 }
 
+// validateURL validates the protocol-specific URL and resolves every address
+// before a request starts. The transport repeats this check at dial time so a
+// DNS answer changing between validation and connection cannot pivot a probe
+// into a private or metadata address.
+func (m *SyntheticMonitor) validateURL(ctx context.Context, raw string, schemes []string) (*url.URL, error) {
+	u, err := security.ValidateURLWithOptions(raw, schemes, true, m.allowPrivate)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.resolveHost(ctx, u.Hostname()); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (m *SyntheticMonitor) resolveHost(ctx context.Context, host string) ([]netip.Addr, error) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if !m.allowPrivate && security.IsBlockedAddress(addr) {
+			return nil, fmt.Errorf("target resolved to blocked address %q", addr)
+		}
+		return []netip.Addr{addr}, nil
+	}
+	if err := security.ValidateHost(host); err != nil {
+		if !m.allowPrivate || !isPrivateHostLiteral(host) {
+			return nil, err
+		}
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	if !m.allowPrivate {
+		if err := security.ValidateResolvedIPs(addresses); err != nil {
+			return nil, err
+		}
+	}
+	return addresses, nil
+}
+
+func isPrivateHostLiteral(host string) bool {
+	if strings.EqualFold(host, "localhost") || strings.EqualFold(host, "localhost.localdomain") || strings.EqualFold(host, "ip6-localhost") || strings.EqualFold(host, "ip6-loopback") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && security.IsBlockedAddress(addr)
+}
+
+func (m *SyntheticMonitor) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addresses, err := m.resolveHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, addr := range addresses {
+		conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("target resolved to no addresses")
+	}
+	return nil, lastErr
+}
+
 // executeHTTP executes an HTTP/HTTPS synthetic transaction with full waterfall timing.
 func (m *SyntheticMonitor) executeHTTP(ctx context.Context, task protocol.CheckTask, targetURL string) protocol.SyntheticResult {
 	now := time.Now().UTC()
@@ -116,6 +210,14 @@ func (m *SyntheticMonitor) executeHTTP(ctx context.Context, task protocol.CheckT
 	if strings.HasPrefix(targetURL, "http://") {
 		res.Protocol = "http"
 	}
+	validatedURL, err := m.validateURL(ctx, targetURL, []string{"http", "https"})
+	if err != nil {
+		res.Status = "error"
+		res.Passed = false
+		res.Error = err.Error()
+		return res
+	}
+	targetURL = validatedURL.String()
 
 	method := strings.ToUpper(strings.TrimSpace(task.Method))
 	if method == "" {
@@ -207,6 +309,21 @@ func (m *SyntheticMonitor) executeHTTP(ctx context.Context, task protocol.CheckT
 	defer resp.Body.Close()
 
 	res.StatusCode = resp.StatusCode
+	// Without an explicit contract assertion, an HTTP error response is not a
+	// healthy synthetic check. Previously a 404/500 with no assertions stayed
+	// `Passed=true`, which made a reachable-but-broken endpoint look healthy.
+	hasStatusCodeAssertion := false
+	for _, rule := range task.Assertions {
+		if rule.Source == "status_code" {
+			hasStatusCodeAssertion = true
+			break
+		}
+	}
+	if !hasStatusCodeAssertion && (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest) {
+		res.Passed = false
+		res.Status = "failing"
+		res.Error = fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+	}
 
 	// Read bounded body
 	readStart := time.Now()
@@ -226,198 +343,232 @@ func (m *SyntheticMonitor) executeHTTP(ctx context.Context, task protocol.CheckT
 	return res
 }
 
-// executeWebSocket connects and tests WebSocket handshake and frame echo.
+// executeWebSocket connects and tests a WebSocket handshake and an actual
+// application data echo. A successful TCP connection or a 101 response alone
+// is not sufficient: a broken upgrade proxy can still return 101 while never
+// accepting WebSocket frames.
 func (m *SyntheticMonitor) executeWebSocket(ctx context.Context, task protocol.CheckTask, targetURL string) protocol.SyntheticResult {
 	now := time.Now().UTC()
 	res := protocol.SyntheticResult{
 		Protocol:  "websocket",
 		TargetURL: targetURL,
-		Status:    "ok",
-		Passed:    true,
+		Status:    "error",
+		Passed:    false,
 		CheckedAt: now.Unix(),
 	}
 
-	u, err := url.Parse(targetURL)
-	if err != nil {
-		res.Status = "error"
-		res.Passed = false
-		res.Error = err.Error()
-		return res
-	}
-
-	isWSS := u.Scheme == "wss" || u.Scheme == "https"
-	hostPort := u.Host
-	if !strings.Contains(hostPort, ":") {
-		if isWSS {
-			hostPort += ":443"
-		} else {
-			hostPort += ":80"
-		}
-	}
-
 	t0 := time.Now()
-	var netConn net.Conn
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-
-	if isWSS {
-		tlsConfig := &tls.Config{
-			ServerName:         u.Hostname(),
-			InsecureSkipVerify: false,
-		}
-		netConn, err = tls.DialWithDialer(dialer, "tcp", hostPort, tlsConfig)
-	} else {
-		netConn, err = dialer.DialContext(ctx, "tcp", hostPort)
-	}
-
-	if err != nil {
-		res.Status = "error"
-		res.Passed = false
-		res.Error = fmt.Sprintf("dial error: %v", err)
+	if _, err := m.validateURL(ctx, targetURL, []string{"ws", "wss", "http", "https"}); err != nil {
+		res.Error = err.Error()
 		res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
 		return res
 	}
-	defer netConn.Close()
-
-	_ = netConn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	// Generate WebSocket Key
-	rawKey := make([]byte, 16)
-	_, _ = rand.Read(rawKey)
-	wsKey := base64.StdEncoding.EncodeToString(rawKey)
-
-	// Send Handshake
-	path := u.RequestURI()
-	if path == "" {
-		path = "/"
+	header := make(http.Header)
+	for key, value := range task.Headers {
+		header.Set(key, value)
 	}
-	reqStr := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: ProbeWatch-Synthetic/%s\r\n\r\n", path, u.Host, wsKey, version.ServerVersion)
-	if _, err := netConn.Write([]byte(reqStr)); err != nil {
-		res.Status = "error"
-		res.Passed = false
-		res.Error = fmt.Sprintf("handshake write error: %v", err)
-		return res
+	if header.Get("User-Agent") == "" {
+		header.Set("User-Agent", "ProbeWatch-Synthetic/"+version.ServerVersion)
 	}
 
-	// Read Handshake Response
-	buf := make([]byte, 1024)
-	n, err := netConn.Read(buf)
-	if err != nil && err != io.EOF {
-		res.Status = "error"
-		res.Passed = false
-		res.Error = fmt.Sprintf("handshake read error: %v", err)
-		return res
-	}
-
-	respStr := string(buf[:n])
+	conn, err := terminal.DialWithDialer(ctx, targetURL, header, m.dialContext)
 	res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
-
-	if strings.Contains(respStr, "101 Switching Protocols") || strings.Contains(respStr, "101 Web Socket Protocol Handshake") {
-		res.StatusCode = 101
-		res.WebSocketEcho = true
-		res.Passed = true
-	} else {
-		res.Passed = false
-		res.Status = "failing"
-		res.Error = "server did not switch protocols (expected 101)"
-		if strings.Contains(respStr, "HTTP/1.1 ") {
-			parts := strings.Split(respStr, " ")
-			if len(parts) >= 2 {
-				res.StatusCode, _ = strconv.Atoi(parts[1])
-			}
-		}
-	}
-
-	return res
-}
-
-// executeGRPC checks a gRPC health endpoint using HTTP/2 framing.
-func (m *SyntheticMonitor) executeGRPC(ctx context.Context, task protocol.CheckTask, targetURL string) protocol.SyntheticResult {
-	now := time.Now().UTC()
-	res := protocol.SyntheticResult{
-		Protocol:   "grpc",
-		TargetURL:  targetURL,
-		Status:     "ok",
-		Passed:     true,
-		GRPCStatus: "SERVING",
-		CheckedAt:  now.Unix(),
-	}
-
-	u, err := url.Parse(targetURL)
 	if err != nil {
-		res.Status = "error"
-		res.Passed = false
-		res.Error = err.Error()
-		return res
-	}
-
-	hostPort := u.Host
-	if !strings.Contains(hostPort, ":") {
-		if u.Scheme == "https" || task.Port == 443 {
-			hostPort += ":443"
-		} else {
-			hostPort = fmt.Sprintf("%s:%d", u.Hostname(), task.Port)
-		}
-	}
-
-	t0 := time.Now()
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-
-	// Attempt TLS connection with ALPN "h2"
-	tlsConfig := &tls.Config{
-		ServerName:         u.Hostname(),
-		NextProtos:         []string{"h2"},
-		InsecureSkipVerify: false,
-	}
-
-	conn, err := tls.DialWithDialer(dialer, "tcp", hostPort, tlsConfig)
-	if err != nil {
-		// Fallback to cleartext TCP gRPC dial
-		var plainConn net.Conn
-		plainConn, err = dialer.DialContext(ctx, "tcp", hostPort)
-		if err != nil {
-			res.Status = "error"
-			res.Passed = false
-			res.Error = fmt.Sprintf("gRPC connect error: %v", err)
-			res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
-			return res
-		}
-		defer plainConn.Close()
-		res.Timing.TCPConnectMS = time.Since(t0).Milliseconds()
-		res.Timing.TotalDurationMS = res.Timing.TCPConnectMS
-		res.StatusCode = 0
-		res.GRPCStatus = "SERVING"
+		res.Error = fmt.Sprintf("websocket handshake error: %v", err)
 		return res
 	}
 	defer conn.Close()
+	stopContextWatch := closeOnContextDone(ctx, conn)
+	defer stopContextWatch()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
 
-	res.Timing.TLSHandshakeMS = time.Since(t0).Milliseconds()
+	res.StatusCode = http.StatusSwitchingProtocols
+	probe := []byte("ProbeWatch-WebSocket-Echo")
+	if err := conn.WriteMessage(terminal.OpText, probe); err != nil {
+		res.Error = fmt.Sprintf("websocket probe write error: %v", err)
+		res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+		return res
+	}
+	opcode, echoed, err := conn.ReadMessage()
+	res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+	if err != nil {
+		res.Error = fmt.Sprintf("websocket echo read error: %v", err)
+		return res
+	}
+	if opcode != terminal.OpText || !bytes.Equal(echoed, probe) {
+		res.Status = "failing"
+		res.Error = "server did not echo the WebSocket probe payload"
+		return res
+	}
+
+	res.Status = "ok"
+	res.Passed = true
+	res.WebSocketEcho = true
+	return res
+}
+
+// executeGRPC verifies the transport layer required by gRPC: TLS endpoints
+// must negotiate h2 and every endpoint must return a valid HTTP/2 SETTINGS
+// frame after the client preface. A bare TCP connection is deliberately not
+// treated as a healthy gRPC service.
+func (m *SyntheticMonitor) executeGRPC(ctx context.Context, task protocol.CheckTask, targetURL string) protocol.SyntheticResult {
+	now := time.Now().UTC()
+	res := protocol.SyntheticResult{
+		Protocol:  "grpc",
+		TargetURL: targetURL,
+		Status:    "error",
+		Passed:    false,
+		CheckedAt: now.Unix(),
+	}
+
+	u, err := m.validateURL(ctx, targetURL, []string{"grpc", "grpcs", "http", "https"})
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
+	useTLS := scheme == "https" || scheme == "grpcs"
+	if scheme != "http" && scheme != "https" && scheme != "grpc" && scheme != "grpcs" {
+		res.Error = fmt.Sprintf("unsupported gRPC URL scheme %q", u.Scheme)
+		return res
+	}
+	if u.Hostname() == "" {
+		res.Error = "gRPC URL must include a host"
+		return res
+	}
+	port := u.Port()
+	if port == "" {
+		port = strconv.Itoa(task.Port)
+		if port == "0" {
+			if useTLS {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		}
+	}
+	hostPort := net.JoinHostPort(u.Hostname(), port)
+
+	t0 := time.Now()
+	conn, err := m.dialContext(ctx, "tcp", hostPort)
+	if err != nil {
+		res.Error = fmt.Sprintf("gRPC connect error: %v", err)
+		res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+		return res
+	}
+	defer conn.Close()
+	res.Timing.TCPConnectMS = time.Since(t0).Milliseconds()
+	stopContextWatch := closeOnContextDone(ctx, conn)
+	defer stopContextWatch()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	if useTLS {
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName: u.Hostname(),
+			NextProtos: []string{"h2"},
+			MinVersion: tls.VersionTLS12,
+		})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			res.Error = fmt.Sprintf("gRPC TLS handshake error: %v", err)
+			res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+			return res
+		}
+		state := tlsConn.ConnectionState()
+		if state.NegotiatedProtocol != "h2" {
+			res.Error = fmt.Sprintf("gRPC TLS endpoint did not negotiate h2 (got %q)", state.NegotiatedProtocol)
+			res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+			return res
+		}
+		conn = tlsConn
+		res.Timing.TLSHandshakeMS = time.Since(t0).Milliseconds() - res.Timing.TCPConnectMS
+	}
 
 	// Send HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 	preface := []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := conn.Write(preface); err != nil {
-		res.Status = "error"
-		res.Passed = false
+	if err := writeSyntheticConn(conn, preface); err != nil {
 		res.Error = fmt.Sprintf("gRPC preface write error: %v", err)
 		return res
 	}
 
 	// Send empty SETTINGS frame: 9-byte header [0,0,0, 0x04, 0x00, 0,0,0,0]
 	settingsFrame := []byte{0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00}
-	if _, err := conn.Write(settingsFrame); err != nil {
-		res.Status = "error"
-		res.Passed = false
+	if err := writeSyntheticConn(conn, settingsFrame); err != nil {
 		res.Error = fmt.Sprintf("gRPC settings frame write error: %v", err)
 		return res
 	}
 
-	// Read server SETTINGS response
-	respBuf := make([]byte, 256)
-	_, _ = conn.Read(respBuf)
+	// A gRPC-capable HTTP/2 peer must answer the preface with a legal SETTINGS
+	// frame. Reading arbitrary bytes or EOF here would make ordinary TCP/HTTP
+	// services appear healthy.
+	frameType, flags, streamID, payload, err := readSyntheticHTTP2Frame(conn)
+	if err != nil {
+		res.Error = fmt.Sprintf("gRPC SETTINGS read error: %v", err)
+		res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+		return res
+	}
+	if frameType != 0x04 || streamID != 0 || (flags&0x01 != 0 && len(payload) != 0) || len(payload)%6 != 0 {
+		res.Error = "gRPC endpoint returned an invalid HTTP/2 SETTINGS frame"
+		res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
+		return res
+	}
+
 	res.Timing.TotalDurationMS = time.Since(t0).Milliseconds()
-	res.GRPCStatus = "SERVING"
+	res.Status = "ok"
 	res.Passed = true
+	res.GRPCStatus = "SERVING"
 	return res
+}
+
+// valuesForSyntheticHeader keeps the header conversion in one place and
+// avoids accidentally mutating task.Headers while constructing an outbound
+// request.
+func closeOnContextDone(ctx context.Context, closer interface{ Close() error }) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = closer.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+func writeSyntheticConn(conn net.Conn, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := conn.Write(payload)
+		if n > 0 {
+			payload = payload[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
+func readSyntheticHTTP2Frame(conn net.Conn) (frameType byte, flags byte, streamID uint32, payload []byte, err error) {
+	var header [9]byte
+	if _, err = io.ReadFull(conn, header[:]); err != nil {
+		return 0, 0, 0, nil, err
+	}
+	length := int(header[0])<<16 | int(header[1])<<8 | int(header[2])
+	if length > 64*1024 {
+		return 0, 0, 0, nil, fmt.Errorf("HTTP/2 frame payload too large: %d", length)
+	}
+	streamID = binary.BigEndian.Uint32(header[5:9]) & 0x7fffffff
+	payload = make([]byte, length)
+	if _, err = io.ReadFull(conn, payload); err != nil {
+		return 0, 0, 0, nil, err
+	}
+	return header[3], header[4], streamID, payload, nil
 }
 
 // executeDoH executes an RFC 8484 DNS-over-HTTPS wire format query.
@@ -429,6 +580,12 @@ func (m *SyntheticMonitor) executeDoH(ctx context.Context, task protocol.CheckTa
 		Status:    "ok",
 		Passed:    true,
 		CheckedAt: now.Unix(),
+	}
+	if _, err := m.validateURL(ctx, targetURL, []string{"http", "https"}); err != nil {
+		res.Status = "error"
+		res.Passed = false
+		res.Error = err.Error()
+		return res
 	}
 
 	// Build a standard DNS query wireformat for task.Host or "example.com"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,15 @@ func TestSystemEventsAndLogQueryHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get public events overview failed: %d", rec.Code)
 	}
+	publicEventsBody := rec.Body.String()
+	for _, secret := range []string{"10.0.0.99", "54321", "mysqld", "root", "sshd"} {
+		if strings.Contains(publicEventsBody, secret) {
+			t.Fatalf("public events response leaked %q: %s", secret, publicEventsBody)
+		}
+	}
+	if strings.Contains(publicEventsBody, `"id"`) || strings.Contains(publicEventsBody, `"node_id"`) || strings.Contains(publicEventsBody, `"message"`) || strings.Contains(publicEventsBody, `"source"`) {
+		t.Fatalf("public events response contains private fields: %s", publicEventsBody)
+	}
 
 	// 6. Query Public Node Events
 	req = httptest.NewRequest(http.MethodGet, "/api/public/nodes/"+task4NodeUUID1+"/events", nil)
@@ -153,5 +163,20 @@ func TestSystemEventsAndLogQueryHandlers(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("query node logs failed: %d, body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPublicEventTitlesAreChinese(t *testing.T) {
+	tests := map[string]string{
+		"security": "安全登录鉴权拦截",
+		"oom":      "内存保护触发 (OOM)",
+		"kernel":   "内核保护事件",
+		"system":   "系统服务状态异常",
+		"other":    "系统状态异常",
+	}
+	for category, want := range tests {
+		if got := publicEventTitle(category); got != want {
+			t.Fatalf("public event title for %s = %q, want %q", category, got, want)
+		}
 	}
 }

@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -125,7 +125,7 @@ func (s *Server) alertRoute(w http.ResponseWriter, r *http.Request) {
 		if len(parts) == 5 {
 			silenceID := parts[4]
 			if r.Method == http.MethodDelete {
-			mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mw.RequireRole(db.RoleAdmin)(mw.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					s.deleteAlertSilence(w, r, silenceID)
 				}))).ServeHTTP(w, r)
 				return
@@ -353,8 +353,14 @@ func (s *Server) listNotificationChannels(w http.ResponseWriter, r *http.Request
 func maskNotificationChannel(ch db.NotificationChannel) db.NotificationChannel {
 	var cfg map[string]any
 	if json.Unmarshal([]byte(ch.Config), &cfg) == nil {
-		for _, key := range []string{"bot_token", "webhook_url", "device_key"} { if value, ok := cfg[key].(string); ok && value != "" { cfg[key] = maskToken(value) } }
-		if encoded, err := json.Marshal(cfg); err == nil { ch.Config = string(encoded) }
+		for _, key := range []string{"bot_token", "webhook_url", "device_key"} {
+			if value, ok := cfg[key].(string); ok && value != "" {
+				cfg[key] = maskToken(value)
+			}
+		}
+		if encoded, err := json.Marshal(cfg); err == nil {
+			ch.Config = string(encoded)
+		}
 	}
 	return ch
 }
@@ -409,15 +415,29 @@ func (s *Server) updateNotificationChannel(w http.ResponseWriter, r *http.Reques
 	config := req.Config
 	var incomingCfg, existingCfg map[string]any
 	if json.Unmarshal([]byte(config), &incomingCfg) == nil && json.Unmarshal([]byte(existing.Config), &existingCfg) == nil {
-		for key, value := range incomingCfg { if text, ok := value.(string); ok && strings.Contains(text, "******") { if old, exists := existingCfg[key]; exists { incomingCfg[key] = old } } }
-		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
+		for key, value := range incomingCfg {
+			if text, ok := value.(string); ok && strings.Contains(text, "******") {
+				if old, exists := existingCfg[key]; exists {
+					incomingCfg[key] = old
+				}
+			}
+		}
+		if encoded, err := json.Marshal(incomingCfg); err == nil {
+			config = string(encoded)
+		}
 	}
 	if json.Unmarshal([]byte(config), &incomingCfg) == nil {
 		for key, fallback := range map[string]string{"bot_token": s.cfg.TelegramBotToken, "webhook_url": s.cfg.WebhookURL} {
-			if id != "env-telegram" && id != "env-webhook" { break }
-			if text, ok := incomingCfg[key].(string); ok && strings.Contains(text, "******") && strings.TrimSpace(fallback) != "" { incomingCfg[key] = fallback }
+			if id != "env-telegram" && id != "env-webhook" {
+				break
+			}
+			if text, ok := incomingCfg[key].(string); ok && strings.Contains(text, "******") && strings.TrimSpace(fallback) != "" {
+				incomingCfg[key] = fallback
+			}
 		}
-		if encoded, err := json.Marshal(incomingCfg); err == nil { config = string(encoded) }
+		if encoded, err := json.Marshal(incomingCfg); err == nil {
+			config = string(encoded)
+		}
 	}
 	createdAt := existing.CreatedAt
 	if createdAt.IsZero() {
@@ -468,7 +488,10 @@ func (s *Server) testNotificationChannel(w http.ResponseWriter, r *http.Request,
 		Message string `json:"message,omitempty"`
 		RunID   string `json:"run_id,omitempty"`
 	}
-	_ = decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req)
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
 	msg := req.Message
 	if msg == "" && req.RunID != "" {
 		msg = fmt.Sprintf("ProbeWatch CI notification test %s", req.RunID)
@@ -490,7 +513,10 @@ func (s *Server) testNotificationChannel(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) testNotificationDirect(w http.ResponseWriter, r *http.Request) {
 	var req testNotificationRequest
-	_ = decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req)
+	if err := decodeJSONObjectRequest(w, r, s.requestBodyLimit(), &req); err != nil {
+		writeRequestError(w, err)
+		return
+	}
 
 	if s.notifier == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "notifier service unavailable")
@@ -560,9 +586,13 @@ func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := map[string]string{}
 	for _, key := range []string{"offline_grace_seconds", "msg_template"} {
-		if value, ok := all[key]; ok { settings[key] = value }
+		if value, ok := all[key]; ok {
+			settings[key] = value
+		}
 	}
-	if _, ok := settings["offline_grace_seconds"]; !ok { settings["offline_grace_seconds"] = "180" }
+	if _, ok := settings["offline_grace_seconds"]; !ok {
+		settings["offline_grace_seconds"] = "180"
+	}
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -573,10 +603,15 @@ func (s *Server) saveAlertSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k, v := range body {
-		if k != "offline_grace_seconds" && k != "msg_template" { continue }
+		if k != "offline_grace_seconds" && k != "msg_template" {
+			continue
+		}
 		if k == "offline_grace_seconds" {
 			val, err := strconv.Atoi(strings.TrimSpace(v))
-			if err != nil || val < 30 || val > 86400 { writeJSONError(w, http.StatusBadRequest, "offline_grace_seconds must be between 30 and 86400"); return }
+			if err != nil || val < 30 || val > 86400 {
+				writeJSONError(w, http.StatusBadRequest, "offline_grace_seconds must be between 30 and 86400")
+				return
+			}
 		}
 		if err := s.service.Store().SetSetting(r.Context(), k, v); err != nil {
 			writeJSONError(w, http.StatusServiceUnavailable, "failed to save settings")
@@ -729,7 +764,10 @@ func (s *Server) ackAlert(w http.ResponseWriter, r *http.Request) {
 		}
 		found := false
 		for _, candidate := range alerts {
-			if candidate.ID == parts[2] { found = true; break }
+			if candidate.ID == parts[2] {
+				found = true
+				break
+			}
 		}
 		if !found {
 			writeJSONError(w, http.StatusNotFound, "alert not found")
@@ -855,16 +893,27 @@ func (s *Server) nodeAction(w http.ResponseWriter, r *http.Request) {
 	} else {
 		targetNode, err = s.service.Store().GetNodeByID(r.Context(), nodeID)
 	}
-	if err != nil { writeJSONError(w, http.StatusNotFound, "node not found"); return }
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "node not found")
+		return
+	}
 	user, ok := s.authenticateUser(w, r)
-	if !ok { return }
-	if !user.CanWrite() { writeJSONError(w, http.StatusForbidden, "viewer role is read-only"); return }
-	if !user.CanAccessNode(targetNode.UUID) { writeJSONError(w, http.StatusForbidden, "access to node denied by scope"); return }
+	if !ok {
+		return
+	}
+	if !user.CanWrite() {
+		writeJSONError(w, http.StatusForbidden, "viewer role is read-only")
+		return
+	}
+	if !user.CanAccessNode(targetNode.UUID) {
+		writeJSONError(w, http.StatusForbidden, "access to node denied by scope")
+		return
+	}
 
 	now := time.Now().UTC()
 	switch action {
 	case "rotate-token":
-	token, err := s.service.Store().RotateNodeTokenWithTTL(r.Context(), targetNode.ID, user.ID, now, s.agentNodeTokenTTL())
+		token, err := s.service.Store().RotateNodeTokenWithTTL(r.Context(), targetNode.ID, user.ID, now, s.agentNodeTokenTTL())
 		if err != nil {
 			writeNodeActionError(w, err)
 			return
@@ -973,10 +1022,13 @@ func buildOverviewCacheKey(r *http.Request, now time.Time) (string, time.Time, b
 	user, hasUser := UserFromContext(r.Context())
 	scope := "public:anon"
 	if hasUser {
+		// Include the effective role and node allow-list.  Role alone is not
+		// enough: scoped administrators and PAT callers may share the same user
+		// ID while having materially different fleet visibility.
 		if user.IsAdmin() {
-			scope = "admin:" + user.ID
+			scope = "admin:" + user.ID + ":" + strings.ToLower(strings.TrimSpace(user.Role)) + ":" + strings.TrimSpace(user.AllowedNodes)
 		} else {
-			scope = "user:" + user.ID + ":" + user.AllowedNodes
+			scope = "user:" + user.ID + ":" + strings.TrimSpace(user.AllowedNodes)
 		}
 	}
 
@@ -1093,7 +1145,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 503, "service unavailable")
 		return
 	}
-	if hasUser && !user.IsAdmin() && user.AllowedNodes != "*" && user.AllowedNodes != "" {
+	if hasUser && strings.TrimSpace(user.AllowedNodes) != "*" {
 		filtered := make([]db.Node, 0, len(nodes))
 		for _, n := range nodes {
 			if user.CanAccessNode(n.UUID) {
@@ -1189,8 +1241,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 				}
 				if json.Unmarshal(record.Payload, &value) == nil {
 					if nodeHaveCounters {
-						if value.Rx >= nodeRxPrev { nodeRxDelta += value.Rx - nodeRxPrev } else { nodeRxDelta += value.Rx }
-						if value.Tx >= nodeTxPrev { nodeTxDelta += value.Tx - nodeTxPrev } else { nodeTxDelta += value.Tx }
+						if value.Rx >= nodeRxPrev {
+							nodeRxDelta += value.Rx - nodeRxPrev
+						} else {
+							nodeRxDelta += value.Rx
+						}
+						if value.Tx >= nodeTxPrev {
+							nodeTxDelta += value.Tx - nodeTxPrev
+						} else {
+							nodeTxDelta += value.Tx
+						}
 					}
 					nodeRxPrev, nodeTxPrev, nodeHaveCounters = value.Rx, value.Tx, true
 					cpuTotal += value.CPU
@@ -1212,7 +1272,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, record := range records {
-		key := record.NodeID + "\x00" + record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+			key := record.NodeID + "\x00" + record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
 			if _, exists := seenChecks[key]; exists {
 				continue
 			}
@@ -1270,11 +1330,33 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		database["total_bytes"] = database["file_bytes"].(uint64) + database["wal_bytes"].(uint64) + database["shm_bytes"].(uint64)
 	}
 
+	// Keep the target aggregate within the same node scope as the rest of the
+	// overview.  A scoped operator must not learn the fleet-wide target count
+	// (which otherwise reveals the size/configuration of unrelated tenants).
 	targetsCount := 0
 	for _, kind := range targetKinds() {
-		if tgts, err := s.service.Store().ListTargets(r.Context(), kind); err == nil {
-			targetsCount += len(tgts)
+		tgts, err := s.service.Store().ListTargets(r.Context(), kind)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+			return
 		}
+		if hasUser && strings.TrimSpace(user.AllowedNodes) != "*" {
+			for _, target := range tgts {
+				var config agentTargetPayload
+				if err := json.Unmarshal(target.Payload, &config); err != nil {
+					writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
+					return
+				}
+				for _, node := range nodes {
+					if nodeMatchesTarget(node, config) {
+						targetsCount++
+						break
+					}
+				}
+			}
+			continue
+		}
+		targetsCount += len(tgts)
 	}
 
 	respMap := map[string]any{
@@ -1346,10 +1428,11 @@ func (s *Server) authenticateUser(w http.ResponseWriter, r *http.Request) (*db.A
 }
 
 // getUserNodeScope resolves the allowed node IDs and UUIDs for the given user.
-// When fullAccess is true, the user has unrestricted fleet access (admin or AllowedNodes == "*").
+// When fullAccess is true, the user has unrestricted fleet access
+// (AllowedNodes == "*"). Role is checked separately for the operation.
 // When fullAccess is false, allowedUUIDs and allowedIDs contain the allowed node identifiers.
 func (s *Server) getUserNodeScope(ctx context.Context, user *db.AdminUser) (fullAccess bool, allowedUUIDs map[string]struct{}, allowedIDs map[string]struct{}, err error) {
-	if user.IsAdmin() || user.AllowedNodes == "*" {
+	if strings.TrimSpace(user.AllowedNodes) == "*" {
 		return true, nil, nil, nil
 	}
 
@@ -1384,6 +1467,26 @@ func (s *Server) getUserNodeScope(ctx context.Context, user *db.AdminUser) (full
 	}
 
 	return false, allowedUUIDs, allowedIDs, nil
+}
+
+// requireFleetWideNodeScope protects global target/scheduler configuration
+// routes. A scoped administrator remains an administrator for account and
+// system settings, but must not create or mutate a probe that can execute on
+// nodes outside their explicit allow-list.
+func (s *Server) requireFleetWideNodeScope(w http.ResponseWriter, r *http.Request) bool {
+	user, ok := UserFromContext(r.Context())
+	if !ok {
+		resolved, authenticated := s.authenticateUser(w, r)
+		if !authenticated || resolved == nil {
+			return false
+		}
+		user = *resolved
+	}
+	if strings.TrimSpace(user.AllowedNodes) != "*" {
+		writeJSONError(w, http.StatusForbidden, "fleet-wide node scope required")
+		return false
+	}
+	return true
 }
 
 // authorizeNodeScope validates the node UUID format, authenticates the caller,
@@ -1458,27 +1561,40 @@ func (s *Server) writeNodeHistory(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	kinds := []db.TargetKind{db.TargetKindTCP}
-	if resource == "network" { kinds = []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS} } else if resource == "mtr" { kinds = []db.TargetKind{db.TargetKindMTR} } else if resource == "media" { kinds = []db.TargetKind{db.TargetKindMediaHTTP} }
+	if resource == "network" {
+		kinds = []db.TargetKind{db.TargetKindTCP, db.TargetKindHTTP, db.TargetKindHTTPS, db.TargetKindDNS}
+	} else if resource == "mtr" {
+		kinds = []db.TargetKind{db.TargetKindMTR}
+	} else if resource == "media" {
+		kinds = []db.TargetKind{db.TargetKindMediaHTTP}
+	}
 	seen := make(map[string]struct{})
 	out := make([]historyResultResponse, 0, limit)
 	for _, kind := range kinds {
 		records, err := s.service.Store().GetResultHistory(r.Context(), kind, nodeID, from, to, limit)
-		if err != nil { writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable"); return }
-		for _, record := range records {
-		key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
-		if _, exists := seen[key]; exists { continue }
-		seen[key] = struct{}{}
-		item := historyResultResponse{CheckedAt: record.CheckedAt, Result: json.RawMessage(record.Payload)}
-		if resource == "media" {
-			item.DetectorID = record.TargetID
-		} else {
-			item.TargetID = record.TargetID
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "node results history unavailable")
+			return
 		}
-		out = append(out, item)
+		for _, record := range records {
+			key := record.TargetID + "\x00" + record.CheckedAt.UTC().Format(time.RFC3339Nano)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			item := historyResultResponse{CheckedAt: record.CheckedAt, Result: json.RawMessage(record.Payload)}
+			if resource == "media" {
+				item.DetectorID = record.TargetID
+			} else {
+				item.TargetID = record.TargetID
+			}
+			out = append(out, item)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CheckedAt.After(out[j].CheckedAt) })
-	if len(out) > limit { out = out[:limit] }
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

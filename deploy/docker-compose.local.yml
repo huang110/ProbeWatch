@@ -7,6 +7,16 @@ services:
       dockerfile: deploy/Dockerfile.local
     ports:
       - "127.0.0.1:8080:8080"
+    # The control plane only writes the SQLite data volume. Keep the image
+    # filesystem immutable and provide a small disposable temp area.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
     environment:
       PROBEWATCH_ENV: development
       PROBEWATCH_LISTEN: 0.0.0.0:8080

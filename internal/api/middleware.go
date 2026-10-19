@@ -99,6 +99,9 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusForbidden, "user account is disabled")
 			return
 		}
+		if isToken && !enforceAPITokenScope(w, r, tokenRecord) {
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
 		if isToken {
@@ -121,8 +124,12 @@ func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handle
 				if rawToken != "" {
 					tokenRecord, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
 					err = tokenErr
-					if caller != nil { user = *caller }
-					if err == nil && tokenRecord != nil { r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true)) }
+					if caller != nil {
+						user = *caller
+					}
+					if err == nil && tokenRecord != nil {
+						r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true))
+					}
 				} else {
 					user, err = m.service.CurrentUser(r, time.Now().UTC())
 				}
@@ -133,6 +140,9 @@ func (m *Middleware) RequireRole(roles ...string) func(http.Handler) http.Handle
 			}
 			if user.Disabled {
 				writeJSONError(w, http.StatusForbidden, "user account is disabled")
+				return
+			}
+			if !enforceAPITokenScope(w, r, nil) {
 				return
 			}
 			for _, role := range roles {
@@ -170,10 +180,14 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			rawToken := auth.ExtractAPIToken(r)
 			var err error
 			if rawToken != "" {
-					tokenRecord, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
+				tokenRecord, caller, tokenErr := m.service.AuthenticateAPIToken(r.Context(), rawToken, time.Now().UTC())
 				err = tokenErr
-				if caller != nil { user = *caller }
-					if err == nil && tokenRecord != nil { r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true)) }
+				if caller != nil {
+					user = *caller
+				}
+				if err == nil && tokenRecord != nil {
+					r = r.WithContext(context.WithValue(context.WithValue(r.Context(), currentAPITokenKey, *tokenRecord), isAPITokenKey, true))
+				}
 			} else {
 				user, err = m.service.CurrentUser(r, time.Now().UTC())
 			}
@@ -186,6 +200,9 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusForbidden, "user account is disabled")
 			return
 		}
+		if isToken && !enforceAPITokenScope(w, r, nil) {
+			return
+		}
 		ctx := context.WithValue(r.Context(), currentAdminUserKey, user)
 		if !isWriteMethod(r.Method) {
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -195,7 +212,10 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusForbidden, "viewer role is read-only")
 			return
 		}
-		if tok, ok := TokenFromContext(r.Context()); ok && !tokenAllowsWrite(tok.Scopes) { writeJSONError(w, http.StatusForbidden, "api token lacks write scope"); return }
+		if tok, ok := TokenFromContext(r.Context()); ok && !tokenAllowsWrite(tok.Scopes) {
+			writeJSONError(w, http.StatusForbidden, "api token lacks write scope")
+			return
+		}
 		if m.cfg.MaxRequestBody > 0 {
 			body, err := io.ReadAll(io.LimitReader(r.Body, m.cfg.MaxRequestBody+1))
 			if err != nil {
@@ -250,9 +270,95 @@ func (m *Middleware) RequireCSRF(next http.Handler) http.Handler {
 }
 
 func tokenAllowsWrite(scopes string) bool {
-	if strings.TrimSpace(scopes) == "" || strings.TrimSpace(scopes) == "*" { return true }
-	for _, scope := range strings.Split(scopes, ",") { scope = strings.TrimSpace(scope); if scope == "write" || scope == "write:*" || strings.HasPrefix(scope, "write:") { return true } }
+	if strings.TrimSpace(scopes) == "" || strings.TrimSpace(scopes) == "*" {
+		return true
+	}
+	for _, scope := range strings.Split(scopes, ",") {
+		scope = strings.TrimSpace(scope)
+		// The explicit admin scope is a full-control PAT scope.  Treat it as
+		// write-capable as well as satisfying resource-level checks below.
+		if scope == "admin" || scope == "write" || scope == "write:*" || strings.HasPrefix(scope, "write:") {
+			return true
+		}
+	}
 	return false
+}
+
+// enforceAPITokenScope applies the resource scopes exposed by the PAT UI. A
+// token with the default "*" remains unrestricted; a custom token is limited
+// to its resource family instead of being treated as a generic write key.
+func enforceAPITokenScope(w http.ResponseWriter, r *http.Request, token *db.APIToken) bool {
+	if token == nil {
+		if current, ok := TokenFromContext(r.Context()); ok {
+			token = &current
+		} else {
+			return true
+		}
+	}
+	required := requiredAPIScope(r)
+	// `admin` is the documented full-control PAT scope.  It must not be
+	// rejected by read-only families such as read:metrics.
+	if required == "" || db.HasScope(token.Scopes, "admin") || db.HasScope(token.Scopes, required) {
+		return true
+	}
+	writeJSONError(w, http.StatusForbidden, "api token lacks required scope: "+required)
+	return false
+}
+
+func requiredAPIScope(r *http.Request) string {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	write := isWriteMethod(r.Method)
+
+	switch {
+	case path == "/api/me", path == "/api/csrf", path == "/api/openapi.json":
+		return ""
+	case path == "/api/nodes" || strings.HasPrefix(path, "/api/nodes/"):
+		if write {
+			return "write:nodes"
+		}
+		return "read:nodes"
+	case path == "/api/alerts" || strings.HasPrefix(path, "/api/alerts/"):
+		if write {
+			return "write:alerts"
+		}
+		return "read:alerts"
+	case path == "/api/system/backups" || strings.HasPrefix(path, "/api/system/backups/"):
+		if write {
+			return "write:backups"
+		}
+		return "read:backups"
+	case path == "/api/registration-tokens":
+		return "admin"
+	case path == "/api/targets" || strings.HasPrefix(path, "/api/targets/") ||
+		path == "/api/settings" || strings.HasPrefix(path, "/api/settings/") ||
+		path == "/api/admin/settings" || strings.HasPrefix(path, "/api/admin/settings/") ||
+		strings.HasPrefix(path, "/api/admin/terminal/"):
+		return "admin"
+	case path == "/api/admin/status-page" || path == "/api/admin/incidents" || strings.HasPrefix(path, "/api/admin/incidents/"):
+		if write {
+			return "write:alerts"
+		}
+		return "read:alerts"
+	case path == "/api/ai/settings" || path == "/api/ai/mcp/token" || path == "/api/mcp/config" || path == "/api/users" || strings.HasPrefix(path, "/api/users/") || strings.HasPrefix(path, "/api/webauthn/"):
+		return "admin"
+	case strings.HasPrefix(path, "/api/ai/"):
+		return "read:metrics"
+	case strings.HasPrefix(path, "/api/overview") || strings.HasPrefix(path, "/api/dns-matrix") || strings.HasPrefix(path, "/api/mesh-matrix") || strings.HasPrefix(path, "/api/speedtest") || strings.HasPrefix(path, "/api/synthetic") || strings.HasPrefix(path, "/api/containers") || strings.HasPrefix(path, "/api/events") || strings.HasPrefix(path, "/api/audit-logs") || strings.HasPrefix(path, "/api/certificates"):
+		if write {
+			return "admin"
+		}
+		return "read:metrics"
+	case path == "/api/tokens" || strings.HasPrefix(path, "/api/tokens/"):
+		return "admin"
+	default:
+		if write {
+			// Fail closed for newly added write routes. A family-scoped token
+			// such as write:alerts must never authorize an endpoint whose
+			// resource mapping has not been reviewed yet.
+			return "admin"
+		}
+		return "read"
+	}
 }
 
 func writeAuthenticationError(w http.ResponseWriter, err error) {

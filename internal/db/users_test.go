@@ -156,3 +156,16 @@ func TestUserRBACCRUDAndScoping(t *testing.T) {
 		t.Fatalf("expected ErrLastAdminProtection on deleting sole admin, got %v", err)
 	}
 }
+
+func TestAdminNodeScopeIsNotBypassedByRole(t *testing.T) {
+	admin := AdminUser{Role: RoleAdmin, AllowedNodes: "node-uuid-1,node-uuid-2"}
+	if !admin.CanAccessNode("node-uuid-1") {
+		t.Fatal("scoped admin should access an explicitly allowed node")
+	}
+	if admin.CanAccessNode("node-uuid-3") {
+		t.Fatal("scoped admin must not access a node outside its allow-list")
+	}
+	if !(AdminUser{Role: RoleAdmin, AllowedNodes: "*"}).CanAccessNode("node-uuid-3") {
+		t.Fatal("fleet-wide admin should access all nodes")
+	}
+}

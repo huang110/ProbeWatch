@@ -65,6 +65,7 @@ import {
   parseColoredTags,
 } from '../lib/billing.js'
 import { DistroIcon } from './Common.jsx'
+import { recordRecentNode } from '../lib/sessionPreferences.js'
 import { TrafficCalibrationModal } from './TrafficCalibrationModal.jsx'
 import { PosterModal } from './PosterModal.jsx'
 import {
@@ -426,12 +427,7 @@ export function NodeDetailPage({
   // Track recently visited nodes for quick access
   useEffect(() => {
     if (!nodeUuid) return
-    try {
-      const raw = localStorage.getItem('probewatch:recent-nodes') || '[]'
-      const list = JSON.parse(raw).filter((id) => id !== nodeUuid)
-      list.unshift(nodeUuid)
-      localStorage.setItem('probewatch:recent-nodes', JSON.stringify(list.slice(0, 10)))
-    } catch {}
+    recordRecentNode(nodeUuid)
   }, [nodeUuid])
 
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false)
