@@ -343,9 +343,11 @@ normalize_endpoint
 
 if [ -z "$NODE_TOKEN" ] && [ -n "$REG_TOKEN" ]; then
     info "检测到临时注册凭据，正在自动向主控注册并换取长期凭证..."
-    NODE_NAME="$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "ProbeWatch-Node")"
+    RAW_HOSTNAME="$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo "ProbeWatch-Node")"
+    NODE_NAME="${PROBEWATCH_AGENT_NAME:-$RAW_HOSTNAME}"
+    validate_safe_value "$RAW_HOSTNAME"
     validate_safe_value "$NODE_NAME"
-    REG_BODY="{\"registration_token\":\"${REG_TOKEN}\",\"node_uuid\":\"${NODE_UUID}\",\"name\":\"${NODE_NAME}\"}"
+    REG_BODY="{\"registration_token\":\"${REG_TOKEN}\",\"node_uuid\":\"${NODE_UUID}\",\"name\":\"${NODE_NAME}\",\"system\":{\"os\":\"linux\",\"arch\":\"${TARGET_ARCH}\",\"hostname\":\"${RAW_HOSTNAME}\",\"agent_version\":\"0.8.13\"}}"
 
     REG_RESP=""
     if command -v curl >/dev/null 2>&1; then
@@ -462,8 +464,7 @@ if [ ! -f "./probewatch-agent" ]; then
         fi
     fi
     DOWNLOAD_VALID=0
-    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ "$ACTUAL_CHECKSUM" = "$CHECKSUM" ] && [ -s "$BIN_TMP" ] && "$BIN_TMP" --version >/dev/null 2>&1; then
-        chmod 0755 "$BIN_TMP"
+    if [ "$DOWNLOAD_SUCCESS" -eq 1 ] && [ "$ACTUAL_CHECKSUM" = "$CHECKSUM" ] && [ -s "$BIN_TMP" ] && chmod 0755 "$BIN_TMP" && "$BIN_TMP" --version >/dev/null 2>&1; then
         mv -f "$BIN_TMP" "$BIN_PATH"
         DOWNLOAD_VALID=1
         ok "Agent 二进制下载成功: $BIN_PATH"
